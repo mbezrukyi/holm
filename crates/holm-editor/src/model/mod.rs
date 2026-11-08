@@ -4,6 +4,7 @@
 //! This module has no GPUI. Every offset is a byte offset in the source text, on a char boundary.
 //! The text has only LF line breaks.
 
+mod display;
 mod format;
 mod history;
 
@@ -11,9 +12,10 @@ use std::borrow::Cow;
 use std::ops::Range;
 use std::time::Instant;
 
-use holm_markdown::{Block, BlockKind, Body, Color, Style, Target};
+use holm_markdown::{BlockKind, Body};
 use ropey::{LineType, Rope};
 
+pub(crate) use display::{Cell, DisplayLine, Highlight, LineKind, Look, Mark, Quote, Run};
 pub(crate) use format::Format;
 pub(crate) use history::Group;
 use history::{Change, Ends, History, Step};
@@ -29,63 +31,6 @@ pub(crate) struct Model {
     cursor: usize,
     anchor: usize,
     history: History,
-}
-
-/// How a piece of screen text looks.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[allow(clippy::struct_excessive_bools)]
-pub(crate) struct Look {
-    pub(crate) strong: bool,
-    pub(crate) emphasis: bool,
-    pub(crate) strikethrough: bool,
-    pub(crate) underline: bool,
-    pub(crate) code: bool,
-    pub(crate) link: bool,
-    /// Markdown syntax on a line that shows it.
-    pub(crate) syntax: bool,
-    pub(crate) color: Option<Color>,
-    pub(crate) highlight: Highlight,
-}
-
-/// The background of a highlight.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum Highlight {
-    #[default]
-    None,
-    Default,
-    Color(Color),
-}
-
-/// A run of screen text with one look.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Run {
-    pub(crate) len: usize,
-    pub(crate) look: Look,
-}
-
-/// One source line as the screen shows it.
-#[derive(Clone, Debug)]
-pub(crate) struct DisplayLine {
-    /// The screen text: the source line without its hidden syntax.
-    pub(crate) text: String,
-    /// The looks of `text`, in order. Their lengths add up to the length of `text`.
-    pub(crate) runs: Vec<Run>,
-    /// The heading level, when the line is part of a heading.
-    pub(crate) heading: Option<u8>,
-    /// The targets of the embedded files on the line, in order.
-    pub(crate) files: Vec<String>,
-    /// Whether the line shows its syntax.
-    pub(crate) raw: bool,
-    source: Range<usize>,
-    segments: Vec<Segment>,
-}
-
-/// A part of the source line that the screen shows.
-#[derive(Clone, Copy, Debug)]
-struct Segment {
-    display: usize,
-    source: usize,
-    len: usize,
 }
 
 /// One edit for [`Model::edit`]: a range of the current text and its new text.
@@ -543,20 +488,7 @@ impl Model {
 
     /// The kinds of the blocks at `offset`, from the top level block inward.
     fn blocks_at(&self, offset: usize) -> Vec<&BlockKind> {
-        let mut kinds = Vec::new();
-        let mut blocks = self.body.blocks();
-        loop {
-            let ix = blocks.partition_point(|b| b.range.start <= offset);
-            let Some(block) = ix
-                .checked_sub(1)
-                .map(|ix| &blocks[ix])
-                .filter(|b| offset <= b.range.end)
-            else {
-                return kinds;
-            };
-            kinds.push(&block.kind);
-            blocks = &block.children;
-        }
+        self.chain_at(offset).into_iter().map(|b| &b.kind).collect()
     }
 
     /// The number of source lines. An empty text has one line.
@@ -580,94 +512,10 @@ impl Model {
         start..end
     }
 
-    /// Whether line `line` shows its syntax: it has the cursor or touches the selection.
-    fn is_raw(&self, line: &Range<usize>) -> bool {
+    /// Whether `range` shows its syntax: it has the cursor or touches the selection.
+    fn is_raw(&self, range: &Range<usize>) -> bool {
         let selection = self.selection();
-        line.start <= selection.end && selection.start <= line.end
-    }
-
-    /// Line `line` as the screen shows it.
-    pub(crate) fn display_line(&self, line: usize) -> DisplayLine {
-        let source = self.line_range(line);
-        let raw = self.is_raw(&source);
-        let blocks = self.body.blocks();
-        let block = blocks
-            .partition_point(|b| b.range.start <= source.start)
-            .checked_sub(1)
-            .map(|ix| &blocks[ix])
-            .filter(|b| b.range.end >= source.start);
-        // Spans and hidden syntax never leave their top level block. So the search starts there.
-        let from = block.map_or(source.start, |b| b.range.start);
-
-        let spans = self.body.spans();
-        let spans = &spans[spans.partition_point(|s| s.range.start < from)
-            ..spans.partition_point(|s| s.range.start < source.end)];
-        let spans: Vec<_> = spans
-            .iter()
-            .filter(|s| s.range.end > source.start)
-            .collect();
-        let hidden = self.body.hidden();
-        let hidden: Vec<_> = hidden[hidden.partition_point(|h| h.start < from)
-            ..hidden.partition_point(|h| h.start < source.end)]
-            .iter()
-            .filter(|h| h.end > source.start)
-            .map(|h| h.start.max(source.start)..h.end.min(source.end))
-            .collect();
-
-        let mut cuts = vec![source.start, source.end];
-        for span in &spans {
-            cuts.extend([span.range.start, span.range.end]);
-        }
-        for range in &hidden {
-            cuts.extend([range.start, range.end]);
-        }
-        cuts.retain(|cut| source.contains(cut) || *cut == source.end);
-        cuts.sort_unstable();
-        cuts.dedup();
-
-        let mut display = DisplayLine {
-            text: String::new(),
-            runs: Vec::new(),
-            heading: block.and_then(heading_level),
-            files: self.files_in(&source),
-            raw,
-            source: source.clone(),
-            segments: Vec::new(),
-        };
-        for piece in cuts.windows(2) {
-            let piece = piece[0]..piece[1];
-            let syntax = hidden
-                .iter()
-                .any(|h| h.start <= piece.start && piece.end <= h.end);
-            if syntax && !raw {
-                continue;
-            }
-            let mut look = Look {
-                syntax,
-                ..Look::default()
-            };
-            for span in spans
-                .iter()
-                .filter(|s| s.range.start <= piece.start && piece.end <= s.range.end)
-            {
-                look.add(span.style);
-            }
-            display.push(piece, look, &self.text);
-        }
-        display
-    }
-
-    fn files_in(&self, line: &Range<usize>) -> Vec<String> {
-        let links = self.body.links();
-        links[links.partition_point(|l| l.range.start < line.start)
-            ..links.partition_point(|l| l.range.start < line.end)]
-            .iter()
-            .filter(|link| link.embedded)
-            .filter_map(|link| match &link.target {
-                Target::File(path) => Some(path.clone()),
-                _ => None,
-            })
-            .collect()
+        range.start <= selection.end && selection.start <= range.end
     }
 
     /// The source offset as a UTF-16 offset, for the platform text input.
@@ -679,80 +527,6 @@ impl Model {
     pub(crate) fn utf16_to_offset(&self, offset: usize) -> usize {
         self.rope
             .utf16_to_byte_idx(offset.min(self.rope.len_utf16()))
-    }
-}
-
-fn heading_level(block: &Block) -> Option<u8> {
-    match block.kind {
-        BlockKind::Heading { level } => Some(level),
-        _ => None,
-    }
-}
-
-impl Look {
-    fn add(&mut self, style: Style) {
-        match style {
-            Style::Emphasis => self.emphasis = true,
-            Style::Strong => self.strong = true,
-            Style::Strikethrough => self.strikethrough = true,
-            Style::Code => self.code = true,
-            Style::Underline => self.underline = true,
-            Style::Highlight(color) => {
-                self.highlight = color.map_or(Highlight::Default, Highlight::Color);
-            }
-            Style::Color(color) => self.color = Some(color),
-            Style::Link => self.link = true,
-        }
-    }
-}
-
-impl DisplayLine {
-    fn push(&mut self, piece: Range<usize>, look: Look, source: &str) {
-        let len = piece.len();
-        match self.segments.last_mut() {
-            Some(last) if last.source + last.len == piece.start => last.len += len,
-            _ => self.segments.push(Segment {
-                display: self.text.len(),
-                source: piece.start,
-                len,
-            }),
-        }
-        match self.runs.last_mut() {
-            Some(last) if last.look == look => last.len += len,
-            _ => self.runs.push(Run { len, look }),
-        }
-        self.text.push_str(&source[piece]);
-    }
-
-    /// The source of the line, without its line break.
-    pub(crate) fn source(&self) -> Range<usize> {
-        self.source.clone()
-    }
-
-    /// The source offset for a screen offset. Between two visible parts it picks the later one.
-    pub(crate) fn to_source(&self, display: usize) -> usize {
-        let Some(ix) = self
-            .segments
-            .partition_point(|s| s.display <= display)
-            .checked_sub(1)
-        else {
-            return self.source.start;
-        };
-        let segment = self.segments[ix];
-        segment.source + (display - segment.display).min(segment.len)
-    }
-
-    /// The screen offset for a source offset. Hidden source maps to the next visible text.
-    pub(crate) fn to_display(&self, source: usize) -> usize {
-        let Some(ix) = self
-            .segments
-            .partition_point(|s| s.source <= source)
-            .checked_sub(1)
-        else {
-            return 0;
-        };
-        let segment = self.segments[ix];
-        segment.display + (source - segment.source).min(segment.len)
     }
 }
 
@@ -957,9 +731,9 @@ mod tests {
         let model = model_at("a **b** c\n\nnext", 12);
         let line = model.display_line(0);
         assert!(!line.raw);
-        assert_eq!(line.text, "a b c");
-        assert_eq!(line.runs.len(), 3);
-        assert!(line.runs[1].look.strong);
+        assert_eq!(line.shown.text, "a b c");
+        assert_eq!(line.shown.runs.len(), 3);
+        assert!(line.shown.runs[1].look.strong);
         assert_eq!(line.to_source(2), 4);
         assert_eq!(line.to_source(3), 7);
         assert_eq!(line.to_display(4), 2);
@@ -971,8 +745,8 @@ mod tests {
         let model = model_at("a **b** c\n\nnext", 1);
         let line = model.display_line(0);
         assert!(line.raw);
-        assert_eq!(line.text, "a **b** c");
-        assert!(line.runs[1].look.syntax);
+        assert_eq!(line.shown.text, "a **b** c");
+        assert!(line.shown.runs[1].look.syntax);
         assert_eq!(line.to_source(5), 5);
     }
 
@@ -989,7 +763,7 @@ mod tests {
     fn embedded_files_hide_and_are_listed() {
         let model = model_at("top\n\n![cat](cat.png)\n", 0);
         let line = model.display_line(2);
-        assert_eq!(line.text, "");
+        assert_eq!(line.shown.text, "");
         assert_eq!(line.files, ["cat.png"]);
         assert_eq!(line.to_source(0), line.source().start);
     }
@@ -999,7 +773,7 @@ mod tests {
         let model = model_at("x\n\n## Plans\n", 0);
         let line = model.display_line(2);
         assert_eq!(line.heading, Some(2));
-        assert_eq!(line.text, "Plans");
+        assert_eq!(line.shown.text, "Plans");
     }
 
     #[test]
@@ -1138,8 +912,8 @@ mod tests {
             for line in 0..model.line_count() {
                 let display = model.display_line(line);
                 let source = display.source();
-                prop_assert_eq!(display.runs.iter().map(|r| r.len).sum::<usize>(), display.text.len());
-                for offset in (0..=display.text.len()).filter(|o| display.text.is_char_boundary(*o)) {
+                prop_assert_eq!(display.shown.runs.iter().map(|r| r.len).sum::<usize>(), display.shown.text.len());
+                for offset in (0..=display.shown.text.len()).filter(|o| display.shown.text.is_char_boundary(*o)) {
                     let mapped = display.to_source(offset);
                     prop_assert!(source.start <= mapped && mapped <= source.end);
                     prop_assert!(model.text().is_char_boundary(mapped));

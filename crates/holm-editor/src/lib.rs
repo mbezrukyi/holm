@@ -4,9 +4,11 @@
 
 mod editor;
 mod element;
+mod highlight;
 mod model;
+mod palette;
 
-pub use editor::{Changed, Editor, WritingHelp};
+pub use editor::{Appearance, Changed, Editor, OpenFile, WritingHelp};
 
 /// An error from `holm-editor`.
 #[derive(Debug, thiserror::Error)]

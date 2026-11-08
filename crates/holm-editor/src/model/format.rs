@@ -2,7 +2,7 @@
 
 use std::ops::Range;
 
-use holm_markdown::{BlockKind, Style};
+use holm_markdown::{Block, BlockKind, Style};
 
 use super::{Bias, Edit, Group, Model, map_offset};
 
@@ -442,11 +442,59 @@ impl Model {
             })
     }
 
+    /// Checks or clears the task box with the `[ ]` source at `range`, as one undo step.
+    /// The cursor stays. Returns whether the text changed.
+    pub(crate) fn toggle_task(&mut self, range: &Range<usize>) -> bool {
+        self.toggle_task_boxes(std::slice::from_ref(range))
+    }
+
+    /// Checks or clears each task box on the lines that the selection touches.
+    /// Returns whether the text changed.
+    pub(crate) fn toggle_tasks(&mut self) -> bool {
+        let selection = self.selection();
+        let lines = self.line_range(self.line_of(selection.start)).start
+            ..self.line_range(self.line_of(selection.end)).end;
+        let mut boxes = Vec::new();
+        collect_tasks(self.body.blocks(), &lines, &mut boxes);
+        self.toggle_task_boxes(&boxes)
+    }
+
+    fn toggle_task_boxes(&mut self, boxes: &[Range<usize>]) -> bool {
+        let edits: Vec<Edit> = boxes
+            .iter()
+            .filter(|range| {
+                range.len() == 3 && self.text.get(range.start..range.start + 1) == Some("[")
+            })
+            .map(|range| {
+                let mark = &self.text[range.start + 1..range.start + 2];
+                let new = if mark == " " { "x" } else { " " };
+                (range.start + 1..range.start + 2, new.to_owned())
+            })
+            .collect();
+        self.edit(edits, self.ends(), Group::Alone, None)
+    }
+
     /// The indent of the parent of the item on `line`, or 0 at the top level.
     fn parent_indent(&self, line: usize, width: usize) -> usize {
         self.items_before(line)
             .find(|above| above.indent.len() < width)
             .map_or(0, |above| above.indent.len())
+    }
+}
+
+/// The `[ ]` sources of the task items that start in `lines`, in order.
+fn collect_tasks(blocks: &[Block], lines: &Range<usize>, boxes: &mut Vec<Range<usize>>) {
+    for block in blocks
+        .iter()
+        .filter(|b| b.range.start <= lines.end && lines.start <= b.range.end)
+    {
+        if let BlockKind::Item { task: Some(task) } = &block.kind
+            && lines.start <= task.range.start
+            && task.range.start <= lines.end
+        {
+            boxes.push(task.range.clone());
+        }
+        collect_tasks(&block.children, lines, boxes);
     }
 }
 

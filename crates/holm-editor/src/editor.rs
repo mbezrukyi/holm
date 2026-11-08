@@ -9,7 +9,8 @@ use gpui_kit::{
     ScrollEvent, Styled, UTF16Selection, Window, div,
 };
 
-use crate::element::{EditorElement, ImageSizes, Layout, Scroll};
+use crate::element::{EditorElement, Hit, ImageSizes, Layout, Scroll, Theme};
+use crate::highlight::{self, Highlighter};
 use crate::model::{Format, Model};
 
 /// Spaces that Tab types outside a list.
@@ -19,9 +20,13 @@ const TAB: &str = "    ";
 ///
 /// The text is the note body only, with LF line breaks. The editor turns other line breaks
 /// into LF. Markdown syntax shows on the lines with the cursor or the selection, and hides on
-/// all other lines. Embedded images show below their line.
+/// all other lines. A code block or a table shows its whole source while the cursor or the
+/// selection is in it. Embedded images show below their line, and other embedded files show
+/// as file cards.
 ///
 /// The editor takes its font, size and line height from the text style of its parent element.
+/// It draws its own background and centers a text column of a fixed width. The app sets light
+/// or dark mode with [`Editor::set_appearance`].
 ///
 /// The editor handles its keys itself, so the app binds none of them:
 ///
@@ -32,6 +37,7 @@ const TAB: &str = "    ";
 /// - Format keys: Ctrl+B bold, Ctrl+I italic, Ctrl+U underline, Ctrl+D strikethrough,
 ///   Ctrl+H highlight, Ctrl+E code, Ctrl+1 to Ctrl+6 a heading, Ctrl+0 a plain line.
 /// - Enter continues a list. Tab and Shift+Tab move a list item in and out.
+/// - Ctrl+L checks or clears the task boxes on the selected lines. A click on a task box does too.
 ///
 /// [`WritingHelp`] turns off the format keys and the list keys.
 pub struct Editor {
@@ -45,6 +51,8 @@ pub struct Editor {
     pub(crate) version: u64,
     pub(crate) layout: Option<Rc<Layout>>,
     pub(crate) image_sizes: ImageSizes,
+    pub(crate) highlighter: Highlighter,
+    pub(crate) theme: Theme,
     goal_x: Option<Pixels>,
     drag: Option<Drag>,
     help: WritingHelp,
@@ -86,15 +94,37 @@ impl Default for WritingHelp {
     }
 }
 
+/// Light or dark mode.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Appearance {
+    /// Dark text on a light background.
+    #[default]
+    Light,
+    /// Light text on a dark background.
+    Dark,
+}
+
 /// The user changed the text. [`Editor::set_text`] does not send it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Changed;
 
 impl EventEmitter<Changed> for Editor {}
 
+/// The user asked to open a file, with the "Open" button of a file card.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpenFile {
+    /// The path of the file. A relative link starts at the folder of the note.
+    pub path: PathBuf,
+}
+
+impl EventEmitter<OpenFile> for Editor {}
+
 impl Editor {
-    /// An empty editor.
+    /// An empty editor in light mode.
     pub fn new(cx: &mut Context<Self>) -> Self {
+        cx.background_executor()
+            .spawn(async { highlight::warm_up() })
+            .detach();
         Self {
             model: Model::new(""),
             folder: None,
@@ -104,6 +134,8 @@ impl Editor {
             version: 0,
             layout: None,
             image_sizes: ImageSizes::default(),
+            highlighter: Highlighter::default(),
+            theme: Theme::new(Appearance::Light),
             goal_x: None,
             drag: None,
             help: WritingHelp::default(),
@@ -138,6 +170,12 @@ impl Editor {
     /// Sets the writing helps, from the settings.
     pub fn set_writing_help(&mut self, help: WritingHelp) {
         self.help = help;
+    }
+
+    /// Sets light or dark mode, from the app theme.
+    pub fn set_appearance(&mut self, appearance: Appearance, cx: &mut Context<Self>) {
+        self.theme = Theme::new(appearance);
+        cx.notify();
     }
 
     /// Sets the folder of the note. Relative paths of embedded files start there.
@@ -215,6 +253,11 @@ impl Editor {
             }
             _ if shift => return false,
             "a" => self.model.select_all(),
+            "l" => {
+                let changed = self.model.toggle_tasks();
+                self.finish(changed, cx);
+                return true;
+            }
             "c" => {
                 self.copy(cx);
                 return true;
@@ -379,6 +422,25 @@ impl Editor {
 
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
+        let hit = self
+            .current_layout()
+            .and_then(|layout| layout.hit(event.position));
+        match hit {
+            Some(Hit::Task(range)) => {
+                // The cursor stays, so the view does not move.
+                if self.model.toggle_task(&range) {
+                    self.version += 1;
+                    cx.emit(Changed);
+                    cx.notify();
+                }
+                return;
+            }
+            Some(Hit::Open(path)) => {
+                cx.emit(OpenFile { path });
+                return;
+            }
+            None => {}
+        }
         let Some(offset) = self.offset_at(event.position) else {
             return;
         };
