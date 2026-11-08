@@ -267,26 +267,53 @@ impl Model {
     }
 
     /// The part of `selection` on each line it touches, without spaces at its ends.
-    /// A list marker and a task box are never part of it.
+    /// A list marker and a task box are never part of it. On a table row each cell is its own
+    /// part, without its `|`. The `|---|` line of a table and the lines of a code block have
+    /// no part.
     fn pieces(&self, selection: &Range<usize>) -> Vec<Range<usize>> {
         let first = self.line_of(selection.start);
         let last = self.line_of(selection.end);
-        (first..=last)
-            .filter_map(|ix| {
-                let line = self.line_range(ix);
-                let content = self.list_item(ix).map_or(line.start, |item| item.content);
-                let start = selection.start.max(content).min(line.end);
-                let end = selection.end.min(line.end);
-                if start >= end {
-                    return None;
+        let mut pieces = Vec::new();
+        for ix in first..=last {
+            let line = self.line_range(ix);
+            let chain = self.chain_at(self.probe(&line));
+            if chain
+                .iter()
+                .any(|b| matches!(b.kind, BlockKind::Code { .. }))
+            {
+                continue;
+            }
+            if let Some(table) = chain
+                .iter()
+                .find(|b| matches!(b.kind, BlockKind::Table { .. }))
+            {
+                let row = table
+                    .children
+                    .iter()
+                    .find(|row| line.start <= row.range.start && row.range.start <= line.end);
+                for cell in row.map_or(&[][..], |row| &row.children[..]) {
+                    let range =
+                        selection.start.max(cell.range.start)..selection.end.min(cell.range.end);
+                    pieces.extend(self.piece(range));
                 }
-                let text = &self.text[start..end];
-                let start = start + (text.len() - text.trim_start().len());
-                let end = end - (text.len() - text.trim_end().len());
-                let piece = self.trim_syntax(start..end);
-                (!piece.is_empty()).then_some(piece)
-            })
-            .collect()
+                continue;
+            }
+            let content = self.list_item(ix).map_or(line.start, |item| item.content);
+            pieces.extend(self.piece(selection.start.max(content)..selection.end.min(line.end)));
+        }
+        pieces
+    }
+
+    /// `range` without spaces and hidden syntax at its ends, or `None` when nothing is left.
+    fn piece(&self, range: Range<usize>) -> Option<Range<usize>> {
+        if range.start >= range.end {
+            return None;
+        }
+        let text = &self.text[range.clone()];
+        let start = range.start + (text.len() - text.trim_start().len());
+        let end = range.end - (text.len() - text.trim_end().len());
+        let piece = self.trim_syntax(start..end.max(start));
+        (!piece.is_empty()).then_some(piece)
     }
 
     /// `range` without the hidden syntax at its ends, like the `**` of a bold word.
@@ -631,6 +658,23 @@ mod tests {
             "==a **b** c=="
         );
         assert_eq!(toggled("a `b` c", 0..7, Format::Code).0, "`a `b` c`");
+    }
+
+    #[test]
+    fn a_format_key_on_a_table_styles_each_cell() {
+        let text = "| a | b c |\n|---|---|\n| 1 | 2 |\n";
+        let (new, _) = toggled(text, 0..text.len(), Format::Highlight);
+        assert_eq!(new, "| ==a== | ==b c== |\n|---|---|\n| ==1== | ==2== |\n");
+        let (new, _) = toggled(text, 2..7, Format::Bold);
+        assert_eq!(new, "| **a** | **b** c |\n|---|---|\n| 1 | 2 |\n");
+    }
+
+    #[test]
+    fn a_format_key_skips_code_blocks() {
+        let text = "a\n```\ncode\n```\nb";
+        let (new, _) = toggled(text, 0..text.len(), Format::Bold);
+        assert_eq!(new, "**a**\n```\ncode\n```\n**b**");
+        assert!(!model_with(text, 6..10).toggle_format(Format::Bold));
     }
 
     #[test]

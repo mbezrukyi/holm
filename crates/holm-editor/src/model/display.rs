@@ -213,7 +213,7 @@ impl Model {
 
     /// The first offset of the line that is neither space nor hidden syntax. It finds the blocks
     /// of the line, because a nested block can start after the line start.
-    fn probe(&self, line: &Range<usize>) -> usize {
+    pub(super) fn probe(&self, line: &Range<usize>) -> usize {
         let hidden = self.body.hidden();
         let first = hidden.partition_point(|h| h.end <= line.start);
         let mut in_hidden = hidden[first..].iter().peekable();
