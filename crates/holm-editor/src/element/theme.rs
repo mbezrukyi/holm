@@ -15,6 +15,17 @@ pub(crate) struct CalloutColors {
     pub(crate) background: Hsla,
 }
 
+/// Where a piece of text sits, as far as its font and color care.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Place {
+    /// In a heading or a table head.
+    pub(crate) bold: bool,
+    /// In a quote or a callout.
+    pub(crate) quoted: bool,
+    /// In a checked task.
+    pub(crate) done: bool,
+}
+
 #[derive(Clone)]
 pub(crate) struct Theme {
     pub(crate) dark: bool,
@@ -151,15 +162,16 @@ impl Theme {
         self.tokens[ix]
     }
 
-    /// The color of a piece of text. Text in a quote is a bit lighter.
-    pub(crate) fn text_color(&self, look: Look, quoted: bool) -> Hsla {
-        if look.syntax {
+    /// The color of a piece of text. Text in a quote is a bit lighter, and the text of a
+    /// checked task is muted.
+    pub(crate) fn text_color(&self, look: Look, place: Place) -> Hsla {
+        if look.syntax || place.done {
             self.muted
         } else if let Some(color) = look.color {
             self.note_color(color)
         } else if look.link {
             self.link
-        } else if quoted {
+        } else if place.quoted {
             self.text.opacity(0.8)
         } else {
             self.text

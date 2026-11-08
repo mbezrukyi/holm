@@ -7,14 +7,14 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use gpui_kit::{
-    Bounds, FontStyle, FontWeight, Pixels, Point, ShapedLine, Size, StrikethroughStyle, TextRun,
-    TextStyle, Window, WrappedLine, point, px, size,
+    Bounds, Font, FontStyle, FontWeight, Pixels, Point, ShapedLine, Size, StrikethroughStyle,
+    TextRun, TextStyle, Window, WrappedLine, point, px, size,
 };
 use holm_markdown::{Alignment, CalloutKind};
 
-use super::theme::Theme;
+use super::theme::{Place, Theme};
 use crate::highlight::{Highlighter, Tokens};
-use crate::model::{Cell, DisplayLine, LineKind, Mark, Model, Run};
+use crate::model::{Cell, DisplayLine, LineKind, Look, Mark, Model, Run};
 
 /// Space above and below an image or a file card.
 pub(crate) const IMAGE_MARGIN: Pixels = px(4.);
@@ -81,8 +81,10 @@ pub(crate) struct LaidLine {
     pub(crate) pad: Pixels,
     /// The text size of the line.
     pub(crate) font_size: Pixels,
-    /// The font family of the text of the line.
-    pub(crate) family: String,
+    /// The font of the plain text of the line.
+    pub(crate) font: Font,
+    /// Where the text of the line sits.
+    pub(crate) place: Place,
     /// The space that each quote around the line takes on the left.
     pub(crate) quote_step: Pixels,
     /// Where quote bars end and blocks like code start.
@@ -105,6 +107,7 @@ pub(crate) struct LaidCell {
     pub(crate) width: Pixels,
     /// Where the text starts in the cell: the padding plus the move for the alignment.
     pub(crate) inset: Pixels,
+    pub(crate) place: Place,
 }
 
 pub(crate) struct LaidMark {
@@ -209,20 +212,8 @@ impl Shaper<'_> {
             block_left + base * 0.75
         } else if let Some(prefix) = display.prefix.as_ref().filter(|_| display.raw) {
             // The marker hangs to the left, so the text stays where the preview shows it.
-            let text = &model.text()[prefix.clone()];
-            let run = TextRun {
-                len: text.len(),
-                font: self.style.font(),
-                color: self.theme.muted,
-                background_color: None,
-                underline: None,
-                strikethrough: None,
-            };
-            let hang = window
-                .text_system()
-                .shape_line(text.to_owned().into(), font_size, &[run], None)
-                .width();
-            (block_left - hang).max(quote_left)
+            (block_left - self.width_of(&model.text()[prefix.clone()], font_size, window))
+                .max(quote_left)
         } else {
             block_left
         };
@@ -271,6 +262,7 @@ impl Shaper<'_> {
             height = base_height * 0.5;
         }
 
+        let place = line_place(&display);
         LaidLine {
             display,
             content,
@@ -278,7 +270,8 @@ impl Shaper<'_> {
             pad,
             quote_step: base,
             font_size,
-            family: self.style.font_family.to_string(),
+            font: self.style.font(),
+            place,
             block_left,
             left,
             line_height,
@@ -288,6 +281,22 @@ impl Shaper<'_> {
             images,
             cards,
         }
+    }
+
+    /// The width of `text` in the plain text font.
+    fn width_of(&self, text: &str, font_size: Pixels, window: &Window) -> Pixels {
+        let run = TextRun {
+            len: text.len(),
+            font: self.style.font(),
+            color: self.theme.muted,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        window
+            .text_system()
+            .shape_line(text.to_owned().into(), font_size, &[run], None)
+            .width()
     }
 
     fn content(
@@ -405,33 +414,22 @@ impl Shaper<'_> {
     }
 
     fn runs(&self, runs: &[Run], display: &DisplayLine) -> Vec<TextRun> {
+        self.text_runs(runs, line_place(display))
+    }
+
+    /// The text runs of `runs` at `place`.
+    fn text_runs(&self, runs: &[Run], place: Place) -> Vec<TextRun> {
         let base = self.style.font();
-        let done = matches!(display.mark, Some(Mark::Task { checked: true, .. }));
         runs.iter()
             .map(|run| {
-                let look = run.look;
-                let mut font = base.clone();
-                if look.strong || display.heading.is_some() {
-                    font.weight = FontWeight::BOLD;
-                }
-                if look.emphasis {
-                    font.style = FontStyle::Italic;
-                }
-                if look.code {
-                    font.family = CODE_FONT.into();
-                }
-                let color = if done && !look.syntax {
-                    self.theme.muted
-                } else {
-                    self.theme.text_color(look, !display.quotes.is_empty())
-                };
+                let color = self.theme.text_color(run.look, place);
                 TextRun {
                     len: run.len,
-                    font,
+                    font: run_font(&base, run.look, place),
                     color,
                     background_color: None,
                     underline: None,
-                    strikethrough: look.strikethrough.then_some(StrikethroughStyle {
+                    strikethrough: run.look.strikethrough.then_some(StrikethroughStyle {
                         thickness: px(1.),
                         color: Some(color),
                     }),
@@ -536,6 +534,7 @@ impl Shaper<'_> {
                 x,
                 width,
                 inset: pad + shift,
+                place: cell_place(head),
             });
             x += width;
         }
@@ -544,33 +543,7 @@ impl Shaper<'_> {
 
     /// The text runs of a table cell. A head cell is bold.
     fn cell_runs(&self, runs: &[Run], head: bool) -> Vec<TextRun> {
-        let base = self.style.font();
-        runs.iter()
-            .map(|run| {
-                let mut font = base.clone();
-                if run.look.strong || head {
-                    font.weight = FontWeight::BOLD;
-                }
-                if run.look.emphasis {
-                    font.style = FontStyle::Italic;
-                }
-                if run.look.code {
-                    font.family = CODE_FONT.into();
-                }
-                let color = self.theme.text_color(run.look, false);
-                TextRun {
-                    len: run.len,
-                    font,
-                    color,
-                    background_color: None,
-                    underline: None,
-                    strikethrough: run.look.strikethrough.then_some(StrikethroughStyle {
-                        thickness: px(1.),
-                        color: Some(color),
-                    }),
-                }
-            })
-            .collect()
+        self.text_runs(runs, cell_place(head))
     }
 
     fn mark(
@@ -705,6 +678,38 @@ impl Shaper<'_> {
             open,
             button,
         }
+    }
+}
+
+/// The font of a piece of text with `look` at `place`, from the plain text font `base`.
+pub(crate) fn run_font(base: &Font, look: Look, place: Place) -> Font {
+    let mut font = base.clone();
+    if look.strong || place.bold {
+        font.weight = FontWeight::BOLD;
+    }
+    if look.emphasis {
+        font.style = FontStyle::Italic;
+    }
+    if look.code {
+        font.family = CODE_FONT.into();
+    }
+    font
+}
+
+/// Where the text of a line sits.
+fn line_place(display: &DisplayLine) -> Place {
+    Place {
+        bold: display.heading.is_some(),
+        quoted: !display.quotes.is_empty(),
+        done: matches!(display.mark, Some(Mark::Task { checked: true, .. })),
+    }
+}
+
+/// Where the text of a table cell sits.
+fn cell_place(head: bool) -> Place {
+    Place {
+        bold: head,
+        ..Place::default()
     }
 }
 

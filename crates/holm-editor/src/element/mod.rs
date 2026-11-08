@@ -8,18 +8,19 @@ use std::sync::Arc;
 
 use gpui_kit::{
     App, BorderStyle, Bounds, ContentMask, Corners, ElementId, ElementInputHandler, Entity,
-    GlobalElementId, ImgResourceLoader, InspectorElementId, IntoElement, LayoutId, PathBuilder,
-    Pixels, Point, Resource, Style, TextAlign, Window, WrappedLine, fill, outline, point, px,
-    relative, size,
+    FontStyle, FontWeight, GlobalElementId, ImgResourceLoader, InspectorElementId, IntoElement,
+    LayoutId, PathBuilder, Pixels, Point, Resource, Style, TextAlign, Window, WrappedLine, fill,
+    outline, point, px, relative, size,
 };
 
 pub(crate) use layout::{Hit, ImageSizes, Layout, Scroll};
+use theme::Place;
 pub(crate) use theme::Theme;
 
 use crate::Editor;
 use crate::ink;
 use crate::model::{LineKind, Mark, Quote, Run};
-use layout::{CODE_FONT, COLUMN_WIDTH, Content, LaidCard, LaidLine, Shaper, lay_out};
+use layout::{COLUMN_WIDTH, Content, LaidCard, LaidLine, Shaper, lay_out, run_font};
 
 /// The width of a quote bar.
 const BAR: Pixels = px(3.);
@@ -237,15 +238,31 @@ fn paint_line(
     match &line.content {
         Content::Text(text) => {
             let runs = &line.display.shown.runs;
-            paint_text(text, runs, text_origin, line, theme, window, cx);
+            paint_text(
+                (text, runs, line.place),
+                text_origin,
+                line,
+                theme,
+                window,
+                cx,
+            );
         }
-        Content::Label(text) => paint_text(text, &[], text_origin, line, theme, window, cx),
+        Content::Label(text) => {
+            paint_text(
+                (text, &[], line.place),
+                text_origin,
+                line,
+                theme,
+                window,
+                cx,
+            );
+        }
         Content::Cells(cells) => {
             let top = (line.height - line.text_height.max(line.line_height)) / 2.;
             for cell in cells {
                 let cell_origin = text_origin + point(cell.x + cell.inset, top.max(px(0.)));
-                let runs = &cell.shown.shown.runs;
-                paint_text(&cell.text, runs, cell_origin, line, theme, window, cx);
+                let piece = (&cell.text, cell.shown.shown.runs.as_slice(), cell.place);
+                paint_text(piece, cell_origin, line, theme, window, cx);
             }
         }
         Content::Empty => {}
@@ -286,11 +303,11 @@ fn paint_line(
     }
 }
 
-/// Paints a text of `line` with the highlights and code backgrounds of its `runs`.
+/// Paints a text of `line`, with its runs and its place, and the highlights, code backgrounds
+/// and underlines of its runs.
 /// A failed paint only loses glyphs in this frame.
 fn paint_text(
-    text: &WrappedLine,
-    runs: &[Run],
+    (text, runs, place): (&WrappedLine, &[Run], Place),
     origin: Point<Pixels>,
     line: &LaidLine,
     theme: &Theme,
@@ -317,7 +334,7 @@ fn paint_text(
         start = end;
     }
     let _ = text.paint(origin, line_height, TextAlign::Left, None, window, cx);
-    paint_underlines(text, runs, origin, line, theme, window);
+    paint_underlines(text, runs, place, origin, line, theme, window);
 }
 
 /// Paints the underlines of underlined text and links: thin, a bit light, close below the text
@@ -325,6 +342,7 @@ fn paint_text(
 fn paint_underlines(
     text: &WrappedLine,
     runs: &[Run],
+    place: Place,
     origin: Point<Pixels>,
     line: &LaidLine,
     theme: &Theme,
@@ -342,7 +360,6 @@ fn paint_underlines(
         top: f32::from(offset),
         bottom: f32::from(offset) + 1.,
     };
-    let quoted = !line.display.quotes.is_empty();
     let content = text.text.as_ref();
     let mut start = 0;
     for run in runs {
@@ -351,16 +368,13 @@ fn paint_underlines(
             start = end;
             continue;
         }
+        let font = run_font(&line.font, run.look, place);
         let font = ink::FontKey {
-            family: if run.look.code {
-                CODE_FONT.to_owned()
-            } else {
-                line.family.clone()
-            },
-            bold: run.look.strong || line.display.heading.is_some(),
-            italic: run.look.emphasis,
+            family: font.family.to_string(),
+            bold: font.weight == FontWeight::BOLD,
+            italic: font.style == FontStyle::Italic,
         };
-        let color = theme.text_color(run.look, quoted).opacity(0.7);
+        let color = theme.text_color(run.look, place).opacity(0.7);
         // Each screen row of the run: its top, and its parts of line from left to right.
         let mut rows: Vec<(Pixels, Vec<(Pixels, Pixels)>)> = Vec::new();
         for (at, c) in content[start..end].char_indices() {
