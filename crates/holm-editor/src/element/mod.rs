@@ -335,12 +335,12 @@ fn paint_underlines(
     let baseline = (line_height - layout.ascent - layout.descent) / 2. + layout.ascent;
     let offset = (line.font_size * 0.1).max(px(1.5));
     // The room between the line and the ink on each side of a gap.
-    let room = (line.font_size * 0.1).max(px(1.5));
-    // The ink may come 1 px near the line above and below it.
+    let room = (line.font_size * 0.07).max(px(1.));
+    // Only ink at the height of the line itself makes a gap, as in a browser.
     let band = ink::Band {
         font_size: f32::from(layout.font_size),
-        top: f32::from(offset) - 1.,
-        bottom: f32::from(offset) + 2.,
+        top: f32::from(offset),
+        bottom: f32::from(offset) + 1.,
     };
     let quoted = !line.display.quotes.is_empty();
     let content = text.text.as_ref();
