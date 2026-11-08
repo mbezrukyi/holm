@@ -106,3 +106,28 @@ pub enum LinkTarget {
     /// A web address, like `https://...` or `mailto:...`.
     Web(String),
 }
+
+/// One change to the notes folder that came from outside Holm, from [`Changes`](crate::Changes).
+///
+/// Saves through [`Core`](crate::Core) never come back as changes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Change {
+    /// A new note file.
+    Added(NoteInfo),
+    /// A note file whose text or info changed.
+    Changed(NoteInfo),
+    /// A note file that is gone. The path is where it was.
+    Removed(PathBuf),
+    /// A note file with an id that is now at another path.
+    Moved {
+        /// The old path.
+        from: PathBuf,
+        /// The note at its new path.
+        note: NoteInfo,
+    },
+    /// The list from [`Core::folders`](crate::Core::folders) may have changed.
+    Folders,
+    /// The tag tree from [`Core::tags`](crate::Core::tags) changed.
+    Tags,
+}

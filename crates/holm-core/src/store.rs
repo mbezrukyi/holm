@@ -63,12 +63,20 @@ impl Store {
         &self.root
     }
 
-    /// Every note file in the notes folder and in its subfolders, with its stamp.
+    /// Every note file at or below `scope`, with its stamp. The empty path is the whole notes folder.
     ///
+    /// `scope` can be a note, a folder, or a path with nothing there.
     /// A subfolder or a file that can't be read is left out with a log line.
-    pub(crate) fn files(&self) -> Result<Vec<(PathBuf, Stamp)>> {
+    pub(crate) fn files(&self, scope: &Path) -> Result<Vec<(PathBuf, Stamp)>> {
+        if !scope.as_os_str().is_empty() {
+            match self.entry(scope) {
+                Entry::Note(stamp) => return Ok(vec![(scope.to_owned(), stamp)]),
+                Entry::Folder => {}
+                Entry::Other | Entry::Missing => return Ok(Vec::new()),
+            }
+        }
         let mut files = Vec::new();
-        self.walk(&mut |rel, kind| {
+        self.walk(scope, &mut |rel, kind| {
             if kind == Kind::Note {
                 match fs::metadata(self.root.join(rel)) {
                     Ok(meta) => files.push((rel.to_owned(), Stamp::of(&meta))),
@@ -77,6 +85,24 @@ impl Store {
             }
         })?;
         Ok(files)
+    }
+
+    /// What is at `rel` now. `rel` must be a plain path, as [`Store::check_folder`] allows.
+    ///
+    /// Like the folder walk, it does not follow symlinks.
+    pub(crate) fn entry(&self, rel: &Path) -> Entry {
+        let real_dir =
+            |dir: &Path| fs::symlink_metadata(self.root.join(dir)).is_ok_and(|meta| meta.is_dir());
+        let mut parents = rel.ancestors().skip(1);
+        if !parents.all(real_dir) {
+            return Entry::Missing;
+        }
+        match fs::symlink_metadata(self.root.join(rel)) {
+            Ok(meta) if meta.is_dir() => Entry::Folder,
+            Ok(meta) if meta.is_file() && is_md(rel) => Entry::Note(Stamp::of(&meta)),
+            Ok(_) => Entry::Other,
+            Err(_) => Entry::Missing,
+        }
     }
 
     /// Whether a note file is at `rel`.
@@ -101,7 +127,7 @@ impl Store {
     /// Every subfolder, sorted by path. It skips `attachments/` at the root.
     pub(crate) fn folders(&self) -> Result<Vec<PathBuf>> {
         let mut folders = Vec::new();
-        self.walk(&mut |rel, kind| {
+        self.walk(Path::new(""), &mut |rel, kind| {
             if kind == Kind::Folder && rel != Path::new(ATTACHMENTS) {
                 folders.push(rel.to_owned());
             }
@@ -186,10 +212,10 @@ impl Store {
         Err(write_error(&dir, io::ErrorKind::StorageFull.into()))
     }
 
-    /// Calls `visit` with the relative path of each note and subfolder.
+    /// Calls `visit` with the relative path of each note and subfolder below the folder `start`.
     /// It skips hidden entries and symlinks, so it can't loop.
-    fn walk(&self, visit: &mut dyn FnMut(&Path, Kind)) -> Result<()> {
-        let mut dirs = vec![PathBuf::new()];
+    fn walk(&self, start: &Path, visit: &mut dyn FnMut(&Path, Kind)) -> Result<()> {
+        let mut dirs = vec![start.to_owned()];
         while let Some(dir) = dirs.pop() {
             let path = self.root.join(&dir);
             let entries = match fs::read_dir(&path) {
@@ -227,6 +253,16 @@ impl Store {
     fn note_path(&self, rel: &Path) -> Result<PathBuf> {
         Self::check_note(rel).map(|()| self.root.join(rel))
     }
+}
+
+/// What is at a path in the notes folder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Entry {
+    Note(Stamp),
+    Folder,
+    /// A file that is not a note, or a symlink.
+    Other,
+    Missing,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

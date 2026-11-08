@@ -16,7 +16,7 @@ use rusqlite::types::Value;
 use rusqlite::{Connection, ErrorCode, OptionalExtension as _, params, params_from_iter};
 
 use crate::error::{Error, Result};
-use crate::model::{Link, LinkTarget, Note, NoteId, NoteInfo, Order, Tag};
+use crate::model::{Change, Link, LinkTarget, Note, NoteId, NoteInfo, Order, Tag};
 use crate::store::{Stamp, Store, time};
 
 const FILE: &str = "index.sqlite";
@@ -77,6 +77,15 @@ pub(crate) enum Filter<'a> {
     Backlinks(&'a Path),
 }
 
+/// What a [`Index::refresh`] found.
+#[derive(Debug, Default)]
+pub(crate) struct Refresh {
+    /// The note changes, sorted by path. It holds no [`Change::Folders`] or [`Change::Tags`].
+    pub(crate) notes: Vec<Change>,
+    /// Whether the tag tree changed.
+    pub(crate) tags: bool,
+}
+
 /// The index file and one connection to it.
 #[derive(Debug)]
 pub(crate) struct Index {
@@ -91,7 +100,7 @@ impl Index {
         let fail = |fail: Fail| fail.into_error(&path);
         fs::create_dir_all(dir).map_err(|e| fail(Fail::Io(e)))?;
         let conn = match connect(&path).and_then(|mut conn| {
-            sync(&mut conn, store)?;
+            sync(&mut conn, store, &[PathBuf::new()])?;
             Ok(conn)
         }) {
             Ok(conn) => conn,
@@ -178,10 +187,16 @@ impl Index {
     pub(crate) fn update(&self, store: &Store, note: &Note, stamp: Stamp) -> Result<Note> {
         self.run(store, |conn| {
             let tx = conn.transaction()?;
-            let note = put(&tx, store, note.clone(), stamp)?;
+            let note = put(&tx, store, note.clone(), stamp, &mut Vec::new())?;
             tx.commit()?;
             Ok(note)
         })
+    }
+
+    /// Brings the notes at or below each path in `scopes` up to date with the files.
+    /// The empty path is the whole notes folder. No scope may be inside another.
+    pub(crate) fn refresh(&self, store: &Store, scopes: &[PathBuf]) -> Result<Refresh> {
+        self.run(store, |conn| sync(conn, store, scopes))
     }
 
     /// Runs `op`. When SQLite finds the index broken, it rebuilds the index and runs `op` again.
@@ -267,7 +282,7 @@ fn connect(path: &Path) -> Result<Connection, Fail> {
 fn rebuild(path: &Path, store: &Store) -> Result<Connection, Fail> {
     remove(path)?;
     let mut conn = connect(path)?;
-    sync(&mut conn, store)?;
+    sync(&mut conn, store, &[PathBuf::new()])?;
     Ok(conn)
 }
 
@@ -284,28 +299,24 @@ fn remove(path: &Path) -> Result<(), Fail> {
     Ok(())
 }
 
-/// Brings the index up to date with the files. It reads only the files whose stamp changed.
+/// Brings the notes in `scopes` up to date with the files. It reads only the files whose stamp changed.
 ///
 /// It handles the files the index knows before new ones. So a known file keeps its id
 /// when a new file has the same id.
-fn sync(conn: &mut Connection, store: &Store) -> Result<(), Fail> {
-    let files = store.files()?;
+fn sync(conn: &mut Connection, store: &Store, scopes: &[PathBuf]) -> Result<Refresh, Fail> {
+    let mut files = Vec::new();
+    for scope in scopes {
+        files.extend(store.files(scope)?);
+    }
     let tx = conn.transaction()?;
-    let known: HashMap<PathBuf, Stamp> = {
-        let mut statement = tx.prepare("SELECT path, modified, changed, size FROM notes")?;
-        let rows = statement.query_map([], |row| {
-            let stamp = Stamp {
-                modified: row.get(1)?,
-                changed: row.get(2)?,
-                size: row.get(3)?,
-            };
-            Ok((path(row.get(0)?), stamp))
-        })?;
-        rows.collect::<rusqlite::Result<_>>()?
-    };
+    let mut known: HashMap<PathBuf, Stamp> = HashMap::new();
+    for scope in scopes {
+        known.extend(known_in(&tx, scope)?);
+    }
+    let mut gone = Vec::new();
     let on_disk: HashSet<&Path> = files.iter().map(|(rel, _)| rel.as_path()).collect();
     for rel in known.keys().filter(|rel| !on_disk.contains(rel.as_path())) {
-        delete(&tx, rel)?;
+        gone.extend(delete(&tx, rel)?);
     }
     let mut todo: Vec<(bool, &Path)> = files
         .iter()
@@ -313,23 +324,118 @@ fn sync(conn: &mut Connection, store: &Store) -> Result<(), Fail> {
         .map(|(rel, _)| (!known.contains_key(rel), rel.as_path()))
         .collect();
     todo.sort_unstable();
-    for (_, rel) in todo {
+    let mut written = Vec::new();
+    for (new, rel) in todo {
+        let old_tags = if new { None } else { Some(tags_of(&tx, rel)?) };
         match store.read(rel) {
             Ok((note, stamp)) => {
-                put(&tx, store, note, stamp)?;
+                let note = put(&tx, store, note, stamp, &mut gone)?;
+                written.push((note.info, old_tags));
             }
             Err(error) => {
                 tracing::warn!(%error, "skipped a note");
-                delete(&tx, rel)?;
+                gone.extend(delete(&tx, rel)?);
             }
         }
     }
     tx.commit()?;
-    Ok(())
+    Ok(refresh(written, gone))
+}
+
+/// The stamps of the known notes at or below `scope`.
+fn known_in(conn: &Connection, scope: &Path) -> Result<Vec<(PathBuf, Stamp)>, Fail> {
+    let mut prefix = scope.as_os_str().as_bytes().to_vec();
+    prefix.push(b'/');
+    let mut statement = conn.prepare_cached(
+        "SELECT path, modified, changed, size FROM notes
+        WHERE ?1 OR path = ?2 OR substr(path, 1, length(?3)) = ?3",
+    )?;
+    let rows = statement.query_map(
+        params![scope.as_os_str().is_empty(), bytes(scope), prefix],
+        |row| {
+            let stamp = Stamp {
+                modified: row.get(1)?,
+                changed: row.get(2)?,
+                size: row.get(3)?,
+            };
+            Ok((path(row.get(0)?), stamp))
+        },
+    )?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// A note that left the index.
+struct Gone {
+    path: PathBuf,
+    id: Option<NoteId>,
+    tags: Vec<String>,
+}
+
+/// Turns the notes that `sync` wrote and removed into changes.
+///
+/// A removed note and a new note with the same id are one move.
+fn refresh(written: Vec<(NoteInfo, Option<Vec<String>>)>, mut gone: Vec<Gone>) -> Refresh {
+    let mut out = Refresh::default();
+    for (note, old_tags) in written {
+        let from = match (&old_tags, &note.id) {
+            (None, Some(id)) => gone
+                .iter()
+                .position(|g| g.id.as_ref() == Some(id))
+                .map(|i| gone.swap_remove(i)),
+            _ => None,
+        };
+        let change = match (from, old_tags) {
+            (Some(from), _) => {
+                out.tags |= !same_tags(&from.tags, &note.tags);
+                Change::Moved {
+                    from: from.path,
+                    note,
+                }
+            }
+            (None, None) => {
+                out.tags |= !note.tags.is_empty();
+                Change::Added(note)
+            }
+            (None, Some(old)) => {
+                out.tags |= !same_tags(&old, &note.tags);
+                Change::Changed(note)
+            }
+        };
+        out.notes.push(change);
+    }
+    for gone in gone {
+        out.tags |= !gone.tags.is_empty();
+        out.notes.push(Change::Removed(gone.path));
+    }
+    out.notes
+        .sort_by(|a, b| change_path(a).cmp(&change_path(b)));
+    out
+}
+
+fn same_tags(a: &[String], b: &[String]) -> bool {
+    a.iter().collect::<HashSet<_>>() == b.iter().collect::<HashSet<_>>()
+}
+
+fn change_path(change: &Change) -> Option<&Path> {
+    match change {
+        Change::Added(note) | Change::Changed(note) | Change::Moved { note, .. } => {
+            Some(&note.path)
+        }
+        Change::Removed(path) => Some(path),
+        _ => None,
+    }
 }
 
 /// Writes one note into the index, after a check that no other file has its id.
-fn put(conn: &Connection, store: &Store, mut note: Note, mut stamp: Stamp) -> Result<Note, Fail> {
+///
+/// When the other file is gone, its note leaves the index and goes into `gone`.
+fn put(
+    conn: &Connection,
+    store: &Store,
+    mut note: Note,
+    mut stamp: Stamp,
+    gone: &mut Vec<Gone>,
+) -> Result<Note, Fail> {
     if let Some(id) = &note.info.id
         && let Some(owner) = owner(conn, id)?
         && owner != note.info.path
@@ -345,11 +451,19 @@ fn put(conn: &Connection, store: &Store, mut note: Note, mut stamp: Stamp) -> Re
                 }
             }
         } else {
-            delete(conn, &owner)?;
+            gone.extend(delete(conn, &owner)?);
         }
     }
     write(conn, store.root(), &note, stamp)?;
     Ok(note)
+}
+
+fn tags_of(conn: &Connection, rel: &Path) -> Result<Vec<String>, Fail> {
+    let mut statement = conn.prepare_cached(
+        "SELECT tag FROM tags JOIN notes ON notes.key = tags.note WHERE notes.path = ?1 ORDER BY pos",
+    )?;
+    let rows = statement.query_map([bytes(rel)], |row| row.get(0))?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
 fn owner(conn: &Connection, id: &NoteId) -> Result<Option<PathBuf>, Fail> {
@@ -415,14 +529,25 @@ fn write(conn: &Connection, root: &Path, note: &Note, stamp: Stamp) -> Result<()
     Ok(())
 }
 
-fn delete(conn: &Connection, rel: &Path) -> Result<(), Fail> {
+/// Removes the note at `rel` from the index, and returns what it was.
+fn delete(conn: &Connection, rel: &Path) -> Result<Option<Gone>, Fail> {
+    let id: Option<Option<String>> = conn
+        .prepare_cached("SELECT id FROM notes WHERE path = ?1")?
+        .query_row([bytes(rel)], |row| row.get(0))
+        .optional()?;
+    let Some(id) = id else { return Ok(None) };
+    let tags = tags_of(conn, rel)?;
     conn.prepare_cached(
         "DELETE FROM search WHERE rowid = (SELECT key FROM notes WHERE path = ?1)",
     )?
     .execute([bytes(rel)])?;
     conn.prepare_cached("DELETE FROM notes WHERE path = ?1")?
         .execute([bytes(rel)])?;
-    Ok(())
+    Ok(Some(Gone {
+        path: rel.to_owned(),
+        id: id.map(NoteId::from_field),
+        tags,
+    }))
 }
 
 /// The path of a linked file: relative to the notes folder when it is inside it, else absolute.
