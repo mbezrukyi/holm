@@ -238,11 +238,14 @@ impl Model {
             + (text[piece.end..styled.text.end].len()
                 - text[piece.end..styled.text.end].trim_start().len());
         let mut piece = start..end;
+        // Syntax of inner spans at the ends of the text, like the `**` in `***b***`, does not
+        // count. A piece that reaches it reaches the end of the span.
+        let core = self.trim_syntax(styled.text.clone());
         let (before, after) = loop {
-            let before = (piece.start > styled.text.start)
+            let before = (piece.start > core.start)
                 .then(|| self.split_at(piece.start, styled.close, &inside))
                 .transpose();
-            let after = (piece.end < styled.text.end)
+            let after = (piece.end < core.end)
                 .then(|| self.split_at(piece.end, styled.open, &inside))
                 .transpose();
             match (before, after) {
@@ -1096,6 +1099,21 @@ mod tests {
     }
 
     #[test]
+    fn a_format_key_removes_a_style_around_other_syntax() {
+        let mut model = model_with("Also strong.", 0..12);
+        for format in [Format::Highlight, Format::Bold, Format::Italic] {
+            model.toggle_format(format);
+        }
+        assert_eq!(model.text(), "==***Also strong.***==");
+        model.toggle_format(Format::Italic);
+        assert_eq!(model.text(), "==**Also strong.**==");
+        model.toggle_format(Format::Bold);
+        assert_eq!(model.text(), "==Also strong.==");
+        model.toggle_format(Format::Highlight);
+        assert_eq!(model.text(), "Also strong.");
+    }
+
+    #[test]
     fn a_second_format_key_removes_the_joined_style() {
         let mut model = model_with("Some ==big== idea", 0..17);
         model.toggle_format(Format::Highlight);
@@ -1278,5 +1296,29 @@ mod tests {
         assert_eq!(list_line("-x", 0), None);
         assert_eq!(list_line("text", 0), None);
         assert!(list_line("-", 0).is_some());
+    }
+
+    const STYLES: [Format; 5] = [
+        Format::Bold,
+        Format::Italic,
+        Format::Underline,
+        Format::Strikethrough,
+        Format::Highlight,
+    ];
+
+    proptest::proptest! {
+        /// Each key pressed twice on the same selection, in any order, gives back the text.
+        #[test]
+        fn keys_pressed_twice_give_back_the_text(
+            words in proptest::collection::vec("[a-z]{1,5}", 1..5),
+            keys in proptest::collection::vec(0..STYLES.len(), 1..6),
+        ) {
+            let text = words.join(" ");
+            let mut model = model_with(&text, 0..text.len());
+            for key in keys.iter().chain(&keys) {
+                model.toggle_format(STYLES[*key]);
+            }
+            proptest::prop_assert_eq!(model.text(), text.as_str());
+        }
     }
 }
