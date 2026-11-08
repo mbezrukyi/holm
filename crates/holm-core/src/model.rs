@@ -57,3 +57,52 @@ pub struct Note {
     /// The text after the frontmatter, with the line endings of the file.
     pub body: String,
 }
+
+/// The order of a list of notes. Pinned notes are always on top.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Order {
+    /// The last changed note first.
+    #[default]
+    LastChange,
+    /// By title, from A to Z, with no regard to capital letters.
+    Title,
+}
+
+/// One tag in the tag tree.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Tag {
+    /// The full name, like `work/holm`.
+    pub name: String,
+    /// How many notes have this tag or one of its child tags.
+    pub notes: usize,
+    /// The child tags, like `work/holm` under `work`, sorted by name.
+    pub children: Vec<Tag>,
+}
+
+/// A link or an embedded file in a note.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Link {
+    /// Where the link points.
+    pub target: LinkTarget,
+    /// Whether it is `![..](..)`: an image or a file card.
+    pub embedded: bool,
+}
+
+/// Where a link points.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum LinkTarget {
+    /// Another note, or a heading in it: `holm:<id>` or `holm:<id>#<heading>`.
+    Note {
+        /// The id of the note.
+        id: NoteId,
+        /// The heading text after `#`.
+        heading: Option<String>,
+    },
+    /// A heading in the same note: `#<heading>`.
+    Heading(String),
+    /// A file. The path is relative to the notes folder when the file is inside it.
+    /// It is absolute when the file is outside.
+    File(PathBuf),
+    /// A web address, like `https://...` or `mailto:...`.
+    Web(String),
+}

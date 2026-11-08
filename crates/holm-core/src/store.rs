@@ -1,9 +1,9 @@
 //! Note files on disk: listing, reading, safe writes and new ids.
 
 use std::ffi::OsStr;
-use std::fs::{self, File, Permissions};
+use std::fs::{self, File, Metadata, Permissions};
 use std::io::{self, Write as _};
-use std::os::unix::fs::PermissionsExt as _;
+use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 
@@ -25,6 +25,26 @@ pub(crate) struct Store {
     root: PathBuf,
 }
 
+/// What tells two versions of a file apart without a read: times and size.
+///
+/// The change time moves on every write, also when Holm keeps the old modification time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Stamp {
+    pub(crate) modified: i64,
+    pub(crate) changed: i64,
+    pub(crate) size: i64,
+}
+
+impl Stamp {
+    fn of(meta: &Metadata) -> Self {
+        Self {
+            modified: meta.mtime() * 1_000_000_000 + meta.mtime_nsec(),
+            changed: meta.ctime() * 1_000_000_000 + meta.ctime_nsec(),
+            size: i64::try_from(meta.size()).unwrap_or(i64::MAX),
+        }
+    }
+}
+
 impl Store {
     pub(crate) fn open(root: &Path) -> Result<Self> {
         let fail = |source| Error::NotesFolder {
@@ -38,21 +58,44 @@ impl Store {
         Ok(Self { root })
     }
 
-    /// Every note in the notes folder and in its subfolders, sorted by path.
+    /// The notes folder, as an absolute path with no symlinks.
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// Every note file in the notes folder and in its subfolders, with its stamp.
     ///
-    /// A note or subfolder that can't be read is left out with a log line.
-    pub(crate) fn notes(&self) -> Result<Vec<NoteInfo>> {
-        let mut notes = Vec::new();
+    /// A subfolder or a file that can't be read is left out with a log line.
+    pub(crate) fn files(&self) -> Result<Vec<(PathBuf, Stamp)>> {
+        let mut files = Vec::new();
         self.walk(&mut |rel, kind| {
             if kind == Kind::Note {
-                match self.read(rel) {
-                    Ok(note) => notes.push(note.info),
-                    Err(error) => tracing::warn!(%error, "skipped a note"),
+                match fs::metadata(self.root.join(rel)) {
+                    Ok(meta) => files.push((rel.to_owned(), Stamp::of(&meta))),
+                    Err(error) => tracing::warn!(%error, path = %rel.display(), "skipped a note"),
                 }
             }
         })?;
-        notes.sort_by(|a, b| a.path.cmp(&b.path));
-        Ok(notes)
+        Ok(files)
+    }
+
+    /// Whether a note file is at `rel`.
+    pub(crate) fn exists(&self, rel: &Path) -> bool {
+        self.note_path(rel).is_ok_and(|path| path.is_file())
+    }
+
+    /// Checks that `rel` is a note path inside the notes folder.
+    pub(crate) fn check_note(rel: &Path) -> Result<()> {
+        if is_md(rel) {
+            plain_path(rel).map(drop)
+        } else {
+            Err(bad_path(rel))
+        }
+    }
+
+    /// Checks that `rel` is a folder path inside the notes folder.
+    pub(crate) fn check_folder(rel: &Path) -> Result<()> {
+        plain_path(rel).map(drop)
     }
 
     /// Every subfolder, sorted by path. It skips `attachments/` at the root.
@@ -67,20 +110,30 @@ impl Store {
         Ok(folders)
     }
 
-    pub(crate) fn read(&self, rel: &Path) -> Result<Note> {
+    pub(crate) fn read(&self, rel: &Path) -> Result<(Note, Stamp)> {
         let path = self.note_path(rel)?;
-        let (text, modified) = read_text(&path)?;
-        Ok(note(rel, &Text::parse(&text), modified))
+        let (text, stamp) = read_text(&path)?;
+        Ok((note(rel, &Text::parse(&text), stamp), stamp))
+    }
+
+    /// Writes a new `id:` into the note and keeps its modification time.
+    pub(crate) fn set_id(&self, rel: &Path, id: &NoteId) -> Result<(Note, Stamp)> {
+        let path = self.note_path(rel)?;
+        let (old, stamp) = read_text(&path)?;
+        let mut text = Text::parse(&old);
+        text.set_id(Some(id.as_str()));
+        write(&path, &old, &text.to_string(), Some(stamp))?;
+        self.read(rel)
     }
 
     /// Writes the body, tags and pin of `note` over its file.
     ///
     /// It adds an id when the file has none. When the body stays the same,
     /// the file keeps its old modification time.
-    pub(crate) fn save(&self, note: &Note) -> Result<Note> {
+    pub(crate) fn save(&self, note: &Note) -> Result<(Note, Stamp)> {
         let rel = &note.info.path;
         let path = self.note_path(rel)?;
-        let (old, modified) = read_text(&path)?;
+        let (old, stamp) = read_text(&path)?;
         let mut text = Text::parse(&old);
         let mut body = note.body.clone();
         if !body.is_empty() && !body.ends_with('\n') {
@@ -97,20 +150,18 @@ impl Store {
         if text.id().is_none() {
             text.set_id(Some(NoteId::generate().as_str()));
         }
-        let new = text.to_string();
-        if new != old {
-            let permissions = fs::metadata(&path)
-                .map_err(|source| write_error(&path, source))?
-                .permissions();
-            let keep = (!body_changed).then_some(modified);
-            replace(&path, &new, permissions, keep).map_err(|source| write_error(&path, source))?;
-        }
+        write(
+            &path,
+            &old,
+            &text.to_string(),
+            (!body_changed).then_some(stamp),
+        )?;
         self.read(rel)
     }
 
     /// Creates an empty note with a new id as `Untitled.md` in `folder`.
     /// On a clash, the name gets a number: `Untitled 2.md`.
-    pub(crate) fn create(&self, folder: &Path) -> Result<Note> {
+    pub(crate) fn create(&self, folder: &Path) -> Result<(Note, Stamp)> {
         let dir = self.root.join(plain_path(folder)?);
         let mut text = Text::parse("");
         text.set_id(Some(NoteId::generate().as_str()));
@@ -174,11 +225,7 @@ impl Store {
 
     /// The absolute path of a note, after a check of the relative path.
     fn note_path(&self, rel: &Path) -> Result<PathBuf> {
-        if is_md(rel) {
-            plain_path(rel).map(|rel| self.root.join(rel))
-        } else {
-            Err(bad_path(rel))
-        }
+        Self::check_note(rel).map(|()| self.root.join(rel))
     }
 }
 
@@ -188,7 +235,7 @@ enum Kind {
     Folder,
 }
 
-fn note(rel: &Path, text: &Text, modified: SystemTime) -> Note {
+fn note(rel: &Path, text: &Text, stamp: Stamp) -> Note {
     let title = text.title().unwrap_or_else(|| {
         rel.file_stem()
             .map(|stem| stem.to_string_lossy().into_owned())
@@ -201,26 +248,49 @@ fn note(rel: &Path, text: &Text, modified: SystemTime) -> Note {
             title,
             tags: text.tags(),
             pinned: text.pinned(),
-            modified,
+            modified: time(stamp.modified),
         },
         body: text.body().to_owned(),
     }
 }
 
-fn read_text(path: &Path) -> Result<(String, SystemTime)> {
+fn read_text(path: &Path) -> Result<(String, Stamp)> {
     let fail = |source| Error::Read {
         path: path.to_owned(),
         source,
     };
     let mut file = File::open(path).map_err(fail)?;
-    let modified = file.metadata().and_then(|m| m.modified()).map_err(fail)?;
+    let stamp = Stamp::of(&file.metadata().map_err(fail)?);
     let mut bytes = Vec::new();
     io::Read::read_to_end(&mut file, &mut bytes).map_err(fail)?;
     let text = String::from_utf8(bytes).map_err(|e| Error::NotUtf8 {
         path: path.to_owned(),
         source: e.utf8_error(),
     })?;
-    Ok((text, modified))
+    Ok((text, stamp))
+}
+
+/// A time in nanoseconds since 1970 as a [`SystemTime`].
+pub(crate) fn time(nanos: i64) -> SystemTime {
+    let since = std::time::Duration::from_nanos(nanos.unsigned_abs());
+    if nanos < 0 {
+        SystemTime::UNIX_EPOCH - since
+    } else {
+        SystemTime::UNIX_EPOCH + since
+    }
+}
+
+/// Replaces `old` with `new` at `path`, when they differ.
+/// With `keep`, the file keeps that stamp's modification time.
+fn write(path: &Path, old: &str, new: &str, keep: Option<Stamp>) -> Result<()> {
+    if new == old {
+        return Ok(());
+    }
+    let permissions = fs::metadata(path)
+        .map_err(|source| write_error(path, source))?
+        .permissions();
+    let keep = keep.map(|stamp| time(stamp.modified));
+    replace(path, new, permissions, keep).map_err(|source| write_error(path, source))
 }
 
 /// Replaces the file at `path` with `text` in one rename, so a crash never leaves half a note.

@@ -37,6 +37,14 @@ pub enum Error {
         /// The cause.
         source: io::Error,
     },
+    /// The index can't be opened or used, also after a rebuild.
+    #[error("cannot use the index {path}")]
+    Index {
+        /// The index file.
+        path: PathBuf,
+        /// The cause.
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     /// The path is absolute, leaves the notes folder, is hidden, or is not a `.md` file.
     #[error("{path} is not a note or a folder inside the notes folder")]
     BadPath {

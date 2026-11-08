@@ -2,60 +2,19 @@
 
 #![allow(clippy::unwrap_used, reason = "tests")]
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
 
+use common::Folder;
+use holm_core::model::Order;
 use holm_core::{Core, Error};
-use tempfile::TempDir;
-
-struct Folder {
-    dir: TempDir,
-    core: Core,
-}
-
-impl Folder {
-    fn new(files: &[(&str, &str)]) -> Self {
-        let dir = tempfile::tempdir().unwrap();
-        for (path, text) in files {
-            let path = dir.path().join(path);
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            fs::write(path, text).unwrap();
-        }
-        let core = Core::open(dir.path(), dir.path().join(".cache")).unwrap();
-        Self { dir, core }
-    }
-
-    fn text(&self, path: &str) -> String {
-        fs::read_to_string(self.dir.path().join(path)).unwrap()
-    }
-
-    fn set_old_time(&self, path: &str) -> SystemTime {
-        let time = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-        fs::File::options()
-            .write(true)
-            .open(self.dir.path().join(path))
-            .unwrap()
-            .set_modified(time)
-            .unwrap();
-        time
-    }
-
-    fn files(&self) -> Vec<String> {
-        let mut names: Vec<String> = fs::read_dir(self.dir.path())
-            .unwrap()
-            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-        names.sort();
-        names
-    }
-}
 
 fn paths(items: impl IntoIterator<Item = PathBuf>) -> Vec<String> {
-    items
-        .into_iter()
-        .map(|p| p.to_string_lossy().into_owned())
-        .collect()
+    let mut paths = common::paths(items);
+    paths.sort();
+    paths
 }
 
 #[test]
@@ -93,7 +52,7 @@ fn notes_lists_only_md_files_and_skips_hidden_ones() {
         ("work/.trash/e.md", ""),
     ]);
 
-    let notes = folder.core.notes().unwrap();
+    let notes = folder.core.notes(Order::LastChange).unwrap();
 
     assert_eq!(
         paths(notes.into_iter().map(|n| n.path)),
@@ -106,7 +65,7 @@ fn notes_skips_a_note_that_is_not_text() {
     let folder = Folder::new(&[("a.md", "")]);
     fs::write(folder.dir.path().join("b.md"), [0xff, 0xfe]).unwrap();
 
-    let notes = folder.core.notes().unwrap();
+    let notes = folder.core.notes(Order::LastChange).unwrap();
 
     assert_eq!(paths(notes.into_iter().map(|n| n.path)), ["a.md"]);
 }
@@ -226,7 +185,7 @@ fn save_keeps_unknown_fields_and_writes_tags_and_pin() {
 #[test]
 fn save_keeps_the_old_time_when_only_tags_or_the_pin_change() {
     let folder = Folder::new(&[("a.md", "---\nid: X1\n---\nBody\n")]);
-    let time = folder.set_old_time("a.md");
+    let time = folder.set_time("a.md", 1_000_000);
     let mut note = folder.core.read("a.md").unwrap();
     note.info.tags = vec!["work".to_owned()];
 
@@ -241,7 +200,7 @@ fn save_keeps_the_old_time_when_only_tags_or_the_pin_change() {
 #[test]
 fn save_keeps_the_old_time_when_it_only_adds_the_id() {
     let folder = Folder::new(&[("a.md", "Body\n")]);
-    let time = folder.set_old_time("a.md");
+    let time = folder.set_time("a.md", 1_000_000);
     let note = folder.core.read("a.md").unwrap();
 
     let saved = folder.core.save(&note).unwrap();
@@ -253,7 +212,7 @@ fn save_keeps_the_old_time_when_it_only_adds_the_id() {
 #[test]
 fn save_gives_a_new_time_when_the_body_changes() {
     let folder = Folder::new(&[("a.md", "---\nid: X1\n---\nBody\n")]);
-    let time = folder.set_old_time("a.md");
+    let time = folder.set_time("a.md", 1_000_000);
     let mut note = folder.core.read("a.md").unwrap();
     note.body = "New body\n".to_owned();
 
@@ -266,7 +225,7 @@ fn save_gives_a_new_time_when_the_body_changes() {
 fn save_with_no_change_does_not_write() {
     let text = "---\nid: X1\ntags: [a, b]\n---\nBody\n";
     let folder = Folder::new(&[("a.md", text)]);
-    let time = folder.set_old_time("a.md");
+    let time = folder.set_time("a.md", 1_000_000);
     let note = folder.core.read("a.md").unwrap();
 
     folder.core.save(&note).unwrap();
@@ -369,5 +328,5 @@ fn the_handle_works_from_many_threads() {
     created.dedup();
 
     assert_eq!(created.len(), 8);
-    assert_eq!(folder.core.notes().unwrap().len(), 8);
+    assert_eq!(folder.core.notes(Order::LastChange).unwrap().len(), 8);
 }
