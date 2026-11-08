@@ -94,7 +94,7 @@ fn clean(path: &Path) -> PathBuf {
 }
 
 /// The path from the folder `base` to `target`. Both are absolute and clean.
-fn relative(base: &Path, target: &Path) -> PathBuf {
+pub(crate) fn relative(base: &Path, target: &Path) -> PathBuf {
     let base: Vec<_> = base.components().collect();
     let target: Vec<_> = target.components().collect();
     let common = base.iter().zip(&target).take_while(|(a, b)| a == b).count();

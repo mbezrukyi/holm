@@ -52,6 +52,12 @@ pub enum Error {
         /// The path as the caller gave it.
         path: PathBuf,
     },
+    /// The tag name is empty, or it is not written as Holm writes tags.
+    #[error("{tag:?} is not a tag name")]
+    BadTag {
+        /// The tag as the caller gave it.
+        tag: String,
+    },
 }
 
 /// A `Result` with the `holm-core` [`Error`].

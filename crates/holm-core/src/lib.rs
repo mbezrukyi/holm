@@ -6,10 +6,12 @@ mod error;
 mod index;
 pub mod model;
 mod relink;
+mod retag;
 mod store;
 mod watch;
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -20,7 +22,8 @@ pub use watch::Feed;
 
 use index::{Filter, Index};
 use model::{Change, DeleteCount, Link, Note, NoteId, NoteInfo, Order, Tag};
-use store::{Entry, Store, folder_of};
+use retag::TagEdit;
+use store::{ATTACHMENTS, Entry, Store, folder_of};
 use watch::{Apply, Batch};
 
 /// The handle to one notes folder.
@@ -424,16 +427,209 @@ impl Core {
     /// - [`Error::Write`] when the id can't be written.
     /// - [`Error::Index`] as in [`Core::save`].
     pub fn link_id(&self, path: impl AsRef<Path>) -> Result<NoteId> {
-        let path = path.as_ref();
-        let _writing = lock(&self.inner.writing);
-        let (note, _) = self.inner.store.read(path)?;
-        if let Some(id) = note.info.id {
-            return Ok(id);
+        let note = self.edit_fields(path.as_ref(), |text| {
+            if text.id().is_none() {
+                text.set_id(Some(NoteId::generate().as_str()));
+            }
+        })?;
+        note.info.id.ok_or_else(|| Error::Write {
+            path: self.inner.store.root().join(&note.info.path),
+            source: std::io::ErrorKind::InvalidData.into(),
+        })
+    }
+
+    /// Sets the tags of the note and returns it. Its body and modification time stay.
+    ///
+    /// Each tag is cleaned like a typed tag, and repeats go. With no tags, the `tags:` field goes.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::BadPath`] as in [`Core::read`].
+    /// - [`Error::Read`] or [`Error::NotUtf8`] when the file can't be read as text.
+    /// - [`Error::Write`] when the file can't be written. The old file then stays.
+    /// - [`Error::Index`] as in [`Core::save`].
+    pub fn set_tags<S: AsRef<str>>(&self, path: impl AsRef<Path>, tags: &[S]) -> Result<NoteInfo> {
+        let tags = retag::unique(
+            tags.iter()
+                .filter_map(|tag| holm_markdown::normalize_tag(tag.as_ref())),
+        );
+        self.edit_fields(path.as_ref(), |text| {
+            if text.tags() != tags {
+                text.set_tags(&tags);
+            }
+        })
+        .map(|note| note.info)
+    }
+
+    /// Pins or unpins the note and returns it. Its body and modification time stay.
+    ///
+    /// # Errors
+    ///
+    /// As in [`Core::set_tags`].
+    pub fn set_pinned(&self, path: impl AsRef<Path>, pinned: bool) -> Result<NoteInfo> {
+        self.edit_fields(path.as_ref(), |text| {
+            if text.pinned() != pinned {
+                text.set_pinned(pinned);
+            }
+        })
+        .map(|note| note.info)
+    }
+
+    /// How many notes [`Core::rename_tag`] changes.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::BadTag`] as in [`Core::rename_tag`].
+    /// - [`Error::Index`] as in [`Core::notes`].
+    pub fn tag_rename_count(&self, from: &str, to: &str) -> Result<usize> {
+        self.tag_edit_count(&TagEdit::rename(from, to)?)
+    }
+
+    /// Renames the tag `from` to `to` in every note, and returns how many notes changed.
+    ///
+    /// Child tags follow: `work` to `job` makes `work/holm` into `job/holm`.
+    /// When a note already has the new name, the two tags merge.
+    /// `to` is cleaned like a typed tag. The notes keep their modification times.
+    ///
+    /// A note that can't be changed keeps its tags, with a log line. The other notes still change.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::BadTag`] when `from` is not a tag name, or nothing is left of `to`.
+    /// - The first error of a note, as in [`Core::set_tags`].
+    pub fn rename_tag(&self, from: &str, to: &str) -> Result<usize> {
+        self.edit_tag(&TagEdit::rename(from, to)?)
+    }
+
+    /// How many notes [`Core::delete_tag`] changes.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::BadTag`] when `tag` is not a tag name.
+    /// - [`Error::Index`] as in [`Core::notes`].
+    pub fn tag_delete_count(&self, tag: &str) -> Result<usize> {
+        self.tag_edit_count(&TagEdit::delete(tag)?)
+    }
+
+    /// Removes the tag and its child tags from every note, and returns how many notes changed.
+    ///
+    /// It works as [`Core::rename_tag`].
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::BadTag`] when `tag` is not a tag name.
+    /// - The first error of a note, as in [`Core::set_tags`].
+    pub fn delete_tag(&self, tag: &str) -> Result<usize> {
+        self.edit_tag(&TagEdit::delete(tag)?)
+    }
+
+    /// Copies the file into `attachments/` at the root of the notes folder,
+    /// and returns its path from the folder of `note`, for a link.
+    ///
+    /// The copy keeps the file name. When it is taken, it gets a number: `photo 2.png`.
+    /// A leading `.` becomes `-`. Holm makes `attachments/` when it is missing.
+    /// The note itself does not change.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::BadPath`] when `note` is not a `.md` path inside the notes folder.
+    /// - [`Error::Read`] when `file` can't be read or is not a file.
+    /// - [`Error::Write`] when the copy can't be written.
+    pub fn attach_file(&self, note: impl AsRef<Path>, file: impl AsRef<Path>) -> Result<PathBuf> {
+        let file = file.as_ref();
+        let read_error = |source| Error::Read {
+            path: file.to_owned(),
+            source,
+        };
+        let source = File::open(file).map_err(read_error)?;
+        if !source.metadata().map_err(read_error)?.is_file() {
+            return Err(read_error(std::io::ErrorKind::IsADirectory.into()));
         }
-        let id = NoteId::generate();
-        let (note, stamp) = self.inner.store.set_id(path, &id)?;
-        self.inner.index.update(&self.inner.store, &note, stamp)?;
-        Ok(id)
+        let stem =
+            holm_markdown::file_stem(&file.file_stem().unwrap_or_default().to_string_lossy());
+        let ext = file
+            .extension()
+            .map(|ext| format!(".{}", ext.to_string_lossy()))
+            .unwrap_or_default();
+        self.attach(note.as_ref(), &OsString::from(stem), &ext, source)
+    }
+
+    /// Saves a pasted PNG image into `attachments/`, and returns its path from the folder
+    /// of `note`, for a link.
+    ///
+    /// The name holds the local time: `Pasted image 2026-11-08 15-30-12.png`.
+    /// Else it works as [`Core::attach_file`].
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::BadPath`] as in [`Core::attach_file`].
+    /// - [`Error::Write`] when the image can't be written.
+    pub fn paste_image(&self, note: impl AsRef<Path>, png: &[u8]) -> Result<PathBuf> {
+        let stem = jiff::Zoned::now()
+            .strftime("Pasted image %Y-%m-%d %H-%M-%S")
+            .to_string();
+        self.attach(note.as_ref(), &OsString::from(stem), ".png", png)
+    }
+
+    fn attach(
+        &self,
+        note: &Path,
+        stem: &OsStr,
+        ext: &str,
+        content: impl std::io::Read,
+    ) -> Result<PathBuf> {
+        Store::check_note(note)?;
+        let file = self.inner.store.add_attachment(stem, ext, content)?;
+        let root = self.inner.store.root();
+        Ok(relink::relative(
+            &root.join(folder_of(note)),
+            &root.join(file),
+        ))
+    }
+
+    /// Changes the frontmatter of the note with `edit`, keeps its modification time,
+    /// and updates the index.
+    fn edit_fields(
+        &self,
+        path: &Path,
+        edit: impl FnOnce(&mut holm_markdown::Note),
+    ) -> Result<Note> {
+        let _writing = lock(&self.inner.writing);
+        let (note, stamp) = self.inner.store.edit_fields(path, edit)?;
+        self.inner.index.update(&self.inner.store, &note, stamp)
+    }
+
+    fn tag_edit_count(&self, edit: &TagEdit<'_>) -> Result<usize> {
+        let notes = self.list(&Filter::Tag(edit.tag()), Order::Title)?;
+        Ok(notes
+            .iter()
+            .filter(|note| edit.apply(&note.tags) != note.tags)
+            .count())
+    }
+
+    fn edit_tag(&self, edit: &TagEdit<'_>) -> Result<usize> {
+        let mut changed = 0;
+        let mut first_error = None;
+        for info in self.list(&Filter::Tag(edit.tag()), Order::Title)? {
+            let mut hit = false;
+            let result = self.edit_fields(&info.path, |text| {
+                let old = text.tags();
+                let new = edit.apply(&old);
+                if new != old {
+                    text.set_tags(&new);
+                    hit = true;
+                }
+            });
+            match result {
+                Ok(_) if hit => changed += 1,
+                Ok(_) => {}
+                Err(error) => {
+                    tracing::warn!(%error, "kept the tags of a note");
+                    first_error.get_or_insert(error);
+                }
+            }
+        }
+        first_error.map_or(Ok(changed), Err)
     }
 
     fn move_folder_to(&self, folder: &Path, parent: &Path, name: &str) -> Result<PathBuf> {
@@ -533,6 +729,8 @@ impl Inner {
         // A missing path may have been a folder. The index knows only notes, so it can't tell.
         // A missing `.md` path is taken as a note.
         let folders = scopes.iter().any(|scope| match self.store.entry(scope) {
+            // The folder list never holds `attachments/`.
+            _ if scope == Path::new(ATTACHMENTS) => false,
             Entry::Folder => true,
             Entry::Missing => Store::check_note(scope).is_err(),
             Entry::Note(_) | Entry::Other => false,

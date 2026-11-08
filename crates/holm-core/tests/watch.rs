@@ -188,6 +188,20 @@ fn holm_s_own_saves_and_new_notes_do_not_come_back() {
 }
 
 #[test]
+fn holm_s_own_tag_pin_and_attachment_changes_do_not_come_back() {
+    let fed = Fed::new(&[("a.md", "---\ntags: [work]\n---\n# A\n")]);
+
+    fed.core.set_pinned("a.md", true).unwrap();
+    fed.core.rename_tag("work", "job").unwrap();
+    let image = fed.core.paste_image("a.md", b"png").unwrap();
+    fed.feed
+        .changed([PathBuf::from("a.md"), PathBuf::from("attachments"), image])
+        .unwrap();
+
+    assert_eq!(fed.take(), []);
+}
+
+#[test]
 fn a_new_folder_adds_its_notes_and_changes_the_folder_list() {
     let fed = Fed::new(&[]);
 

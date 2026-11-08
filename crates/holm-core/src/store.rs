@@ -2,7 +2,7 @@
 
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, Metadata, Permissions};
-use std::io::{self, Write as _};
+use std::io;
 use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
@@ -143,12 +143,16 @@ impl Store {
         Ok((note(rel, &Text::parse(&text), stamp), stamp))
     }
 
-    /// Writes a new `id:` into the note and keeps its modification time.
-    pub(crate) fn set_id(&self, rel: &Path, id: &NoteId) -> Result<(Note, Stamp)> {
+    /// Changes the frontmatter of the note with `edit` and keeps its modification time.
+    pub(crate) fn edit_fields(
+        &self,
+        rel: &Path,
+        edit: impl FnOnce(&mut Text),
+    ) -> Result<(Note, Stamp)> {
         let path = self.note_path(rel)?;
         let (old, stamp) = read_text(&path)?;
         let mut text = Text::parse(&old);
-        text.set_id(Some(id.as_str()));
+        edit(&mut text);
         write(&path, &old, &text.to_string(), Some(stamp))?;
         self.read(rel)
     }
@@ -192,20 +196,42 @@ impl Store {
         let dir = self.root.join(plain_path(folder)?);
         let mut text = Text::parse("");
         text.set_id(Some(NoteId::generate().as_str()));
-        let mut file = temp_file(&dir, &text.to_string(), None, None)
+        let file = temp_file(&dir, text.to_string().as_bytes(), None, None)
             .map_err(|source| write_error(&dir, source))?;
-        for name in numbered(OsStr::new(NEW_NOTE), ".md") {
-            let path = dir.join(&name);
-            match file.persist_noclobber(&path) {
-                Ok(_) => {
-                    sync_dir(&dir).map_err(|source| write_error(&path, source))?;
-                    return self.read(&folder.join(name));
+        let name = persist_new(file, &dir, OsStr::new(NEW_NOTE), ".md")?;
+        self.read(&folder.join(name))
+    }
+
+    /// Copies `content` into a new file in `attachments/` at the root, and returns its path.
+    ///
+    /// The file is `stem` + `ext`, or `stem 2` + `ext` and so on on a clash.
+    /// It makes the `attachments/` folder when it is missing.
+    pub(crate) fn add_attachment(
+        &self,
+        stem: &OsStr,
+        ext: &str,
+        content: impl io::Read,
+    ) -> Result<PathBuf> {
+        let dir = self.root.join(ATTACHMENTS);
+        match self.entry(Path::new(ATTACHMENTS)) {
+            Entry::Folder => {}
+            Entry::Missing => {
+                match fs::create_dir(&dir) {
+                    Err(e) if e.kind() != io::ErrorKind::AlreadyExists => {
+                        return Err(write_error(&dir, e));
+                    }
+                    _ => {}
                 }
-                Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => file = e.file,
-                Err(e) => return Err(write_error(&path, e.error)),
+                sync_dir(&self.root).map_err(|e| write_error(&dir, e))?;
+            }
+            Entry::Note(_) | Entry::Other => {
+                return Err(write_error(&dir, io::ErrorKind::NotADirectory.into()));
             }
         }
-        Err(write_error(&dir, io::ErrorKind::StorageFull.into()))
+        let file =
+            temp_file(&dir, content, None, None).map_err(|source| write_error(&dir, source))?;
+        let name = persist_new(file, &dir, stem, ext)?;
+        Ok(Path::new(ATTACHMENTS).join(name))
     }
 
     /// Moves the note at `from` to `folder` as `<stem>.md`, or `<stem> 2.md` and so on
@@ -234,7 +260,7 @@ impl Store {
                 Some(temp) => temp,
                 None => temp_file(
                     &dir,
-                    &text,
+                    text.as_bytes(),
                     Some(permissions.clone()),
                     Some(time(stamp.modified)),
                 )
@@ -494,6 +520,23 @@ fn numbered(stem: &OsStr, ext: &str) -> impl Iterator<Item = OsString> {
     })
 }
 
+/// Gives `file` the first free name in `dir`: `stem` + `ext`, then `stem 2` + `ext` and so on.
+/// It never replaces a file, and it returns the name.
+fn persist_new(mut file: NamedTempFile, dir: &Path, stem: &OsStr, ext: &str) -> Result<OsString> {
+    for name in numbered(stem, ext) {
+        let path = dir.join(&name);
+        match file.persist_noclobber(&path) {
+            Ok(_) => {
+                sync_dir(dir).map_err(|source| write_error(&path, source))?;
+                return Ok(name);
+            }
+            Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => file = e.file,
+            Err(e) => return Err(write_error(&path, e.error)),
+        }
+    }
+    Err(write_error(dir, io::ErrorKind::StorageFull.into()))
+}
+
 /// A folder name from what the user typed, cleaned like a note file name.
 fn folder_name(name: &str) -> Result<OsString> {
     let name = holm_markdown::file_stem(name.trim());
@@ -558,16 +601,16 @@ fn replace(
     modified: Option<SystemTime>,
 ) -> io::Result<()> {
     let dir = path.parent().unwrap_or(Path::new("."));
-    temp_file(dir, text, Some(permissions), modified)?
+    temp_file(dir, text.as_bytes(), Some(permissions), modified)?
         .persist(path)
         .map_err(|e| e.error)?;
     sync_dir(dir)
 }
 
-/// Writes `text` to a hidden temp file in `dir` and flushes it to the disk.
+/// Writes `content` to a hidden temp file in `dir` and flushes it to the disk.
 fn temp_file(
     dir: &Path,
-    text: &str,
+    mut content: impl io::Read,
     permissions: Option<Permissions>,
     modified: Option<SystemTime>,
 ) -> io::Result<NamedTempFile> {
@@ -576,7 +619,7 @@ fn temp_file(
         .suffix(".tmp")
         .permissions(Permissions::from_mode(NEW_FILE_MODE))
         .tempfile_in(dir)?;
-    file.write_all(text.as_bytes())?;
+    io::copy(&mut content, &mut file)?;
     if let Some(permissions) = permissions {
         file.as_file().set_permissions(permissions)?;
     }

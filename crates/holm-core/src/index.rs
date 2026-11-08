@@ -481,7 +481,7 @@ fn put(
         if store.exists(&owner) {
             let new = NoteId::generate();
             tracing::info!(%id, %new, path = %note.info.path.display(), "gave a copied note a new id");
-            match store.set_id(&note.info.path, &new) {
+            match store.edit_fields(&note.info.path, |text| text.set_id(Some(new.as_str()))) {
                 Ok((written, written_stamp)) => (note, stamp) = (written, written_stamp),
                 Err(error) => {
                     tracing::warn!(%error, "kept a copied note without an id");
