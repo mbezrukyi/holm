@@ -142,15 +142,37 @@ pub(crate) type ImageSizes = HashMap<PathBuf, Option<Size<u32>>>;
 
 /// Shapes source lines for one frame.
 pub(crate) struct Shaper<'a> {
-    pub(crate) style: TextStyle,
+    style: TextStyle,
     /// The width of the text column.
-    pub(crate) width: Pixels,
-    pub(crate) folder: Option<&'a Path>,
-    pub(crate) sizes: &'a mut ImageSizes,
-    pub(crate) highlighter: &'a mut Highlighter,
-    pub(crate) theme: &'a Theme,
+    width: Pixels,
+    folder: Option<&'a Path>,
+    sizes: &'a mut ImageSizes,
+    highlighter: &'a mut Highlighter,
+    theme: &'a Theme,
     /// The column widths of the tables in this frame, by the start of each table.
-    pub(crate) tables: HashMap<usize, Rc<[Pixels]>>,
+    tables: HashMap<usize, Rc<[Pixels]>>,
+}
+
+impl<'a> Shaper<'a> {
+    /// A shaper for one frame, with a column of `width`. Relative file links start at `folder`.
+    pub(crate) fn new(
+        style: TextStyle,
+        width: Pixels,
+        folder: Option<&'a Path>,
+        sizes: &'a mut ImageSizes,
+        highlighter: &'a mut Highlighter,
+        theme: &'a Theme,
+    ) -> Self {
+        Self {
+            style,
+            width,
+            folder,
+            sizes,
+            highlighter,
+            theme,
+            tables: HashMap::new(),
+        }
+    }
 }
 
 impl Shaper<'_> {

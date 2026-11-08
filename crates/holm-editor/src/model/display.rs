@@ -82,7 +82,7 @@ pub(crate) struct DisplayLine {
 }
 
 /// What a line is part of, when the screen draws it in its own way.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub(crate) enum LineKind {
     Text,
     /// A line of a code block.
@@ -115,12 +115,6 @@ pub(crate) struct Cell {
     pub(crate) alignment: Alignment,
 }
 
-impl PartialEq for Cell {
-    fn eq(&self, other: &Self) -> bool {
-        self.shown.text == other.shown.text && self.alignment == other.alignment
-    }
-}
-
 /// A quote around a line.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Quote {
@@ -145,7 +139,7 @@ impl Model {
     /// Line `line` as the screen shows it.
     pub(crate) fn display_line(&self, line: usize) -> DisplayLine {
         let source = self.line_range(line);
-        let chain = self.chain_at(self.probe(&source));
+        let chain = self.blocks_of_line(&source);
         let from = chain.first().map_or(source.start, |b| b.range.start);
 
         // Code blocks and tables show their whole source while the selection touches them.
@@ -174,7 +168,7 @@ impl Model {
         let kind = self.line_kind(line, &source, &chain, raw);
         let mut mark = None;
         let mut list_prefix = None;
-        if kind == LineKind::Text {
+        if matches!(kind, LineKind::Text) {
             if let Some(item) = items.last().filter(|i| self.line_of(i.range.start) == line) {
                 let (found, end) = self.mark(item);
                 mark = (!raw).then_some(found);
@@ -211,9 +205,14 @@ impl Model {
         }
     }
 
+    /// The blocks that hold the source line `line`, from the top level block inward.
+    pub(super) fn blocks_of_line(&self, line: &Range<usize>) -> Vec<&Block> {
+        self.chain_at(self.probe(line))
+    }
+
     /// The first offset of the line that is neither space nor hidden syntax. It finds the blocks
     /// of the line, because a nested block can start after the line start.
-    pub(super) fn probe(&self, line: &Range<usize>) -> usize {
+    fn probe(&self, line: &Range<usize>) -> usize {
         let hidden = self.body.hidden();
         let first = hidden.partition_point(|h| h.end <= line.start);
         let mut in_hidden = hidden[first..].iter().peekable();
@@ -606,13 +605,13 @@ mod tests {
         assert_eq!(cells[0].shown.text, "x");
         assert_eq!(cells[1].shown.text, "y");
         assert_eq!(cells[1].alignment, Alignment::Right);
-        assert_eq!(away.display_line(3).kind, LineKind::TableRule);
+        assert!(matches!(away.display_line(3).kind, LineKind::TableRule));
 
         let inside = model_at(text, text.find('2').unwrap_or(0));
         for line in 2..=4 {
             let display = inside.display_line(line);
             assert!(display.raw);
-            assert_eq!(display.kind, LineKind::Text);
+            assert!(matches!(display.kind, LineKind::Text));
         }
     }
 
@@ -620,7 +619,10 @@ mod tests {
     fn a_callout_shows_its_name_and_its_quote() {
         let model = model_at("a\n\n> [!tip]\n> Use it.\n", 0);
         let title = model.display_line(2);
-        assert_eq!(title.kind, LineKind::CalloutTitle(CalloutKind::Tip));
+        assert!(matches!(
+            title.kind,
+            LineKind::CalloutTitle(CalloutKind::Tip)
+        ));
         let body = model.display_line(3);
         assert_eq!(body.quotes, [Quote::Callout(CalloutKind::Tip)]);
         assert_eq!(body.shown.text, "Use it.");
@@ -630,7 +632,7 @@ mod tests {
     fn a_rule_away_from_the_cursor_shows_no_text() {
         let model = model_at("a\n\n---\n", 0);
         let line = model.display_line(2);
-        assert_eq!(line.kind, LineKind::Rule);
+        assert!(matches!(line.kind, LineKind::Rule));
         assert_eq!(line.shown.text, "");
     }
 

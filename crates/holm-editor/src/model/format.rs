@@ -219,20 +219,14 @@ impl Model {
         } else {
             for (piece, styled) in pieces.iter().zip(&styled) {
                 if styled.is_none() {
+                    // The new markers go around the syntax of the spans in the piece.
+                    let Range { start, end } = self.around_syntax(piece);
                     // The same style inside the piece cannot nest, so its markers go.
-                    // A span at an end of the piece has its markers outside the piece.
                     let inside = if format == Format::Code {
                         Vec::new()
                     } else {
-                        let wide = self.widen(piece);
-                        self.styled_inside(format, &wide)
+                        self.styled_inside(format, &(start..end))
                     };
-                    let start = inside.first().map_or(piece.start, |s| {
-                        piece.start.min(s.text.start - s.open.len())
-                    });
-                    let end = inside
-                        .last()
-                        .map_or(piece.end, |s| piece.end.max(s.text.end + s.close.len()));
                     edits.push((start..start, format.open().to_owned()));
                     for inner in inside {
                         let open = inner.text.start - inner.open.len()..inner.text.start;
@@ -306,7 +300,7 @@ impl Model {
         let mut pieces = Vec::new();
         for ix in first..=last {
             let line = self.line_range(ix);
-            let chain = self.chain_at(self.probe(&line));
+            let chain = self.blocks_of_line(&line);
             if chain
                 .iter()
                 .any(|b| matches!(b.kind, BlockKind::Code { .. }))
@@ -339,11 +333,18 @@ impl Model {
         if range.start >= range.end {
             return None;
         }
+        let piece = self.trim_syntax(self.trim_spaces(range));
+        // Syntax can stand between the text and a space, like `== c`.
+        let piece = self.trim_spaces(piece);
+        (!piece.is_empty()).then_some(piece)
+    }
+
+    /// `range` without spaces at its ends.
+    fn trim_spaces(&self, range: Range<usize>) -> Range<usize> {
         let text = &self.text[range.clone()];
         let start = range.start + (text.len() - text.trim_start().len());
         let end = range.end - (text.len() - text.trim_end().len());
-        let piece = self.trim_syntax(start..end.max(start));
-        (!piece.is_empty()).then_some(piece)
+        start..end.max(start)
     }
 
     /// `range` without the hidden syntax at its ends, like the `**` of a bold word.
@@ -410,20 +411,55 @@ impl Model {
             })
     }
 
-    /// `range` with the hidden syntax right before and right after it.
-    fn widen(&self, range: &Range<usize>) -> Range<usize> {
+    /// `range` with the syntax at its ends that belongs only to spans opened or closed in it.
+    ///
+    /// The parse joins touching syntax, like the `**==` after `==**b`. A span whose opening
+    /// syntax is in `range` must close in it, so the end moves past that syntax. The start moves
+    /// the same way. A span that holds exactly `range` keeps its syntax outside.
+    fn around_syntax(&self, range: &Range<usize>) -> Range<usize> {
         let hidden = self.body.hidden();
-        let before = hidden.partition_point(|h| h.end < range.start);
-        let start = hidden
-            .get(before)
-            .filter(|h| h.end == range.start)
-            .map_or(range.start, |h| h.start);
-        let after = hidden.partition_point(|h| h.start < range.end);
-        let end = hidden
-            .get(after)
-            .filter(|h| h.start == range.end)
-            .map_or(range.end, |h| h.end);
-        start..end
+        let spans = self.body.spans();
+        let from = self
+            .chain_at(range.start)
+            .first()
+            .map_or(0, |b| b.range.start);
+        let spans = &spans[spans.partition_point(|s| s.range.start < from)..];
+        let mut out = range.clone();
+
+        // Syntax after the text: the closing markers of inner spans come before those of the
+        // spans that hold all of `range`. The end moves past the inner ones only.
+        let ix = hidden.partition_point(|h| h.end <= range.end);
+        if let Some(h) = hidden.get(ix).filter(|h| h.start <= range.end) {
+            let near = &spans[..spans.partition_point(|s| s.range.start <= h.end)];
+            let opens = near
+                .iter()
+                .any(|s| h.start < s.range.start && s.range.start <= h.end);
+            let (inner, outer): (Vec<_>, Vec<_>) = near
+                .iter()
+                .filter(|s| h.start <= s.range.end && s.range.end < h.end)
+                .partition(|s| s.range.start > range.start);
+            if !opens && !inner.is_empty() {
+                out.end = outer.iter().map(|s| s.range.end).min().unwrap_or(h.end);
+            }
+        }
+
+        // Syntax before the text: the opening markers of the spans that hold all of `range`
+        // come before those of inner spans. The start moves before the inner ones only.
+        let ix = hidden.partition_point(|h| h.end < range.start);
+        if let Some(h) = hidden.get(ix).filter(|h| h.start < range.start) {
+            let near = &spans[..spans.partition_point(|s| s.range.start <= h.end)];
+            let closes = near
+                .iter()
+                .any(|s| h.start <= s.range.end && s.range.end < h.end);
+            let (inner, outer): (Vec<_>, Vec<_>) = near
+                .iter()
+                .filter(|s| h.start < s.range.start && s.range.start <= h.end)
+                .partition(|s| s.range.end < out.end);
+            if !closes && !inner.is_empty() {
+                out.start = outer.iter().map(|s| s.range.start).max().unwrap_or(h.start);
+            }
+        }
+        out
     }
 
     /// The spans of `format` that lie in `range` with their syntax, in order, apart.
@@ -758,6 +794,30 @@ mod tests {
         let mut model = model_with(text, 9..9);
         assert!(model.toggle_format(Format::Code));
         assert_eq!(model.text(), "Also inline code, more");
+    }
+
+    #[test]
+    fn new_markers_go_around_the_syntax_of_inner_spans() {
+        for (text, want) in [
+            ("x ==**b**==", "**x ==b==**"),
+            ("x **b**==c==", "**x b==c==**"),
+            ("x ==b==", "**x ==b==**"),
+            ("==b== x", "**==b== x**"),
+            ("a ==**b**== c", "**a ==b== c**"),
+        ] {
+            assert_eq!(toggled(text, 0..text.len(), Format::Bold).0, want, "{text}");
+        }
+        // The markers of a span that holds the selection stay outside the new markers.
+        assert_eq!(
+            toggled("**x b==c==**", 2..8, Format::Highlight).0,
+            "**==x bc==**"
+        );
+        assert_eq!(
+            toggled("**==a==b c**", 4..10, Format::Highlight).0,
+            "**==ab c==**"
+        );
+        // Syntax and a space at the start of the selection stay outside the new markers.
+        assert_eq!(toggled("==a b== c", 5..9, Format::Bold).0, "==a b== **c**");
     }
 
     #[test]

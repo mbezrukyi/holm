@@ -3,7 +3,6 @@
 mod layout;
 mod theme;
 
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -86,15 +85,14 @@ impl gpui_kit::Element for EditorElement {
         let style = window.text_style();
         let column = column(bounds);
         let layout = self.editor.update(cx, |editor, _| {
-            let mut shaper = Shaper {
+            let mut shaper = Shaper::new(
                 style,
-                width: column.size.width,
-                folder: editor.folder.as_deref(),
-                sizes: &mut editor.image_sizes,
-                highlighter: &mut editor.highlighter,
-                theme: &editor.theme,
-                tables: HashMap::new(),
-            };
+                column.size.width,
+                editor.folder.as_deref(),
+                &mut editor.image_sizes,
+                &mut editor.highlighter,
+                &editor.theme,
+            );
             let lines = lay_out(
                 &editor.model,
                 &mut editor.scroll,
