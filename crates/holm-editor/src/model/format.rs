@@ -219,8 +219,14 @@ impl Model {
         } else {
             for (piece, styled) in pieces.iter().zip(&styled) {
                 if styled.is_none() {
+                    // A span of the same style that the piece cuts joins the new span.
+                    let piece = if format == Format::Code {
+                        piece.clone()
+                    } else {
+                        self.grow_to_style(format, piece)
+                    };
                     // The new markers go around the syntax of the spans in the piece.
-                    let Range { start, end } = self.around_syntax(piece);
+                    let Range { start, end } = self.around_syntax(&piece);
                     // The same style inside the piece cannot nest, so its markers go.
                     let inside = if format == Format::Code {
                         Vec::new()
@@ -460,6 +466,33 @@ impl Model {
             }
         }
         out
+    }
+
+    /// `range` grown to hold, with their syntax, the spans of `format` whose text it touches.
+    fn grow_to_style(&self, format: Format, range: &Range<usize>) -> Range<usize> {
+        let spans = self.body.spans();
+        let mut out = range.clone();
+        loop {
+            let grown = spans[..spans.partition_point(|s| s.range.start < out.end)]
+                .iter()
+                .filter(|s| format.is(s.style) && out.start < s.range.end)
+                .filter_map(|s| {
+                    format.markers().iter().find_map(|&(open, close)| {
+                        let before = s.range.start.checked_sub(open.len())?;
+                        let after = s.range.end + close.len();
+                        let fits = self.text.get(before..s.range.start) == Some(open)
+                            && self.text.get(s.range.end..after) == Some(close);
+                        fits.then_some(before..after)
+                    })
+                })
+                .fold(out.clone(), |out, span| {
+                    out.start.min(span.start)..out.end.max(span.end)
+                });
+            if grown == out {
+                return out;
+            }
+            out = grown;
+        }
     }
 
     /// The spans of `format` that lie in `range` with their syntax, in order, apart.
@@ -807,6 +840,19 @@ mod tests {
         ] {
             assert_eq!(toggled(text, 0..text.len(), Format::Bold).0, want, "{text}");
         }
+        // A span of the same style that the selection cuts joins the new span.
+        assert_eq!(
+            toggled("A tip with **strong** text.", 2..15, Format::Bold).0,
+            "A **tip with strong** text."
+        );
+        assert_eq!(
+            toggled("A **tip with** strong", 8..21, Format::Bold).0,
+            "A **tip with strong**"
+        );
+        assert_eq!(
+            toggled("> ==A tip with **strong** text.==", 6..19, Format::Bold).0,
+            "> ==A **tip with strong** text.=="
+        );
         // The markers of a span that holds the selection stay outside the new markers.
         assert_eq!(
             toggled("**x b==c==**", 2..8, Format::Highlight).0,
