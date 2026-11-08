@@ -200,8 +200,28 @@ impl Model {
         } else {
             for (piece, styled) in pieces.iter().zip(&styled) {
                 if styled.is_none() {
-                    edits.push((piece.start..piece.start, format.open().to_owned()));
-                    edits.push((piece.end..piece.end, format.close().to_owned()));
+                    // The same style inside the piece cannot nest, so its markers go.
+                    // A span at an end of the piece has its markers outside the piece.
+                    let inside = if format == Format::Code {
+                        Vec::new()
+                    } else {
+                        let wide = self.widen(piece);
+                        self.styled_inside(format, &wide)
+                    };
+                    let start = inside.first().map_or(piece.start, |s| {
+                        piece.start.min(s.text.start - s.open.len())
+                    });
+                    let end = inside
+                        .last()
+                        .map_or(piece.end, |s| piece.end.max(s.text.end + s.close.len()));
+                    edits.push((start..start, format.open().to_owned()));
+                    for inner in inside {
+                        let open = inner.text.start - inner.open.len()..inner.text.start;
+                        let close = inner.text.end..inner.text.end + inner.close.len();
+                        edits.push((open, String::new()));
+                        edits.push((close, String::new()));
+                    }
+                    edits.push((end..end, format.close().to_owned()));
                 }
             }
         }
@@ -309,6 +329,58 @@ impl Model {
                     })
                 })
             })
+    }
+
+    /// `range` with the hidden syntax right before and right after it.
+    fn widen(&self, range: &Range<usize>) -> Range<usize> {
+        let hidden = self.body.hidden();
+        let before = hidden.partition_point(|h| h.end < range.start);
+        let start = hidden
+            .get(before)
+            .filter(|h| h.end == range.start)
+            .map_or(range.start, |h| h.start);
+        let after = hidden.partition_point(|h| h.start < range.end);
+        let end = hidden
+            .get(after)
+            .filter(|h| h.start == range.end)
+            .map_or(range.end, |h| h.end);
+        start..end
+    }
+
+    /// The spans of `format` that lie in `range` with their syntax, in order, apart.
+    fn styled_inside(&self, format: Format, range: &Range<usize>) -> Vec<Styled> {
+        let spans = self.body.spans();
+        let mut found: Vec<Styled> = Vec::new();
+        for span in &spans[spans.partition_point(|s| s.range.start < range.start)
+            ..spans.partition_point(|s| s.range.start < range.end)]
+        {
+            if !format.is(span.style) {
+                continue;
+            }
+            let markers = format.markers().iter().find(|&&(open, close)| {
+                span.range.start >= range.start + open.len()
+                    && span.range.end + close.len() <= range.end
+                    && self
+                        .text
+                        .get(span.range.start - open.len()..span.range.start)
+                        == Some(open)
+                    && self.text.get(span.range.end..span.range.end + close.len()) == Some(close)
+            });
+            let Some(&(open, close)) = markers else {
+                continue;
+            };
+            let after = found
+                .last()
+                .map_or(range.start, |last| last.text.end + last.close.len());
+            if span.range.start - open.len() >= after {
+                found.push(Styled {
+                    text: span.range.clone(),
+                    open,
+                    close,
+                });
+            }
+        }
+        found
     }
 
     /// Makes each line the selection touches a heading of `level`, or a plain line with 0.
@@ -535,6 +607,42 @@ mod tests {
             toggled("a word", 2..6, Format::Highlight),
             ("a ==word==".into(), 4..8)
         );
+    }
+
+    #[test]
+    fn a_format_key_joins_the_same_style_inside_the_selection() {
+        let text = "Some ==big== ideas, a ==soft== mark.";
+        let (new, selection) = toggled(text, 0..text.len(), Format::Highlight);
+        assert_eq!(new, "==Some big ideas, a soft mark.==");
+        assert_eq!(&new[selection], "Some big ideas, a soft mark.");
+        assert_eq!(toggled("a **b** c", 0..9, Format::Bold).0, "**a b c**");
+        assert_eq!(toggled("a *b* _c_ d", 0..11, Format::Italic).0, "*a b c d*");
+        assert_eq!(
+            toggled("a <u>b</u> c", 0..12, Format::Underline).0,
+            "<u>a b c</u>"
+        );
+        assert_eq!(
+            toggled("a ~~b~~ c", 0..9, Format::Strikethrough).0,
+            "~~a b c~~"
+        );
+        // Other styles stay, and code keeps all text inside it as it is.
+        assert_eq!(
+            toggled("a **b** ==c==", 0..13, Format::Highlight).0,
+            "==a **b** c=="
+        );
+        assert_eq!(toggled("a `b` c", 0..7, Format::Code).0, "`a `b` c`");
+    }
+
+    #[test]
+    fn a_second_format_key_removes_the_joined_style() {
+        let mut model = model_with("Some ==big== idea", 0..17);
+        model.toggle_format(Format::Highlight);
+        assert_eq!(model.text(), "==Some big idea==");
+        model.toggle_format(Format::Highlight);
+        assert_eq!(model.text(), "Some big idea");
+        model.undo();
+        model.undo();
+        assert_eq!(model.text(), "Some ==big== idea");
     }
 
     #[test]
