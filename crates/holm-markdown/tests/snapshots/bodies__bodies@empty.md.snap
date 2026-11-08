@@ -1,0 +1,10 @@
+---
+source: crates/holm-markdown/tests/bodies.rs
+expression: report(&text)
+input_file: crates/holm-markdown/tests/bodies/empty.md
+---
+--- blocks ---
+--- spans ---
+--- hidden ---
+--- links ---
+--- headings ---

@@ -1,0 +1,31 @@
+---
+source: crates/holm-markdown/tests/bodies.rs
+expression: report(&text)
+input_file: crates/holm-markdown/tests/bodies/headings.md
+---
+--- blocks ---
+Heading { level: 1 } 0..21 "# Title *with* `code`"
+Heading { level: 2 } 23..35 "## Closed ##"
+Heading { level: 1 } 37..50 "Setext\n======"
+Heading { level: 6 } 52..62 "###### Six"
+Heading { level: 1 } 64..65 "#"
+--- spans ---
+Emphasis 9..13 "with"
+Code 16..20 "code"
+--- hidden ---
+0..2 "# "
+8..9 "*"
+13..14 "*"
+15..16 "`"
+20..21 "`"
+23..26 "## "
+32..35 " ##"
+44..50 "======"
+52..59 "###### "
+--- links ---
+--- headings ---
+1 "Title with code" 0..21 "# Title *with* `code`"
+2 "Closed" 23..35 "## Closed ##"
+1 "Setext" 37..50 "Setext\n======"
+6 "Six" 52..62 "###### Six"
+1 "" 64..65 "#"

@@ -1,0 +1,26 @@
+---
+source: crates/holm-markdown/tests/bodies.rs
+expression: report(&text)
+input_file: crates/holm-markdown/tests/bodies/table.md
+---
+--- blocks ---
+Table { alignments: [Left, Right] } 0..58 "| Name | Size |\n|:-----|-----:|\n| `a`  | **1** |\n| b | 2 |"
+  TableRow { head: true } 0..15 "| Name | Size |"
+    TableCell 1..7 " Name "
+    TableCell 8..14 " Size "
+  TableRow { head: false } 32..48 "| `a`  | **1** |"
+    TableCell 33..39 " `a`  "
+    TableCell 40..47 " **1** "
+  TableRow { head: false } 49..58 "| b | 2 |"
+    TableCell 50..53 " b "
+    TableCell 54..57 " 2 "
+--- spans ---
+Code 35..36 "a"
+Strong 43..44 "1"
+--- hidden ---
+34..35 "`"
+36..37 "`"
+41..43 "**"
+44..46 "**"
+--- links ---
+--- headings ---

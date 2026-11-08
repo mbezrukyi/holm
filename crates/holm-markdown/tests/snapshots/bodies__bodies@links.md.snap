@@ -1,0 +1,114 @@
+---
+source: crates/holm-markdown/tests/bodies.rs
+expression: report(&text)
+input_file: crates/holm-markdown/tests/bodies/links.md
+---
+--- blocks ---
+Paragraph 0..45 "[Holm ideas](holm:01JC3X0000000000000000000A)"
+Paragraph 47..122 "[plans](<holm:01JC3X0000000000000000000A#Bug list>) and [here](<#Bug list>)"
+Paragraph 124..205 "[file](attachments/a.pdf) and [space](<my file.pdf>) and [up](../x(1).md \"title\")"
+Paragraph 207..274 "![image](attachments/cat.png) ![card](</home/me/Docs/report 1.pdf>)"
+Paragraph 276..347 "<https://example.com> <me@example.com> [web](https://example.com/a?b=c)"
+Paragraph 349..387 "[ref] and [empty]() and [](no-text.md)"
+Paragraph 389..416 "[![inner](i.png)](outer.md)"
+--- spans ---
+Link 1..11 "Holm ideas"
+Link 48..53 "plans"
+Link 104..108 "here"
+Link 125..129 "file"
+Link 155..160 "space"
+Link 182..184 "up"
+Link 277..296 "https://example.com"
+Link 299..313 "me@example.com"
+Link 316..319 "web"
+Link 350..353 "ref"
+Link 360..365 "empty"
+Link 390..405 "![inner](i.png)"
+--- hidden ---
+0..1 "["
+11..45 "](holm:01JC3X0000000000000000000A)"
+47..48 "["
+53..98 "](<holm:01JC3X0000000000000000000A#Bug list>)"
+103..104 "["
+108..122 "](<#Bug list>)"
+124..125 "["
+129..149 "](attachments/a.pdf)"
+154..155 "["
+160..176 "](<my file.pdf>)"
+181..182 "["
+184..205 "](../x(1).md \"title\")"
+207..236 "![image](attachments/cat.png)"
+237..274 "![card](</home/me/Docs/report 1.pdf>)"
+276..277 "<"
+296..297 ">"
+298..299 "<"
+313..314 ">"
+315..316 "["
+319..347 "](https://example.com/a?b=c)"
+349..350 "["
+353..354 "]"
+359..360 "["
+365..368 "]()"
+389..416 "[![inner](i.png)](outer.md)"
+--- links ---
+0..45 "[Holm ideas](holm:01JC3X0000000000000000000A)"
+  target: Note { id: "01JC3X0000000000000000000A", heading: None }
+  target range: Some("13..44 \"holm:01JC3X0000000000000000000A\"")
+  embedded: false
+47..98 "[plans](<holm:01JC3X0000000000000000000A#Bug list>)"
+  target: Note { id: "01JC3X0000000000000000000A", heading: Some("Bug list") }
+  target range: Some("55..97 \"<holm:01JC3X0000000000000000000A#Bug list>\"")
+  embedded: false
+103..122 "[here](<#Bug list>)"
+  target: Heading("Bug list")
+  target range: Some("110..121 \"<#Bug list>\"")
+  embedded: false
+124..149 "[file](attachments/a.pdf)"
+  target: File("attachments/a.pdf")
+  target range: Some("131..148 \"attachments/a.pdf\"")
+  embedded: false
+154..176 "[space](<my file.pdf>)"
+  target: File("my file.pdf")
+  target range: Some("162..175 \"<my file.pdf>\"")
+  embedded: false
+181..205 "[up](../x(1).md \"title\")"
+  target: File("../x(1).md")
+  target range: Some("186..196 \"../x(1).md\"")
+  embedded: false
+207..236 "![image](attachments/cat.png)"
+  target: File("attachments/cat.png")
+  target range: Some("216..235 \"attachments/cat.png\"")
+  embedded: true
+237..274 "![card](</home/me/Docs/report 1.pdf>)"
+  target: File("/home/me/Docs/report 1.pdf")
+  target range: Some("245..273 \"</home/me/Docs/report 1.pdf>\"")
+  embedded: true
+276..297 "<https://example.com>"
+  target: Web("https://example.com")
+  target range: Some("277..296 \"https://example.com\"")
+  embedded: false
+298..314 "<me@example.com>"
+  target: Web("mailto:me@example.com")
+  target range: Some("299..313 \"me@example.com\"")
+  embedded: false
+315..347 "[web](https://example.com/a?b=c)"
+  target: Web("https://example.com/a?b=c")
+  target range: Some("321..346 \"https://example.com/a?b=c\"")
+  embedded: false
+349..354 "[ref]"
+  target: Note { id: "01JC3X0000000000000000000B", heading: None }
+  target range: None
+  embedded: false
+373..387 "[](no-text.md)"
+  target: File("no-text.md")
+  target range: Some("376..386 \"no-text.md\"")
+  embedded: false
+389..416 "[![inner](i.png)](outer.md)"
+  target: File("outer.md")
+  target range: Some("407..415 \"outer.md\"")
+  embedded: false
+390..405 "![inner](i.png)"
+  target: File("i.png")
+  target range: Some("399..404 \"i.png\"")
+  embedded: true
+--- headings ---

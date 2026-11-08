@@ -11,8 +11,13 @@ pulldown-cmark.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+divan.workspace = true
 insta = { workspace = true, features = ["glob"] }
 proptest.workspace = true
+
+[[bench]]
+name = "parse"
+harness = false
 
 [lints]
 workspace = true

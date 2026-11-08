@@ -1,0 +1,38 @@
+---
+source: crates/holm-markdown/tests/bodies.rs
+expression: report(&text)
+input_file: crates/holm-markdown/tests/bodies/html.md
+---
+--- blocks ---
+Paragraph 0..24 "Plain <u>under</u> text."
+Paragraph 26..109 "<span style=\"color: #c4553a\">red</span> and <span style=\"color:#ABC;\">short</span>."
+Paragraph 111..182 "<mark>yellow</mark> and <mark style=\"background: #fde68a\">amber</mark>."
+Paragraph 184..251 "<span style=\"color: red\">named</span> stays, and <b>bold</b> stays."
+Paragraph 253..292 "<u>open only, and </u></u> extra close."
+Paragraph 294..343 "<u><span style=\"color: #123456\">nested</span></u>"
+--- spans ---
+Underline 9..14 "under"
+Color(Color { r: 196, g: 85, b: 58 }) 55..58 "red"
+Color(Color { r: 170, g: 187, b: 204 }) 96..101 "short"
+Highlight(None) 117..123 "yellow"
+Highlight(Some(Color { r: 253, g: 230, b: 138 })) 169..174 "amber"
+Underline 256..271 "open only, and "
+Underline 297..339 "<span style=\"color: #123456\">nested</span>"
+Color(Color { r: 18, g: 52, b: 86 }) 326..332 "nested"
+--- hidden ---
+6..9 "<u>"
+14..18 "</u>"
+26..55 "<span style=\"color: #c4553a\">"
+58..65 "</span>"
+70..96 "<span style=\"color:#ABC;\">"
+101..108 "</span>"
+111..117 "<mark>"
+123..130 "</mark>"
+135..169 "<mark style=\"background: #fde68a\">"
+174..181 "</mark>"
+253..256 "<u>"
+271..275 "</u>"
+294..326 "<u><span style=\"color: #123456\">"
+332..343 "</span></u>"
+--- links ---
+--- headings ---
