@@ -363,6 +363,43 @@ impl Layout {
         Some((self.offset_at(origin + target)?, x))
     }
 
+    /// The source offset at the start or the end of the screen row with the cursor.
+    /// It returns `None` when that row is not in this layout.
+    pub(crate) fn row_edge(&self, cursor: usize, end: bool) -> Option<usize> {
+        let line = self
+            .lines
+            .iter()
+            .find(|line| contains(&line.display.source(), cursor))?;
+        let Some(text) = &line.text else {
+            let source = line.display.source();
+            return Some(if end { source.end } else { source.start });
+        };
+        let at = text.position_for_index(line.display.to_display(cursor), line.line_height)?;
+        let x = if end { self.bounds.size.width } else { px(0.) };
+        let index = text
+            .closest_index_for_position(point(x, at.y), line.line_height)
+            .unwrap_or_else(|index| index);
+        Some(line.display.to_source(index))
+    }
+
+    /// How many rows of the base line height fit in the view, at least one.
+    pub(crate) fn rows_in_view(&self) -> usize {
+        let line_height = self
+            .lines
+            .iter()
+            .map(|line| line.line_height)
+            .reduce(Pixels::min)
+            .unwrap_or(self.bounds.size.height);
+        let rows = (self.bounds.size.height / line_height).floor();
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a small row count"
+        )]
+        let rows = rows.max(1.) as usize;
+        rows
+    }
+
     /// The window bounds of the cursor, when its line is in this layout.
     pub(crate) fn cursor_bounds(&self, cursor: usize) -> Option<Bounds<Pixels>> {
         let line = self

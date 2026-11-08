@@ -4,10 +4,14 @@ mod common;
 
 use std::cell::Cell;
 use std::rc::Rc;
+use std::time::Duration;
 
 use common::{LINE_HEIGHT, advance, app, data_folder, open};
-use gpui_kit::{Entity, Modifiers, Pixels, VisualTestContext, point, px};
-use holm_editor::{Changed, Editor};
+use gpui_kit::{
+    ClipboardItem, Entity, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels,
+    VisualTestContext, point, px,
+};
+use holm_editor::{Changed, Editor, WritingHelp};
 
 const WIDTH: Pixels = px(600.);
 const HEIGHT: Pixels = px(400.);
@@ -20,6 +24,34 @@ fn text(editor: &Entity<Editor>, cx: &VisualTestContext) -> String {
 fn click(cx: &mut VisualTestContext, column: f32, y: Pixels) {
     let x = advance(cx) * column;
     cx.simulate_click(point(x, y), Modifiers::none());
+}
+
+/// Clicks `count` times in a row at a char column and a pixel height.
+fn multi_click(cx: &mut VisualTestContext, column: f32, y: Pixels, count: usize) {
+    let position = point(advance(cx) * column, y);
+    for click_count in 1..=count {
+        cx.simulate_event(MouseDownEvent {
+            position,
+            modifiers: Modifiers::none(),
+            button: MouseButton::Left,
+            click_count,
+            first_mouse: false,
+        });
+        cx.simulate_event(MouseUpEvent {
+            position,
+            modifiers: Modifiers::none(),
+            button: MouseButton::Left,
+            click_count,
+        });
+    }
+}
+
+fn clipboard(cx: &VisualTestContext) -> Option<String> {
+    cx.read_from_clipboard().and_then(|item| item.text())
+}
+
+fn set_help(editor: &Entity<Editor>, cx: &mut VisualTestContext, help: WritingHelp) {
+    cx.update(|_, cx| editor.update(cx, |editor, _| editor.set_writing_help(help)));
 }
 
 fn count_changes(editor: &Entity<Editor>, cx: &mut VisualTestContext) -> Rc<Cell<usize>> {
@@ -177,4 +209,192 @@ fn the_view_follows_the_cursor() {
     click(cx, 0.2, LINE_HEIGHT * 9.5);
     cx.simulate_input("X");
     assert!(text(&editor, cx).contains("\nXline 50\n"));
+}
+
+#[test]
+fn format_keys_add_and_remove_markdown() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "one two", WIDTH, HEIGHT);
+    cx.simulate_keystrokes("ctrl-right right shift-ctrl-right ctrl-b");
+    assert_eq!(text(&editor, cx), "one **two**");
+    cx.simulate_keystrokes("ctrl-i");
+    assert_eq!(text(&editor, cx), "one ***two***");
+    cx.simulate_keystrokes("ctrl-b ctrl-i");
+    assert_eq!(text(&editor, cx), "one two");
+    cx.simulate_keystrokes("ctrl-u ctrl-d ctrl-h ctrl-e");
+    assert_eq!(text(&editor, cx), "one <u>~~==`two`==~~</u>");
+}
+
+#[test]
+fn a_format_key_with_no_selection_types_inside_new_markers() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "", WIDTH, HEIGHT);
+    cx.simulate_keystrokes("ctrl-b");
+    cx.simulate_input("bold");
+    assert_eq!(text(&editor, cx), "**bold**");
+}
+
+#[test]
+fn heading_keys_set_the_level() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "Plans", WIDTH, HEIGHT);
+    cx.simulate_keystrokes("ctrl-2");
+    assert_eq!(text(&editor, cx), "## Plans");
+    cx.simulate_keystrokes("ctrl-0");
+    assert_eq!(text(&editor, cx), "Plans");
+}
+
+#[test]
+fn format_keys_can_be_turned_off() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "word", WIDTH, HEIGHT);
+    set_help(
+        &editor,
+        cx,
+        WritingHelp {
+            format_keys: false,
+            ..WritingHelp::default()
+        },
+    );
+    cx.simulate_keystrokes("ctrl-a ctrl-b ctrl-1");
+    assert_eq!(text(&editor, cx), "word");
+}
+
+#[test]
+fn enter_continues_a_list_and_tab_indents_it() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "- one", WIDTH, HEIGHT);
+    cx.simulate_keystrokes("end enter");
+    cx.simulate_input("two");
+    assert_eq!(text(&editor, cx), "- one\n- two");
+    cx.simulate_keystrokes("tab");
+    assert_eq!(text(&editor, cx), "- one\n  - two");
+    cx.simulate_keystrokes("shift-tab");
+    assert_eq!(text(&editor, cx), "- one\n- two");
+    cx.simulate_keystrokes("enter enter");
+    assert_eq!(text(&editor, cx), "- one\n- two\n");
+}
+
+#[test]
+fn list_keys_can_be_turned_off() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "- one", WIDTH, HEIGHT);
+    set_help(
+        &editor,
+        cx,
+        WritingHelp {
+            continue_lists: false,
+            indent_lists: false,
+            ..WritingHelp::default()
+        },
+    );
+    cx.simulate_keystrokes("end enter tab");
+    assert_eq!(text(&editor, cx), "- one\n    ");
+}
+
+#[test]
+fn no_char_closes_itself() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "", WIDTH, HEIGHT);
+    cx.simulate_input("*(\"'[");
+    assert_eq!(text(&editor, cx), "*(\"'[");
+}
+
+#[test]
+fn copy_and_cut_give_the_markdown_source() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "a **b** c\n\nnext", WIDTH, HEIGHT);
+    cx.simulate_keystrokes("shift-end ctrl-c");
+    assert_eq!(clipboard(cx).as_deref(), Some("a **b** c"));
+    cx.simulate_keystrokes("ctrl-x");
+    assert_eq!(text(&editor, cx), "\n\nnext");
+    assert_eq!(clipboard(cx).as_deref(), Some("a **b** c"));
+}
+
+#[test]
+fn paste_puts_in_plain_text_as_it_is() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "ab", WIDTH, HEIGHT);
+    cx.write_to_clipboard(ClipboardItem::new_string("**x**\r\n- y".into()));
+    cx.simulate_keystrokes("right ctrl-v");
+    assert_eq!(text(&editor, cx), "a**x**\n- yb");
+    cx.simulate_keystrokes("ctrl-z");
+    assert_eq!(text(&editor, cx), "ab");
+}
+
+#[test]
+fn undo_and_redo_go_by_words_and_pauses() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "", WIDTH, HEIGHT);
+    cx.simulate_input("one two");
+    cx.executor().advance_clock(Duration::from_secs(2));
+    cx.simulate_input("three");
+    cx.simulate_keystrokes("ctrl-z");
+    assert_eq!(text(&editor, cx), "one two");
+    cx.simulate_keystrokes("ctrl-z");
+    assert_eq!(text(&editor, cx), "one ");
+    cx.simulate_keystrokes("ctrl-y ctrl-y");
+    assert_eq!(text(&editor, cx), "one twothree");
+}
+
+#[test]
+fn a_reload_is_one_undo_step() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "old", WIDTH, HEIGHT);
+    let changes = count_changes(&editor, cx);
+    cx.update(|_, cx| editor.update(cx, |editor, cx| editor.reload_text("new", cx)));
+    assert_eq!(text(&editor, cx), "new");
+    assert_eq!(changes.get(), 0);
+    cx.simulate_keystrokes("ctrl-z");
+    assert_eq!(text(&editor, cx), "old");
+    assert_eq!(changes.get(), 1);
+}
+
+#[test]
+fn home_end_and_word_keys_move_and_select() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "one two\nthree", WIDTH, HEIGHT);
+    cx.simulate_keystrokes("end");
+    cx.simulate_input("X");
+    cx.simulate_keystrokes("ctrl-end");
+    cx.simulate_input("Y");
+    cx.simulate_keystrokes("ctrl-home ctrl-shift-right backspace");
+    assert_eq!(text(&editor, cx), " twoX\nthreeY");
+    cx.simulate_keystrokes("ctrl-delete");
+    assert_eq!(text(&editor, cx), "\nthreeY");
+}
+
+#[test]
+fn page_down_moves_by_one_view() {
+    let mut app = app();
+    let note = (0..100).fold(String::new(), |note, n| note + &format!("line {n}\n"));
+    let (editor, cx) = open(&mut app, &note, WIDTH, LINE_HEIGHT * 10.);
+    cx.simulate_keystrokes("pagedown");
+    cx.simulate_input("X");
+    assert!(text(&editor, cx).contains("\nXline 10\n"));
+}
+
+#[test]
+fn a_double_click_selects_a_word_and_a_triple_click_a_line() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "one two\nnext", WIDTH, HEIGHT);
+    multi_click(cx, 5.2, LINE_HEIGHT * 0.5, 2);
+    cx.simulate_input("X");
+    assert_eq!(text(&editor, cx), "one X\nnext");
+    multi_click(cx, 1.2, LINE_HEIGHT * 0.5, 3);
+    cx.simulate_input("Y");
+    assert_eq!(text(&editor, cx), "Ynext");
+}
+
+#[test]
+fn a_drag_selects_text() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "one two", WIDTH, HEIGHT);
+    let x = advance(cx);
+    let y = LINE_HEIGHT * 0.5;
+    cx.simulate_mouse_down(point(x * 1.2, y), MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_move(point(x * 5.2, y), MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_up(point(x * 5.2, y), MouseButton::Left, Modifiers::none());
+    cx.simulate_input("X");
+    assert_eq!(text(&editor, cx), "oXwo");
 }

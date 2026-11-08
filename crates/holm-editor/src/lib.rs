@@ -6,7 +6,7 @@ mod editor;
 mod element;
 mod model;
 
-pub use editor::{Changed, Editor};
+pub use editor::{Changed, Editor, WritingHelp};
 
 /// An error from `holm-editor`.
 #[derive(Debug, thiserror::Error)]

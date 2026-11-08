@@ -3,22 +3,37 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use gpui_kit::{
-    App, Bounds, Context, CursorStyle, EntityInputHandler, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, ParentElement, Pixels, Point, Render, ScrollEvent, Styled, UTF16Selection,
-    Window, div,
+    App, Bounds, ClipboardItem, Context, CursorStyle, EntityInputHandler, EventEmitter,
+    FocusHandle, Focusable, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render,
+    ScrollEvent, Styled, UTF16Selection, Window, div,
 };
 
 use crate::element::{EditorElement, ImageSizes, Layout, Scroll};
-use crate::model::Model;
+use crate::model::{Format, Model};
+
+/// Spaces that Tab types outside a list.
+const TAB: &str = "    ";
 
 /// The live preview editor for one note body.
 ///
-/// The text is the note body only, with LF line breaks. Markdown syntax shows on the lines
-/// with the cursor or the selection, and hides on all other lines. Embedded images show
-/// below their line.
+/// The text is the note body only, with LF line breaks. The editor turns other line breaks
+/// into LF. Markdown syntax shows on the lines with the cursor or the selection, and hides on
+/// all other lines. Embedded images show below their line.
 ///
 /// The editor takes its font, size and line height from the text style of its parent element.
+///
+/// The editor handles its keys itself, so the app binds none of them:
+///
+/// - Arrows move by char, and with Ctrl by word. Home and End go to the row ends, and with
+///   Ctrl to the note ends. Page Up and Page Down move by one view. Shift selects.
+/// - Ctrl+A selects all. Ctrl+C, Ctrl+X and Ctrl+V copy, cut and paste the Markdown source.
+/// - Ctrl+Z undoes, Ctrl+Y redoes. Ctrl+Backspace and Ctrl+Delete remove a word.
+/// - Format keys: Ctrl+B bold, Ctrl+I italic, Ctrl+U underline, Ctrl+D strikethrough,
+///   Ctrl+H highlight, Ctrl+E code, Ctrl+1 to Ctrl+6 a heading, Ctrl+0 a plain line.
+/// - Enter continues a list. Tab and Shift+Tab move a list item in and out.
+///
+/// [`WritingHelp`] turns off the format keys and the list keys.
 pub struct Editor {
     pub(crate) model: Model,
     pub(crate) folder: Option<PathBuf>,
@@ -31,7 +46,44 @@ pub struct Editor {
     pub(crate) layout: Option<Rc<Layout>>,
     pub(crate) image_sizes: ImageSizes,
     goal_x: Option<Pixels>,
-    selecting: bool,
+    drag: Option<Drag>,
+    help: WritingHelp,
+}
+
+/// A mouse drag after a click. The selection grows by `unit` from `origin`.
+#[derive(Clone, Debug)]
+struct Drag {
+    unit: Unit,
+    origin: Range<usize>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Unit {
+    Char,
+    Word,
+    Line,
+}
+
+/// The writing helps that the user can turn off. All are on by default.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct WritingHelp {
+    /// The keys that add or remove Markdown syntax, like Ctrl+B.
+    pub format_keys: bool,
+    /// Enter in a list item starts the next item.
+    pub continue_lists: bool,
+    /// Tab and Shift+Tab move a list item in and out.
+    pub indent_lists: bool,
+}
+
+impl Default for WritingHelp {
+    fn default() -> Self {
+        Self {
+            format_keys: true,
+            continue_lists: true,
+            indent_lists: true,
+        }
+    }
 }
 
 /// The user changed the text. [`Editor::set_text`] does not send it.
@@ -53,11 +105,13 @@ impl Editor {
             layout: None,
             image_sizes: ImageSizes::default(),
             goal_x: None,
-            selecting: false,
+            drag: None,
+            help: WritingHelp::default(),
         }
     }
 
-    /// Shows `text` from its start, with the cursor at the start.
+    /// Shows `text` from its start, with the cursor at the start and an empty undo stack.
+    /// Use it to open a note.
     pub fn set_text(&mut self, text: &str, cx: &mut Context<Self>) {
         self.model = Model::new(text);
         self.scroll = Scroll::default();
@@ -66,9 +120,24 @@ impl Editor {
         cx.notify();
     }
 
+    /// Puts in `text` from the disk in place of the current text, as one undo step.
+    /// The view and the cursor stay near their place. It sends no [`Changed`].
+    pub fn reload_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        if self.model.reload(text) {
+            self.version += 1;
+            self.goal_x = None;
+            cx.notify();
+        }
+    }
+
     /// The text.
     pub fn text(&self) -> &str {
         self.model.text()
+    }
+
+    /// Sets the writing helps, from the settings.
+    pub fn set_writing_help(&mut self, help: WritingHelp) {
+        self.help = help;
     }
 
     /// Sets the folder of the note. Relative paths of embedded files start there.
@@ -100,37 +169,177 @@ impl Editor {
 
     fn key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let modifiers = event.keystroke.modifiers;
-        if modifiers.control || modifiers.alt || modifiers.platform || modifiers.function {
+        if modifiers.alt || modifiers.platform || modifiers.function {
             return;
         }
-        let extend = modifiers.shift;
         let key = event.keystroke.key.as_str();
+        let handled = if modifiers.control {
+            self.control_key(key, modifiers.shift, cx)
+        } else {
+            self.plain_key(key, modifiers.shift, cx)
+        };
+        if handled {
+            cx.stop_propagation();
+        }
+    }
+
+    /// A key with Ctrl. Ctrl+Shift with a letter belongs to the app.
+    fn control_key(&mut self, key: &str, shift: bool, cx: &mut Context<Self>) -> bool {
+        let now = cx.background_executor().now();
+        let format = match key {
+            "b" => Some(Format::Bold),
+            "i" => Some(Format::Italic),
+            "u" => Some(Format::Underline),
+            "d" => Some(Format::Strikethrough),
+            "h" => Some(Format::Highlight),
+            "e" => Some(Format::Code),
+            _ => None,
+        };
+        let heading = key
+            .parse::<u8>()
+            .ok()
+            .filter(|level| *level <= 6 && key.len() == 1);
         match key {
-            "left" => self.model.move_left(extend),
-            "right" => self.model.move_right(extend),
-            "up" | "down" => self.move_vertical(key == "down", extend),
-            "backspace" | "delete" | "enter" => {
-                let changed = match key {
-                    "backspace" => self.model.backspace(),
-                    "delete" => self.model.delete(),
-                    _ => {
-                        self.model.insert("\n");
-                        true
-                    }
+            "left" => self.model.move_word_left(shift),
+            "right" => self.model.move_word_right(shift),
+            "home" => self.model.set_cursor(0, shift),
+            "end" => self.model.set_cursor(self.model.text().len(), shift),
+            "backspace" | "delete" if !shift => {
+                let changed = if key == "backspace" {
+                    self.model.backspace(true, now)
+                } else {
+                    self.model.delete(true, now)
                 };
-                if changed {
-                    self.edited(cx);
-                }
-                cx.stop_propagation();
-                return;
+                self.finish(changed, cx);
+                return true;
             }
-            _ => return,
+            _ if shift => return false,
+            "a" => self.model.select_all(),
+            "c" => {
+                self.copy(cx);
+                return true;
+            }
+            "x" => {
+                self.copy(cx);
+                let changed = self.model.remove_selection();
+                self.finish(changed, cx);
+                return true;
+            }
+            "v" => {
+                let text = cx.read_from_clipboard().and_then(|item| item.text());
+                let changed = text.is_some_and(|text| self.model.insert(&text));
+                self.finish(changed, cx);
+                return true;
+            }
+            "z" | "y" => {
+                let changed = if key == "z" {
+                    self.model.undo()
+                } else {
+                    self.model.redo()
+                };
+                self.finish(changed, cx);
+                return true;
+            }
+            _ if !self.help.format_keys => return false,
+            _ if format.is_some() || heading.is_some() => {
+                let changed = match (format, heading) {
+                    (Some(format), _) => self.model.toggle_format(format),
+                    (None, Some(level)) => self.model.toggle_heading(level),
+                    (None, None) => false,
+                };
+                self.finish(changed, cx);
+                return true;
+            }
+            _ => return false,
         }
-        if !matches!(key, "up" | "down") {
-            self.goal_x = None;
-        }
+        self.goal_x = None;
         self.moved(cx);
-        cx.stop_propagation();
+        true
+    }
+
+    /// A key with no Ctrl. Shift extends the selection.
+    fn plain_key(&mut self, key: &str, shift: bool, cx: &mut Context<Self>) -> bool {
+        let now = cx.background_executor().now();
+        match key {
+            "left" => self.model.move_left(shift),
+            "right" => self.model.move_right(shift),
+            "up" | "down" => {
+                self.move_vertical(key == "down", shift);
+                self.moved(cx);
+                return true;
+            }
+            "pageup" | "pagedown" => {
+                self.move_page(key == "pagedown", shift);
+                self.moved(cx);
+                return true;
+            }
+            "home" | "end" => {
+                let cursor = self.model.cursor();
+                let end = key == "end";
+                let offset = self
+                    .current_layout()
+                    .and_then(|layout| layout.row_edge(cursor, end))
+                    .unwrap_or_else(|| {
+                        let line = self.model.line_range(self.model.line_of(cursor));
+                        if end { line.end } else { line.start }
+                    });
+                self.model.set_cursor(offset, shift);
+            }
+            "backspace" | "delete" if !shift || key == "backspace" => {
+                let changed = if key == "backspace" {
+                    self.model.backspace(false, now)
+                } else {
+                    self.model.delete(false, now)
+                };
+                self.finish(changed, cx);
+                return true;
+            }
+            "enter" => {
+                let changed = self.model.newline(self.help.continue_lists, now);
+                self.finish(changed, cx);
+                return true;
+            }
+            "tab" => {
+                let indented = self
+                    .help
+                    .indent_lists
+                    .then(|| self.model.indent(shift))
+                    .flatten();
+                let changed = match indented {
+                    Some(changed) => changed,
+                    None if shift => false,
+                    None => self.model.type_text(TAB, now),
+                };
+                self.finish(changed, cx);
+                return true;
+            }
+            _ => return false,
+        }
+        self.goal_x = None;
+        self.moved(cx);
+        true
+    }
+
+    /// Tells the app and the view about an edit, when there was one.
+    fn finish(&mut self, changed: bool, cx: &mut Context<Self>) {
+        if changed {
+            self.edited(cx);
+        }
+    }
+
+    fn copy(&self, cx: &mut Context<Self>) {
+        let text = self.model.selected_text();
+        if !text.is_empty() {
+            cx.write_to_clipboard(ClipboardItem::new_string(text.to_owned()));
+        }
+    }
+
+    /// Moves the cursor by the rows that fit in the view.
+    fn move_page(&mut self, down: bool, extend: bool) {
+        let rows = self.current_layout().map_or(1, Layout::rows_in_view);
+        for _ in 0..rows {
+            self.move_vertical(down, extend);
+        }
     }
 
     fn move_vertical(&mut self, down: bool, extend: bool) {
@@ -170,28 +379,67 @@ impl Editor {
 
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
-        if let Some(offset) = self.offset_at(event.position) {
-            self.model.set_cursor(offset, event.modifiers.shift);
-            self.selecting = true;
-            self.goal_x = None;
-            cx.notify();
-        }
+        let Some(offset) = self.offset_at(event.position) else {
+            return;
+        };
+        let unit = match event.click_count {
+            0 | 1 => Unit::Char,
+            2 => Unit::Word,
+            _ => Unit::Line,
+        };
+        let origin = match unit {
+            Unit::Char if event.modifiers.shift => {
+                let anchor = self.model.selection();
+                let anchor = if self.model.is_reversed() {
+                    anchor.end
+                } else {
+                    anchor.start
+                };
+                anchor..anchor
+            }
+            Unit::Char => offset..offset,
+            Unit::Word => self.model.word_at(offset),
+            Unit::Line => self.model.line_at(offset),
+        };
+        self.drag = Some(Drag { unit, origin });
+        self.drag_to(offset);
+        self.goal_x = None;
+        cx.notify();
     }
 
     fn mouse_move(&mut self, event: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        if !self.selecting {
+        if self.drag.is_none() {
             return;
         }
-        if let Some(offset) = self.offset_at(event.position)
-            && offset != self.model.cursor()
-        {
-            self.model.set_cursor(offset, true);
-            cx.notify();
+        if let Some(offset) = self.offset_at(event.position) {
+            let before = self.model.selection();
+            self.drag_to(offset);
+            if self.model.selection() != before {
+                cx.notify();
+            }
+        }
+    }
+
+    /// Selects from the drag origin to the unit at `offset`.
+    fn drag_to(&mut self, offset: usize) {
+        let Some(drag) = &self.drag else { return };
+        let target = match drag.unit {
+            Unit::Char => offset..offset,
+            Unit::Word => self.model.word_at(offset),
+            Unit::Line => self.model.line_at(offset),
+        };
+        let origin = drag.origin.clone();
+        if target.start < origin.start {
+            self.model.set_cursor(origin.end, false);
+            self.model.set_cursor(target.start, true);
+        } else {
+            self.model.set_cursor(origin.start, false);
+            self.model.set_cursor(target.end.max(origin.end), true);
         }
     }
 
     fn mouse_up(&mut self, _event: &MouseUpEvent, _window: &mut Window, _cx: &mut Context<Self>) {
-        self.selecting = false;
+        self.drag = None;
     }
 
     fn scroll(&mut self, event: &ScrollEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -277,8 +525,10 @@ impl EntityInputHandler for Editor {
         cx: &mut Context<Self>,
     ) {
         let range = range.map_or_else(|| self.model.selection(), |r| self.range_from_utf16(&r));
-        self.model.replace(range, text);
-        self.edited(cx);
+        let changed = self
+            .model
+            .type_in(range, text, cx.background_executor().now());
+        self.finish(changed, cx);
     }
 
     fn replace_and_mark_text_in_range(
