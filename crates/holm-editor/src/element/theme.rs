@@ -5,6 +5,7 @@ use holm_markdown::{CalloutKind, Color};
 
 use crate::Appearance;
 use crate::highlight::Token;
+use crate::model::{Highlight, Look};
 use crate::palette;
 
 /// The colors of one callout kind.
@@ -148,6 +149,15 @@ impl Theme {
             Token::Punctuation => 9,
         };
         self.tokens[ix]
+    }
+
+    /// The background of a piece of text: a highlight or inline code.
+    pub(crate) fn text_background(&self, look: Look) -> Option<Hsla> {
+        match look.highlight {
+            Highlight::Color(color) => Some(self.note_color(color)),
+            Highlight::Default => Some(self.highlight),
+            Highlight::None => look.code.then_some(self.code_background),
+        }
     }
 
     /// A color from the note. Palette colors get their dark tone in dark mode.

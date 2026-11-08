@@ -14,7 +14,7 @@ use holm_markdown::{Alignment, CalloutKind};
 
 use super::theme::Theme;
 use crate::highlight::{Highlighter, Tokens};
-use crate::model::{Cell, DisplayLine, Highlight, LineKind, Look, Mark, Model, Run};
+use crate::model::{Cell, DisplayLine, LineKind, Look, Mark, Model, Run};
 
 /// Space above and below an image or a file card.
 pub(crate) const IMAGE_MARGIN: Pixels = px(4.);
@@ -404,7 +404,7 @@ impl Shaper<'_> {
                     len: run.len,
                     font,
                     color,
-                    background_color: self.background(look),
+                    background_color: None,
                     underline: (look.underline || look.link).then_some(UnderlineStyle {
                         thickness: px(1.),
                         color: Some(color),
@@ -430,14 +430,6 @@ impl Shaper<'_> {
             self.theme.text.opacity(0.8)
         } else {
             self.theme.text
-        }
-    }
-
-    fn background(&self, look: Look) -> Option<gpui_kit::Hsla> {
-        match look.highlight {
-            Highlight::Color(color) => Some(self.theme.note_color(color)),
-            Highlight::Default => Some(self.theme.highlight),
-            Highlight::None => look.code.then_some(self.theme.code_background),
         }
     }
 
@@ -563,7 +555,7 @@ impl Shaper<'_> {
                     len: run.len,
                     font,
                     color,
-                    background_color: self.background(run.look),
+                    background_color: None,
                     underline: (run.look.underline || run.look.link).then_some(UnderlineStyle {
                         thickness: px(1.),
                         color: Some(color),

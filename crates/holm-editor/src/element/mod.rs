@@ -18,7 +18,7 @@ pub(crate) use layout::{Hit, ImageSizes, Layout, Scroll};
 pub(crate) use theme::Theme;
 
 use crate::Editor;
-use crate::model::{LineKind, Mark, Quote};
+use crate::model::{LineKind, Mark, Quote, Run};
 use layout::{COLUMN_WIDTH, Content, LaidCard, LaidLine, Shaper, lay_out};
 
 /// The width of a quote bar.
@@ -236,14 +236,17 @@ fn paint_line(
     let origin = column.origin + point(px(0.), line.top);
     let text_origin = origin + point(line.left, line.pad);
     match &line.content {
-        Content::Text(text) | Content::Label(text) => {
-            paint_text(text, text_origin, line.line_height, window, cx);
+        Content::Text(text) => {
+            let runs = &line.display.shown.runs;
+            paint_text(text, runs, text_origin, line, theme, window, cx);
         }
+        Content::Label(text) => paint_text(text, &[], text_origin, line, theme, window, cx),
         Content::Cells(cells) => {
             let top = (line.height - line.text_height.max(line.line_height)) / 2.;
             for cell in cells {
                 let cell_origin = text_origin + point(cell.x + cell.inset, top.max(px(0.)));
-                paint_text(&cell.text, cell_origin, line.line_height, window, cx);
+                let runs = &cell.shown.shown.runs;
+                paint_text(&cell.text, runs, cell_origin, line, theme, window, cx);
             }
         }
         Content::Empty => {}
@@ -284,16 +287,63 @@ fn paint_line(
     }
 }
 
-/// Paints a text with its highlights. A failed paint only loses glyphs in this frame.
+/// Paints a text of `line` with the highlights and code backgrounds of its `runs`.
+/// A failed paint only loses glyphs in this frame.
 fn paint_text(
     text: &WrappedLine,
+    runs: &[Run],
     origin: Point<Pixels>,
-    line_height: Pixels,
+    line: &LaidLine,
+    theme: &Theme,
     window: &mut Window,
     cx: &mut App,
 ) {
-    let _ = text.paint_background(origin, line_height, TextAlign::Left, None, window, cx);
+    let line_height = line.line_height;
+    // A background is a bit lower than the row and a bit wider than its text, so two rows of
+    // backgrounds do not touch and the text keeps some room on its sides.
+    let height = (line.font_size * 1.3).min(line_height);
+    let side = line.font_size * 0.25;
+    let mut start = 0;
+    for run in runs {
+        let end = start + run.len;
+        if let Some(color) = theme.text_background(run.look) {
+            for (x, y, right) in row_spans(text, start..end, line_height, line.font_size) {
+                let bounds = Bounds::from_corners(
+                    origin + point(x - side, y + (line_height - height) / 2.),
+                    origin + point(right + side, y + (line_height + height) / 2.),
+                );
+                window.paint_quad(fill(bounds, color).corner_radii(px(3.)));
+            }
+        }
+        start = end;
+    }
     let _ = text.paint(origin, line_height, TextAlign::Left, None, window, cx);
+}
+
+/// The left x, the top y and the right x of each screen row that the text in `range` takes.
+fn row_spans(
+    text: &WrappedLine,
+    range: std::ops::Range<usize>,
+    line_height: Pixels,
+    font_size: Pixels,
+) -> Vec<(Pixels, Pixels, Pixels)> {
+    let content = text.text.as_ref();
+    let mut spans: Vec<(Pixels, Pixels, Pixels)> = Vec::new();
+    for (at, c) in content[range.clone()].char_indices() {
+        let at = range.start + at;
+        let Some(here) = text.position_for_index(at, line_height) else {
+            continue;
+        };
+        let right = text
+            .position_for_index(at + c.len_utf8(), line_height)
+            .filter(|next| next.y == here.y)
+            .map_or(here.x + font_size * 0.5, |next| next.x);
+        match spans.last_mut() {
+            Some(last) if last.1 == here.y => last.2 = right,
+            _ => spans.push((here.x, here.y, right)),
+        }
+    }
+    spans
 }
 
 /// Paints a file card. `origin` is the top left of its line.
