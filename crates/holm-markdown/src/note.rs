@@ -106,6 +106,11 @@ impl Note {
         title(&self.body)
     }
 
+    /// Replaces the text after the frontmatter. The frontmatter stays as it is.
+    pub fn set_body(&mut self, body: &str) {
+        body.clone_into(&mut self.body);
+    }
+
     /// Sets the `id` field, or removes it with `None`.
     pub fn set_id(&mut self, id: Option<&str>) {
         let raw = id.map(|id| Frontmatter::write_id(id, self.line_ending.as_str()));
