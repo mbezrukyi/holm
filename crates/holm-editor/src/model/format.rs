@@ -247,14 +247,19 @@ impl Model {
     }
 
     /// The part of `selection` on each line it touches, without spaces at its ends.
+    /// A list marker and a task box are never part of it.
     fn pieces(&self, selection: &Range<usize>) -> Vec<Range<usize>> {
         let first = self.line_of(selection.start);
         let last = self.line_of(selection.end);
         (first..=last)
-            .filter_map(|line| {
-                let line = self.line_range(line);
-                let start = selection.start.max(line.start);
+            .filter_map(|ix| {
+                let line = self.line_range(ix);
+                let content = self.list_item(ix).map_or(line.start, |item| item.content);
+                let start = selection.start.max(content).min(line.end);
                 let end = selection.end.min(line.end);
+                if start >= end {
+                    return None;
+                }
                 let text = &self.text[start..end];
                 let start = start + (text.len() - text.trim_start().len());
                 let end = end - (text.len() - text.trim_end().len());
@@ -530,6 +535,16 @@ mod tests {
             toggled("a word", 2..6, Format::Highlight),
             ("a ==word==".into(), 4..8)
         );
+    }
+
+    #[test]
+    fn a_format_key_skips_list_markers_and_task_boxes() {
+        let text = "- [ ] one\n- [x] two\n";
+        let (new, _) = toggled(text, 0..text.len(), Format::Underline);
+        assert_eq!(new, "- [ ] <u>one</u>\n- [x] <u>two</u>\n");
+        let (new, _) = toggled("1. one", 0..6, Format::Bold);
+        assert_eq!(new, "1. **one**");
+        assert!(!model_with("- one", 0..2).toggle_format(Format::Bold));
     }
 
     #[test]
