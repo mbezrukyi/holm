@@ -17,8 +17,9 @@ pub(crate) use layout::{Hit, ImageSizes, Layout, Scroll};
 pub(crate) use theme::Theme;
 
 use crate::Editor;
+use crate::ink;
 use crate::model::{LineKind, Mark, Quote, Run};
-use layout::{COLUMN_WIDTH, Content, LaidCard, LaidLine, Shaper, lay_out};
+use layout::{CODE_FONT, COLUMN_WIDTH, Content, LaidCard, LaidLine, Shaper, lay_out};
 
 /// The width of a quote bar.
 const BAR: Pixels = px(3.);
@@ -316,6 +317,93 @@ fn paint_text(
         start = end;
     }
     let _ = text.paint(origin, line_height, TextAlign::Left, None, window, cx);
+    paint_underlines(text, runs, origin, line, theme, window);
+}
+
+/// Paints the underlines of underlined text and links: thin, a bit light, close below the text
+/// line, with a gap where the ink of a letter crosses it, like a browser does.
+fn paint_underlines(
+    text: &WrappedLine,
+    runs: &[Run],
+    origin: Point<Pixels>,
+    line: &LaidLine,
+    theme: &Theme,
+    window: &mut Window,
+) {
+    let line_height = line.line_height;
+    let layout = &text.unwrapped_layout;
+    let baseline = (line_height - layout.ascent - layout.descent) / 2. + layout.ascent;
+    let offset = (line.font_size * 0.1).max(px(1.5));
+    // The room between the line and the ink on each side of a gap.
+    let room = (line.font_size * 0.1).max(px(1.5));
+    // The ink may come 1 px near the line above and below it.
+    let band = ink::Band {
+        font_size: f32::from(layout.font_size),
+        top: f32::from(offset) - 1.,
+        bottom: f32::from(offset) + 2.,
+    };
+    let quoted = !line.display.quotes.is_empty();
+    let content = text.text.as_ref();
+    let mut start = 0;
+    for run in runs {
+        let end = start + run.len;
+        if !(run.look.underline || run.look.link) {
+            start = end;
+            continue;
+        }
+        let font = ink::FontKey {
+            family: if run.look.code {
+                CODE_FONT.to_owned()
+            } else {
+                line.family.clone()
+            },
+            bold: run.look.strong || line.display.heading.is_some(),
+            italic: run.look.emphasis,
+        };
+        let color = theme.text_color(run.look, quoted).opacity(0.7);
+        // Each screen row of the run: its top, and its parts of line from left to right.
+        let mut rows: Vec<(Pixels, Vec<(Pixels, Pixels)>)> = Vec::new();
+        for (at, c) in content[start..end].char_indices() {
+            let at = start + at;
+            let Some(here) = text.position_for_index(at, line_height) else {
+                continue;
+            };
+            let right = text
+                .position_for_index(at + c.len_utf8(), line_height)
+                .filter(|next| next.y == here.y)
+                .map_or(here.x + line.font_size * 0.5, |next| next.x);
+            if rows.last().is_none_or(|(y, _)| *y != here.y) {
+                rows.push((here.y, vec![(here.x, here.x)]));
+            }
+            let Some((_, parts)) = rows.last_mut() else {
+                continue;
+            };
+            for (left, gap_right) in ink::gaps(&font, c, band) {
+                // A tail can reach under the letter before, like the tail of `y`, so the part
+                // before the gap can get shorter.
+                if let Some(last) = parts.last_mut() {
+                    last.1 = last.1.min(here.x + px(left) - room);
+                }
+                let after = here.x + px(gap_right) + room;
+                parts.push((after, after));
+            }
+            if let Some(last) = parts.last_mut() {
+                last.1 = last.1.max(right);
+            }
+        }
+        for (y, parts) in rows {
+            for (left, right) in parts {
+                if right > left {
+                    let bounds = Bounds::new(
+                        origin + point(left, y + baseline + offset),
+                        size(right - left, px(1.)),
+                    );
+                    window.paint_quad(fill(bounds, color));
+                }
+            }
+        }
+        start = end;
+    }
 }
 
 /// The left x, the top y and the right x of each screen row that the text in `range` takes.

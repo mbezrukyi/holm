@@ -151,6 +151,21 @@ impl Theme {
         self.tokens[ix]
     }
 
+    /// The color of a piece of text. Text in a quote is a bit lighter.
+    pub(crate) fn text_color(&self, look: Look, quoted: bool) -> Hsla {
+        if look.syntax {
+            self.muted
+        } else if let Some(color) = look.color {
+            self.note_color(color)
+        } else if look.link {
+            self.link
+        } else if quoted {
+            self.text.opacity(0.8)
+        } else {
+            self.text
+        }
+    }
+
     /// The background of a piece of text: a highlight or inline code.
     pub(crate) fn text_background(&self, look: Look) -> Option<Hsla> {
         match look.highlight {

@@ -8,13 +8,13 @@ use std::rc::Rc;
 
 use gpui_kit::{
     Bounds, FontStyle, FontWeight, Pixels, Point, ShapedLine, Size, StrikethroughStyle, TextRun,
-    TextStyle, UnderlineStyle, Window, WrappedLine, point, px, size,
+    TextStyle, Window, WrappedLine, point, px, size,
 };
 use holm_markdown::{Alignment, CalloutKind};
 
 use super::theme::Theme;
 use crate::highlight::{Highlighter, Tokens};
-use crate::model::{Cell, DisplayLine, LineKind, Look, Mark, Model, Run};
+use crate::model::{Cell, DisplayLine, LineKind, Mark, Model, Run};
 
 /// Space above and below an image or a file card.
 pub(crate) const IMAGE_MARGIN: Pixels = px(4.);
@@ -81,6 +81,8 @@ pub(crate) struct LaidLine {
     pub(crate) pad: Pixels,
     /// The text size of the line.
     pub(crate) font_size: Pixels,
+    /// The font family of the text of the line.
+    pub(crate) family: String,
     /// The space that each quote around the line takes on the left.
     pub(crate) quote_step: Pixels,
     /// Where quote bars end and blocks like code start.
@@ -276,6 +278,7 @@ impl Shaper<'_> {
             pad,
             quote_step: base,
             font_size,
+            family: self.style.font_family.to_string(),
             block_left,
             left,
             line_height,
@@ -420,18 +423,14 @@ impl Shaper<'_> {
                 let color = if done && !look.syntax {
                     self.theme.muted
                 } else {
-                    self.text_color(look, !display.quotes.is_empty())
+                    self.theme.text_color(look, !display.quotes.is_empty())
                 };
                 TextRun {
                     len: run.len,
                     font,
                     color,
                     background_color: None,
-                    underline: (look.underline || look.link).then_some(UnderlineStyle {
-                        thickness: px(1.),
-                        color: Some(color),
-                        wavy: false,
-                    }),
+                    underline: None,
                     strikethrough: look.strikethrough.then_some(StrikethroughStyle {
                         thickness: px(1.),
                         color: Some(color),
@@ -439,20 +438,6 @@ impl Shaper<'_> {
                 }
             })
             .collect()
-    }
-
-    fn text_color(&self, look: Look, quoted: bool) -> gpui_kit::Hsla {
-        if look.syntax {
-            self.theme.muted
-        } else if let Some(color) = look.color {
-            self.theme.note_color(color)
-        } else if look.link {
-            self.theme.link
-        } else if quoted {
-            self.theme.text.opacity(0.8)
-        } else {
-            self.theme.text
-        }
     }
 
     /// The widths of the columns of `table`, so the table fits in the column.
@@ -572,17 +557,13 @@ impl Shaper<'_> {
                 if run.look.code {
                     font.family = CODE_FONT.into();
                 }
-                let color = self.text_color(run.look, false);
+                let color = self.theme.text_color(run.look, false);
                 TextRun {
                     len: run.len,
                     font,
                     color,
                     background_color: None,
-                    underline: (run.look.underline || run.look.link).then_some(UnderlineStyle {
-                        thickness: px(1.),
-                        color: Some(color),
-                        wavy: false,
-                    }),
+                    underline: None,
                     strikethrough: run.look.strikethrough.then_some(StrikethroughStyle {
                         thickness: px(1.),
                         color: Some(color),

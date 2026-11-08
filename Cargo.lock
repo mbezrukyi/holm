@@ -3416,6 +3416,7 @@ name = "holm-editor"
 version = "0.1.0"
 dependencies = [
  "divan",
+ "fontdb",
  "gpui-kit",
  "holm-markdown",
  "imagesize 0.14.0",
@@ -3423,6 +3424,7 @@ dependencies = [
  "ropey",
  "syntect",
  "thiserror 2.0.21",
+ "ttf-parser",
  "two-face",
 ]
 

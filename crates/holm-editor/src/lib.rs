@@ -5,6 +5,7 @@
 mod editor;
 mod element;
 mod highlight;
+mod ink;
 mod model;
 mod palette;
 

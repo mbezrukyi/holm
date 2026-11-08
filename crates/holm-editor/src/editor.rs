@@ -11,6 +11,7 @@ use gpui_kit::{
 
 use crate::element::{EditorElement, Hit, ImageSizes, Layout, Scroll, Theme};
 use crate::highlight::{self, Highlighter};
+use crate::ink;
 use crate::model::{Format, Model};
 
 /// Spaces that Tab types outside a list.
@@ -123,7 +124,10 @@ impl Editor {
     /// An empty editor in light mode.
     pub fn new(cx: &mut Context<Self>) -> Self {
         cx.background_executor()
-            .spawn(async { highlight::warm_up() })
+            .spawn(async {
+                highlight::warm_up();
+                ink::warm_up();
+            })
             .detach();
         Self {
             model: Model::new(""),

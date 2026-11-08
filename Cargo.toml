@@ -15,6 +15,7 @@ holm-markdown = { path = "crates/holm-markdown" }
 holm-editor = { path = "crates/holm-editor" }
 
 gpui-kit = { version = "=0.9.0", default-features = false }
+fontdb = "0.23"
 imagesize = "0.14"
 jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 notify = { version = "8.2", default-features = false }
@@ -28,6 +29,7 @@ tempfile = "3"
 thiserror = "2"
 tracing = "0.1"
 tracing-appender = "0.2"
+ttf-parser = "0.25"
 two-face = { version = "0.4.5", default-features = false, features = ["syntect-fancy"] }
 ulid = "3"
 

@@ -1,6 +1,6 @@
 # Plans for the week
 
-Some ==big== ideas, a <u>key</u> word, <span style="color: #c4553a">red</span> and <span style="color: #3f6fa8">blue</span> text, and a <mark style="background: #fde68a">soft</mark> mark.
+Some ==big== ideas, a <u>happy key</u> word, <span style="color: #c4553a">red</span> and <span style="color: #3f6fa8">blue</span> text, and a <mark style="background: #fde68a">soft</mark> mark.
 Also `inline code`, **strong**, *calm* and ~~old~~ text, with a [link](https://example.com).
 
 ## Lists
