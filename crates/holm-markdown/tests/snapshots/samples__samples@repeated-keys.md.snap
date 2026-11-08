@@ -1,0 +1,38 @@
+---
+source: crates/holm-markdown/tests/samples.rs
+expression: report(&text)
+input_file: crates/holm-markdown/tests/samples/repeated-keys.md
+---
+line ending: Lf
+id: Some("first")
+tags: ["a", "A"]
+pinned: false
+title: Some("Repeated keys")
+
+--- frontmatter ---
+---
+id: first
+author: me
+id: second
+tags: [a, a, A]
+---
+
+--- body ---
+# Repeated keys
+
+--- set all ---
+---
+id: 01JC3X0000NEW
+author: me
+tags:
+  - work/holm
+  - new-tag
+pinned: true
+---
+# Repeated keys
+
+--- remove all ---
+---
+author: me
+---
+# Repeated keys

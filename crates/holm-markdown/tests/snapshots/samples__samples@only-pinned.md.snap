@@ -1,0 +1,39 @@
+---
+source: crates/holm-markdown/tests/samples.rs
+expression: report(&text)
+input_file: crates/holm-markdown/tests/samples/only-pinned.md
+---
+line ending: Lf
+id: None
+tags: []
+pinned: true
+title: Some("Pinned only")
+
+--- frontmatter ---
+---
+author: me
+pinned: true
+draft: yes
+---
+
+--- body ---
+# Pinned only
+
+--- set all ---
+---
+id: 01JC3X0000NEW
+tags:
+  - work/holm
+  - new-tag
+author: me
+pinned: true
+draft: yes
+---
+# Pinned only
+
+--- remove all ---
+---
+author: me
+draft: yes
+---
+# Pinned only

@@ -15,7 +15,7 @@ holm-markdown = { path = "crates/holm-markdown" }
 holm-editor = { path = "crates/holm-editor" }
 
 gpui-kit = "=0.9.0"
-pulldown-cmark = "0.13"
+pulldown-cmark = { version = "0.13", default-features = false }
 thiserror = "2"
 tracing = "0.1"
 tracing-appender = "0.2"

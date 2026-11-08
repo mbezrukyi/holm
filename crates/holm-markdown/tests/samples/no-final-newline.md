@@ -1,0 +1,3 @@
+---
+id: no-final-newline
+---
