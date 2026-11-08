@@ -2,7 +2,7 @@
 
 use std::ops::Range;
 
-use holm_markdown::{Block, BlockKind, Style};
+use holm_markdown::{Block, BlockKind, Span, Style};
 
 use super::{Bias, Edit, Group, Model, map_offset};
 
@@ -199,48 +199,12 @@ impl Model {
         let mut edits: Vec<Edit> = Vec::new();
         if styled.iter().all(Option::is_some) {
             for (piece, styled) in pieces.iter().zip(styled.into_iter().flatten()) {
-                edits.push(if piece.start == styled.text.start {
-                    (
-                        styled.text.start - styled.open.len()..styled.text.start,
-                        String::new(),
-                    )
-                } else {
-                    (piece.start..piece.start, styled.close.to_owned())
-                });
-                edits.push(if piece.end == styled.text.end {
-                    (
-                        styled.text.end..styled.text.end + styled.close.len(),
-                        String::new(),
-                    )
-                } else {
-                    (piece.end..piece.end, styled.open.to_owned())
-                });
+                self.cut_out(&styled, piece, &mut edits);
             }
         } else {
             for (piece, styled) in pieces.iter().zip(&styled) {
                 if styled.is_none() {
-                    // A span of the same style that the piece cuts joins the new span.
-                    let piece = if format == Format::Code {
-                        piece.clone()
-                    } else {
-                        self.grow_to_style(format, piece)
-                    };
-                    // The new markers go around the syntax of the spans in the piece.
-                    let Range { start, end } = self.around_syntax(&piece);
-                    // The same style inside the piece cannot nest, so its markers go.
-                    let inside = if format == Format::Code {
-                        Vec::new()
-                    } else {
-                        self.styled_inside(format, &(start..end))
-                    };
-                    edits.push((start..start, format.open().to_owned()));
-                    for inner in inside {
-                        let open = inner.text.start - inner.open.len()..inner.text.start;
-                        let close = inner.text.end..inner.text.end + inner.close.len();
-                        edits.push((open, String::new()));
-                        edits.push((close, String::new()));
-                    }
-                    edits.push((end..end, format.close().to_owned()));
+                    self.wrap(format, piece, &mut edits);
                 }
             }
         }
@@ -257,6 +221,217 @@ impl Model {
             (start, end)
         };
         self.edit(edits, ends, Group::Alone, None)
+    }
+
+    /// Removes the style of `styled` from `piece`, a part of its text. Where a cut falls inside
+    /// another span in `styled`, that span closes before the cut and opens again after it.
+    fn cut_out(&self, styled: &Styled, piece: &Range<usize>, edits: &mut Vec<Edit>) {
+        let inside = |s: &Span| {
+            styled.text.start <= s.range.start
+                && s.range.end <= styled.text.end
+                && s.range != styled.text
+        };
+        // A marker cannot close after a space or open before one, so the cuts move past spaces.
+        let text = &self.text;
+        let start = styled.text.start + text[styled.text.start..piece.start].trim_end().len();
+        let end = piece.end
+            + (text[piece.end..styled.text.end].len()
+                - text[piece.end..styled.text.end].trim_start().len());
+        let mut piece = start..end;
+        let (before, after) = loop {
+            let before = (piece.start > styled.text.start)
+                .then(|| self.split_at(piece.start, styled.close, &inside))
+                .transpose();
+            let after = (piece.end < styled.text.end)
+                .then(|| self.split_at(piece.end, styled.open, &inside))
+                .transpose();
+            match (before, after) {
+                (Ok(before), Ok(after)) => break (before, after),
+                (before, after) => {
+                    // A span that cannot be split leaves the style as a whole.
+                    for grow in [before.err(), after.err()].into_iter().flatten() {
+                        piece.start = piece.start.min(grow.start).max(styled.text.start);
+                        piece.end = piece.end.max(grow.end).min(styled.text.end);
+                    }
+                }
+            }
+        };
+        match before {
+            Some((closes, opens)) => {
+                edits.push((piece.start..piece.start, closes + styled.close));
+                let next = self.after_spaces(piece.start);
+                edits.push((next..next, opens));
+            }
+            None => edits.push((
+                styled.text.start - styled.open.len()..styled.text.start,
+                String::new(),
+            )),
+        }
+        match after {
+            Some((closes, opens)) => {
+                let last = self.before_spaces(piece.end);
+                edits.push((last..last, closes));
+                edits.push((piece.end..piece.end, styled.open.to_owned() + &opens));
+            }
+            None => edits.push((
+                styled.text.end..styled.text.end + styled.close.len(),
+                String::new(),
+            )),
+        }
+    }
+
+    /// Puts `format` around `piece`. Where an end falls inside a span of another style, that
+    /// span closes before the new marker and opens again after it.
+    fn wrap(&self, format: Format, piece: &Range<usize>, edits: &mut Vec<Edit>) {
+        // A span of the same style that the piece cuts joins the new span.
+        let mut piece = if format == Format::Code {
+            piece.clone()
+        } else {
+            self.grow_to_style(format, piece)
+        };
+        let (range, open, close) = loop {
+            // The new markers go around the syntax of the spans in the piece.
+            let range = self.around_syntax(&piece);
+            let crosses = |s: &Span| !(s.range.start <= range.start && range.end <= s.range.end);
+            let open = self.split_at(range.start, format.open(), &crosses);
+            let close = self.split_at(range.end, format.close(), &crosses);
+            match (open, close) {
+                (Ok(open), Ok(close)) => break (range, open, close),
+                (open, close) => {
+                    // A span that cannot be split goes into the new span as a whole.
+                    for grow in [open.err(), close.err()].into_iter().flatten() {
+                        piece.start = piece.start.min(grow.start);
+                        piece.end = piece.end.max(grow.end);
+                    }
+                }
+            }
+        };
+        // The same style inside the piece cannot nest, so its markers go.
+        let inside = if format == Format::Code {
+            Vec::new()
+        } else {
+            self.styled_inside(format, &range)
+        };
+        // Syntax cannot open before a space or close after one. So split spans close before
+        // the spaces in front of the new span, and open again after the spaces behind it.
+        let last = self.before_spaces(range.start);
+        edits.push((last..last, open.0));
+        edits.push((range.start..range.start, format.open().to_owned() + &open.1));
+        for inner in inside {
+            let open = inner.text.start - inner.open.len()..inner.text.start;
+            let close = inner.text.end..inner.text.end + inner.close.len();
+            edits.push((open, String::new()));
+            edits.push((close, String::new()));
+        }
+        edits.push((range.end..range.end, close.0 + format.close()));
+        let next = self.after_spaces(range.end);
+        edits.push((next..next, close.1));
+    }
+
+    /// The offset before the spaces and tabs that end right at `at`.
+    fn before_spaces(&self, at: usize) -> usize {
+        at - self.text.as_bytes()[..at]
+            .iter()
+            .rev()
+            .take_while(|b| matches!(b, b' ' | b'\t'))
+            .count()
+    }
+
+    /// The offset after the spaces and tabs that start right at `at`.
+    fn after_spaces(&self, at: usize) -> usize {
+        at + self.text.as_bytes()[at..]
+            .iter()
+            .take_while(|b| matches!(b, b' ' | b'\t'))
+            .count()
+    }
+
+    /// The syntax that closes and opens again the spans that `cuts` picks and that hold `at`,
+    /// so `marker` can go at `at` between the two.
+    ///
+    /// It fails with the source of those spans when one of them cannot be split: a link, inline
+    /// code, or markers that would touch the same marker char, like `**` and `*`.
+    fn split_at(
+        &self,
+        at: usize,
+        marker: &str,
+        cuts: &dyn Fn(&Span) -> bool,
+    ) -> Result<(String, String), Range<usize>> {
+        let spans = self.body.spans();
+        let from = self.chain_at(at).first().map_or(0, |b| b.range.start);
+        let mut crossed: Vec<&Span> = spans[spans.partition_point(|s| s.range.start < from)
+            ..spans.partition_point(|s| s.range.start < at)]
+            .iter()
+            .filter(|s| s.range.start < at && at < s.range.end && cuts(s))
+            .collect();
+        if crossed.is_empty() {
+            return Ok((String::new(), String::new()));
+        }
+        // The outer span first.
+        crossed.sort_by_key(|s| (s.range.start, std::cmp::Reverse(s.range.end)));
+        let syntax: Vec<_> = crossed.iter().map(|s| self.span_syntax(s)).collect();
+        // The source of all crossed spans, for a caller that cannot split them.
+        let start = crossed.iter().map(|s| s.range.start).min().unwrap_or(at);
+        let end = crossed.iter().map(|s| s.range.end).max().unwrap_or(at);
+        let whole = syntax
+            .iter()
+            .flatten()
+            .fold(start..end, |r, (open, close)| {
+                r.start.min(open.start)..r.end.max(close.end)
+            });
+        if syntax.iter().any(Option::is_none) {
+            return Err(whole);
+        }
+        let syntax: Vec<_> = syntax.into_iter().flatten().collect();
+        let mut parts: Vec<&str> = syntax
+            .iter()
+            .rev()
+            .map(|(_, close)| &self.text[close.clone()])
+            .collect();
+        parts.push(marker);
+        parts.extend(syntax.iter().map(|(open, _)| &self.text[open.clone()]));
+        let touch = parts.windows(2).any(|pair| {
+            let last = pair[0].chars().next_back();
+            last.is_some_and(|c| "*_~=".contains(c)) && last == pair[1].chars().next()
+        });
+        if touch {
+            return Err(whole);
+        }
+        let at_marker = syntax.len();
+        Ok((parts[..at_marker].concat(), parts[at_marker + 1..].concat()))
+    }
+
+    /// The opening and closing syntax of `span`, or `None` for a link or inline code.
+    fn span_syntax(&self, span: &Span) -> Option<(Range<usize>, Range<usize>)> {
+        let forms = match span.style {
+            Style::Strong => Format::Bold.markers(),
+            Style::Emphasis => Format::Italic.markers(),
+            Style::Strikethrough => Format::Strikethrough.markers(),
+            Style::Underline => Format::Underline.markers(),
+            Style::Highlight(None) => Format::Highlight.markers(),
+            Style::Highlight(Some(_)) => return self.tag_syntax(span, "</mark>"),
+            Style::Color(_) => return self.tag_syntax(span, "</span>"),
+            Style::Code | Style::Link => return None,
+        };
+        forms.iter().find_map(|&(open, close)| {
+            let before = span.range.start.checked_sub(open.len())?;
+            let after = span.range.end + close.len();
+            let fits = self.text.get(before..span.range.start) == Some(open)
+                && self.text.get(span.range.end..after) == Some(close);
+            fits.then_some((before..span.range.start, span.range.end..after))
+        })
+    }
+
+    /// The syntax of a span in an HTML tag with attributes, like `<span style="...">`.
+    fn tag_syntax(&self, span: &Span, close: &str) -> Option<(Range<usize>, Range<usize>)> {
+        let before = &self.text[..span.range.start];
+        if !before.ends_with('>') {
+            return None;
+        }
+        let open = before.rfind('<')?;
+        self.text[span.range.end..].starts_with(close).then_some((
+            open..span.range.start,
+            span.range.end..span.range.end + close.len(),
+        ))
     }
 
     /// Removes the format of the span around the cursor, or puts in an empty pair of markers.
@@ -864,6 +1039,60 @@ mod tests {
         );
         // Syntax and a space at the start of the selection stay outside the new markers.
         assert_eq!(toggled("==a b== c", 5..9, Format::Bold).0, "==a b== **c**");
+    }
+
+    #[test]
+    fn a_cut_splits_the_spans_it_crosses() {
+        for (text, selected, format, want) in [
+            (
+                "==A **tip with strong** text.==",
+                "ip with st",
+                Format::Highlight,
+                "==A **t**==**ip with st**==**rong** text.==",
+            ),
+            (
+                "A **tip with strong** text",
+                "A **t",
+                Format::Highlight,
+                "==A **t**==**ip with strong** text",
+            ),
+            (
+                "A **tip with strong** text",
+                "A **t",
+                Format::Underline,
+                "<u>A **t**</u>**ip with strong** text",
+            ),
+            (
+                "a <span style=\"color: #c4553a\">red text</span> b",
+                "a <span style=\"color: #c4553a\">red",
+                Format::Bold,
+                "**a <span style=\"color: #c4553a\">red</span>** <span style=\"color: #c4553a\">text</span> b",
+            ),
+            ("**==a b c==**", "b", Format::Highlight, "**==a== b ==c==**"),
+            (
+                "==A t**ip with strong** text.==",
+                "with ",
+                Format::Highlight,
+                "==A t**ip**== **with** ==**strong** text.==",
+            ),
+        ] {
+            let start = text.find(selected).unwrap_or(0);
+            let got = toggled(text, start..start + selected.len(), format).0;
+            assert_eq!(got, want, "{text}");
+        }
+    }
+
+    #[test]
+    fn a_span_that_cannot_be_split_goes_in_whole() {
+        // A link, and `*` next to `**`, cannot be split.
+        assert_eq!(
+            toggled("a [link text](x) b", 0..7, Format::Bold).0,
+            "**a [link text](x)** b"
+        );
+        assert_eq!(
+            toggled("A **tip with strong** text", 0..5, Format::Italic).0,
+            "*A **tip with strong*** text"
+        );
     }
 
     #[test]
