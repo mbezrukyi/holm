@@ -169,10 +169,29 @@ impl Model {
     /// Returns whether the text changed.
     pub(crate) fn toggle_format(&mut self, format: Format) -> bool {
         let selection = self.selection();
-        if selection.is_empty() {
-            return self.toggle_at_cursor(format);
+        let at_cursor = selection.is_empty();
+        let mut pieces = if at_cursor {
+            // At the cursor in inline code, the style goes around the whole code.
+            match self
+                .code_span_at(self.cursor)
+                .filter(|_| format != Format::Code)
+            {
+                Some(span) => vec![span],
+                None => return self.toggle_at_cursor(format),
+            }
+        } else {
+            self.pieces(&selection)
+        };
+        // Markers inside inline code show as plain text, so an end in code moves out of it.
+        if format != Format::Code {
+            for piece in &mut pieces {
+                let start = self
+                    .code_span_at(piece.start)
+                    .map_or(piece.start, |s| s.start);
+                let end = self.code_span_at(piece.end).map_or(piece.end, |s| s.end);
+                *piece = start.min(piece.start)..end.max(piece.end);
+            }
         }
-        let pieces = self.pieces(&selection);
         if pieces.is_empty() {
             return false;
         }
@@ -229,7 +248,10 @@ impl Model {
         let last = pieces[pieces.len() - 1].end;
         let start = map_offset(&edits, first, Bias::After);
         let end = map_offset(&edits, last, Bias::Before);
-        let ends = if self.is_reversed() {
+        let ends = if at_cursor {
+            let cursor = map_offset(&edits, self.cursor, Bias::After);
+            (cursor, cursor)
+        } else if self.is_reversed() {
             (end, start)
         } else {
             (start, end)
@@ -238,8 +260,16 @@ impl Model {
     }
 
     /// Removes the format of the span around the cursor, or puts in an empty pair of markers.
+    /// In a code block it does nothing.
     fn toggle_at_cursor(&mut self, format: Format) -> bool {
         let cursor = self.cursor;
+        if self
+            .blocks_at(cursor)
+            .iter()
+            .any(|kind| matches!(kind, BlockKind::Code { .. }))
+        {
+            return false;
+        }
         if let Some(styled) = self.styled(format, &(cursor..cursor)) {
             let edits = vec![
                 (
@@ -355,6 +385,28 @@ impl Model {
                         close,
                     })
                 })
+            })
+    }
+
+    /// The source of the inline code span, with its backticks, whose text holds `offset`.
+    fn code_span_at(&self, offset: usize) -> Option<Range<usize>> {
+        let spans = self.body.spans();
+        spans[..spans.partition_point(|s| s.range.start <= offset)]
+            .iter()
+            .rev()
+            .find(|s| s.style == Style::Code && offset <= s.range.end)
+            .map(|s| {
+                let bytes = self.text.as_bytes();
+                let open = bytes[..s.range.start]
+                    .iter()
+                    .rev()
+                    .take_while(|&&b| b == b'`')
+                    .count();
+                let close = bytes[s.range.end..]
+                    .iter()
+                    .take_while(|&&b| b == b'`')
+                    .count();
+                s.range.start - open..s.range.end + close
             })
     }
 
@@ -675,6 +727,37 @@ mod tests {
         let (new, _) = toggled(text, 0..text.len(), Format::Bold);
         assert_eq!(new, "**a**\n```\ncode\n```\n**b**");
         assert!(!model_with(text, 6..10).toggle_format(Format::Bold));
+        assert!(!model_with(text, 8..8).toggle_format(Format::Bold));
+        assert!(!model_with(text, 2..2).toggle_format(Format::Bold));
+    }
+
+    #[test]
+    fn a_format_key_in_inline_code_styles_the_whole_code() {
+        let text = "Also `inline code`, more";
+        // An end of the selection inside the code moves out of it.
+        assert_eq!(
+            toggled(text, 6..19, Format::Highlight).0,
+            "Also ==`inline code`,== more"
+        );
+        assert_eq!(
+            toggled(text, 0..10, Format::Bold).0,
+            "**Also `inline code`**, more"
+        );
+        // A selection or the cursor inside the code styles all of it, and a second key removes it.
+        assert_eq!(
+            toggled(text, 8..12, Format::Highlight).0,
+            "Also ==`inline code`==, more"
+        );
+        let mut model = model_with(text, 9..9);
+        assert!(model.toggle_format(Format::Bold));
+        assert_eq!(model.text(), "Also **`inline code`**, more");
+        assert_eq!(model.selection(), 11..11);
+        assert!(model.toggle_format(Format::Bold));
+        assert_eq!(model.text(), text);
+        // The code key still removes the code.
+        let mut model = model_with(text, 9..9);
+        assert!(model.toggle_format(Format::Code));
+        assert_eq!(model.text(), "Also inline code, more");
     }
 
     #[test]
