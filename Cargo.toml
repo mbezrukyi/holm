@@ -16,9 +16,11 @@ holm-editor = { path = "crates/holm-editor" }
 
 gpui-kit = "=0.9.0"
 pulldown-cmark = { version = "0.13", default-features = false }
+tempfile = "3"
 thiserror = "2"
 tracing = "0.1"
 tracing-appender = "0.2"
+ulid = "3"
 
 divan = "0.1"
 insta = "1"
