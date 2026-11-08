@@ -1,6 +1,6 @@
 //! Note files on disk: listing, reading, safe writes and new ids.
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, Metadata, Permissions};
 use std::io::{self, Write as _};
 use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
@@ -12,9 +12,10 @@ use tempfile::NamedTempFile;
 
 use crate::error::{Error, Result};
 use crate::model::{Note, NoteId, NoteInfo};
+use crate::relink::{Moved, relink};
 
-/// The folder for pasted files. The folder list skips it.
-const ATTACHMENTS: &str = "attachments";
+/// The folder for pasted files at the root. The folder list skips it.
+pub(crate) const ATTACHMENTS: &str = "attachments";
 const NEW_NOTE: &str = "Untitled";
 /// A new file gets these bits before the umask.
 const NEW_FILE_MODE: u32 = 0o666;
@@ -193,12 +194,7 @@ impl Store {
         text.set_id(Some(NoteId::generate().as_str()));
         let mut file = temp_file(&dir, &text.to_string(), None, None)
             .map_err(|source| write_error(&dir, source))?;
-        for n in 1_u32.. {
-            let name = if n == 1 {
-                format!("{NEW_NOTE}.md")
-            } else {
-                format!("{NEW_NOTE} {n}.md")
-            };
+        for name in numbered(OsStr::new(NEW_NOTE), ".md") {
             let path = dir.join(&name);
             match file.persist_noclobber(&path) {
                 Ok(_) => {
@@ -210,6 +206,193 @@ impl Store {
             }
         }
         Err(write_error(&dir, io::ErrorKind::StorageFull.into()))
+    }
+
+    /// Moves the note at `from` to `folder` as `<stem>.md`, or `<stem> 2.md` and so on
+    /// on a clash, and returns its new path. It fixes the relative file links in the note.
+    ///
+    /// The note keeps its modification time and permissions.
+    /// When `from` is one of the names to try, the note stays where it is.
+    pub(crate) fn move_note(&self, from: &Path, folder: &Path, stem: &OsStr) -> Result<PathBuf> {
+        let source = self.note_path(from)?;
+        let dir = self.root.join(plain_path(folder)?);
+        let (old, stamp) = read_text(&source)?;
+        let text = relink(&old, &self.root, folder_of(from), folder, None).unwrap_or(old);
+        let permissions = fs::metadata(&source)
+            .map_err(|e| Error::Read {
+                path: source.clone(),
+                source: e,
+            })?
+            .permissions();
+        let mut file = None;
+        for name in numbered(stem, ".md") {
+            let rel = folder.join(&name);
+            if rel == from {
+                return Ok(rel);
+            }
+            let temp = match file.take() {
+                Some(temp) => temp,
+                None => temp_file(
+                    &dir,
+                    &text,
+                    Some(permissions.clone()),
+                    Some(time(stamp.modified)),
+                )
+                .map_err(|source| write_error(&dir, source))?,
+            };
+            let path = dir.join(&name);
+            match temp.persist_noclobber(&path) {
+                Ok(_) => {
+                    remove(&source)?;
+                    sync_dir(&dir).map_err(|e| write_error(&path, e))?;
+                    sync_dir(folder_abs(&source)).map_err(|e| write_error(&source, e))?;
+                    return Ok(rel);
+                }
+                Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => file = Some(e.file),
+                Err(e) => return Err(write_error(&path, e.error)),
+            }
+        }
+        Err(write_error(&dir, io::ErrorKind::StorageFull.into()))
+    }
+
+    /// Creates the folder `name` in `parent`, or `name 2` and so on on a clash,
+    /// and returns its path.
+    pub(crate) fn create_folder(&self, parent: &Path, name: &str) -> Result<PathBuf> {
+        let parent = plain_path(parent)?;
+        for name in numbered(&folder_name(name)?, "") {
+            let rel = parent.join(name);
+            if rel == Path::new(ATTACHMENTS) {
+                continue;
+            }
+            let path = self.root.join(&rel);
+            match fs::create_dir(&path) {
+                Ok(()) => {
+                    sync_dir(folder_abs(&path)).map_err(|e| write_error(&path, e))?;
+                    return Ok(rel);
+                }
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(e) => return Err(write_error(&path, e)),
+            }
+        }
+        Err(write_error(&self.root, io::ErrorKind::StorageFull.into()))
+    }
+
+    /// Moves the folder `from` to `parent` as `name`, or `name 2` and so on on a clash,
+    /// and returns its new path.
+    ///
+    /// It fixes the relative file links in the notes inside. A note that can't be fixed
+    /// keeps its links, with a log line.
+    pub(crate) fn move_folder(&self, from: &Path, parent: &Path, name: &str) -> Result<PathBuf> {
+        self.check_user_folder(from)?;
+        let parent = plain_path(parent)?;
+        if parent.starts_with(from) {
+            return Err(bad_path(parent));
+        }
+        let source = self.root.join(from);
+        for name in numbered(&folder_name(name)?, "") {
+            let rel = parent.join(name);
+            if rel == from {
+                return Ok(rel);
+            }
+            if rel == Path::new(ATTACHMENTS) {
+                continue;
+            }
+            let path = self.root.join(&rel);
+            // An empty folder takes the name first. The rename then replaces it,
+            // so it never replaces a folder that someone else made.
+            match fs::create_dir(&path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(write_error(&path, e)),
+            }
+            if let Err(e) = fs::rename(&source, &path) {
+                if let Err(error) = fs::remove_dir(&path) {
+                    tracing::warn!(%error, path = %path.display(), "kept an empty folder");
+                }
+                return Err(write_error(&source, e));
+            }
+            sync_dir(folder_abs(&path)).map_err(|e| write_error(&path, e))?;
+            sync_dir(folder_abs(&source)).map_err(|e| write_error(&source, e))?;
+            self.relink_folder(Moved { from, to: &rel })?;
+            return Ok(rel);
+        }
+        Err(write_error(&self.root, io::ErrorKind::StorageFull.into()))
+    }
+
+    /// Deletes the note file at `rel`. A note that is already gone is no error.
+    pub(crate) fn delete_note(&self, rel: &Path) -> Result<()> {
+        let path = self.note_path(rel)?;
+        remove(&path)?;
+        sync_dir(folder_abs(&path)).map_err(|e| write_error(&path, e))
+    }
+
+    /// Deletes the folder `rel` with everything in it. A folder that is already gone is no error.
+    pub(crate) fn delete_folder(&self, rel: &Path) -> Result<()> {
+        if self.entry(rel) == Entry::Missing {
+            return Ok(());
+        }
+        self.check_user_folder(rel)?;
+        let path = self.root.join(rel);
+        fs::remove_dir_all(&path).map_err(|e| write_error(&path, e))?;
+        sync_dir(folder_abs(&path)).map_err(|e| write_error(&path, e))
+    }
+
+    /// Deletes the file at `rel` when [`Store::is_attachment`] allows it.
+    pub(crate) fn delete_attachment(&self, rel: &Path) -> Result<()> {
+        if self.is_attachment(rel) {
+            remove(&self.root.join(rel))?;
+        }
+        Ok(())
+    }
+
+    /// Whether `rel` is a file in `attachments/` that is not a note.
+    /// A symlink counts as a file. No folder on the way may be a symlink.
+    pub(crate) fn is_attachment(&self, rel: &Path) -> bool {
+        rel.starts_with(ATTACHMENTS)
+            && plain_path(rel).is_ok()
+            && self.entry(rel) == Entry::Other
+            && fs::symlink_metadata(self.root.join(rel)).is_ok_and(|meta| !meta.is_dir())
+    }
+
+    /// Checks that `rel` is a folder that the user may move or delete:
+    /// a real folder that is not the root and not `attachments/`.
+    fn check_user_folder(&self, rel: &Path) -> Result<()> {
+        plain_path(rel)?;
+        if rel.as_os_str().is_empty() || rel == Path::new(ATTACHMENTS) {
+            return Err(bad_path(rel));
+        }
+        match self.entry(rel) {
+            Entry::Folder => Ok(()),
+            Entry::Missing => Err(Error::Read {
+                path: self.root.join(rel),
+                source: io::ErrorKind::NotFound.into(),
+            }),
+            Entry::Note(_) | Entry::Other => Err(Error::Read {
+                path: self.root.join(rel),
+                source: io::ErrorKind::NotADirectory.into(),
+            }),
+        }
+    }
+
+    /// Fixes the relative file links of each note inside a folder that moved.
+    fn relink_folder(&self, moved: Moved<'_>) -> Result<()> {
+        for (rel, _) in self.files(moved.to)? {
+            let Ok(inside) = rel.strip_prefix(moved.to) else {
+                continue;
+            };
+            let old_folder = moved.from.join(folder_of(inside));
+            let path = self.root.join(&rel);
+            let fixed = read_text(&path).and_then(|(old, stamp)| {
+                match relink(&old, &self.root, &old_folder, folder_of(&rel), Some(moved)) {
+                    Some(new) => write(&path, &old, &new, Some(stamp)),
+                    None => Ok(()),
+                }
+            });
+            if let Err(error) = fixed {
+                tracing::warn!(%error, "kept the file links of a moved note");
+            }
+        }
+        Ok(())
     }
 
     /// Calls `visit` with the relative path of each note and subfolder below the folder `start`.
@@ -287,6 +470,44 @@ fn note(rel: &Path, text: &Text, stamp: Stamp) -> Note {
             modified: time(stamp.modified),
         },
         body: text.body().to_owned(),
+    }
+}
+
+/// The folder of a note or folder path. The root folder is the empty path.
+pub(crate) fn folder_of(rel: &Path) -> &Path {
+    rel.parent().unwrap_or(Path::new(""))
+}
+
+fn folder_abs(path: &Path) -> &Path {
+    path.parent().unwrap_or(Path::new("/"))
+}
+
+/// `stem` + `ext`, then `stem 2` + `ext`, `stem 3` + `ext` and so on.
+fn numbered(stem: &OsStr, ext: &str) -> impl Iterator<Item = OsString> {
+    (1_u32..).map(move |n| {
+        let mut name = stem.to_owned();
+        if n > 1 {
+            name.push(format!(" {n}"));
+        }
+        name.push(ext);
+        name
+    })
+}
+
+/// A folder name from what the user typed, cleaned like a note file name.
+fn folder_name(name: &str) -> Result<OsString> {
+    let name = holm_markdown::file_stem(name.trim());
+    if name.is_empty() {
+        return Err(bad_path(Path::new(&name)));
+    }
+    Ok(name.into())
+}
+
+/// Deletes the file at `path`. A file that is already gone is no error.
+fn remove(path: &Path) -> Result<()> {
+    match fs::remove_file(path) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(write_error(path, e)),
+        _ => Ok(()),
     }
 }
 

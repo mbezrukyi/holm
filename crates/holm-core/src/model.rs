@@ -107,6 +107,15 @@ pub enum LinkTarget {
     Web(String),
 }
 
+/// What a delete removes, for the delete dialog.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DeleteCount {
+    /// How many notes.
+    pub notes: usize,
+    /// How many files in `attachments/` that no other note links.
+    pub attachments: usize,
+}
+
 /// One change to the notes folder that came from outside Holm, from [`Changes`](crate::Changes).
 ///
 /// Saves through [`Core`](crate::Core) never come back as changes.

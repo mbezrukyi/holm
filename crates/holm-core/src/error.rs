@@ -29,10 +29,10 @@ pub enum Error {
         /// The cause.
         source: std::str::Utf8Error,
     },
-    /// A note file could not be written.
+    /// A file or a folder could not be written, moved or deleted.
     #[error("cannot write {path}")]
     Write {
-        /// The note file.
+        /// The file or folder.
         path: PathBuf,
         /// The cause.
         source: io::Error,
@@ -46,6 +46,7 @@ pub enum Error {
         source: Box<dyn std::error::Error + Send + Sync>,
     },
     /// The path is absolute, leaves the notes folder, is hidden, or is not a `.md` file.
+    /// Also a folder that Holm does not let the user move or delete, or an empty name.
     #[error("{path} is not a note or a folder inside the notes folder")]
     BadPath {
         /// The path as the caller gave it.

@@ -8,7 +8,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
 use holm_markdown::{Body, Target};
@@ -17,7 +17,8 @@ use rusqlite::{Connection, ErrorCode, OptionalExtension as _, params, params_fro
 
 use crate::error::{Error, Result};
 use crate::model::{Change, Link, LinkTarget, Note, NoteId, NoteInfo, Order, Tag};
-use crate::store::{Stamp, Store, time};
+use crate::relink::resolve;
+use crate::store::{ATTACHMENTS, Stamp, Store, folder_of, time};
 
 const FILE: &str = "index.sqlite";
 /// Change this number with each change to [`SCHEMA`]. An index with another number is rebuilt.
@@ -84,6 +85,15 @@ pub(crate) struct Refresh {
     pub(crate) notes: Vec<Change>,
     /// Whether the tag tree changed.
     pub(crate) tags: bool,
+}
+
+/// What [`Index::removal`] found.
+#[derive(Debug)]
+pub(crate) struct Removal {
+    /// How many notes the delete removes.
+    pub(crate) notes: usize,
+    /// The attachment files that no other note links.
+    pub(crate) files: Vec<PathBuf>,
 }
 
 /// The index file and one connection to it.
@@ -197,6 +207,34 @@ impl Index {
     /// The empty path is the whole notes folder. No scope may be inside another.
     pub(crate) fn refresh(&self, store: &Store, scopes: &[PathBuf]) -> Result<Refresh> {
         self.run(store, |conn| sync(conn, store, scopes))
+    }
+
+    /// What a delete of `scope` removes: a note path, or a folder with all its notes.
+    ///
+    /// The files are the ones in `attachments/` that the notes in `scope` link
+    /// and no note outside `scope` links. They may be missing on disk.
+    pub(crate) fn removal(&self, store: &Store, scope: &Path) -> Result<Removal> {
+        let mut prefix = scope.as_os_str().as_bytes().to_vec();
+        prefix.push(b'/');
+        let attachments = format!("{ATTACHMENTS}/").into_bytes();
+        self.run(store, |conn| {
+            let notes = known_in(conn, scope)?.len();
+            let mut statement = conn.prepare_cached(
+                "SELECT DISTINCT links.target FROM links JOIN notes ON notes.key = links.note
+                WHERE links.kind = 'file' AND substr(links.target, 1, length(?3)) = ?3
+                    AND (notes.path = ?1 OR substr(notes.path, 1, length(?2)) = ?2)
+                    AND NOT EXISTS (
+                        SELECT 1 FROM links AS other JOIN notes AS owner ON owner.key = other.note
+                        WHERE other.kind = 'file' AND other.target = links.target
+                            AND owner.path != ?1 AND substr(owner.path, 1, length(?2)) != ?2)
+                ORDER BY links.target",
+            )?;
+            let rows = statement.query_map(params![bytes(scope), prefix, attachments], |row| {
+                Ok(path(row.get(0)?))
+            })?;
+            let files = rows.collect::<rusqlite::Result<_>>()?;
+            Ok(Removal { notes, files })
+        })
     }
 
     /// Runs `op`. When SQLite finds the index broken, it rebuilds the index and runs `op` again.
@@ -476,7 +514,7 @@ fn owner(conn: &Connection, id: &NoteId) -> Result<Option<PathBuf>, Fail> {
 
 fn write(conn: &Connection, root: &Path, note: &Note, stamp: Stamp) -> Result<(), Fail> {
     let info = &note.info;
-    let folder = info.path.parent().unwrap_or(Path::new(""));
+    let folder = folder_of(&info.path);
     let key: i64 = conn
         .prepare_cached(
             "INSERT INTO notes (path, folder, id, title, pinned, modified, changed, size)
@@ -519,7 +557,7 @@ fn write(conn: &Connection, root: &Path, note: &Note, stamp: Stamp) -> Result<()
         let (kind, target, heading) = match &link.target {
             Target::Note { id, heading } => ("note", Value::Text(id.clone()), heading.as_deref()),
             Target::Heading(heading) => ("heading", Value::Text(heading.clone()), None),
-            Target::File(file) => ("file", bytes(&resolve(root, &info.path, file)), None),
+            Target::File(file) => ("file", bytes(&resolve(root, folder, file)), None),
             Target::Web(address) => ("web", Value::Text(address.clone()), None),
         };
         add_link.execute(params![key, pos, kind, target, heading, link.embedded])?;
@@ -548,30 +586,6 @@ fn delete(conn: &Connection, rel: &Path) -> Result<Option<Gone>, Fail> {
         id: id.map(NoteId::from_field),
         tags,
     }))
-}
-
-/// The path of a linked file: relative to the notes folder when it is inside it, else absolute.
-fn resolve(root: &Path, note: &Path, file: &str) -> PathBuf {
-    let file = Path::new(file);
-    let full = if file.is_absolute() {
-        file.to_owned()
-    } else {
-        root.join(note.parent().unwrap_or(Path::new(""))).join(file)
-    };
-    let mut clean = PathBuf::new();
-    for part in full.components() {
-        match part {
-            Component::ParentDir => {
-                clean.pop();
-            }
-            Component::CurDir => {}
-            part => clean.push(part),
-        }
-    }
-    match clean.strip_prefix(root) {
-        Ok(rel) => rel.to_owned(),
-        Err(_) => clean,
-    }
 }
 
 /// Turns the words the user typed into an FTS5 query. Each word matches as a prefix.
