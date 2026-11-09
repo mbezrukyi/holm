@@ -32,14 +32,58 @@ fn main() {}
 
 ";
 
+/// Plain prose: paragraphs of many lines with few marks.
+const PROSE: &str = "We walked to the old mill by the river and sat on the stone wall for an hour.
+The water was low, and the wheel did not turn. A man with a dog came by and told us
+the mill closed when he was a boy. He said the miller's family still lives in the town,
+in the yellow house next to the bakery, and they keep the key to the door.
+
+On the way back we stopped at the bakery and bought bread for the week.
+
+";
+
+/// Quotes, lists and tables, with a little inline syntax.
+const BLOCKS: &str = "> A quote with *one* mark
+> that runs over two lines.
+
+- first item
+- second item with `code`
+  - nested item
+1. one
+2. two
+
+| Name | Size | Note |
+|:-----|-----:|------|
+| a    | 1    | **big** |
+| b    | 2    | small |
+
+";
+
+/// About 1 MB of `part`, one after another.
+fn one_mb(part: &str) -> String {
+    part.repeat(1_000_000 / part.len() + 1)
+}
+
 /// About 1 MB of [`CHUNK`] parts, one after another.
 fn one_mb_note() -> String {
-    CHUNK.repeat(1_000_000 / CHUNK.len() + 1)
+    one_mb(CHUNK)
 }
 
 #[divan::bench]
 fn parse_1_mb(bencher: divan::Bencher<'_, '_>) {
     let text = one_mb_note();
+    bencher.bench(|| Body::parse(divan::black_box(&text)));
+}
+
+#[divan::bench]
+fn parse_1_mb_prose(bencher: divan::Bencher<'_, '_>) {
+    let text = one_mb(PROSE);
+    bencher.bench(|| Body::parse(divan::black_box(&text)));
+}
+
+#[divan::bench]
+fn parse_1_mb_blocks(bencher: divan::Bencher<'_, '_>) {
+    let text = one_mb(BLOCKS);
     bencher.bench(|| Body::parse(divan::black_box(&text)));
 }
 
