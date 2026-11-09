@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc baaf3f6827f052143cc3ec5220adb100a7ff67ead4ddaf3de3cd868a8515d614 # shrinks to (old, range, new) = ("Setext\nSome *text*\nSome *text*\n```\nSome *text*\nSome *text*\nSome *text*\n \n", 0..0, "")
+cc 8efd2cf7e5191f36964775613e9edddbdcb42fe40e196a71b020453f0eda02bb # shrinks to (old, range, new) = ("[a]: /x\n\n> a quote\n \n> a quote\n\nA [link][a] and ==mark==\n\n  - nested\n \n> a quote\n\n", 35..39, "\n")

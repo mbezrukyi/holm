@@ -103,3 +103,17 @@ fn pulldown_cmark_only(bencher: divan::Bencher<'_, '_>) {
             .count()
     });
 }
+
+/// One char typed in the middle of the note and removed again: two calls of [`Body::reparse`].
+#[divan::bench]
+fn reparse_after_one_key(bencher: divan::Bencher<'_, '_>) {
+    let mut text = one_mb_note();
+    let mut body = Body::parse(&text);
+    let at = text.floor_char_boundary(text.len() / 2);
+    bencher.bench_local(|| {
+        text.insert(at, 'a');
+        body.reparse(divan::black_box(&text), at..at, 1);
+        text.remove(at);
+        body.reparse(divan::black_box(&text), at..at + 1, 0);
+    });
+}

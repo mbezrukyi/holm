@@ -13,6 +13,11 @@ pub use link::Target;
 
 use crate::inline::{Defs, Destination, Kind, Leaf, Node, Scratch};
 
+const OPTIONS: Options = Options::ENABLE_TABLES
+    .union(Options::ENABLE_TASKLISTS)
+    .union(Options::ENABLE_STRIKETHROUGH)
+    .union(Options::ENABLE_GFM);
+
 /// A parsed note body, for live preview and for the index.
 ///
 /// Every range is a byte range in the parsed text, and lies on char boundaries.
@@ -34,6 +39,10 @@ pub struct Body {
     headings: Vec<Heading>,
     leaves: Vec<Leaf>,
     defs: Defs,
+    /// The source of each link reference definition, sorted.
+    def_ranges: Vec<Range<usize>>,
+    /// The length of the parsed text.
+    len: usize,
 }
 
 /// One block of the body, with the blocks inside it.
@@ -202,20 +211,128 @@ pub struct Heading {
 impl Body {
     /// Parses a note body: the text after the frontmatter. It never fails.
     pub fn parse(text: &str) -> Self {
-        let options = Options::ENABLE_TABLES
-            | Options::ENABLE_TASKLISTS
-            | Options::ENABLE_STRIKETHROUGH
-            | Options::ENABLE_GFM;
-        let mut walker = Walker::new(text);
+        let events = Parser::new_ext(text, OPTIONS).into_offset_iter();
         // The parser reads the link definitions before the first event.
-        let events = Parser::new_ext(text, options).into_offset_iter();
+        let mut defs = Defs::default();
+        let mut def_ranges = Vec::new();
         for (label, def) in events.reference_definitions().iter() {
-            walker.body.defs.insert(label, def.dest.to_string());
+            defs.insert(label, def.dest.to_string());
+            def_ranges.push(def.span.clone());
         }
+        def_ranges.sort_unstable_by_key(|range| range.start);
+        let mut walker = Walker::new(text, defs);
         for (event, range) in events {
             walker.event(event, range);
         }
-        walker.finish()
+        let mut body = walker.finish();
+        body.def_ranges = def_ranges;
+        body
+    }
+
+    /// Parses `text` again after an edit, with the same result as [`Body::parse`].
+    ///
+    /// `text` is the text of this body with the bytes in `old` replaced by `new_len` bytes. Only
+    /// the blocks near the edit are parsed again. An edit that can change blocks far away, like
+    /// an open code fence or a link definition, gets a full parse. So does an edit that does not
+    /// fit the old text.
+    pub fn reparse(&mut self, text: &str, old: Range<usize>, new_len: usize) {
+        if !self.reparse_part(text, old, new_len) {
+            *self = Self::parse(text);
+        }
+    }
+
+    /// Parses again only the top level blocks near the edit. Returns `false`, with the body
+    /// unchanged, when that can give a result other than a full parse.
+    ///
+    /// The part starts after a blank line before the edit. There the parser is in the same state
+    /// as at the start of a text. The part ends with the first block after the edit. When that
+    /// block comes out the same, the parser is in the same state after it as before the edit.
+    fn reparse_part(&mut self, text: &str, old: Range<usize>, new_len: usize) -> bool {
+        let fits = old.start <= old.end
+            && old.end <= self.len
+            && self.len - old.len() + new_len == text.len()
+            && text.is_char_boundary(old.start)
+            && text.is_char_boundary(old.start + new_len);
+        if !fits {
+            return false;
+        }
+        let new_end = old.start + new_len;
+        let moved = |at: usize| at + new_len - old.len();
+        let blocks = &self.blocks;
+
+        // Blocks before `old.start` keep the old text, so `text` has their gaps too.
+        let mut first = blocks
+            .partition_point(|block| block.range.end < old.start)
+            .saturating_sub(1);
+        while first > 0
+            && !is_blank_gap(&text[blocks[first - 1].range.end..blocks[first].range.start])
+        {
+            first -= 1;
+        }
+        let start = if first == 0 {
+            0
+        } else {
+            line_start(text, blocks[first].range.start)
+        };
+
+        // The first block whose whole line comes after the edit.
+        let mut last = blocks.partition_point(|block| block.range.start <= old.end);
+        while last < blocks.len() && line_start(text, moved(blocks[last].range.start)) <= new_end {
+            last += 1;
+        }
+        // The part keeps the line breaks after its last block, as the full text has them.
+        let (old_stop, stop) = match blocks.get(last + 1) {
+            Some(next) => {
+                let stop = line_start(text, moved(next.range.start));
+                (stop + old.len() - new_len, stop)
+            }
+            None => (self.len, text.len()),
+        };
+        let old_defs = self.def_ranges.partition_point(|range| range.start < start)
+            ..self
+                .def_ranges
+                .partition_point(|range| range.start < old_stop);
+        if !old_defs.is_empty() {
+            return false;
+        }
+
+        let part = &text[start..stop];
+        let events = Parser::new_ext(part, OPTIONS).into_offset_iter();
+        if events.reference_definitions().iter().next().is_some() {
+            return false;
+        }
+        let mut walker = Walker::new(part, std::mem::take(&mut self.defs));
+        for (event, range) in events {
+            walker.event(event, range);
+        }
+        let mut new = walker.finish();
+        self.defs = std::mem::take(&mut new.defs);
+        new.shift(&|at| at + start);
+
+        let same_end = match self.blocks.get(last) {
+            Some(block) => new.blocks.last().is_some_and(|end| {
+                let mut block = block.clone();
+                block.shift(&moved);
+                *end == block
+            }),
+            None => true,
+        };
+        if !same_end {
+            return false;
+        }
+
+        let blocks_end = (last + 1).min(self.blocks.len());
+        splice(&mut self.blocks, first..blocks_end, new.blocks, &moved);
+        replace(&mut self.spans, new.spans, start..old_stop, &moved);
+        replace(&mut self.hidden, new.hidden, start..old_stop, &moved);
+        replace(&mut self.links, new.links, start..old_stop, &moved);
+        replace(&mut self.headings, new.headings, start..old_stop, &moved);
+        replace(&mut self.leaves, new.leaves, start..old_stop, &moved);
+        for range in &mut self.def_ranges[old_defs.end..] {
+            range.shift(&moved);
+        }
+        self.len = text.len();
+        true
     }
 
     /// The top level blocks, in order.
@@ -230,8 +347,8 @@ impl Body {
 
     /// The inline tree of `leaf`, in source offsets. `text` is the parsed text.
     ///
-    /// The body keeps no trees, because a full parse runs after each edit. Many small trees are
-    /// slow to free. This call parses the leaf again.
+    /// The body keeps no trees, because many small trees are slow to free. This call parses the
+    /// leaf again.
     pub fn inline(&self, text: &str, leaf: &Leaf) -> Vec<Node> {
         leaf.tree(text, &self.defs)
     }
@@ -261,6 +378,141 @@ impl Body {
     pub(crate) fn defs(&self) -> &Defs {
         &self.defs
     }
+
+    /// Moves every range by `to`.
+    fn shift(&mut self, to: &impl Fn(usize) -> usize) {
+        for block in &mut self.blocks {
+            block.shift(to);
+        }
+        for list in [&mut self.hidden, &mut self.def_ranges] {
+            for range in list {
+                range.shift(to);
+            }
+        }
+        self.spans.iter_mut().for_each(|span| span.shift(to));
+        self.links.iter_mut().for_each(|link| link.shift(to));
+        self.headings
+            .iter_mut()
+            .for_each(|heading| heading.shift(to));
+        self.leaves.iter_mut().for_each(|leaf| leaf.shift(to));
+    }
+}
+
+/// A part of a body with source offsets, which an edit can move.
+trait Moves {
+    fn start(&self) -> usize;
+    fn shift(&mut self, to: &impl Fn(usize) -> usize);
+}
+
+impl Moves for Range<usize> {
+    fn start(&self) -> usize {
+        self.start
+    }
+
+    fn shift(&mut self, to: &impl Fn(usize) -> usize) {
+        *self = to(self.start)..to(self.end);
+    }
+}
+
+impl Moves for Block {
+    fn start(&self) -> usize {
+        self.range.start
+    }
+
+    fn shift(&mut self, to: &impl Fn(usize) -> usize) {
+        self.range.shift(to);
+        if let BlockKind::Item { task: Some(task) } = &mut self.kind {
+            task.range.shift(to);
+        }
+        for child in &mut self.children {
+            child.shift(to);
+        }
+    }
+}
+
+impl Moves for Span {
+    fn start(&self) -> usize {
+        self.range.start
+    }
+
+    fn shift(&mut self, to: &impl Fn(usize) -> usize) {
+        self.range.shift(to);
+    }
+}
+
+impl Moves for Link {
+    fn start(&self) -> usize {
+        self.range.start
+    }
+
+    fn shift(&mut self, to: &impl Fn(usize) -> usize) {
+        self.range.shift(to);
+        if let Some(range) = &mut self.target_range {
+            range.shift(to);
+        }
+    }
+}
+
+impl Moves for Heading {
+    fn start(&self) -> usize {
+        self.range.start
+    }
+
+    fn shift(&mut self, to: &impl Fn(usize) -> usize) {
+        self.range.shift(to);
+    }
+}
+
+impl Moves for Leaf {
+    fn start(&self) -> usize {
+        self.range().start
+    }
+
+    fn shift(&mut self, to: &impl Fn(usize) -> usize) {
+        Leaf::shift(self, to);
+    }
+}
+
+/// Puts `new` in place of the items in `range` of a list sorted by start, and moves the items
+/// after them by `to`.
+fn replace<T: Moves>(
+    list: &mut Vec<T>,
+    new: Vec<T>,
+    range: Range<usize>,
+    to: &impl Fn(usize) -> usize,
+) {
+    let lo = list.partition_point(|item| item.start() < range.start);
+    let hi = list.partition_point(|item| item.start() < range.end);
+    splice(list, lo..hi, new, to);
+}
+
+/// Puts `new` in place of `list[range]`, and moves the items after them by `to`.
+fn splice<T: Moves>(
+    list: &mut Vec<T>,
+    range: Range<usize>,
+    new: Vec<T>,
+    to: &impl Fn(usize) -> usize,
+) {
+    let after = range.start + new.len();
+    list.splice(range, new);
+    for item in &mut list[after..] {
+        item.shift(to);
+    }
+}
+
+/// Whether the source between two top level blocks is only white space, with a blank line.
+fn is_blank_gap(gap: &str) -> bool {
+    let breaks =
+        gap.matches('\n').count() + gap.matches('\r').count() - gap.matches("\r\n").count();
+    breaks >= 2
+        && gap
+            .bytes()
+            .all(|b| matches!(b, b' ' | b'\t' | b'\n' | b'\r'))
+}
+
+/// The start of the line at `at`.
+fn line_start(text: &str, at: usize) -> usize {
+    text[..at].rfind(['\n', '\r']).map_or(0, |i| i + 1)
 }
 
 /// An open block tag while the walker reads its children.
@@ -285,18 +537,12 @@ struct OpenLeaf {
     heading: Option<usize>,
     first: usize,
     last: usize,
-    /// Where the inline events start, except line breaks.
-    starts: Vec<usize>,
-    /// Code spans and HTML tags that hold a line break.
-    long: Vec<Range<usize>>,
 }
 
 struct Walker<'a> {
     text: &'a str,
     frames: Vec<Frame>,
     leaf: Option<OpenLeaf>,
-    /// The `starts` buffer of the last leaf, kept for the next one.
-    starts: Vec<usize>,
     /// The lines of the last leaf, kept for the next one.
     segments: Vec<Range<usize>>,
     scratch: Scratch,
@@ -306,22 +552,25 @@ struct Walker<'a> {
 }
 
 impl<'a> Walker<'a> {
-    fn new(text: &'a str) -> Self {
+    fn new(text: &'a str, defs: Defs) -> Self {
         Self {
             text,
             frames: Vec::new(),
             leaf: None,
-            starts: Vec::new(),
             segments: Vec::new(),
             scratch: Scratch::default(),
             inline_hidden: Vec::new(),
-            body: Body::default(),
+            body: Body {
+                defs,
+                len: text.len(),
+                ..Body::default()
+            },
         }
     }
 
     fn event(&mut self, event: Event<'_>, range: Range<usize>) {
         match event {
-            Event::Start(tag) if is_inline_tag(&tag) => self.inline(&range, true),
+            Event::Start(tag) if is_inline_tag(&tag) => self.inline(&range),
             Event::End(end) if is_inline_end(end) => self.touch(&range),
             Event::Start(tag) => self.start(tag, range),
             Event::End(_) => self.end(),
@@ -335,22 +584,13 @@ impl<'a> Walker<'a> {
                 };
                 self.push_block(block);
             }
-            Event::SoftBreak | Event::HardBreak => self.inline(&range, false),
             Event::Html(_) => self.touch(&range),
-            Event::Code(_) | Event::InlineHtml(_) => {
-                self.inline(&range, true);
-                if let Some(leaf) = &mut self.leaf
-                    && self.text[range.clone()].contains(['\n', '\r'])
-                {
-                    leaf.long.push(range);
-                }
-            }
-            _ => self.inline(&range, true),
+            _ => self.inline(&range),
         }
     }
 
-    /// Notes an inline event. `start` says whether its start can begin a line of the leaf.
-    fn inline(&mut self, range: &Range<usize>, start: bool) {
+    /// Notes an inline event.
+    fn inline(&mut self, range: &Range<usize>) {
         self.touch(range);
         if range.is_empty() {
             return;
@@ -370,8 +610,6 @@ impl<'a> Walker<'a> {
                 heading: None,
                 first: range.start,
                 last: range.end,
-                starts: std::mem::take(&mut self.starts),
-                long: Vec::new(),
             });
         }
         let Some(leaf) = &mut self.leaf else {
@@ -379,9 +617,6 @@ impl<'a> Walker<'a> {
         };
         leaf.first = leaf.first.min(range.start);
         leaf.last = leaf.last.max(range.end);
-        if start {
-            leaf.starts.push(range.start);
-        }
     }
 
     fn start(&mut self, tag: Tag<'_>, range: Range<usize>) {
@@ -446,8 +681,6 @@ impl<'a> Walker<'a> {
                 heading: heading.then(|| self.body.headings.len() - 1),
                 first: usize::MAX,
                 last: 0,
-                starts: std::mem::take(&mut self.starts),
-                long: Vec::new(),
             });
         }
     }
@@ -486,25 +719,17 @@ impl<'a> Walker<'a> {
     }
 
     fn close_leaf(&mut self) {
-        let Some(mut leaf) = self.leaf.take() else {
+        let Some(leaf) = self.leaf.take() else {
             return;
         };
         if leaf.first < leaf.last {
             self.segments.clear();
-            segments(
-                self.text,
-                leaf.first..leaf.last,
-                &mut leaf.starts,
-                &leaf.long,
-                &mut self.segments,
-            );
+            segments(self.text, leaf.first..leaf.last, &mut self.segments);
             self.parse_leaf(
                 Leaf::new(self.text, &self.segments, leaf.table),
                 leaf.heading,
             );
         }
-        leaf.starts.clear();
-        self.starts = leaf.starts;
     }
 
     /// Adds the inline syntax of `leaf` to the body. A heading also gets its plain text.
@@ -799,18 +1024,10 @@ fn is_break(b: u8) -> bool {
 }
 
 /// Adds the source of each line of the leaf in `range` to `segments`. Line breaks, quote
-/// markers and indents are not in it. The first inline event on a line shows where its text
-/// starts. A line can start inside a `long` event. Then the quote markers and spaces at its
-/// start are skipped.
-fn segments(
-    text: &str,
-    range: Range<usize>,
-    starts: &mut [usize],
-    long: &[Range<usize>],
-    segments: &mut Vec<Range<usize>>,
-) {
+/// markers and indents are not in it. A paragraph line never starts with `>`, because that
+/// starts a quote. So the `>`, spaces and tabs at the start of a line are never text.
+fn segments(text: &str, range: Range<usize>, segments: &mut Vec<Range<usize>>) {
     let (first, last) = (range.start, range.end);
-    starts.sort_unstable();
     let b = text.as_bytes();
     // An escaped char starts its own text event, right after the backslash.
     let mut line = if first > 0 && b[first - 1] == b'\\' {
@@ -830,26 +1047,11 @@ fn segments(
         } else {
             brk + 1
         };
-        let line_end = b[next..last]
+        let prefix = b[next..last]
             .iter()
-            .position(|&c| is_break(c))
-            .map_or(last, |i| next + i);
-        let k = starts.partition_point(|&s| s < next);
-        let inside = long.iter().any(|r| r.start < next && next < r.end);
-        let mut start = match starts.get(k) {
-            Some(&s) if s <= line_end && !inside => s,
-            _ => {
-                let prefix = b[next..line_end]
-                    .iter()
-                    .take_while(|&&c| matches!(c, b' ' | b'\t' | b'>'))
-                    .count();
-                next + prefix
-            }
-        };
-        if start > next && b[start - 1] == b'\\' {
-            start -= 1;
-        }
-        line = start;
+            .take_while(|&&c| matches!(c, b' ' | b'\t' | b'>'))
+            .count();
+        line = next + prefix;
     }
 }
 

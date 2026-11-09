@@ -1,0 +1,36 @@
+---
+source: crates/holm-markdown/tests/bodies.rs
+expression: report(&text)
+input_file: crates/holm-markdown/tests/bodies/links-across-lines.md
+---
+--- blocks ---
+Paragraph 0..87 "A [\n][a] link and a [link\n](holm:01JC3X0000000000000000000A) that end on the next line."
+Quote 89..120 "> A [quote\n> link](#Plans) too."
+  Paragraph 91..120 "A [quote\n> link](#Plans) too."
+--- spans ---
+Link 3..4 "\n"
+Link 21..26 "link\n"
+Link 94..106 "quote\n> link"
+--- hidden ---
+2..3 "["
+4..8 "][a]"
+20..21 "["
+26..60 "](holm:01JC3X0000000000000000000A)"
+89..91 "> "
+93..94 "["
+100..102 "> "
+106..115 "](#Plans)"
+--- links ---
+2..8 "[\n][a]"
+  target: File("/x")
+  target range: None
+  embedded: false
+20..60 "[link\n](holm:01JC3X0000000000000000000A)"
+  target: Note { id: "01JC3X0000000000000000000A", heading: None }
+  target range: Some("28..59 \"holm:01JC3X0000000000000000000A\"")
+  embedded: false
+93..115 "[quote\n> link](#Plans)"
+  target: Heading("Plans")
+  target range: Some("108..114 \"#Plans\"")
+  embedded: false
+--- headings ---

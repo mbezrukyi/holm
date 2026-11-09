@@ -163,6 +163,14 @@ impl Leaf {
         self.range.clone()
     }
 
+    /// Moves every source offset by `to`.
+    pub(crate) fn shift(&mut self, to: &impl Fn(usize) -> usize) {
+        self.range = to(self.range.start)..to(self.range.end);
+        for line in &mut self.lines {
+            line.source = to(line.source.start)..to(line.source.end);
+        }
+    }
+
     /// Whether the leaf is a table cell.
     pub(crate) fn is_table_cell(&self) -> bool {
         self.table
