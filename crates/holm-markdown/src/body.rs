@@ -245,8 +245,9 @@ impl Body {
     /// unchanged, when that can give a result other than a full parse.
     ///
     /// The part starts after a blank line before the edit. There the parser is in the same state
-    /// as at the start of a text. The part ends with the first block after the edit. When that
-    /// block comes out the same, the parser is in the same state after it as before the edit.
+    /// as at the start of a text. The part ends with the first block after the edit, and the line
+    /// breaks after that block. When that block comes out the same, the parser is in the same
+    /// state after it as before the edit.
     fn reparse_part(&mut self, text: &str, old: Range<usize>, new_len: usize) -> bool {
         let fits = old.start <= old.end
             && old.end <= self.len
@@ -276,40 +277,37 @@ impl Body {
         };
 
         // The first block whose whole line comes after the edit.
-        let mut last = blocks.partition_point(|block| block.range.start <= old.end);
-        while last < blocks.len() && line_start(text, moved(blocks[last].range.start)) <= new_end {
-            last += 1;
+        let mut after = blocks.partition_point(|block| block.range.start <= old.end);
+        while after < blocks.len() && line_start(text, moved(blocks[after].range.start)) <= new_end
+        {
+            after += 1;
         }
-        // The part keeps the line breaks after its last block, as the full text has them.
-        let (old_stop, stop) = match blocks.get(last + 1) {
+        let (old_stop, stop) = match blocks.get(after + 1) {
             Some(next) => {
                 let stop = line_start(text, moved(next.range.start));
                 (stop + old.len() - new_len, stop)
             }
             None => (self.len, text.len()),
         };
-        let old_defs = self.def_ranges.partition_point(|range| range.start < start)
-            ..self
-                .def_ranges
-                .partition_point(|range| range.start < old_stop);
-        if !old_defs.is_empty() {
+        let defs_after = self
+            .def_ranges
+            .partition_point(|range| range.start < old_stop);
+        if self.def_ranges.partition_point(|range| range.start < start) != defs_after {
             return false;
         }
 
-        let part = &text[start..stop];
-        let events = Parser::new_ext(part, OPTIONS).into_offset_iter();
+        let events = Parser::new_ext(&text[start..stop], OPTIONS).into_offset_iter();
         if events.reference_definitions().iter().next().is_some() {
             return false;
         }
-        let mut walker = Walker::new(part, std::mem::take(&mut self.defs));
+        let mut walker = Walker::new(text, std::mem::take(&mut self.defs));
         for (event, range) in events {
-            walker.event(event, range);
+            walker.event(event, range.start + start..range.end + start);
         }
         let mut new = walker.finish();
         self.defs = std::mem::take(&mut new.defs);
-        new.shift(&|at| at + start);
 
-        let same_end = match self.blocks.get(last) {
+        let same_end = match self.blocks.get(after) {
             Some(block) => new.blocks.last().is_some_and(|end| {
                 let mut block = block.clone();
                 block.shift(&moved);
@@ -321,14 +319,14 @@ impl Body {
             return false;
         }
 
-        let blocks_end = (last + 1).min(self.blocks.len());
+        let blocks_end = (after + 1).min(self.blocks.len());
         splice(&mut self.blocks, first..blocks_end, new.blocks, &moved);
         replace(&mut self.spans, new.spans, start..old_stop, &moved);
         replace(&mut self.hidden, new.hidden, start..old_stop, &moved);
         replace(&mut self.links, new.links, start..old_stop, &moved);
         replace(&mut self.headings, new.headings, start..old_stop, &moved);
         replace(&mut self.leaves, new.leaves, start..old_stop, &moved);
-        for range in &mut self.def_ranges[old_defs.end..] {
+        for range in &mut self.def_ranges[defs_after..] {
             range.shift(&moved);
         }
         self.len = text.len();
@@ -377,24 +375,6 @@ impl Body {
 
     pub(crate) fn defs(&self) -> &Defs {
         &self.defs
-    }
-
-    /// Moves every range by `to`.
-    fn shift(&mut self, to: &impl Fn(usize) -> usize) {
-        for block in &mut self.blocks {
-            block.shift(to);
-        }
-        for list in [&mut self.hidden, &mut self.def_ranges] {
-            for range in list {
-                range.shift(to);
-            }
-        }
-        self.spans.iter_mut().for_each(|span| span.shift(to));
-        self.links.iter_mut().for_each(|link| link.shift(to));
-        self.headings
-            .iter_mut()
-            .for_each(|heading| heading.shift(to));
-        self.leaves.iter_mut().for_each(|leaf| leaf.shift(to));
     }
 }
 
@@ -502,12 +482,17 @@ fn splice<T: Moves>(
 
 /// Whether the source between two top level blocks is only white space, with a blank line.
 fn is_blank_gap(gap: &str) -> bool {
-    let breaks =
-        gap.matches('\n').count() + gap.matches('\r').count() - gap.matches("\r\n").count();
+    let mut breaks = 0;
+    let mut bytes = gap.bytes().peekable();
+    while let Some(b) = bytes.next() {
+        match b {
+            b'\n' => breaks += 1,
+            b'\r' if bytes.peek() != Some(&b'\n') => breaks += 1,
+            b' ' | b'\t' | b'\r' => {}
+            _ => return false,
+        }
+    }
     breaks >= 2
-        && gap
-            .bytes()
-            .all(|b| matches!(b, b' ' | b'\t' | b'\n' | b'\r'))
 }
 
 /// The start of the line at `at`.
