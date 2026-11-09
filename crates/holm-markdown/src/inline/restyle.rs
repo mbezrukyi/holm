@@ -918,7 +918,7 @@ fn flat(joined: &str, pieces: &[Piece]) -> Vec<Flat> {
         // Raw HTML shows as it is written, like text.
         let class = (!piece.class.is_text() && piece.class != Class::Html).then_some(piece.class);
         let text = if class.is_none() {
-            scan::unescape(piece.source(joined))
+            scan::unescape(piece.source(joined)).into_owned()
         } else {
             piece.source(joined).to_owned()
         };

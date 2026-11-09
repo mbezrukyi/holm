@@ -11,7 +11,7 @@ use pulldown_cmark::{
 
 pub use link::Target;
 
-use crate::inline::{Defs, Kind, Leaf, Node, Scratch};
+use crate::inline::{Defs, Destination, Kind, Leaf, Node, Scratch};
 
 /// A parsed note body, for live preview and for the index.
 ///
@@ -207,12 +207,13 @@ impl Body {
             | Options::ENABLE_STRIKETHROUGH
             | Options::ENABLE_GFM;
         let mut walker = Walker::new(text);
-        let mut events = Parser::new_ext(text, options).into_offset_iter();
-        for (event, range) in events.by_ref() {
-            walker.event(event, range);
-        }
+        // The parser reads the link definitions before the first event.
+        let events = Parser::new_ext(text, options).into_offset_iter();
         for (label, def) in events.reference_definitions().iter() {
             walker.body.defs.insert(label, def.dest.to_string());
+        }
+        for (event, range) in events {
+            walker.event(event, range);
         }
         walker.finish()
     }
@@ -290,20 +291,17 @@ struct OpenLeaf {
     long: Vec<Range<usize>>,
 }
 
-/// A leaf block that waits for the link definitions before it is parsed.
-struct PendingLeaf {
-    segments: Vec<Range<usize>>,
-    table: bool,
-    heading: Option<usize>,
-}
-
 struct Walker<'a> {
     text: &'a str,
     frames: Vec<Frame>,
     leaf: Option<OpenLeaf>,
     /// The `starts` buffer of the last leaf, kept for the next one.
     starts: Vec<usize>,
-    pending: Vec<PendingLeaf>,
+    /// The lines of the last leaf, kept for the next one.
+    segments: Vec<Range<usize>>,
+    scratch: Scratch,
+    /// The inline syntax to hide, in order. The block syntax goes in the body's list.
+    inline_hidden: Vec<Range<usize>>,
     body: Body,
 }
 
@@ -314,7 +312,9 @@ impl<'a> Walker<'a> {
             frames: Vec::new(),
             leaf: None,
             starts: Vec::new(),
-            pending: Vec::new(),
+            segments: Vec::new(),
+            scratch: Scratch::default(),
+            inline_hidden: Vec::new(),
             body: Body::default(),
         }
     }
@@ -489,24 +489,37 @@ impl<'a> Walker<'a> {
         let Some(mut leaf) = self.leaf.take() else {
             return;
         };
-        let segments = (leaf.first < leaf.last).then(|| {
+        if leaf.first < leaf.last {
+            self.segments.clear();
             segments(
                 self.text,
                 leaf.first..leaf.last,
                 &mut leaf.starts,
                 &leaf.long,
-            )
-        });
+                &mut self.segments,
+            );
+            self.parse_leaf(
+                Leaf::new(self.text, &self.segments, leaf.table),
+                leaf.heading,
+            );
+        }
         leaf.starts.clear();
         self.starts = leaf.starts;
-        let Some(segments) = segments else {
-            return;
-        };
-        self.pending.push(PendingLeaf {
-            segments,
-            table: leaf.table,
-            heading: leaf.heading,
-        });
+    }
+
+    /// Adds the inline syntax of `leaf` to the body. A heading also gets its plain text.
+    fn parse_leaf(&mut self, leaf: Leaf, heading: Option<usize>) {
+        let text = self.text;
+        if let Some(i) = heading {
+            let mut plain = String::new();
+            let nodes = leaf.parse(text, &self.body.defs, &mut self.scratch, Some(&mut plain));
+            self.body.headings[i].text = plain;
+            self.collect(nodes);
+        } else if !leaf.is_plain(text) {
+            let nodes = leaf.parse(text, &self.body.defs, &mut self.scratch, None);
+            self.collect(nodes);
+        }
+        self.body.leaves.push(leaf);
     }
 
     fn task(&mut self, checked: bool, range: Range<usize>) {
@@ -593,33 +606,12 @@ impl<'a> Walker<'a> {
         while !self.frames.is_empty() {
             self.end();
         }
-        let text = self.text;
-        let pending = std::mem::take(&mut self.pending);
-        // The block syntax is hidden already. The inline syntax goes in its own sorted list.
-        let mut blocks_hidden = std::mem::take(&mut self.body.hidden);
-        let mut leaves = Vec::with_capacity(pending.len());
-        let mut scratch = Scratch::default();
-        for leaf in pending {
-            let (leaf_tree, nodes, plain) = Leaf::new(
-                text,
-                leaf.segments,
-                leaf.table,
-                &self.body.defs,
-                leaf.heading.is_some(),
-                &mut scratch,
-            );
-            if let (Some(i), Some(plain)) = (leaf.heading, plain) {
-                self.body.headings[i].text = plain;
-            }
-            self.collect(&nodes);
-            leaves.push(leaf_tree);
-        }
         let mut body = self.body;
-        body.leaves = leaves;
+        let mut blocks_hidden = std::mem::take(&mut body.hidden);
         if !blocks_hidden.is_sorted_by_key(|range| range.start) {
             blocks_hidden.sort_unstable_by_key(|range| range.start);
         }
-        body.hidden = merge(blocks_hidden, std::mem::take(&mut body.hidden));
+        body.hidden = merge(blocks_hidden, self.inline_hidden);
         // The lists are nearly sorted already. A check is cheaper than a sort.
         if !body.spans.is_sorted_by_key(|span| span.range.start) {
             body.spans.sort_by_key(|span| span.range.start);
@@ -630,21 +622,20 @@ impl<'a> Walker<'a> {
         if !body.hidden.is_sorted_by_key(|range| range.start) {
             body.hidden.sort_unstable_by_key(|range| range.start);
         }
-        let mut merged: Vec<Range<usize>> = Vec::with_capacity(body.hidden.len());
-        for range in body.hidden {
-            match merged.last_mut() {
-                Some(last) if range.start <= last.end => last.end = last.end.max(range.end),
-                _ => merged.push(range),
+        body.hidden.dedup_by(|next, last| {
+            let touch = next.start <= last.end;
+            if touch {
+                last.end = last.end.max(next.end);
             }
-        }
-        body.hidden = merged;
+            touch
+        });
         body
     }
 
     /// Adds the spans, the hidden syntax and the links of an inline tree.
-    fn collect(&mut self, nodes: &[Node]) {
+    fn collect(&mut self, nodes: Vec<Node>) {
         for node in nodes {
-            let style = match &node.kind {
+            let style = match node.kind {
                 Kind::Text => {
                     self.hide_escapes(&node.source);
                     continue;
@@ -652,17 +643,17 @@ impl<'a> Walker<'a> {
                 Kind::Html => continue,
                 Kind::HardBreak => {
                     if self.text.as_bytes()[node.source.start] == b'\\' {
-                        self.hide(node.source.start..node.source.start + 1);
+                        self.hide_inline(node.source.start..node.source.start + 1);
                     }
                     continue;
                 }
                 Kind::Image(dest) => {
-                    self.hide(node.source.clone());
-                    self.push_link(node, dest, true);
+                    self.hide_inline(node.source.clone());
+                    self.push_link(node.source, *dest, true);
                     continue;
                 }
                 Kind::Link(dest) => {
-                    self.push_link(node, dest, false);
+                    self.push_link(node.source.clone(), *dest, false);
                     if node.content.is_empty() {
                         continue;
                     }
@@ -672,14 +663,14 @@ impl<'a> Walker<'a> {
                 Kind::Emphasis => Style::Emphasis,
                 Kind::Strong => Style::Strong,
                 Kind::Strikethrough => Style::Strikethrough,
-                Kind::Highlight(color) => Style::Highlight(*color),
+                Kind::Highlight(color) => Style::Highlight(color),
                 Kind::Underline => Style::Underline,
-                Kind::Color(color) => Style::Color(*color),
+                Kind::Color(color) => Style::Color(color),
             };
             self.span(node.content.clone(), style);
-            self.hide(node.source.start..node.content.start);
-            self.collect(&node.children);
-            self.hide(node.content.end..node.source.end);
+            self.hide_inline(node.source.start..node.content.start);
+            self.collect(node.children);
+            self.hide_inline(node.content.end..node.source.end);
         }
     }
 
@@ -688,7 +679,7 @@ impl<'a> Walker<'a> {
         let mut i = range.start;
         while i + 1 < range.end {
             if bytes[i] == b'\\' && bytes[i + 1].is_ascii_punctuation() {
-                self.hide(i..i + 1);
+                self.hide_inline(i..i + 1);
                 i += 2;
             } else {
                 i += 1;
@@ -696,12 +687,12 @@ impl<'a> Walker<'a> {
         }
     }
 
-    fn push_link(&mut self, node: &Node, dest: &crate::inline::Destination, embedded: bool) {
-        if let Some(target) = &dest.target {
+    fn push_link(&mut self, range: Range<usize>, dest: Destination, embedded: bool) {
+        if let Some(target) = dest.target {
             self.body.links.push(Link {
-                range: node.source.clone(),
-                target: target.clone(),
-                target_range: dest.range.clone(),
+                range,
+                target,
+                target_range: dest.range,
                 embedded,
             });
         }
@@ -733,6 +724,12 @@ impl<'a> Walker<'a> {
     fn span(&mut self, range: Range<usize>, style: Style) {
         if !range.is_empty() {
             self.body.spans.push(Span { range, style });
+        }
+    }
+
+    fn hide_inline(&mut self, range: Range<usize>) {
+        if !range.is_empty() {
+            self.inline_hidden.push(range);
         }
     }
 
@@ -801,19 +798,20 @@ fn is_break(b: u8) -> bool {
     matches!(b, b'\n' | b'\r')
 }
 
-/// The source of each line of the leaf in `range`. Line breaks, quote markers and indents are
-/// not in it. The first inline event on a line shows where its text starts. A line can start
-/// inside a `long` event. Then the quote markers and spaces at its start are skipped.
+/// Adds the source of each line of the leaf in `range` to `segments`. Line breaks, quote
+/// markers and indents are not in it. The first inline event on a line shows where its text
+/// starts. A line can start inside a `long` event. Then the quote markers and spaces at its
+/// start are skipped.
 fn segments(
     text: &str,
     range: Range<usize>,
     starts: &mut [usize],
     long: &[Range<usize>],
-) -> Vec<Range<usize>> {
+    segments: &mut Vec<Range<usize>>,
+) {
     let (first, last) = (range.start, range.end);
     starts.sort_unstable();
     let b = text.as_bytes();
-    let mut segments = Vec::new();
     // An escaped char starts its own text event, right after the backslash.
     let mut line = if first > 0 && b[first - 1] == b'\\' {
         first - 1
@@ -823,7 +821,7 @@ fn segments(
     loop {
         let Some(brk) = b[line..last].iter().position(|&c| is_break(c)) else {
             segments.push(line..last);
-            return segments;
+            return;
         };
         let brk = line + brk;
         segments.push(line..brk);

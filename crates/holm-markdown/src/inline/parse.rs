@@ -41,14 +41,7 @@ pub(crate) struct Scratch {
 
 /// Parses like [`parse`], with buffers from an earlier parse.
 pub(crate) fn parse_with(text: &str, defs: &Defs, scratch: &mut Scratch) -> Vec<Node> {
-    // Most short leaves are plain text.
-    let special = |b: &u8| {
-        matches!(
-            b,
-            b'\\' | b'`' | b'*' | b'_' | b'~' | b'=' | b'[' | b']' | b'<' | b'\n'
-        )
-    };
-    if !text.as_bytes().iter().any(special) {
+    if is_plain(text) {
         return if text.is_empty() {
             Vec::new()
         } else {
@@ -83,6 +76,33 @@ pub(crate) fn parse_with(text: &str, defs: &Defs, scratch: &mut Scratch) -> Vec<
     scratch.no_closer = parser.no_closer;
     finish(text, nodes)
 }
+
+/// Whether `text` has no inline syntax, so its tree is one text node. A line break counts only
+/// after two spaces.
+pub(crate) fn is_plain(text: &str) -> bool {
+    let b = text.as_bytes();
+    b.iter().enumerate().all(|(i, &c)| match c {
+        b'\n' => !b[..i].ends_with(b"  "),
+        c => !is_special(c),
+    })
+}
+
+fn is_special(c: u8) -> bool {
+    SPECIAL[usize::from(c)]
+}
+
+/// The bytes that can start inline syntax. A table is faster than a match in the plain text
+/// scan, which runs over the whole note.
+static SPECIAL: [bool; 256] = {
+    let mut table = [false; 256];
+    let chars = b"\\`*_~=[]<\n";
+    let mut i = 0;
+    while i < chars.len() {
+        table[chars[i] as usize] = true;
+        i += 1;
+    }
+    table
+};
 
 const HEAD: usize = 0;
 const NONE: usize = usize::MAX;

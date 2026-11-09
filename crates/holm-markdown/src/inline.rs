@@ -71,58 +71,78 @@ pub struct Destination {
 /// A leaf block: where its text lies in the source. [`crate::Body::inline`] gives its tree.
 #[derive(Clone, Debug)]
 pub struct Leaf {
-    /// The first line of the text. It has no line break, quote markers or indent.
-    first: Range<usize>,
-    /// All lines, when there is more than one. A leaf of one line needs no list.
-    lines: Vec<Range<usize>>,
-    /// Where each of `lines` starts in the joined text.
-    starts: Vec<usize>,
+    /// The source from the start of the first line to the end of the last one.
+    range: Range<usize>,
+    /// All lines, when quote markers, an indent or `\r` stand between them. Without a list, the
+    /// source of the leaf is its joined text.
+    lines: Box<[Line]>,
     table: bool,
 }
 
+/// One line of a leaf with a gap between its lines.
+#[derive(Clone, Debug)]
+struct Line {
+    source: Range<usize>,
+    /// Where the line starts in the joined text.
+    joined: usize,
+}
+
 impl Leaf {
-    /// The leaf of the text in `segments`, and its tree. With `plain`, it also gives the plain
-    /// text for a heading link. There is at least one segment, and they are in order.
-    pub(crate) fn new(
-        text: &str,
-        mut segments: Vec<Range<usize>>,
-        table: bool,
-        defs: &Defs,
-        plain: bool,
-        scratch: &mut Scratch,
-    ) -> (Self, Vec<Node>, Option<String>) {
-        let first = segments.first().cloned().unwrap_or_default();
-        let mut starts = Vec::new();
-        if segments.len() > 1 {
+    /// The leaf of the text in `segments`. There is at least one segment, and they are in order.
+    pub(crate) fn new(text: &str, segments: &[Range<usize>], table: bool) -> Self {
+        let start = segments.first().map_or(0, |s| s.start);
+        let end = segments.last().map_or(start, |s| s.end);
+        let one_piece = segments
+            .windows(2)
+            .all(|w| w[1].start == w[0].end + 1 && text.as_bytes()[w[0].end] == b'\n');
+        let mut lines = Vec::new();
+        if !one_piece {
+            lines.reserve_exact(segments.len());
             let mut at = 0;
-            for segment in &segments {
-                starts.push(at);
+            for segment in segments {
+                lines.push(Line {
+                    source: segment.clone(),
+                    joined: at,
+                });
                 at += segment.len() + 1;
             }
-        } else {
-            segments = Vec::new();
         }
-        let leaf = Self {
-            first,
-            lines: segments,
-            starts,
+        Self {
+            range: start..end,
+            lines: lines.into_boxed_slice(),
             table,
-        };
-        let joined = leaf.joined(text);
+        }
+    }
+
+    /// Whether the text has no inline syntax. Its tree is then one text node.
+    pub(crate) fn is_plain(&self, text: &str) -> bool {
+        parse::is_plain(&self.joined(text))
+    }
+
+    /// The inline tree in source offsets, with the buffers of earlier parses. With `plain`, it
+    /// also writes the plain text for a heading link.
+    pub(crate) fn parse(
+        &self,
+        text: &str,
+        defs: &Defs,
+        scratch: &mut Scratch,
+        plain: Option<&mut String>,
+    ) -> Vec<Node> {
+        let joined = self.joined(text);
         let nodes = parse::parse_with(&joined, defs, scratch);
-        let plain = plain.then(|| {
-            let mut out = String::new();
-            plain_text(&joined, &nodes, &mut out);
-            out.trim().to_owned()
-        });
-        let nodes = leaf.to_source_nodes(nodes);
-        (leaf, nodes, plain)
+        if let Some(out) = plain {
+            plain_text(&joined, &nodes, out);
+            let trimmed = out.trim();
+            if trimmed.len() != out.len() {
+                *out = trimmed.to_owned();
+            }
+        }
+        self.to_source_nodes(nodes)
     }
 
     /// The inline tree in source offsets.
     pub(crate) fn tree(&self, text: &str, defs: &Defs) -> Vec<Node> {
-        let nodes = parse::parse(&self.joined(text), defs);
-        self.to_source_nodes(nodes)
+        self.parse(text, defs, &mut Scratch::default(), None)
     }
 
     fn to_source_nodes(&self, mut nodes: Vec<Node>) -> Vec<Node> {
@@ -130,28 +150,17 @@ impl Leaf {
             for node in &mut nodes {
                 self.map_node(node);
             }
-        } else if self.first.start != 0 {
+        } else if self.range.start != 0 {
             for node in &mut nodes {
-                shift_node(node, self.first.start);
+                shift_node(node, self.range.start);
             }
         }
         nodes
     }
 
-    fn segments(&self) -> &[Range<usize>] {
-        if self.lines.is_empty() {
-            std::slice::from_ref(&self.first)
-        } else {
-            &self.lines
-        }
-    }
-
     /// The source from the start of the first line to the end of the last one.
     pub fn range(&self) -> Range<usize> {
-        let segments = self.segments();
-        let first = segments.first().map_or(0, |s| s.start);
-        let last = segments.last().map_or(first, |s| s.end);
-        first..last
+        self.range.clone()
     }
 
     /// Whether the leaf is a table cell.
@@ -162,47 +171,53 @@ impl Leaf {
     /// The text of the lines joined with `\n`. The parser and the format keys work on it.
     pub(crate) fn joined<'a>(&self, text: &'a str) -> Cow<'a, str> {
         if self.lines.is_empty() {
-            return Cow::Borrowed(&text[self.first.clone()]);
+            return Cow::Borrowed(&text[self.range.clone()]);
         }
         let mut joined = String::with_capacity(self.range().len());
-        for (i, segment) in self.lines.iter().enumerate() {
+        for (i, line) in self.lines.iter().enumerate() {
             if i > 0 {
                 joined.push('\n');
             }
-            joined.push_str(&text[segment.clone()]);
+            joined.push_str(&text[line.source.clone()]);
         }
         Cow::Owned(joined)
     }
 
     /// The source between line `i` and line `i + 1`, like `\n> `.
     pub(crate) fn gap<'a>(&self, text: &'a str, i: usize) -> &'a str {
-        &text[self.lines[i].end..self.lines[i + 1].start]
+        if self.lines.is_empty() {
+            return "\n";
+        }
+        &text[self.lines[i].source.end..self.lines[i + 1].source.start]
     }
 
     /// The source offset of an offset in the joined text.
     pub(crate) fn to_source(&self, joined: usize) -> usize {
         if self.lines.is_empty() {
-            return self.first.start + joined.min(self.first.len());
+            return self.range.start + joined.min(self.range.len());
         }
         let i = self
-            .starts
-            .partition_point(|&s| s <= joined)
+            .lines
+            .partition_point(|line| line.joined <= joined)
             .saturating_sub(1);
-        self.lines[i].start + (joined - self.starts[i]).min(self.lines[i].len())
+        let line = &self.lines[i];
+        line.source.start + (joined - line.joined).min(line.source.len())
     }
 
     /// The offset in the joined text of a source offset. An offset between two lines lands on
     /// the line break.
     pub(crate) fn to_joined(&self, source: usize) -> usize {
         if self.lines.is_empty() {
-            return source.clamp(self.first.start, self.first.end) - self.first.start;
+            return source.clamp(self.range.start, self.range.end) - self.range.start;
         }
-        let i = self.lines.partition_point(|s| s.start <= source);
+        let i = self
+            .lines
+            .partition_point(|line| line.source.start <= source);
         let Some(i) = i.checked_sub(1) else {
             return 0;
         };
-        let segment = &self.lines[i];
-        self.starts[i] + (source.min(segment.end) - segment.start)
+        let line = &self.lines[i];
+        line.joined + (source.min(line.source.end) - line.source.start)
     }
 
     fn map_node(&self, node: &mut Node) {
