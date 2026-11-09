@@ -1,0 +1,28 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc b0b81b88cd17f1ad9b3756dc4e2ad65c3e6ad5109c6c7d6c88b1340be387adfa # shrinks to pieces = ["<u>"], a = 0, b = 1, key = 0
+cc caaa1ee357cbde5d8096ae4aa84e49519479e5aadb609f54bbec7a023af01a92 # shrinks to pieces = ["``"], a = 94, b = 2, key = 0
+cc 2009e6d6f01aeddd3a65199ee9e245a7f870289972c62b065abb7062eeca24d5 # shrinks to pieces = ["<u>", "a", "é", "</b>", "</u>", "é", "**", "__"], a = 0, b = 150, key = 0
+cc ba90060cef43ef7286d0cfa447612a86be2088c61e1e6009452a58dcc282e47b # shrinks to pieces = ["a", "<span style=\"color: #c4553a\">", "**", "a", "_", "\\", "a", "a"], a = 74, b = 73, key = 0
+cc 2cd02e49f00e7a6f060cbeaefd908508cf7387ee79456ce90a9821740de1a1fb # shrinks to pieces = ["__", "<u>", "**", "**", "a"], a = 22, b = 3, key = 2
+cc 98c2d556266f362cb599a468b062e9ae0cdacf958d24a210a91b3213886011c4 # shrinks to pieces = ["a", "<u>", "<u>", "``", "é", "<u>", "a", "é"], a = 176, b = 85, key = 5
+cc 44f45976666d9fa9ea14bce77022d5bd429887be72fa3bfa5ce21034782d5a1f # shrinks to pieces = ["&amp;", "<b>", "<span style=\"color: #c4553a\">", "a", "[", "</u>", "</b>", "<b>", "</i>"], a = 0, b = 48, key = 0
+cc 43088cc2d767a3a68ed45ec893c8fe690aae4b2b5717d0c62a47056d2a7f26d5 # shrinks to pieces = ["`", "<b>", "``", "a", "</u>"], a = 67, b = 8, key = 2
+cc 58c6298da736c02838c76580c8846842f83e7bc19345472e39c11ece248c9cf1 # shrinks to pieces = ["[", "](x.md)"], a = 2, b = 0, key = 0
+cc dbd0c77d7577b3b358ab65db7366dd98ab7b72e593b8fb650fbb4defe34768ca # shrinks to pieces = ["</mark>", "a", "</u>", "é", "a", "[", "](x.md)", "a"], a = 0, b = 15, key = 5
+cc af04be3e42fefd85d3a5158b9895000fcc6fb785f49b2447ccf4ed6acea774db # shrinks to pieces = ["[", "<u>", "]", "**", "**", "\\*", "*", "</b>", "<mark>", "](x.md)", "**", " "], a = 72, b = 172, key = 0
+cc e011969e11348c2f7ecc276a8a72265b5abf22edc32d2e689c86d61bf98be81a # shrinks to pieces = [" ", "~", "~", "</b>", "a", "__", "</u>", "~~", "\\*"], a = 36, b = 0, key = 3
+cc 0a9bfbb434cd5b48e5fc52850a066391fd2ce0d3d7141c702c7639415269c51b # shrinks to pieces = ["[", "**", "__", "é", "**", "\\*"], a = 130, b = 31, key = 0
+cc 7d45f4ba4d37f4b24b3790113a3be833583f46dad1003bed8279c8a308c5a326 # shrinks to pieces = ["<u>", "__", "a", "a", "a", "\\", "&amp;", "a"], a = 10, b = 0, key = 0
+cc 6103af3cb448a43eede2ca60df31b99819e78646ed5ec37e22b8fcdf37f62169 # shrinks to pieces = ["\\", "\\", "&amp;", "<u>"], a = 91, b = 0, key = 0
+cc 98680af976ccaf14b5d6d60aa654da89f0e992924db52de908abcab0cd9f01b0 # shrinks to pieces = ["``", "``", "<u>", "``", "<mark>", "a", "é", "``"], a = 7, b = 8, key = 5
+cc b1d540cedcda46e12ad7da254b54b05ba7a5a264d95aa62733c171f304be2de1 # shrinks to pieces = ["<b>", "<u>", "</b>"], a = 4, b = 5, key = 0
+cc da3404b81c2507dddab8e99191574c2bb39a622b78b11685eb8828f56bdfceff # shrinks to pieces = ["_", "*", " ", "a", "a", "a", "</mark>", "_", " "], a = 48, b = 4, key = 1
+cc 3b0d11223f3eb578b45d3ddc3eb5f0bbb7bb3135065362fb3a5a6020ee051238 # shrinks to pieces = ["[", "<i>", "</u>", "**", "</i>", "](x.md)", "a", "&amp;", "word"], a = 0, b = 1, key = 1
+cc 7ccd66750799b8da54bb9f24356d4cb972caac2f08ec32cf71395979c0f10abf # shrinks to pieces = ["<u>", " ", " ", " ", "</u>", " ", "](x.md)"], a = 14, b = 0, key = 0
+cc 81c12fc6faa2bfe66859676912f2c8ba5894df90594071ecdc74c8d719fe1bc3 # shrinks to pieces = ["<u>", "<mark>", "word", "a", "é", " ", "</mark>"], a = 0, b = 10, key = 0
+cc 69174ca0b05d4b786d133b8bec1b12d7b1119851d2edc2410abbdbe810db31b8 # shrinks to pieces = ["](x.md)", "&amp;", "a", "a", "[", " ", "](x.md)"], a = 24, b = 87, key = 5

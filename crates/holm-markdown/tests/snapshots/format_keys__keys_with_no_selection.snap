@@ -1,0 +1,13 @@
+---
+source: crates/holm-markdown/tests/format_keys.rs
+expression: "cases.join(\"\\n\")"
+---
+"one two" 1 Bold: "**one** two" at 3
+"one two" 3 Italic: "*one* two" at 4
+"one **two**" 8 Bold: "one two" at 6
+"one " 4 Highlight: "one ====" at 6
+"a  b" 2 Underline: "a <u></u> b" at 5
+"- " 2 Bold: "- ****" at 4
+"x `code` y" 4 Code: "x code y" at 6
+"x `code` y" 4 Bold: "x **`code`** y" at 6
+"```\nx y\n```" 5 Bold: no change

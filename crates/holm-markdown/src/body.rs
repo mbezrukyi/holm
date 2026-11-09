@@ -1,16 +1,17 @@
-//! The note body as blocks, styled spans, hidden syntax, links and headings.
+//! The note body as blocks, leaves, styled spans, hidden syntax, links and headings.
 
-mod html;
-mod link;
+pub(crate) mod link;
 
 use std::ops::Range;
 
 use pulldown_cmark::{
-    Alignment as CmarkAlignment, BlockQuoteKind, CodeBlockKind, Event, HeadingLevel, LinkType,
-    Options, Parser, Tag, TagEnd,
+    Alignment as CmarkAlignment, BlockQuoteKind, CodeBlockKind, Event, HeadingLevel, Options,
+    Parser, Tag, TagEnd,
 };
 
 pub use link::Target;
+
+use crate::inline::{Defs, Kind, Leaf, Node, Scratch};
 
 /// A parsed note body, for live preview and for the index.
 ///
@@ -31,6 +32,8 @@ pub struct Body {
     hidden: Vec<Range<usize>>,
     links: Vec<Link>,
     headings: Vec<Heading>,
+    leaves: Vec<Leaf>,
+    defs: Defs,
 }
 
 /// One block of the body, with the blocks inside it.
@@ -204,8 +207,12 @@ impl Body {
             | Options::ENABLE_STRIKETHROUGH
             | Options::ENABLE_GFM;
         let mut walker = Walker::new(text);
-        for (event, range) in Parser::new_ext(text, options).into_offset_iter() {
+        let mut events = Parser::new_ext(text, options).into_offset_iter();
+        for (event, range) in events.by_ref() {
             walker.event(event, range);
+        }
+        for (label, def) in events.reference_definitions().iter() {
+            walker.body.defs.insert(label, def.dest.to_string());
         }
         walker.finish()
     }
@@ -213,6 +220,19 @@ impl Body {
     /// The top level blocks, in order.
     pub fn blocks(&self) -> &[Block] {
         &self.blocks
+    }
+
+    /// The leaf blocks, in order.
+    pub fn leaves(&self) -> &[Leaf] {
+        &self.leaves
+    }
+
+    /// The inline tree of `leaf`, in source offsets. `text` is the parsed text.
+    ///
+    /// The body keeps no trees, because a full parse runs after each edit. Many small trees are
+    /// slow to free. This call parses the leaf again.
+    pub fn inline(&self, text: &str, leaf: &Leaf) -> Vec<Node> {
+        leaf.tree(text, &self.defs)
     }
 
     /// The styled spans, sorted by start.
@@ -236,49 +256,54 @@ impl Body {
     pub fn headings(&self) -> &[Heading] {
         &self.headings
     }
+
+    pub(crate) fn defs(&self) -> &Defs {
+        &self.defs
+    }
 }
 
-enum FrameKind {
-    Block(BlockKind),
-    Inline(Inline),
-    Other,
-}
-
-#[derive(Clone, Copy)]
-enum Inline {
-    Emphasis,
-    Strong,
-    Strikethrough,
-    Link,
-    Image,
-}
-
-/// An open tag while the walker reads its children.
+/// An open block tag while the walker reads its children.
 struct Frame {
-    kind: FrameKind,
+    kind: Option<BlockKind>,
     range: Range<usize>,
     /// Start of the first non-empty child event.
     first: Option<usize>,
     /// End of the last non-empty child event.
     last: Option<usize>,
     children: Vec<Block>,
-    /// Where this frame's entries start in [`Walker::texts`] and [`Walker::tags`].
-    texts_from: usize,
-    tags_from: usize,
-    /// The target of a link or image. It is in a box, so other frames stay small.
-    link: Option<Box<(Option<Target>, LinkType)>>,
+}
+
+/// The inline events of a leaf block, while the walker reads them.
+struct OpenLeaf {
+    /// How many frames are open, with the leaf's own frame. For the text of a tight list item,
+    /// the item's frame.
+    depth: usize,
+    /// Whether it is the text of a tight list item. Such text has no frame of its own.
+    item: bool,
+    table: bool,
+    heading: Option<usize>,
+    first: usize,
+    last: usize,
+    /// Where the inline events start, except line breaks.
+    starts: Vec<usize>,
+    /// Code spans and HTML tags that hold a line break.
+    long: Vec<Range<usize>>,
+}
+
+/// A leaf block that waits for the link definitions before it is parsed.
+struct PendingLeaf {
+    segments: Vec<Range<usize>>,
+    table: bool,
+    heading: Option<usize>,
 }
 
 struct Walker<'a> {
     text: &'a str,
     frames: Vec<Frame>,
-    /// How many images are open. Events inside an image are its alt text.
-    image_depth: usize,
-    in_heading: bool,
-    /// Text events with the same bytes as the source, for `==` pairs.
-    texts: Vec<Range<usize>>,
-    /// Inline HTML tags, for `<u>`, `<span>` and `<mark>` pairs.
-    tags: Vec<Range<usize>>,
+    leaf: Option<OpenLeaf>,
+    /// The `starts` buffer of the last leaf, kept for the next one.
+    starts: Vec<usize>,
+    pending: Vec<PendingLeaf>,
     body: Body,
 }
 
@@ -287,50 +312,19 @@ impl<'a> Walker<'a> {
         Self {
             text,
             frames: Vec::new(),
-            image_depth: 0,
-            in_heading: false,
-            texts: Vec::new(),
-            tags: Vec::new(),
+            leaf: None,
+            starts: Vec::new(),
+            pending: Vec::new(),
             body: Body::default(),
         }
     }
 
     fn event(&mut self, event: Event<'_>, range: Range<usize>) {
-        if let (true, Event::Text(t) | Event::Code(t)) = (self.in_heading, &event)
-            && let Some(heading) = self.body.headings.last_mut()
-        {
-            heading.text.push_str(t);
-        }
-        if self.image_depth > 0 {
-            match event {
-                Event::Start(Tag::Image { .. }) => self.image_depth += 1,
-                Event::End(TagEnd::Image) => {
-                    self.image_depth -= 1;
-                    if self.image_depth == 0 {
-                        self.end();
-                        return;
-                    }
-                }
-                _ => {}
-            }
-            self.touch(&range);
-            return;
-        }
         match event {
+            Event::Start(tag) if is_inline_tag(&tag) => self.inline(&range, true),
+            Event::End(end) if is_inline_end(end) => self.touch(&range),
             Event::Start(tag) => self.start(tag, range),
             Event::End(_) => self.end(),
-            Event::Text(t) => self.text_event(&t, range),
-            Event::Code(_) => self.code(range),
-            Event::InlineHtml(_) => {
-                self.tags.push(range.clone());
-                self.touch(&range);
-            }
-            Event::HardBreak => {
-                if self.text.as_bytes()[range.start] == b'\\' {
-                    self.hide(range.start..range.start + 1);
-                }
-                self.touch(&range);
-            }
             Event::TaskListMarker(checked) => self.task(checked, range),
             Event::Rule => {
                 self.touch(&range);
@@ -341,30 +335,76 @@ impl<'a> Walker<'a> {
                 };
                 self.push_block(block);
             }
-            _ => self.touch(&range),
+            Event::SoftBreak | Event::HardBreak => self.inline(&range, false),
+            Event::Html(_) => self.touch(&range),
+            Event::Code(_) | Event::InlineHtml(_) => {
+                self.inline(&range, true);
+                if let Some(leaf) = &mut self.leaf
+                    && self.text[range.clone()].contains(['\n', '\r'])
+                {
+                    leaf.long.push(range);
+                }
+            }
+            _ => self.inline(&range, true),
+        }
+    }
+
+    /// Notes an inline event. `start` says whether its start can begin a line of the leaf.
+    fn inline(&mut self, range: &Range<usize>, start: bool) {
+        self.touch(range);
+        if range.is_empty() {
+            return;
+        }
+        let in_item = matches!(
+            self.frames.last(),
+            Some(Frame {
+                kind: Some(BlockKind::Item { .. }),
+                ..
+            })
+        );
+        if self.leaf.is_none() && in_item {
+            self.leaf = Some(OpenLeaf {
+                depth: self.frames.len(),
+                item: true,
+                table: false,
+                heading: None,
+                first: range.start,
+                last: range.end,
+                starts: std::mem::take(&mut self.starts),
+                long: Vec::new(),
+            });
+        }
+        let Some(leaf) = &mut self.leaf else {
+            return;
+        };
+        leaf.first = leaf.first.min(range.start);
+        leaf.last = leaf.last.max(range.end);
+        if start {
+            leaf.starts.push(range.start);
         }
     }
 
     fn start(&mut self, tag: Tag<'_>, range: Range<usize>) {
         self.touch(&range);
-        let mut link = None;
+        if self.leaf.as_ref().is_some_and(|leaf| leaf.item) {
+            self.close_leaf();
+        }
         let kind = match tag {
-            Tag::Paragraph => FrameKind::Block(BlockKind::Paragraph),
+            Tag::Paragraph => Some(BlockKind::Paragraph),
             Tag::Heading { level, .. } => {
-                self.in_heading = true;
                 self.body.headings.push(Heading {
                     level: heading_level(level),
                     text: String::new(),
                     range: self.trim(&range),
                 });
-                FrameKind::Block(BlockKind::Heading {
+                Some(BlockKind::Heading {
                     level: heading_level(level),
                 })
             }
-            Tag::BlockQuote(kind) => FrameKind::Block(kind.map_or(BlockKind::Quote, |kind| {
+            Tag::BlockQuote(kind) => Some(kind.map_or(BlockKind::Quote, |kind| {
                 BlockKind::Callout(callout_kind(kind))
             })),
-            Tag::CodeBlock(kind) => FrameKind::Block(match kind {
+            Tag::CodeBlock(kind) => Some(match kind {
                 CodeBlockKind::Fenced(info) => BlockKind::Code {
                     language: info.split_whitespace().next().map(str::to_owned),
                     fenced: true,
@@ -374,76 +414,61 @@ impl<'a> Walker<'a> {
                     fenced: false,
                 },
             }),
-            Tag::HtmlBlock => FrameKind::Block(BlockKind::Html),
-            Tag::List(start) => FrameKind::Block(BlockKind::List { start }),
-            Tag::Item => FrameKind::Block(BlockKind::Item { task: None }),
-            Tag::Table(alignments) => FrameKind::Block(BlockKind::Table {
+            Tag::HtmlBlock => Some(BlockKind::Html),
+            Tag::List(start) => Some(BlockKind::List { start }),
+            Tag::Item => Some(BlockKind::Item { task: None }),
+            Tag::Table(alignments) => Some(BlockKind::Table {
                 alignments: alignments.into_iter().map(alignment).collect(),
             }),
-            Tag::TableHead => FrameKind::Block(BlockKind::TableRow { head: true }),
-            Tag::TableRow => FrameKind::Block(BlockKind::TableRow { head: false }),
-            Tag::TableCell => FrameKind::Block(BlockKind::TableCell),
-            Tag::Emphasis => FrameKind::Inline(Inline::Emphasis),
-            Tag::Strong => FrameKind::Inline(Inline::Strong),
-            Tag::Strikethrough => FrameKind::Inline(Inline::Strikethrough),
-            Tag::Link {
-                link_type,
-                dest_url,
-                ..
-            } => {
-                link = Some(Box::new((link::target(&dest_url, link_type), link_type)));
-                FrameKind::Inline(Inline::Link)
-            }
-            Tag::Image {
-                link_type,
-                dest_url,
-                ..
-            } => {
-                self.image_depth = 1;
-                link = Some(Box::new((link::target(&dest_url, link_type), link_type)));
-                FrameKind::Inline(Inline::Image)
-            }
-            _ => FrameKind::Other,
+            Tag::TableHead => Some(BlockKind::TableRow { head: true }),
+            Tag::TableRow => Some(BlockKind::TableRow { head: false }),
+            Tag::TableCell => Some(BlockKind::TableCell),
+            _ => None,
         };
+        let leaf = matches!(
+            kind,
+            Some(BlockKind::Paragraph | BlockKind::Heading { .. } | BlockKind::TableCell)
+        );
+        let table = matches!(kind, Some(BlockKind::TableCell));
+        let heading = matches!(kind, Some(BlockKind::Heading { .. }));
         self.frames.push(Frame {
             kind,
             range,
             first: None,
             last: None,
             children: Vec::new(),
-            texts_from: self.texts.len(),
-            tags_from: self.tags.len(),
-            link,
         });
-    }
-
-    fn end(&mut self) {
-        let Some(mut frame) = self.frames.pop() else {
-            return;
-        };
-        match std::mem::replace(&mut frame.kind, FrameKind::Other) {
-            FrameKind::Block(kind) => self.end_block(kind, frame),
-            FrameKind::Inline(inline) => self.end_inline(inline, frame),
-            FrameKind::Other => {}
+        if leaf {
+            self.leaf = Some(OpenLeaf {
+                depth: self.frames.len(),
+                item: false,
+                table,
+                heading: heading.then(|| self.body.headings.len() - 1),
+                first: usize::MAX,
+                last: 0,
+                starts: std::mem::take(&mut self.starts),
+                long: Vec::new(),
+            });
         }
     }
 
-    fn end_block(&mut self, kind: BlockKind, frame: Frame) {
+    fn end(&mut self) {
+        if self
+            .leaf
+            .as_ref()
+            .is_some_and(|leaf| leaf.depth == self.frames.len())
+        {
+            self.close_leaf();
+        }
+        let Some(frame) = self.frames.pop() else {
+            return;
+        };
+        let Some(kind) = frame.kind.clone() else {
+            return;
+        };
         let range = self.trim(&frame.range);
-        // Inline events always belong to the innermost block, so its entries are last.
-        let tags = std::mem::take(&mut self.tags);
-        self.pair_tags(&tags[frame.tags_from..]);
-        self.tags = tags;
-        self.tags.truncate(frame.tags_from);
-        let texts = std::mem::take(&mut self.texts);
-        self.pair_highlights(&texts[frame.texts_from..]);
-        self.texts = texts;
-        self.texts.truncate(frame.texts_from);
         match &kind {
-            BlockKind::Heading { .. } => {
-                self.in_heading = false;
-                self.hide_heading_syntax(&range, &frame);
-            }
+            BlockKind::Heading { .. } => self.hide_heading_syntax(&range, &frame),
             BlockKind::Code { fenced: true, .. } => self.hide_fences(&range, frame.last),
             BlockKind::Quote => self.hide_quote_markers(&range),
             BlockKind::Callout(_) => {
@@ -460,86 +485,28 @@ impl<'a> Walker<'a> {
         self.push_block(block);
     }
 
-    fn end_inline(&mut self, inline: Inline, frame: Frame) {
-        let range = frame.range;
-        let style = match inline {
-            Inline::Emphasis => Style::Emphasis,
-            Inline::Strong => Style::Strong,
-            Inline::Strikethrough => Style::Strikethrough,
-            Inline::Link => Style::Link,
-            Inline::Image => {
-                self.hide(range.clone());
-                self.push_link(&range, frame.link, frame.last, true);
-                return;
-            }
-        };
-        if let (Some(first), Some(last)) = (frame.first, frame.last) {
-            self.span(first..last, style);
-            self.hide(range.start..first);
-            self.hide(last..range.end);
-        }
-        if let Inline::Link = inline {
-            self.push_link(&range, frame.link, frame.last, false);
-        }
-    }
-
-    fn push_link(
-        &mut self,
-        range: &Range<usize>,
-        link: Option<Box<(Option<Target>, LinkType)>>,
-        last: Option<usize>,
-        embedded: bool,
-    ) {
-        let Some((Some(target), link_type)) = link.map(|link| *link) else {
+    fn close_leaf(&mut self) {
+        let Some(mut leaf) = self.leaf.take() else {
             return;
         };
-        let target_range = match link_type {
-            LinkType::Inline => {
-                let open = if embedded { 2 } else { 1 };
-                let text_end = last.unwrap_or(range.start + open);
-                link::target_range(self.text, text_end, range.end)
-            }
-            LinkType::Autolink | LinkType::Email => Some(range.start + 1..range.end - 1),
-            _ => None,
-        };
-        self.body.links.push(Link {
-            range: range.clone(),
-            target,
-            target_range,
-            embedded,
+        let segments = (leaf.first < leaf.last).then(|| {
+            segments(
+                self.text,
+                leaf.first..leaf.last,
+                &mut leaf.starts,
+                &leaf.long,
+            )
         });
-    }
-
-    fn text_event(&mut self, text: &str, range: Range<usize>) {
-        self.touch(&range);
-        // A code block holds only text, so it is always the top frame.
-        let in_code = matches!(
-            self.frames.last().map(|frame| &frame.kind),
-            Some(FrameKind::Block(BlockKind::Code { .. }))
-        );
-        if in_code || range.is_empty() {
+        leaf.starts.clear();
+        self.starts = leaf.starts;
+        let Some(segments) = segments else {
             return;
-        }
-        let bytes = self.text.as_bytes();
-        // An escaped char starts its own text event, right after the backslash.
-        if is_escaped(bytes, range.start) && bytes[range.start].is_ascii_punctuation() {
-            self.hide(range.start - 1..range.start);
-        }
-        if &self.text[range.clone()] == text {
-            self.texts.push(range);
-        }
-    }
-
-    fn code(&mut self, range: Range<usize>) {
-        self.touch(&range);
-        let source = &self.text.as_bytes()[range.clone()];
-        let ticks = source.iter().take_while(|&&b| b == b'`').count();
-        if ticks * 2 <= source.len() {
-            let inner = range.start + ticks..range.end - ticks;
-            self.hide(range.start..inner.start);
-            self.hide(inner.end..range.end);
-            self.span(inner, Style::Code);
-        }
+        };
+        self.pending.push(PendingLeaf {
+            segments,
+            table: leaf.table,
+            heading: leaf.heading,
+        });
     }
 
     fn task(&mut self, checked: bool, range: Range<usize>) {
@@ -548,9 +515,9 @@ impl<'a> Walker<'a> {
             .frames
             .iter_mut()
             .rev()
-            .find(|frame| matches!(frame.kind, FrameKind::Block(BlockKind::Item { .. })));
+            .find(|frame| matches!(frame.kind, Some(BlockKind::Item { .. })));
         if let Some(frame) = item {
-            frame.kind = FrameKind::Block(BlockKind::Item {
+            frame.kind = Some(BlockKind::Item {
                 task: Some(Task { checked, range }),
             });
         }
@@ -558,12 +525,6 @@ impl<'a> Walker<'a> {
 
     /// Hides `# ` before the text and the closing `#`s, or the `===` line of a setext heading.
     fn hide_heading_syntax(&mut self, range: &Range<usize>, frame: &Frame) {
-        if let Some(heading) = self.body.headings.last_mut() {
-            let trimmed = heading.text.trim();
-            if trimmed.len() != heading.text.len() {
-                heading.text = trimmed.to_owned();
-            }
-        }
         let (Some(first), Some(last)) = (frame.first, frame.last) else {
             return;
         };
@@ -594,12 +555,7 @@ impl<'a> Walker<'a> {
         let depth = 1 + self
             .frames
             .iter()
-            .filter(|frame| {
-                matches!(
-                    frame.kind,
-                    FrameKind::Block(BlockKind::Quote | BlockKind::Callout(_))
-                )
-            })
+            .filter(|frame| matches!(frame.kind, Some(BlockKind::Quote | BlockKind::Callout(_))))
             .count();
         let bytes = self.text.as_bytes();
         let mut line_start = range.start;
@@ -633,73 +589,37 @@ impl<'a> Walker<'a> {
         }
     }
 
-    /// Pairs `<u>`, `<span style>` and `<mark>` tags inside one block.
-    fn pair_tags(&mut self, tags: &[Range<usize>]) {
-        let mut open: Vec<(html::Name, Range<usize>, Style)> = Vec::new();
-        for range in tags {
-            match html::parse(&self.text[range.clone()]) {
-                Some(html::Tag::Open(name, style)) => open.push((name, range.clone(), style)),
-                Some(html::Tag::Close(name)) => {
-                    if let Some(i) = open.iter().rposition(|(n, _, _)| *n == name) {
-                        let (_, start, style) = open.remove(i);
-                        self.span(start.end..range.start, style);
-                        self.hide(start);
-                        self.hide(range.clone());
-                    }
-                }
-                None => {}
-            }
-        }
-    }
-
-    /// Pairs `==` runs inside one block. `texts` are text events in order.
-    fn pair_highlights(&mut self, texts: &[Range<usize>]) {
-        let bytes = self.text.as_bytes();
-        let mut open: Option<Range<usize>> = None;
-        let mut i = 0;
-        while i < texts.len() {
-            // Text events next to each other form one run of text.
-            let start = texts[i].start;
-            let mut end = texts[i].end;
-            i += 1;
-            while i < texts.len() && texts[i].start == end {
-                end = texts[i].end;
-                i += 1;
-            }
-            let mut p = start;
-            while let Some(found) = self.text[p..end].find('=') {
-                p += found;
-                let mut s = p;
-                while p < end && bytes[p] == b'=' {
-                    p += 1;
-                }
-                if is_escaped(bytes, s) {
-                    s += 1;
-                }
-                if p - s != 2 {
-                    continue;
-                }
-                let before = self.text[..s].chars().next_back();
-                let after = self.text[p..].chars().next();
-                let can_close = before.is_some_and(|c| !c.is_whitespace());
-                let can_open = after.is_some_and(|c| !c.is_whitespace());
-                match open.take() {
-                    Some(o) if can_close => {
-                        self.span(o.end..s, Style::Highlight(None));
-                        self.hide(o);
-                        self.hide(s..p);
-                    }
-                    o => open = if can_open { Some(s..p) } else { o },
-                }
-            }
-        }
-    }
-
     fn finish(mut self) -> Body {
         while !self.frames.is_empty() {
             self.end();
         }
+        let text = self.text;
+        let pending = std::mem::take(&mut self.pending);
+        // The block syntax is hidden already. The inline syntax goes in its own sorted list.
+        let mut blocks_hidden = std::mem::take(&mut self.body.hidden);
+        let mut leaves = Vec::with_capacity(pending.len());
+        let mut scratch = Scratch::default();
+        for leaf in pending {
+            let (leaf_tree, nodes, plain) = Leaf::new(
+                text,
+                leaf.segments,
+                leaf.table,
+                &self.body.defs,
+                leaf.heading.is_some(),
+                &mut scratch,
+            );
+            if let (Some(i), Some(plain)) = (leaf.heading, plain) {
+                self.body.headings[i].text = plain;
+            }
+            self.collect(&nodes);
+            leaves.push(leaf_tree);
+        }
         let mut body = self.body;
+        body.leaves = leaves;
+        if !blocks_hidden.is_sorted_by_key(|range| range.start) {
+            blocks_hidden.sort_unstable_by_key(|range| range.start);
+        }
+        body.hidden = merge(blocks_hidden, std::mem::take(&mut body.hidden));
         // The lists are nearly sorted already. A check is cheaper than a sort.
         if !body.spans.is_sorted_by_key(|span| span.range.start) {
             body.spans.sort_by_key(|span| span.range.start);
@@ -721,6 +641,72 @@ impl<'a> Walker<'a> {
         body
     }
 
+    /// Adds the spans, the hidden syntax and the links of an inline tree.
+    fn collect(&mut self, nodes: &[Node]) {
+        for node in nodes {
+            let style = match &node.kind {
+                Kind::Text => {
+                    self.hide_escapes(&node.source);
+                    continue;
+                }
+                Kind::Html => continue,
+                Kind::HardBreak => {
+                    if self.text.as_bytes()[node.source.start] == b'\\' {
+                        self.hide(node.source.start..node.source.start + 1);
+                    }
+                    continue;
+                }
+                Kind::Image(dest) => {
+                    self.hide(node.source.clone());
+                    self.push_link(node, dest, true);
+                    continue;
+                }
+                Kind::Link(dest) => {
+                    self.push_link(node, dest, false);
+                    if node.content.is_empty() {
+                        continue;
+                    }
+                    Style::Link
+                }
+                Kind::Code => Style::Code,
+                Kind::Emphasis => Style::Emphasis,
+                Kind::Strong => Style::Strong,
+                Kind::Strikethrough => Style::Strikethrough,
+                Kind::Highlight(color) => Style::Highlight(*color),
+                Kind::Underline => Style::Underline,
+                Kind::Color(color) => Style::Color(*color),
+            };
+            self.span(node.content.clone(), style);
+            self.hide(node.source.start..node.content.start);
+            self.collect(&node.children);
+            self.hide(node.content.end..node.source.end);
+        }
+    }
+
+    fn hide_escapes(&mut self, range: &Range<usize>) {
+        let bytes = self.text.as_bytes();
+        let mut i = range.start;
+        while i + 1 < range.end {
+            if bytes[i] == b'\\' && bytes[i + 1].is_ascii_punctuation() {
+                self.hide(i..i + 1);
+                i += 2;
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    fn push_link(&mut self, node: &Node, dest: &crate::inline::Destination, embedded: bool) {
+        if let Some(target) = &dest.target {
+            self.body.links.push(Link {
+                range: node.source.clone(),
+                target: target.clone(),
+                target_range: dest.range.clone(),
+                embedded,
+            });
+        }
+    }
+
     /// Notes a child event in the open frame.
     fn touch(&mut self, range: &Range<usize>) {
         if range.is_empty() {
@@ -732,15 +718,13 @@ impl<'a> Walker<'a> {
         }
     }
 
-    fn block_frame(&mut self) -> Option<&mut Frame> {
-        self.frames
+    fn push_block(&mut self, block: Block) {
+        let frame = self
+            .frames
             .iter_mut()
             .rev()
-            .find(|frame| matches!(frame.kind, FrameKind::Block(_)))
-    }
-
-    fn push_block(&mut self, block: Block) {
-        match self.block_frame() {
+            .find(|frame| frame.kind.is_some());
+        match frame {
             Some(frame) => frame.children.push(block),
             None => self.body.blocks.push(block),
         }
@@ -773,15 +757,102 @@ impl<'a> Walker<'a> {
     }
 }
 
-/// Whether an odd number of backslashes stands right before `pos`.
-fn is_escaped(bytes: &[u8], pos: usize) -> bool {
-    bytes[..pos]
-        .iter()
-        .rev()
-        .take_while(|&&b| b == b'\\')
-        .count()
-        % 2
-        == 1
+/// Two sorted lists of ranges as one sorted list.
+fn merge(a: Vec<Range<usize>>, b: Vec<Range<usize>>) -> Vec<Range<usize>> {
+    let mut out = Vec::with_capacity(a.len() + b.len());
+    let mut b = b.into_iter().peekable();
+    for range in a {
+        while let Some(next) = b.next_if(|next| next.start < range.start) {
+            out.push(next);
+        }
+        out.push(range);
+    }
+    out.extend(b);
+    out
+}
+
+fn is_inline_tag(tag: &Tag<'_>) -> bool {
+    matches!(
+        tag,
+        Tag::Emphasis
+            | Tag::Strong
+            | Tag::Strikethrough
+            | Tag::Superscript
+            | Tag::Subscript
+            | Tag::Link { .. }
+            | Tag::Image { .. }
+    )
+}
+
+fn is_inline_end(end: TagEnd) -> bool {
+    matches!(
+        end,
+        TagEnd::Emphasis
+            | TagEnd::Strong
+            | TagEnd::Strikethrough
+            | TagEnd::Superscript
+            | TagEnd::Subscript
+            | TagEnd::Link
+            | TagEnd::Image
+    )
+}
+
+fn is_break(b: u8) -> bool {
+    matches!(b, b'\n' | b'\r')
+}
+
+/// The source of each line of the leaf in `range`. Line breaks, quote markers and indents are
+/// not in it. The first inline event on a line shows where its text starts. A line can start
+/// inside a `long` event. Then the quote markers and spaces at its start are skipped.
+fn segments(
+    text: &str,
+    range: Range<usize>,
+    starts: &mut [usize],
+    long: &[Range<usize>],
+) -> Vec<Range<usize>> {
+    let (first, last) = (range.start, range.end);
+    starts.sort_unstable();
+    let b = text.as_bytes();
+    let mut segments = Vec::new();
+    // An escaped char starts its own text event, right after the backslash.
+    let mut line = if first > 0 && b[first - 1] == b'\\' {
+        first - 1
+    } else {
+        first
+    };
+    loop {
+        let Some(brk) = b[line..last].iter().position(|&c| is_break(c)) else {
+            segments.push(line..last);
+            return segments;
+        };
+        let brk = line + brk;
+        segments.push(line..brk);
+        let next = if b[brk] == b'\r' && b.get(brk + 1) == Some(&b'\n') {
+            brk + 2
+        } else {
+            brk + 1
+        };
+        let line_end = b[next..last]
+            .iter()
+            .position(|&c| is_break(c))
+            .map_or(last, |i| next + i);
+        let k = starts.partition_point(|&s| s < next);
+        let inside = long.iter().any(|r| r.start < next && next < r.end);
+        let mut start = match starts.get(k) {
+            Some(&s) if s <= line_end && !inside => s,
+            _ => {
+                let prefix = b[next..line_end]
+                    .iter()
+                    .take_while(|&&c| matches!(c, b' ' | b'\t' | b'>'))
+                    .count();
+                next + prefix
+            }
+        };
+        if start > next && b[start - 1] == b'\\' {
+            start -= 1;
+        }
+        line = start;
+    }
 }
 
 fn heading_level(level: HeadingLevel) -> u8 {

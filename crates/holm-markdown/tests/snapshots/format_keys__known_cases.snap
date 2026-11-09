@@ -1,0 +1,94 @@
+---
+source: crates/holm-markdown/tests/format_keys.rs
+expression: "cases.join(\"\\n\")"
+---
+==Write the report==
+Highlight on "Writ": Writ==e the report==   [Writ]
+Highlight on "Writ": ==Write the report==   [Writ]
+
+**==Writ==**==e the report==
+Bold on "Writ": ==Write the report==   [Writ]
+
+==*Writ*==*e the report*
+Highlight on "Writ": *Write the report*   [Writ]
+
+*==Writ==e the report*
+Italic on "Writ": ==Writ==*e the report*   [Writ]
+
+A **tip with strong** text
+Italic on "A **t": *A* ***t*ip with strong** text   [A* ***t]
+
+A tip with strong text
+Bold on "tip with strong": A **tip with strong** text   [tip with strong]
+Italic on "A **t": *A* ***t*ip with strong** text   [A* ***t]
+
+x"y"z
+Bold on "\"y\"": x<b>"y"</b>z   ["y"]
+
+a b c
+Italic on " b ": a *b* c   [ *b* ]
+
+a `b`c
+Bold on "a `b`": <b>a `b`</b>c   [a `b`]
+
+a.b
+Italic on "a.": <i>a.</i>b   [a.]
+
+Write
+Bold on "t": Wri**t**e   [t]
+
+ab
+Italic on "a": *a*b   [a]
+Bold on "b": *a***b**   [b]
+
+a **b** c
+Bold on "a **b** c": **a b c**   [a b c]
+Bold on "a b c": a b c   [a b c]
+
+a *b* _c_ d
+Italic on "a *b* _c_ d": *a b c d*   [a b c d]
+
+a word
+Underline on "word": a <u>word</u>   [word]
+Strikethrough on "word": a <u>~~word~~</u>   [word]
+
+x [link](a.md) y
+Bold on "lin": x **[link](a.md)** y   [lin]
+Code on "link": no change
+
+a `b` c
+Code on "a `b` c": `a b c`   [`a b c`]
+Code on "a b c": a b c   [a b c]
+
+a `x*y` c
+Code on "x*y": a x\*y c   [x\*y]
+
+tick ` here
+Code on "tick ` here": ``tick ` here``   [``tick ` here``]
+
+**a b** c
+Code on "b** c": **a** `b c`   [`b c`]
+
+<u>a **b</u> c**
+Underline on "a": <u><u>a</u> **b</u> c**   [a]
+
+> a *b
+> c* d
+Underline on "a *b\n> c* d": > <u>a *b
+> c* d</u>   [a *b
+> c* d]
+
+| a | b |
+|---|---|
+| c | d |
+Bold on "a | b |\n|---|---|\n| c": | **a** | **b** |
+|---|---|
+| **c** | d |   [a** | **b** |
+|---|---|
+| **c]
+
+- [ ] task
+- next
+Highlight on "task\n- next": - [ ] ==task==
+- ==next==   [task==
+- ==next]

@@ -1,9 +1,11 @@
-//! Parses a note into frontmatter, title, links, tags and styled spans.
+//! Parses a note into frontmatter, title, links, tags and styled spans, and restyles inline
+//! text for the format keys.
 //!
 //! It does no I/O. The caller reads and writes the files.
 
 mod body;
 mod frontmatter;
+pub mod inline;
 mod note;
 mod tag;
 mod title;

@@ -36,13 +36,6 @@ pub(crate) struct Model {
 /// One edit for [`Model::edit`]: a range of the current text and its new text.
 type Edit = (Range<usize>, String);
 
-/// Where an empty edit range puts an offset that lies right on it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Bias {
-    Before,
-    After,
-}
-
 /// The kind of char, for word moves and double clicks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CharKind {
@@ -74,12 +67,13 @@ fn lf_only(text: &str) -> Cow<'_, str> {
 }
 
 /// Where `offset` lands after `edits`, which are in order and apart.
-/// An offset inside a replaced range lands at the end of its new text.
-fn map_offset(edits: &[Edit], offset: usize, bias: Bias) -> usize {
+/// An offset inside a replaced range lands at the end of its new text, and an offset on an
+/// insert lands after it.
+fn map_offset(edits: &[Edit], offset: usize) -> usize {
     let mut mapped = offset;
     for (range, text) in edits {
         let past = if range.is_empty() {
-            range.start < offset || (range.start == offset && bias == Bias::After)
+            range.start <= offset
         } else {
             range.end <= offset
         };
@@ -262,8 +256,8 @@ impl Model {
             text[prefix..new.len() - suffix].to_owned(),
         )];
         let ends = (
-            map_offset(&edits, self.anchor, Bias::After),
-            map_offset(&edits, self.cursor, Bias::After),
+            map_offset(&edits, self.anchor),
+            map_offset(&edits, self.cursor),
         );
         self.edit(edits, ends, Group::Alone, None)
     }
