@@ -28,6 +28,9 @@ pub(crate) struct Model {
     /// The same text as `rope`. The parser and the text shaper need one `&str`.
     text: String,
     body: Body,
+    /// What the splices since the last parse changed: a range of the old text, and the end of
+    /// its new text.
+    changed: Option<(Range<usize>, usize)>,
     cursor: usize,
     anchor: usize,
     history: History,
@@ -94,6 +97,7 @@ impl Model {
         Self {
             rope: Rope::from_str(&text),
             body: Body::parse(&text),
+            changed: None,
             text,
             cursor: 0,
             anchor: 0,
@@ -159,7 +163,26 @@ impl Model {
     fn splice(&mut self, range: Range<usize>, text: &str) {
         self.rope.remove(range.clone());
         self.rope.insert(range.start, text);
-        self.text.replace_range(range, text);
+        self.text.replace_range(range.clone(), text);
+        self.changed = Some(match self.changed.take() {
+            None => (range.clone(), range.start + text.len()),
+            Some((old, new_end)) => {
+                // `end` is after both changes, so the old text has it `new_end - old.end` earlier.
+                let end = new_end.max(range.end);
+                (
+                    old.start.min(range.start)..end + old.end - new_end,
+                    end + text.len() - range.len(),
+                )
+            }
+        });
+    }
+
+    /// Parses the text again after the splices.
+    fn reparse(&mut self) {
+        if let Some((old, new_end)) = self.changed.take() {
+            self.body
+                .reparse(&self.text, old.clone(), new_end - old.start);
+        }
     }
 
     /// Makes `edits` one undo step, then sets the anchor and the cursor to `ends`.
@@ -184,7 +207,7 @@ impl Model {
         if changes.is_empty() {
             return false;
         }
-        self.body = Body::parse(&self.text);
+        self.reparse();
         self.set_ends(ends);
         self.history.record(Step {
             changes,
@@ -271,7 +294,7 @@ impl Model {
             let range = change.start..change.start + change.inserted.len();
             self.splice(range, &change.removed);
         }
-        self.body = Body::parse(&self.text);
+        self.reparse();
         self.set_ends(step.before);
         self.history.push_redo(step);
         true
@@ -286,7 +309,7 @@ impl Model {
             let range = change.start..change.start + change.removed.len();
             self.splice(range, &change.inserted);
         }
-        self.body = Body::parse(&self.text);
+        self.reparse();
         self.set_ends(step.after);
         self.history.push_undo(step);
         true
@@ -771,6 +794,17 @@ mod tests {
     }
 
     #[test]
+    fn splices_join_into_one_changed_range() {
+        let mut model = Model::new("abcdefgh");
+        model.splice(6..7, "XYZ");
+        model.splice(1..3, "");
+        assert_eq!(model.text(), "adefXYZh");
+        assert_eq!(model.changed, Some((1..7, 7)));
+        model.reparse();
+        assert_eq!(model.changed, None);
+    }
+
+    #[test]
     fn utf16_offsets_round_trip() {
         let model = Model::new("a🙂b");
         assert_eq!(model.offset_to_utf16(5), 3);
@@ -875,6 +909,21 @@ mod tests {
                 prop_assert!(model.text().is_char_boundary(model.cursor()));
                 prop_assert!(model.text().is_char_boundary(model.selection().start));
                 prop_assert_eq!(model.rope.to_string(), model.text());
+            }
+        }
+
+        #[test]
+        fn the_parse_after_each_edit_equals_a_full_parse(start in text(), ops in prop::collection::vec(op(), 0..30)) {
+            let mut model = Model::new(&start);
+            let mut clock = now();
+            for op in ops {
+                run(&mut model, op, &mut clock);
+                let full = Body::parse(model.text());
+                prop_assert_eq!(model.body.blocks(), full.blocks());
+                prop_assert_eq!(model.body.spans(), full.spans());
+                prop_assert_eq!(model.body.hidden(), full.hidden());
+                prop_assert_eq!(model.body.links(), full.links());
+                prop_assert_eq!(model.body.headings(), full.headings());
             }
         }
 
