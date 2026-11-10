@@ -12,7 +12,8 @@ mod title;
 mod yaml;
 
 pub use body::{
-    Alignment, Block, BlockKind, Body, CalloutKind, Color, Heading, Link, Span, Style, Target, Task,
+    Alignment, Block, BlockKind, Body, CalloutKind, Color, Heading, Link, Span, Style, Target,
+    Task, escape_text,
 };
 pub use note::{LineEnding, Note};
 pub use tag::normalize_tag;

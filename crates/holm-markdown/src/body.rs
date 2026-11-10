@@ -9,7 +9,7 @@ use pulldown_cmark::{
     Parser, Tag, TagEnd,
 };
 
-pub use link::Target;
+pub use link::{Target, escape_text};
 
 use crate::inline::{Defs, Destination, Kind, Leaf, Node, Scratch};
 
