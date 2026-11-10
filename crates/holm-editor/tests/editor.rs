@@ -398,3 +398,34 @@ fn a_drag_selects_text() {
     cx.simulate_input("X");
     assert_eq!(text(&editor, cx), "oXwo");
 }
+
+#[test]
+fn a_click_selects_nothing_when_its_line_shows_the_syntax() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "start\n\nsome **bold** text", WIDTH, HEIGHT);
+    // The click shows the "**", so the same point now lands on another byte.
+    let position = point(advance(cx) * 6.2, LINE_HEIGHT * 2.5);
+    cx.simulate_mouse_down(position, MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_move(position, MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_up(position, MouseButton::Left, Modifiers::none());
+    cx.simulate_input("X");
+    assert_eq!(text(&editor, cx), "start\n\nsome **bXold** text");
+}
+
+#[test]
+fn a_drag_starts_only_a_few_pixels_from_the_click() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "one two", WIDTH, HEIGHT);
+    let x = advance(cx);
+    let y = LINE_HEIGHT * 0.5;
+    cx.simulate_mouse_down(point(x * 1.2, y), MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_move(
+        point(x * 1.2 + px(2.), y),
+        MouseButton::Left,
+        Modifiers::none(),
+    );
+    cx.simulate_mouse_move(point(x * 5.2, y), MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_up(point(x * 5.2, y), MouseButton::Left, Modifiers::none());
+    cx.simulate_input("X");
+    assert_eq!(text(&editor, cx), "oXwo");
+}

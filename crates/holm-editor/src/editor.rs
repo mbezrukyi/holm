@@ -8,7 +8,7 @@ use gpui_kit::{
     App, Bounds, ClipboardEntry, ClipboardItem, Context, CursorStyle, EntityInputHandler,
     EventEmitter, ExternalPaths, FocusHandle, Focusable, InteractiveElement, IntoElement,
     KeyDownEvent, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ParentElement, Pixels, Point, Render, ScrollEvent, Styled, UTF16Selection, Window, div,
+    ParentElement, Pixels, Point, Render, ScrollEvent, Styled, UTF16Selection, Window, div, px,
 };
 use holm_markdown::Target;
 
@@ -20,6 +20,8 @@ use crate::model::{Format, Model};
 
 /// Spaces that Tab types outside a list.
 const TAB: &str = "    ";
+/// How far the mouse moves with the button down before a click becomes a drag.
+const DRAG_START: Pixels = px(4.);
 
 /// The live preview editor for one note body.
 ///
@@ -72,10 +74,15 @@ pub struct Editor {
 }
 
 /// A mouse drag after a click. The selection grows by `unit` from `origin`.
+///
+/// A click can show the syntax of its line and so move the text under the mouse. So the
+/// drag waits until the mouse is [`DRAG_START`] away from `down`.
 #[derive(Clone, Debug)]
 struct Drag {
     unit: Unit,
     origin: Range<usize>,
+    down: Point<Pixels>,
+    moving: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -674,15 +681,25 @@ impl Editor {
             Unit::Word => self.model.word_at(offset),
             Unit::Line => self.model.line_at(offset),
         };
-        self.drag = Some(Drag { unit, origin });
+        self.drag = Some(Drag {
+            unit,
+            origin,
+            down: event.position,
+            moving: false,
+        });
         self.drag_to(offset);
         self.goal_x = None;
         cx.notify();
     }
 
     fn mouse_move(&mut self, event: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        if self.drag.is_none() {
-            return;
+        let Some(drag) = &mut self.drag else { return };
+        if !drag.moving {
+            let distance = event.position - drag.down;
+            if distance.x.abs() < DRAG_START && distance.y.abs() < DRAG_START {
+                return;
+            }
+            drag.moving = true;
         }
         if let Some(offset) = self.offset_at(event.position) {
             let before = self.model.selection();
