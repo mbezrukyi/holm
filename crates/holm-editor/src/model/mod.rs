@@ -7,12 +7,14 @@
 mod display;
 mod format;
 mod history;
+mod links;
 
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::ops::Range;
 use std::time::Instant;
 
-use holm_markdown::{BlockKind, Body};
+use holm_markdown::{BlockKind, Body, Target};
 use ropey::{LineType, Rope};
 
 pub(crate) use display::{Cell, DisplayLine, Highlight, LineKind, Look, Mark, Quote, Run};
@@ -34,6 +36,8 @@ pub(crate) struct Model {
     cursor: usize,
     anchor: usize,
     history: History,
+    /// The link targets that the app knows are broken.
+    broken: HashSet<Target>,
 }
 
 /// One edit for [`Model::edit`]: a range of the current text and its new text.
@@ -102,6 +106,7 @@ impl Model {
             cursor: 0,
             anchor: 0,
             history: History::default(),
+            broken: HashSet::new(),
         }
     }
 

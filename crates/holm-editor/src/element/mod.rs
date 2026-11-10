@@ -131,6 +131,11 @@ impl gpui_kit::Element for EditorElement {
         let selection = editor.model.selection();
         let cursor = editor.model.cursor();
         let theme = editor.theme.clone();
+        let matches = editor
+            .find
+            .as_ref()
+            .map(|find| layout.match_bounds(&find.matches))
+            .unwrap_or_default();
         window.handle_input(
             &focus,
             ElementInputHandler::new(bounds, self.editor.clone()),
@@ -140,6 +145,9 @@ impl gpui_kit::Element for EditorElement {
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             for line in &layout.lines {
                 paint_blocks(line, layout.bounds, &theme, window);
+            }
+            for rect in matches {
+                window.paint_quad(outline(rect, theme.muted, BorderStyle::Solid));
             }
             for rect in layout.selection_bounds(&selection) {
                 window.paint_quad(fill(rect, theme.selection));

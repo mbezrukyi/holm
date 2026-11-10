@@ -165,7 +165,7 @@ impl Theme {
     /// The color of a piece of text. Text in a quote is a bit lighter, and the text of a
     /// checked task is muted.
     pub(crate) fn text_color(&self, look: Look, place: Place) -> Hsla {
-        if look.syntax || place.done {
+        if look.syntax || look.broken || place.done {
             self.muted
         } else if let Some(color) = look.color {
             self.note_color(color)

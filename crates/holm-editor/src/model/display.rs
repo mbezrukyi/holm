@@ -16,6 +16,8 @@ pub(crate) struct Look {
     pub(crate) underline: bool,
     pub(crate) code: bool,
     pub(crate) link: bool,
+    /// The text of a link whose target is missing.
+    pub(crate) broken: bool,
     /// Markdown syntax on a line that shows it.
     pub(crate) syntax: bool,
     pub(crate) color: Option<Color>,
@@ -432,6 +434,11 @@ impl Model {
                 .filter(|s| s.range.start <= piece.start && piece.end <= s.range.end)
             {
                 look.add(span.style);
+            }
+            if look.link {
+                look.broken = self
+                    .link_over(&piece, range.start)
+                    .is_some_and(|link| self.is_broken(&link.target));
             }
             shown.push(piece, look, &self.text);
         }

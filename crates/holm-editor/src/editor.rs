@@ -2,14 +2,18 @@ use std::ops::Range;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use std::collections::HashSet;
+
 use gpui_kit::{
-    App, Bounds, ClipboardItem, Context, CursorStyle, EntityInputHandler, EventEmitter,
-    FocusHandle, Focusable, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render,
-    ScrollEvent, Styled, UTF16Selection, Window, div,
+    App, Bounds, ClipboardEntry, ClipboardItem, Context, CursorStyle, EntityInputHandler,
+    EventEmitter, ExternalPaths, FocusHandle, Focusable, InteractiveElement, IntoElement,
+    KeyDownEvent, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    ParentElement, Pixels, Point, Render, ScrollEvent, Styled, UTF16Selection, Window, div,
 };
+use holm_markdown::Target;
 
 use crate::element::{EditorElement, Hit, ImageSizes, Layout, Scroll, Theme};
+use crate::find::Find;
 use crate::highlight::{self, Highlighter};
 use crate::ink;
 use crate::model::{Format, Model};
@@ -39,6 +43,13 @@ const TAB: &str = "    ";
 ///   Ctrl+H highlight, Ctrl+E code, Ctrl+1 to Ctrl+6 a heading, Ctrl+0 a plain line.
 /// - Enter continues a list. Tab and Shift+Tab move a list item in and out.
 /// - Ctrl+L checks or clears the task boxes on the selected lines. A click on a task box does too.
+/// - A click places the cursor, also on a link. Ctrl+click opens the link under the mouse, and
+///   Ctrl+Enter the link at the cursor. A link to a heading in this note moves the cursor
+///   there. Other links send [`OpenLink`] or [`OpenFile`].
+/// - Ctrl+V with files or an image on the clipboard sends [`PasteFiles`], and so does a drop of
+///   files.
+/// - Ctrl+F opens find. Typed text goes into its query. Enter and Shift+Enter select the next
+///   and the match before. Esc or a click in the text closes it.
 ///
 /// [`WritingHelp`] turns off the format keys and the list keys.
 pub struct Editor {
@@ -57,6 +68,7 @@ pub struct Editor {
     goal_x: Option<Pixels>,
     drag: Option<Drag>,
     help: WritingHelp,
+    pub(crate) find: Option<Find>,
 }
 
 /// A mouse drag after a click. The selection grows by `unit` from `origin`.
@@ -111,7 +123,7 @@ pub struct Changed;
 
 impl EventEmitter<Changed> for Editor {}
 
-/// The user asked to open a file, with the "Open" button of a file card.
+/// The user asked to open a file: with the "Open" button of a file card, or a file link.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpenFile {
     /// The path of the file. A relative link starts at the folder of the note.
@@ -119,6 +131,48 @@ pub struct OpenFile {
 }
 
 impl EventEmitter<OpenFile> for Editor {}
+
+/// The user asked to open a link to a note or a web address.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpenLink {
+    /// A [`Target::Note`] or a [`Target::Web`].
+    pub target: Target,
+}
+
+impl EventEmitter<OpenLink> for Editor {}
+
+/// The user pasted or dropped files or an image. The app stores them and calls
+/// [`Editor::insert_link`] for each one. A drop first moves the cursor to the drop point.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PasteFiles {
+    /// The files, in order.
+    pub files: Vec<PastedFile>,
+}
+
+impl EventEmitter<PasteFiles> for Editor {}
+
+/// One pasted or dropped file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PastedFile {
+    /// A file on the disk.
+    Path(PathBuf),
+    /// Image data from the clipboard, with no file yet.
+    Image {
+        /// The file extension of its format, like `png`.
+        extension: &'static str,
+        /// The bytes of the image file.
+        bytes: Vec<u8>,
+    },
+}
+
+/// The link at the cursor, from [`Editor::link_at_cursor`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CursorLink {
+    /// Where the link points.
+    pub target: Target,
+    /// Whether it is `![..](..)`: an image or a file card.
+    pub embedded: bool,
+}
 
 impl Editor {
     /// An empty editor in light mode.
@@ -143,13 +197,17 @@ impl Editor {
             goal_x: None,
             drag: None,
             help: WritingHelp::default(),
+            find: None,
         }
     }
 
     /// Shows `text` from its start, with the cursor at the start and an empty undo stack.
     /// Use it to open a note.
     pub fn set_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        let broken = self.model.take_broken();
         self.model = Model::new(text);
+        self.model.set_broken(broken);
+        self.find = None;
         self.scroll = Scroll::default();
         self.goal_x = None;
         self.version += 1;
@@ -162,6 +220,9 @@ impl Editor {
         if self.model.reload(text) {
             self.version += 1;
             self.goal_x = None;
+            if let Some(find) = &mut self.find {
+                find.refresh(&mut self.model);
+            }
             cx.notify();
         }
     }
@@ -187,6 +248,74 @@ impl Editor {
         self.folder = folder;
         self.image_sizes.clear();
         cx.notify();
+    }
+
+    /// Sets the link targets that are missing, like a note link to a heading that the note does
+    /// not have. Their links get a quiet "broken" style. The editor itself checks links to
+    /// headings in this note. The set stays for the next notes, until the next call.
+    pub fn set_link_states(&mut self, broken: HashSet<Target>, cx: &mut Context<Self>) {
+        self.model.set_broken(broken);
+        cx.notify();
+    }
+
+    /// The selected source text. It is empty with no selection.
+    pub fn selected_text(&self) -> &str {
+        self.model.selected_text()
+    }
+
+    /// The link that holds the cursor, or ends at it.
+    pub fn link_at_cursor(&self) -> Option<CursorLink> {
+        self.model
+            .link_at(self.model.cursor())
+            .map(|link| CursorLink {
+                target: link.target.clone(),
+                embedded: link.embedded,
+            })
+    }
+
+    /// Puts a link to `target` in place of the selection, as one undo step, and the cursor
+    /// after it. The selection becomes the link text. With no selection, `text` does, written
+    /// so that it shows as it is. `embedded` writes `![..](..)`, which shows an image or a file
+    /// card. It sends [`Changed`].
+    pub fn insert_link(
+        &mut self,
+        text: &str,
+        target: &Target,
+        embedded: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let changed = self.model.insert_link(text, target, embedded);
+        self.finish(changed, cx);
+    }
+
+    /// Points the link at the cursor to `target`, as one undo step. The link text stays.
+    /// It returns whether the text changed. It changes nothing with no link at the cursor, or
+    /// for a reference link like `[text][name]`. It sends [`Changed`] when the text changes.
+    pub fn set_link_target(&mut self, target: &Target, cx: &mut Context<Self>) -> bool {
+        let changed = self.model.set_link_target(target);
+        self.finish(changed, cx);
+        changed
+    }
+
+    /// Opens `target`: moves to a heading in this note, or tells the app.
+    fn open_link(&mut self, target: Target, cx: &mut Context<Self>) {
+        match target {
+            Target::Heading(name) => {
+                if let Some(start) = self.model.heading_start(&name) {
+                    self.model.set_cursor(start, false);
+                    self.goal_x = None;
+                    self.moved(cx);
+                }
+            }
+            Target::File(path) => {
+                let path = match &self.folder {
+                    Some(folder) => folder.join(path),
+                    None => PathBuf::from(path),
+                };
+                cx.emit(OpenFile { path });
+            }
+            target => cx.emit(OpenLink { target }),
+        }
     }
 
     /// The last layout, when it still shows the current text.
@@ -215,6 +344,12 @@ impl Editor {
             return;
         }
         let key = event.keystroke.key.as_str();
+        if self.find.is_some() {
+            if self.find_key(key, modifiers, cx) {
+                cx.stop_propagation();
+            }
+            return;
+        }
         let handled = if modifiers.control {
             self.control_key(key, modifiers.shift, cx)
         } else {
@@ -246,6 +381,13 @@ impl Editor {
             "right" => self.model.move_word_right(shift),
             "home" => self.model.set_cursor(0, shift),
             "end" => self.model.set_cursor(self.model.text().len(), shift),
+            "enter" if !shift => {
+                let Some(link) = self.model.link_at(self.model.cursor()) else {
+                    return false;
+                };
+                self.open_link(link.target.clone(), cx);
+                return true;
+            }
             "backspace" | "delete" if !shift => {
                 let changed = if key == "backspace" {
                     self.model.backspace(true, now)
@@ -266,6 +408,10 @@ impl Editor {
                 self.copy(cx);
                 return true;
             }
+            "f" => {
+                self.open_find(cx);
+                return true;
+            }
             "x" => {
                 self.copy(cx);
                 let changed = self.model.remove_selection();
@@ -273,9 +419,7 @@ impl Editor {
                 return true;
             }
             "v" => {
-                let text = cx.read_from_clipboard().and_then(|item| item.text());
-                let changed = text.is_some_and(|text| self.model.insert(&text));
-                self.finish(changed, cx);
+                self.paste(cx);
                 return true;
             }
             "z" | "y" => {
@@ -298,6 +442,62 @@ impl Editor {
                 return true;
             }
             _ => return false,
+        }
+        self.goal_x = None;
+        self.moved(cx);
+        true
+    }
+
+    /// Opens find. A selection on one line becomes the query.
+    fn open_find(&mut self, cx: &mut Context<Self>) {
+        let selected = self.model.selected_text();
+        let query = if selected.contains('\n') {
+            String::new()
+        } else {
+            selected.to_owned()
+        };
+        let mut find = Find::new(query, self.model.selection().start);
+        find.refresh(&mut self.model);
+        self.find = Some(find);
+        self.moved(cx);
+    }
+
+    /// Pastes text, or sends [`PasteFiles`] for files or an image.
+    fn paste(&mut self, cx: &mut Context<Self>) {
+        let item = cx.read_from_clipboard();
+        let files = item.as_ref().map(pasted_files).unwrap_or_default();
+        if !files.is_empty() {
+            cx.emit(PasteFiles { files });
+            return;
+        }
+        let text = item.and_then(|item| item.text());
+        let changed = text.is_some_and(|text| self.model.insert(&text));
+        self.finish(changed, cx);
+    }
+
+    /// A key while find is open. It returns whether the key stops here.
+    /// Typed chars go on to the text input, which adds them to the query.
+    /// Other keys with Ctrl go on to the app. Other named keys do nothing.
+    fn find_key(&mut self, key: &str, modifiers: Modifiers, cx: &mut Context<Self>) -> bool {
+        let Some(find) = &mut self.find else {
+            return false;
+        };
+        match (modifiers.control, key) {
+            (false, "escape") => self.find = None,
+            (false, "enter") => find.step(modifiers.shift, &mut self.model),
+            (_, "backspace") => {
+                find.pop(modifiers.control);
+                find.refresh(&mut self.model);
+            }
+            (true, "f") => {}
+            (true, "v") => {
+                if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+                    find.push(&text);
+                    find.refresh(&mut self.model);
+                }
+            }
+            (true, _) => return false,
+            (false, _) => return key.chars().count() > 1 && key != "space",
         }
         self.goal_x = None;
         self.moved(cx);
@@ -426,6 +626,7 @@ impl Editor {
 
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
+        self.find = None;
         let hit = self
             .current_layout()
             .and_then(|layout| layout.hit(event.position));
@@ -448,6 +649,12 @@ impl Editor {
         let Some(offset) = self.offset_at(event.position) else {
             return;
         };
+        if event.modifiers.control
+            && let Some(link) = self.model.link_at(offset)
+        {
+            self.open_link(link.target.clone(), cx);
+            return;
+        }
         let unit = match event.click_count {
             0 | 1 => Unit::Char,
             2 => Unit::Word,
@@ -508,6 +715,22 @@ impl Editor {
         self.drag = None;
     }
 
+    fn drop_files(&mut self, paths: &ExternalPaths, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.focus, cx);
+        self.find = None;
+        if let Some(offset) = self.offset_at(window.mouse_position()) {
+            self.model.set_cursor(offset, false);
+        }
+        let files = paths
+            .paths()
+            .iter()
+            .cloned()
+            .map(PastedFile::Path)
+            .collect();
+        cx.emit(PasteFiles { files });
+        cx.notify();
+    }
+
     fn scroll(&mut self, event: &ScrollEvent, window: &mut Window, cx: &mut Context<Self>) {
         self.scroll.offset -= event.delta.pixel_delta(window.line_height()).y;
         cx.notify();
@@ -541,9 +764,12 @@ impl Render for Editor {
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::mouse_up))
             .on_mouse_move(cx.listener(Self::mouse_move))
             .on_scroll(cx.listener(Self::scroll))
+            .on_drop(cx.listener(Self::drop_files))
+            .relative()
             .child(EditorElement {
                 editor: cx.entity(),
             })
+            .children(self.find.as_ref().map(|find| find.bar(&self.theme)))
     }
 }
 
@@ -590,6 +816,12 @@ impl EntityInputHandler for Editor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(find) = &mut self.find {
+            find.push(text);
+            find.refresh(&mut self.model);
+            self.moved(cx);
+            return;
+        }
         let range = range.map_or_else(|| self.model.selection(), |r| self.range_from_utf16(&r));
         let changed = self
             .model
@@ -645,4 +877,33 @@ impl EntityInputHandler for Editor {
     ) -> Option<usize> {
         Some(self.model.offset_to_utf16(self.model.text().len()))
     }
+}
+
+/// The files or the image on the clipboard. Files come first. It is empty for text.
+fn pasted_files(item: &ClipboardItem) -> Vec<PastedFile> {
+    let paths: Vec<PastedFile> = item
+        .entries()
+        .iter()
+        .filter_map(|entry| match entry {
+            ClipboardEntry::ExternalPaths(paths) => Some(paths.paths()),
+            _ => None,
+        })
+        .flatten()
+        .cloned()
+        .map(PastedFile::Path)
+        .collect();
+    if !paths.is_empty() {
+        return paths;
+    }
+    item.entries()
+        .iter()
+        .find_map(|entry| match entry {
+            ClipboardEntry::Image(image) => Some(PastedFile::Image {
+                extension: image.format.extension(),
+                bytes: image.bytes.clone(),
+            }),
+            _ => None,
+        })
+        .into_iter()
+        .collect()
 }

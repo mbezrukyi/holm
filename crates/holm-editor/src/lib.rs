@@ -4,12 +4,16 @@
 
 mod editor;
 mod element;
+mod find;
 mod highlight;
 mod ink;
 mod model;
 mod palette;
 
-pub use editor::{Appearance, Changed, Editor, OpenFile, WritingHelp};
+pub use editor::{
+    Appearance, Changed, CursorLink, Editor, OpenFile, OpenLink, PasteFiles, PastedFile,
+    WritingHelp,
+};
 
 /// An error from `holm-editor`.
 #[derive(Debug, thiserror::Error)]

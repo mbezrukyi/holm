@@ -974,8 +974,30 @@ impl Layout {
 
     /// The window rectangles that cover `selection`.
     pub(crate) fn selection_bounds(&self, selection: &Range<usize>) -> Vec<Bounds<Pixels>> {
+        self.text_bounds(selection, true)
+    }
+
+    /// The rects of the find matches in this layout.
+    pub(crate) fn match_bounds(&self, matches: &[Range<usize>]) -> Vec<Bounds<Pixels>> {
+        let (Some(first), Some(last)) = (self.lines.first(), self.lines.last()) else {
+            return Vec::new();
+        };
+        let (start, end) = (first.display.source().start, last.display.source().end);
+        matches[matches.partition_point(|m| m.end < start)
+            ..matches.partition_point(|m| m.start <= end)]
+            .iter()
+            .flat_map(|m| self.text_bounds(m, false))
+            .collect()
+    }
+
+    /// The rects of the text in `range`. With `raw_only`, only lines that show their syntax.
+    fn text_bounds(&self, selection: &Range<usize>, raw_only: bool) -> Vec<Bounds<Pixels>> {
         let mut rects = Vec::new();
-        for line in self.lines.iter().filter(|line| line.display.raw) {
+        for line in self
+            .lines
+            .iter()
+            .filter(|line| line.display.raw || !raw_only)
+        {
             let Some(text) = line.text() else { continue };
             let source = line.display.source();
             if selection.end < source.start || selection.start > source.end {
