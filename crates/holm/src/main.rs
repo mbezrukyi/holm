@@ -6,9 +6,14 @@ mod bar;
 mod changes;
 mod config;
 mod crash;
+mod dialog;
 mod error;
+mod icons;
 mod log;
+mod notes;
 mod pane;
+mod picker;
+mod sidebar;
 mod text;
 mod theme;
 mod window;
@@ -30,7 +35,7 @@ fn main() -> ExitCode {
         Err(error) => return fail(&error),
     };
     let failed = Rc::new(Cell::new(false));
-    gpui_kit::application().run({
+    gpui_kit::application().with_assets(icons::Icons).run({
         let failed = failed.clone();
         move |cx| {
             gpui_kit::init(cx);

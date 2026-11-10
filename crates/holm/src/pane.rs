@@ -4,16 +4,19 @@
 //! An outside change of the note reloads it quietly when the pane has no unsaved
 //! changes. Else a quiet bar asks to reload or to keep the text in the editor.
 //! When a save fails, a quiet bar shows the error, and the text stays in the editor.
+//!
+//! When the user opens another note, the pane saves the old one. It also renames the old file
+//! to match the title.
 
 use std::borrow::Cow;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::{Theme as Ui, v_flex};
 use gpui_kit::{
-    AppContext as _, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement, Render,
-    Styled, Subscription, Task, Window, div,
+    AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
+    ParentElement, Render, Styled, Subscription, Task, Window, div,
 };
 use holm_core::Core;
 use holm_core::model::{Change, Note};
@@ -25,6 +28,24 @@ use crate::{changes, text, theme};
 
 /// How long the pane waits after the last change before it saves.
 const AUTOSAVE: Duration = Duration::from_millis(500);
+
+/// What the pane tells the app.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum PaneEvent {
+    /// The pane shows the note at this path.
+    Opened(PathBuf),
+    /// The pane changed a note file: a save or a rename.
+    Wrote,
+}
+
+/// What happens to the open note when the pane opens another one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Leave {
+    /// Save it and rename its file to match the title.
+    Keep,
+    /// The note is gone. Drop its text.
+    Drop,
+}
 
 pub(crate) struct NotePane {
     core: Core,
@@ -40,6 +61,7 @@ pub(crate) struct NotePane {
     /// The note changed on disk while the editor had unsaved changes.
     conflict: bool,
     error: Option<&'static str>,
+    opening: Option<Task<()>>,
     _changes: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
@@ -90,6 +112,7 @@ impl NotePane {
             saving: None,
             conflict: false,
             error: None,
+            opening: None,
             _changes: changes,
             _subscriptions: subscriptions,
         };
@@ -165,6 +188,7 @@ impl NotePane {
                 if self.is_dirty(cx) {
                     self.schedule_save(cx);
                 }
+                cx.emit(PaneEvent::Wrote);
             }
             Err(error) => {
                 let error = AppError::from(error);
@@ -218,7 +242,124 @@ impl NotePane {
         self.save(true, cx);
         cx.notify();
     }
+
+    /// The path of the open note, relative to the notes folder.
+    pub(crate) fn path(&self) -> &Path {
+        &self.note.info.path
+    }
+
+    /// Saves unsaved text now. Like at quit, the text wins over an outside change.
+    /// The task ends when the file is written, or when the save failed.
+    pub(crate) fn flush(&mut self, cx: &mut Context<Self>) -> Task<()> {
+        self.autosave = None;
+        let running = self.saving.take();
+        cx.spawn(async move |pane, cx| {
+            if let Some(running) = running {
+                running.await;
+            }
+            let save = pane.update(cx, |pane, cx| {
+                if pane.is_dirty(cx) {
+                    pane.save_task(true, cx)
+                } else {
+                    None
+                }
+            });
+            if let Ok(Some(save)) = save {
+                save.await;
+            }
+        })
+    }
+
+    /// Opens the note at `path`. With [`Leave::Keep`], the pane first saves the open note and
+    /// renames its file to match the title. When that save fails, the pane stays on the note.
+    pub(crate) fn open(&mut self, path: PathBuf, leave: Leave, cx: &mut Context<Self>) {
+        if leave == Leave::Keep && path == self.note.info.path {
+            return;
+        }
+        let flush = (leave == Leave::Keep).then(|| self.flush(cx));
+        let old = self.note.info.path.clone();
+        self.opening = Some(cx.spawn(async move |pane, cx| {
+            if let Some(flush) = flush {
+                flush.await;
+                let saved = pane.update(cx, |pane, cx| !pane.is_dirty(cx));
+                if !matches!(saved, Ok(true)) {
+                    return;
+                }
+            }
+            let Ok(core) = pane.read_with(cx, |pane, _| pane.core.clone()) else {
+                return;
+            };
+            let job = cx.background_spawn(async move {
+                let renamed = (leave == Leave::Keep).then(|| core.rename_to_title(&old));
+                (renamed, core.read(&path))
+            });
+            let (renamed, read) = job.await;
+            pane.update(cx, |pane, cx| pane.opened(renamed, read, cx))
+                .ok();
+        }));
+    }
+
+    fn opened(
+        &mut self,
+        renamed: Option<holm_core::Result<holm_core::model::NoteInfo>>,
+        read: holm_core::Result<Note>,
+        cx: &mut Context<Self>,
+    ) {
+        self.opening = None;
+        match renamed {
+            Some(Ok(info)) => {
+                if info.path != self.note.info.path {
+                    cx.emit(PaneEvent::Wrote);
+                }
+            }
+            Some(Err(error)) => {
+                let error = AppError::from(error);
+                tracing::warn!(error = %crate::chain(&error), "cannot rename the note to its title");
+            }
+            None => {}
+        }
+        match read {
+            Ok(note) => {
+                let path = note.info.path.clone();
+                self.show(note, false, cx);
+                cx.emit(PaneEvent::Opened(path));
+            }
+            Err(error) => {
+                let error = AppError::from(error);
+                tracing::warn!(error = %crate::chain(&error), "cannot open the note");
+                self.error = Some(error.message());
+                cx.notify();
+            }
+        }
+    }
+
+    /// Follows a move of the open note, or of a folder that holds it, and reads it again.
+    /// A move can change the file links in the note. Call [`Self::flush`] before the move.
+    pub(crate) fn moved(&mut self, from: &Path, to: &Path, cx: &mut Context<Self>) {
+        let Ok(rest) = self.note.info.path.strip_prefix(from) else {
+            return;
+        };
+        let path = if rest.as_os_str().is_empty() {
+            to.to_owned()
+        } else {
+            to.join(rest)
+        };
+        self.note.info.path.clone_from(&path);
+        let folder = path.parent().map(|parent| self.notes_folder.join(parent));
+        self.editor
+            .update(cx, |editor, cx| editor.set_folder(folder, cx));
+        self.reload(cx);
+        cx.emit(PaneEvent::Opened(path));
+    }
+
+    /// Selects the title text in the editor and gives the editor the focus.
+    pub(crate) fn select_title(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.editor.update(cx, Editor::select_title);
+        window.focus(&self.editor.focus_handle(cx), cx);
+    }
 }
+
+impl EventEmitter<PaneEvent> for NotePane {}
 
 #[cfg(test)]
 impl NotePane {

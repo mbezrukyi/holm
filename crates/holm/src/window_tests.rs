@@ -8,13 +8,15 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use gpui_kit::test::TestWindowExt as _;
-use gpui_kit::{AnyWindowHandle, AppContext as _, Entity, TestAppContext};
+use gpui_kit::{AnyWindowHandle, AppContext as _, Entity, Focusable as _, TestAppContext};
 use holm_core::{Core, Feed};
 use tempfile::TempDir;
 
 use super::{HolmWindow, Stage, Startup};
 use crate::config::Config;
+use crate::notes::NotesView;
 use crate::pane::NotePane;
+use crate::sidebar::{Item, View};
 use crate::{changes, text, theme};
 
 struct Fixture {
@@ -107,11 +109,16 @@ fn autosave(cx: &mut TestAppContext) {
     cx.run_until_parked();
 }
 
-fn pane(cx: &TestAppContext, window: &Entity<HolmWindow>) -> Option<Entity<NotePane>> {
+fn notes(cx: &TestAppContext, window: &Entity<HolmWindow>) -> Option<Entity<NotesView>> {
     cx.read(|cx| match &window.read(cx).stage {
-        Stage::Open(pane) => Some(pane.clone()),
+        Stage::Open(notes) => Some(notes.clone()),
         _ => None,
     })
+}
+
+fn pane(cx: &TestAppContext, window: &Entity<HolmWindow>) -> Option<Entity<NotePane>> {
+    let notes = notes(cx, window)?;
+    Some(cx.read(|cx| notes.read(cx).pane().clone()))
 }
 
 fn editor_text(cx: &TestAppContext, window: &Entity<HolmWindow>) -> String {
@@ -272,4 +279,191 @@ fn a_crash_in_the_last_run_shows_the_log_path(cx: &mut TestAppContext) {
     let log = PathBuf::from("/state/holm/holm.log");
     let (_, window) = open(cx, fixture.startup(Some(log.clone())));
     assert_eq!(notices(cx, &window), [text::crashed(&log)]);
+}
+
+fn set_time(path: &Path, seconds: u64) {
+    let time = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(seconds);
+    fs::File::options()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_modified(time)
+        .unwrap();
+}
+
+fn keys(cx: &mut TestAppContext, handle: AnyWindowHandle, keys: &str) {
+    cx.simulate_keystrokes(handle, keys);
+    settle(cx);
+}
+
+fn view(cx: &TestAppContext, notes: &Entity<NotesView>) -> View {
+    cx.read(|cx| notes.read(cx).sidebar().read(cx).view().clone())
+}
+
+fn sidebar_focused(
+    cx: &mut TestAppContext,
+    handle: AnyWindowHandle,
+    notes: &Entity<NotesView>,
+) -> bool {
+    cx.update_window(handle, |_, window, cx| {
+        notes
+            .read(cx)
+            .sidebar()
+            .focus_handle(cx)
+            .contains_focused(window, cx)
+    })
+    .unwrap()
+}
+
+fn editor_focused(
+    cx: &mut TestAppContext,
+    handle: AnyWindowHandle,
+    notes: &Entity<NotesView>,
+) -> bool {
+    cx.update_window(handle, |_, window, cx| {
+        notes
+            .read(cx)
+            .pane()
+            .focus_handle(cx)
+            .contains_focused(window, cx)
+    })
+    .unwrap()
+}
+
+fn question(cx: &TestAppContext, notes: &Entity<NotesView>) -> Option<String> {
+    cx.read(|cx| {
+        notes
+            .read(cx)
+            .dialog()
+            .map(|dialog| dialog.read(cx).question().to_owned())
+    })
+}
+
+#[gpui_kit::test]
+fn the_delete_dialog_counts_and_deletes(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    fs::create_dir(notes_dir.join("attachments")).unwrap();
+    fs::write(notes_dir.join("attachments/x.png"), "png").unwrap();
+    fs::write(notes_dir.join("A.md"), "# A\n![](attachments/x.png)\n").unwrap();
+    fs::write(notes_dir.join("B.md"), "# B\n").unwrap();
+    set_time(&notes_dir.join("A.md"), 200);
+    set_time(&notes_dir.join("B.md"), 100);
+    let (handle, window) = open(cx, fixture.startup(None));
+    let notes = notes(cx, &window).unwrap();
+    assert_eq!(editor_text(cx, &window), "# A\n![](attachments/x.png)\n");
+
+    keys(cx, handle, "ctrl-shift-l delete");
+    assert_eq!(
+        question(cx, &notes).as_deref(),
+        Some("Delete “A”? This deletes 1 note and 1 file forever.")
+    );
+    keys(cx, handle, "escape");
+    assert_eq!(question(cx, &notes), None);
+    assert!(notes_dir.join("A.md").is_file());
+    assert!(sidebar_focused(cx, handle, &notes));
+
+    // The dialog opens after the count, so the keys go one step at a time.
+    keys(cx, handle, "delete");
+    keys(cx, handle, "space enter");
+    assert_eq!(question(cx, &notes), None);
+    assert!(!notes_dir.join("A.md").exists());
+    assert!(!notes_dir.join("attachments/x.png").exists());
+    assert_eq!(editor_text(cx, &window), "# B\n");
+    assert!(!Config::load(fixture.config()).settings().ask_before_delete);
+
+    keys(cx, handle, "delete");
+    assert_eq!(
+        question(cx, &notes),
+        None,
+        "no dialog after Do not show again"
+    );
+    assert!(!notes_dir.join("B.md").exists());
+    assert_eq!(editor_text(cx, &window), "");
+    assert!(notes_dir.join("Untitled.md").is_file());
+}
+
+#[gpui_kit::test]
+fn the_keyboard_moves_through_tree_list_and_editor(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    fs::create_dir(notes_dir.join("work")).unwrap();
+    fs::write(notes_dir.join("work/Plan.md"), "# Plan\n").unwrap();
+    fs::write(notes_dir.join("Top.md"), "# Top\n").unwrap();
+    set_time(&notes_dir.join("work/Plan.md"), 100);
+    set_time(&notes_dir.join("Top.md"), 200);
+    let (handle, window) = open(cx, fixture.startup(None));
+    let notes = notes(cx, &window).unwrap();
+    assert_eq!(view(cx, &notes), View::List(Item::All));
+    assert!(editor_focused(cx, handle, &notes));
+
+    keys(cx, handle, "ctrl-shift-l");
+    assert!(sidebar_focused(cx, handle, &notes));
+
+    keys(cx, handle, "escape down enter");
+    let work = Item::Folder("work".into());
+    assert_eq!(view(cx, &notes), View::List(work.clone()));
+
+    keys(cx, handle, "down");
+    assert_eq!(editor_text(cx, &window), "# Plan\n");
+    keys(cx, handle, "f2");
+    assert!(editor_focused(cx, handle, &notes));
+    cx.simulate_input(handle, "Goals");
+    autosave(cx);
+
+    keys(cx, handle, "ctrl-shift-l");
+    assert!(sidebar_focused(cx, handle, &notes));
+    keys(cx, handle, "escape");
+    assert_eq!(view(cx, &notes), View::Tree(work));
+    keys(cx, handle, "up enter down");
+    assert_eq!(editor_text(cx, &window), "# Top\n");
+    assert!(read(&notes_dir.join("work/Goals.md")).ends_with("---\n# Goals\n"));
+    assert!(!notes_dir.join("work/Plan.md").exists());
+
+    keys(cx, handle, "enter");
+    assert!(editor_focused(cx, handle, &notes));
+    keys(cx, handle, "ctrl-shift-l ctrl-shift-l");
+    assert!(cx.read(|cx| notes.read(cx).is_hidden()));
+    assert!(editor_focused(cx, handle, &notes));
+    keys(cx, handle, "ctrl-shift-l");
+    assert!(!cx.read(|cx| notes.read(cx).is_hidden()));
+    assert!(sidebar_focused(cx, handle, &notes));
+
+    let settings = Config::load(fixture.config()).settings().clone();
+    assert_eq!(settings.sidebar.view, View::List(Item::All));
+    assert_eq!(settings.last_note, Some(PathBuf::from("Top.md")));
+}
+
+#[gpui_kit::test]
+fn keys_make_rename_and_move_notes_and_folders(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    fs::write(notes_dir.join("Top.md"), "# Top\n").unwrap();
+    let (handle, window) = open(cx, fixture.startup(None));
+    let notes = notes(cx, &window).unwrap();
+
+    keys(cx, handle, "ctrl-shift-n");
+    assert!(notes_dir.join(text::NEW_FOLDER).is_dir());
+    cx.simulate_input(handle, "work");
+    keys(cx, handle, "enter");
+    assert!(notes_dir.join("work").is_dir());
+    assert!(!notes_dir.join(text::NEW_FOLDER).exists());
+    let work = Item::Folder("work".into());
+    assert_eq!(view(cx, &notes), View::Tree(work.clone()));
+
+    keys(cx, handle, "enter ctrl-n");
+    assert!(notes_dir.join("work/Untitled.md").is_file());
+    assert!(editor_focused(cx, handle, &notes));
+
+    keys(cx, handle, "ctrl-shift-l escape up enter down");
+    assert_eq!(editor_text(cx, &window), "# Top\n");
+    keys(cx, handle, "ctrl-shift-m");
+    keys(cx, handle, "down enter");
+    assert!(notes_dir.join("work/Top.md").is_file());
+    assert!(!notes_dir.join("Top.md").exists());
+    let pane = pane(cx, &window).unwrap();
+    assert_eq!(
+        cx.read(|cx| pane.read(cx).path().to_owned()),
+        PathBuf::from("work/Top.md")
+    );
 }

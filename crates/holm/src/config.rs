@@ -15,6 +15,7 @@ use holm_markdown::Color;
 use toml_edit::{Array, DocumentMut, Item, Table, Value};
 
 use crate::error::AppError;
+use crate::sidebar::{Item as SidebarItem, View};
 
 const VERSION: i64 = 1;
 
@@ -45,6 +46,27 @@ pub(crate) struct Settings {
     pub(crate) custom_colors: Vec<Color>,
     /// False after "Do not show again" in the delete dialog.
     pub(crate) ask_before_delete: bool,
+    pub(crate) sidebar: SidebarSettings,
+    /// The note that was open last, relative to the notes folder.
+    pub(crate) last_note: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SidebarSettings {
+    /// In pixels.
+    pub(crate) width: u16,
+    pub(crate) hidden: bool,
+    pub(crate) view: View,
+}
+
+impl Default for SidebarSettings {
+    fn default() -> Self {
+        Self {
+            width: 250,
+            hidden: false,
+            view: View::default(),
+        }
+    }
 }
 
 impl Default for Settings {
@@ -56,6 +78,8 @@ impl Default for Settings {
             writing_help: WritingHelp::default(),
             custom_colors: Vec::new(),
             ask_before_delete: true,
+            sidebar: SidebarSettings::default(),
+            last_note: None,
         }
     }
 }
@@ -222,6 +246,16 @@ fn read(document: &DocumentMut) -> Settings {
                     read_writing_help(table, &mut settings.writing_help);
                 }
             }
+            "last_note" => {
+                if let Some(path) = get(key, item, Item::as_str) {
+                    settings.last_note = Some(PathBuf::from(path));
+                }
+            }
+            "sidebar" => {
+                if let Some(table) = get(key, item, Item::as_table_like) {
+                    read_sidebar(table, &mut settings.sidebar);
+                }
+            }
             _ => unknown(key),
         }
     }
@@ -242,6 +276,71 @@ fn read_writing_help(table: &dyn toml_edit::TableLike, help: &mut WritingHelp) {
         if let Some(on) = get(key, item, Item::as_bool) {
             *field = on;
         }
+    }
+}
+
+fn read_sidebar(table: &dyn toml_edit::TableLike, sidebar: &mut SidebarSettings) {
+    let mut list = matches!(sidebar.view, View::List(_));
+    let mut item = sidebar.view.item().clone();
+    for (key, value) in table.iter() {
+        match key {
+            "width" => {
+                if let Some(width) =
+                    get(key, value, |value| u16::try_from(value.as_integer()?).ok())
+                {
+                    sidebar.width = width;
+                }
+            }
+            "hidden" => {
+                if let Some(hidden) = get(key, value, Item::as_bool) {
+                    sidebar.hidden = hidden;
+                }
+            }
+            "view" => {
+                if let Some(view) = get(key, value, |value| match value.as_str()? {
+                    "tree" => Some(false),
+                    "list" => Some(true),
+                    _ => None,
+                }) {
+                    list = view;
+                }
+            }
+            "item" => {
+                if let Some(read) = get(key, value, |value| item_from(value.as_str()?)) {
+                    item = read;
+                }
+            }
+            _ => unknown(&format!("sidebar.{key}")),
+        }
+    }
+    sidebar.view = if list {
+        View::List(item)
+    } else {
+        View::Tree(item)
+    };
+}
+
+/// `all`, `folder:<path>` or `tag:<name>`.
+fn item_from(text: &str) -> Option<SidebarItem> {
+    match text.split_once(':') {
+        None if text == "all" => Some(SidebarItem::All),
+        Some(("folder", path)) if !path.is_empty() => {
+            Some(SidebarItem::Folder(PathBuf::from(path)))
+        }
+        Some(("tag", name)) if !name.is_empty() => Some(SidebarItem::Tag(name.to_owned())),
+        _ => None,
+    }
+}
+
+/// The text of `item` in the file. A folder path that is not UTF-8 gives `all`.
+fn item_text(item: &SidebarItem) -> String {
+    match item {
+        SidebarItem::Folder(path) => match path.to_str() {
+            Some(path) => format!("folder:{path}"),
+            None => "all".to_owned(),
+        },
+        SidebarItem::Tag(name) => format!("tag:{name}"),
+        SidebarItem::All => "all".to_owned(),
     }
 }
 
@@ -291,6 +390,12 @@ fn write(document: &mut DocumentMut, settings: &Settings) {
         .map(ToString::to_string)
         .collect();
     set(document, "custom_colors", Value::from(colors));
+    match settings.last_note.as_deref().map(Path::to_str) {
+        Some(Some(path)) => set(document, "last_note", Value::from(path)),
+        Some(None) | None => {
+            document.remove("last_note");
+        }
+    }
 
     if !document.get("writing_help").is_some_and(Item::is_table) {
         document.insert("writing_help", Item::Table(Table::new()));
@@ -303,6 +408,21 @@ fn write(document: &mut DocumentMut, settings: &Settings) {
         set(table, "format_keys", Value::from(help.format_keys));
         set(table, "continue_lists", Value::from(help.continue_lists));
         set(table, "indent_lists", Value::from(help.indent_lists));
+    }
+
+    if !document.get("sidebar").is_some_and(Item::is_table) {
+        document.insert("sidebar", Item::Table(Table::new()));
+    }
+    if let Some(table) = document.get_mut("sidebar").and_then(Item::as_table_mut) {
+        let sidebar = &settings.sidebar;
+        set(table, "width", Value::from(i64::from(sidebar.width)));
+        set(table, "hidden", Value::from(sidebar.hidden));
+        let view = match sidebar.view {
+            View::Tree(_) => "tree",
+            View::List(_) => "list",
+        };
+        set(table, "view", Value::from(view));
+        set(table, "item", Value::from(item_text(sidebar.view.item())));
     }
 }
 
@@ -357,6 +477,12 @@ mod tests {
                 b: 0x3a,
             }],
             ask_before_delete: false,
+            sidebar: SidebarSettings {
+                width: 310,
+                hidden: true,
+                view: View::Tree(SidebarItem::Tag("work/holm".into())),
+            },
+            last_note: Some(PathBuf::from("work/Plans.md")),
         };
         config.save(settings.clone()).unwrap();
 
@@ -396,6 +522,18 @@ mod tests {
         ] {
             assert!(text.contains(line), "{line} is missing in:\n{text}");
         }
+    }
+
+    #[test]
+    fn the_sidebar_list_and_its_item_come_back() {
+        let (_dir, config) =
+            load("version = 1\n[sidebar]\nview = \"list\"\nitem = \"folder:work\"\n");
+        assert_eq!(
+            config.settings().sidebar.view,
+            View::List(SidebarItem::Folder("work".into()))
+        );
+        let (_dir, config) = load("version = 1\n[sidebar]\nview = \"tree\"\nitem = \"bad\"\n");
+        assert_eq!(config.settings().sidebar.view, View::Tree(SidebarItem::All));
     }
 
     #[test]

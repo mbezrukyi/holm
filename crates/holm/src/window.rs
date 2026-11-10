@@ -1,4 +1,4 @@
-//! The main window: the notes folder screen, the editor pane, and the bars from the start.
+//! The main window: the notes folder screen, the notes view, and the bars from the start.
 //!
 //! The first start asks for the notes folder. A notes folder that Holm can't open shows
 //! a screen that offers to pick another one.
@@ -14,12 +14,12 @@ use gpui_kit::{
     TitlebarOptions, Window, WindowBounds, WindowDecorations, WindowOptions, div, px, size,
 };
 use holm_core::Core;
-use holm_core::model::{Note, Order};
+use holm_core::model::Note;
 
 use crate::bar::{self, Bar};
 use crate::config::{Config, Settings, Theme};
 use crate::error::AppError;
-use crate::pane::NotePane;
+use crate::notes::{self, NotesView};
 use crate::{text, theme};
 
 pub(crate) const APP_ID: &str = "io.github.mbezrukyi.Holm";
@@ -64,7 +64,7 @@ pub(crate) fn open(startup: Startup, cx: &mut App) -> Result<(), AppError> {
 
 pub(crate) struct HolmWindow {
     open_core: OpenCore,
-    config: Config,
+    config: Entity<Config>,
     index_dir: PathBuf,
     default_folder: PathBuf,
     stage: Stage,
@@ -78,7 +78,7 @@ enum Stage {
     Opening,
     /// Holm can't open the notes folder.
     Failed(SharedString),
-    Open(Entity<NotePane>),
+    Open(Entity<NotesView>),
 }
 
 /// A bar from the start that the user closes.
@@ -98,7 +98,7 @@ impl HolmWindow {
         } = startup;
         theme::apply(config.settings().theme, window, cx);
         let appearance = cx.observe_window_appearance(window, |this, window, cx| {
-            if this.config.settings().theme == Theme::System {
+            if this.config.read(cx).settings().theme == Theme::System {
                 theme::apply(Theme::System, window, cx);
             }
         });
@@ -118,7 +118,7 @@ impl HolmWindow {
         let folder = config.settings().notes_folder.clone();
         let mut this = Self {
             open_core,
-            config,
+            config: cx.new(|_| config),
             index_dir,
             default_folder,
             stage: Stage::Ask,
@@ -143,9 +143,10 @@ impl HolmWindow {
         cx.notify();
         let index_dir = self.index_dir.clone();
         let open = self.open_core.clone();
+        let last = self.config.read(cx).settings().last_note.clone();
         let job = cx.background_spawn({
             let folder = folder.clone();
-            async move { open_notes(&*open, &folder, &index_dir, create) }
+            async move { open_notes(&*open, &folder, &index_dir, create, last.as_deref()) }
         });
         cx.spawn_in(window, async move |this, cx| {
             let result = job.await;
@@ -153,7 +154,10 @@ impl HolmWindow {
                 this.stage = match result {
                     Ok((core, note)) => {
                         let folder = folder.clone();
-                        Stage::Open(cx.new(|cx| NotePane::new(core, folder, note, window, cx)))
+                        let config = this.config.clone();
+                        Stage::Open(
+                            cx.new(|cx| NotesView::new(core, folder, note, config, window, cx)),
+                        )
                     }
                     Err(error) => {
                         tracing::warn!(error = %crate::chain(&error), "cannot open the notes folder");
@@ -182,9 +186,10 @@ impl HolmWindow {
     ) {
         let settings = Settings {
             notes_folder: Some(folder.clone()),
-            ..self.config.settings().clone()
+            last_note: None,
+            ..self.config.read(cx).settings().clone()
         };
-        if let Err(error) = self.config.save(settings) {
+        if let Err(error) = self.config.update(cx, |config, _| config.save(settings)) {
             tracing::warn!(error = %crate::chain(&error), "cannot save the settings");
             self.notices.retain(|notice| notice.id != "config-write");
             self.notices.push(Notice {
@@ -268,21 +273,19 @@ impl HolmWindow {
     }
 }
 
-/// Opens the core and gives the last changed note. With no notes, it makes one.
+/// Opens the core and gives the note to show first. `create` makes the folder first.
 fn open_notes(
     open: &dyn Fn(&Path, &Path) -> holm_core::Result<Core>,
     folder: &Path,
     index_dir: &Path,
     create: bool,
+    last: Option<&Path>,
 ) -> Result<(Core, Note), AppError> {
     if create && let Err(error) = std::fs::create_dir_all(folder) {
         tracing::warn!(path = %folder.display(), %error, "cannot make the notes folder");
     }
     let core = open(folder, index_dir)?;
-    let note = match core.notes(Order::LastChange)?.first() {
-        Some(info) => core.read(&info.path)?,
-        None => core.create("")?,
-    };
+    let note = notes::first_note(&core, last)?;
     Ok((core, note))
 }
 

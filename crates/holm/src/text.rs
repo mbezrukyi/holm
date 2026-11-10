@@ -40,3 +40,33 @@ pub(crate) fn crashed(log: &Path) -> String {
         log.display()
     )
 }
+
+pub(crate) const ALL_NOTES: &str = "All notes";
+pub(crate) const NO_NOTES: &str = "No notes";
+pub(crate) const PIN_MARK: &str = "●";
+pub(crate) const FOLDERS: &str = "FOLDERS";
+pub(crate) const TAGS: &str = "TAGS";
+pub(crate) const NEW_FOLDER: &str = "New folder";
+pub(crate) const ROOT_FOLDER: &str = "Notes folder";
+pub(crate) const MOVE_TO: &str = "Move to";
+pub(crate) const DELETE: &str = "Delete";
+pub(crate) const CANCEL: &str = "Cancel";
+pub(crate) const DO_NOT_ASK: &str = "Do not show again";
+
+/// The question of the delete dialog.
+pub(crate) fn delete_question(name: &str, notes: usize, files: usize) -> String {
+    let notes = count(notes, "note", "notes");
+    let what = match files {
+        0 => notes,
+        files => format!("{notes} and {}", count(files, "file", "files")),
+    };
+    format!("Delete {name}? This deletes {what} forever.")
+}
+
+fn count(n: usize, one: &str, many: &str) -> String {
+    if n == 1 {
+        format!("1 {one}")
+    } else {
+        format!("{n} {many}")
+    }
+}
