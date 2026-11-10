@@ -421,3 +421,21 @@ mod real_events {
         );
     }
 }
+
+#[test]
+fn the_revision_grows_with_own_writes_and_outside_changes() {
+    let fed = Fed::new(&[("a.md", "# A\n")]);
+    let start = fed.core.revision();
+
+    fed.core.read("a.md").unwrap();
+    fed.core.notes(Order::Title).unwrap();
+    assert_eq!(fed.core.revision(), start, "reads change nothing");
+
+    fed.core.create("").unwrap();
+    let created = fed.core.revision();
+    assert!(created > start);
+
+    fed.write("a.md", "# A again\n");
+    fed.feed.changed(["a.md"]).unwrap();
+    assert!(fed.core.revision() > created);
+}

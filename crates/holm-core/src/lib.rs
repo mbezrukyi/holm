@@ -13,6 +13,7 @@ mod watch;
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -44,6 +45,8 @@ struct Inner {
     index: Index,
     /// Held while a write and its index update run, so a watch batch never sees half of it.
     writing: Mutex<()>,
+    /// The count of writes, from Holm or from outside. See [`Core::revision`].
+    revision: AtomicU64,
     listeners: Mutex<Vec<Sender<Change>>>,
     _watcher: Option<watch::Watcher>,
 }
@@ -100,6 +103,15 @@ impl Core {
             apply: core.apply(),
         };
         Ok((core, feed))
+    }
+
+    /// A number that grows after each change to the notes folder that the core knows of:
+    /// its own writes and the changes from outside. A view that shows lists of notes reads
+    /// them again when this number changes.
+    ///
+    /// It can also grow when nothing changed, for example after a write that failed.
+    pub fn revision(&self) -> u64 {
+        self.inner.revision.load(Ordering::Acquire)
     }
 
     /// A new stream of the changes that come from outside Holm.
@@ -236,7 +248,7 @@ impl Core {
     /// - [`Error::Write`] when the new file can't be written. The old file then stays.
     /// - [`Error::Index`] as in [`Core::notes`]. The file is saved all the same.
     pub fn save(&self, note: &Note) -> Result<Note> {
-        let _writing = lock(&self.inner.writing);
+        let _writing = self.inner.write();
         let (note, stamp) = self.inner.store.save(note)?;
         self.inner.index.update(&self.inner.store, &note, stamp)
     }
@@ -251,7 +263,7 @@ impl Core {
     /// - [`Error::Write`] when the file can't be written, for example when the folder is missing.
     /// - [`Error::Index`] as in [`Core::save`].
     pub fn create(&self, folder: impl AsRef<Path>) -> Result<Note> {
-        let _writing = lock(&self.inner.writing);
+        let _writing = self.inner.write();
         let (note, stamp) = self.inner.store.create(folder.as_ref())?;
         self.inner.index.update(&self.inner.store, &note, stamp)
     }
@@ -272,7 +284,7 @@ impl Core {
     /// - [`Error::Index`] as in [`Core::save`].
     pub fn rename_to_title(&self, path: impl AsRef<Path>) -> Result<NoteInfo> {
         let path = path.as_ref();
-        let _writing = lock(&self.inner.writing);
+        let _writing = self.inner.write();
         let (note, _) = self.inner.store.read(path)?;
         let stem = holm_markdown::file_stem(&note.info.title);
         let new = self
@@ -294,7 +306,7 @@ impl Core {
     /// - Else as in [`Core::rename_to_title`].
     pub fn move_note(&self, path: impl AsRef<Path>, folder: impl AsRef<Path>) -> Result<NoteInfo> {
         let path = path.as_ref();
-        let _writing = lock(&self.inner.writing);
+        let _writing = self.inner.write();
         Store::check_note(path)?;
         let stem = path.file_stem().unwrap_or_default();
         let new = self.inner.store.move_note(path, folder.as_ref(), stem)?;
@@ -311,7 +323,7 @@ impl Core {
     /// - [`Error::BadPath`] when `parent` is not a folder path, or `name` is empty.
     /// - [`Error::Write`] when the folder can't be made, for example when `parent` is missing.
     pub fn create_folder(&self, parent: impl AsRef<Path>, name: &str) -> Result<PathBuf> {
-        let _writing = lock(&self.inner.writing);
+        let _writing = self.inner.write();
         self.inner.store.create_folder(parent.as_ref(), name)
     }
 
@@ -594,7 +606,7 @@ impl Core {
         path: &Path,
         edit: impl FnOnce(&mut holm_markdown::Note),
     ) -> Result<Note> {
-        let _writing = lock(&self.inner.writing);
+        let _writing = self.inner.write();
         let (note, stamp) = self.inner.store.edit_fields(path, edit)?;
         self.inner.index.update(&self.inner.store, &note, stamp)
     }
@@ -633,7 +645,7 @@ impl Core {
     }
 
     fn move_folder_to(&self, folder: &Path, parent: &Path, name: &str) -> Result<PathBuf> {
-        let _writing = lock(&self.inner.writing);
+        let _writing = self.inner.write();
         let new = self.inner.store.move_folder(folder, parent, name)?;
         if new != folder {
             self.refresh(vec![folder.to_owned(), new.clone()])?;
@@ -658,7 +670,7 @@ impl Core {
 
     /// Runs `delete` on `scope`, then deletes its attachment files and updates the index.
     fn delete(&self, scope: &Path, delete: impl FnOnce(&Store) -> Result<()>) -> Result<()> {
-        let _writing = lock(&self.inner.writing);
+        let _writing = self.inner.write();
         let (_, files) = self.removal(scope)?;
         delete(&self.inner.store)?;
         for file in files {
@@ -696,6 +708,7 @@ impl Core {
             store,
             index,
             writing: Mutex::new(()),
+            revision: AtomicU64::new(0),
             listeners: Mutex::new(Vec::new()),
             _watcher: watcher,
         };
@@ -713,6 +726,14 @@ impl Core {
 }
 
 impl Inner {
+    /// Takes the write lock. The revision grows when the write ends.
+    fn write(&self) -> Writing<'_> {
+        Writing {
+            revision: &self.revision,
+            _lock: lock(&self.writing),
+        }
+    }
+
     /// Checks the disk at each path of `batch`, updates the index and sends the changes.
     fn apply(&self, batch: Batch) -> Result<()> {
         // The batch is sorted.
@@ -724,7 +745,7 @@ impl Inner {
         if scopes.is_empty() {
             return Ok(());
         }
-        let _writing = lock(&self.writing);
+        let _writing = self.write();
         let refresh = self.index.refresh(&self.store, &scopes)?;
         // A missing path may have been a folder. The index knows only notes, so it can't tell.
         // A missing `.md` path is taken as a note.
@@ -750,6 +771,18 @@ impl Inner {
             });
         }
         Ok(())
+    }
+}
+
+/// The write lock of the core. It counts the write when it ends.
+struct Writing<'a> {
+    revision: &'a AtomicU64,
+    _lock: MutexGuard<'a, ()>,
+}
+
+impl Drop for Writing<'_> {
+    fn drop(&mut self) {
+        self.revision.fetch_add(1, Ordering::Release);
     }
 }
 
