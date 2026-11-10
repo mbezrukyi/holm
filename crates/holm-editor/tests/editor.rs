@@ -6,7 +6,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use common::{LINE_HEIGHT, advance, app, data_folder, open};
+use common::{LINE_HEIGHT, MARGIN, advance, app, column_x, data_folder, open};
 use gpui_kit::{
     ClipboardItem, Entity, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels,
     VisualTestContext, point, px,
@@ -22,13 +22,13 @@ fn text(editor: &Entity<Editor>, cx: &VisualTestContext) -> String {
 
 /// Clicks at a char column and a pixel height, from the top left of the editor.
 fn click(cx: &mut VisualTestContext, column: f32, y: Pixels) {
-    let x = advance(cx) * column;
+    let x = column_x(cx, column);
     cx.simulate_click(point(x, y), Modifiers::none());
 }
 
 /// Clicks `count` times in a row at a char column and a pixel height.
 fn multi_click(cx: &mut VisualTestContext, column: f32, y: Pixels, count: usize) {
-    let position = point(advance(cx) * column, y);
+    let position = point(column_x(cx, column), y);
     for click_count in 1..=count {
         cx.simulate_event(MouseDownEvent {
             position,
@@ -136,7 +136,7 @@ fn long_lines_wrap_at_the_editor_width() {
     let mut app = app();
     let width = {
         let (_, cx) = open(&mut app, "", WIDTH, HEIGHT);
-        advance(cx) * 20.5
+        advance(cx) * 20.5 + MARGIN * 2.
     };
     let (editor, cx) = open(&mut app, "aaaa bbbb cccc dddd eeee ffff", width, HEIGHT);
     // The second row starts at "eeee".
@@ -392,9 +392,21 @@ fn a_drag_selects_text() {
     let (editor, cx) = open(&mut app, "one two", WIDTH, HEIGHT);
     let x = advance(cx);
     let y = LINE_HEIGHT * 0.5;
-    cx.simulate_mouse_down(point(x * 1.2, y), MouseButton::Left, Modifiers::none());
-    cx.simulate_mouse_move(point(x * 5.2, y), MouseButton::Left, Modifiers::none());
-    cx.simulate_mouse_up(point(x * 5.2, y), MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_down(
+        point(MARGIN + x * 1.2, y),
+        MouseButton::Left,
+        Modifiers::none(),
+    );
+    cx.simulate_mouse_move(
+        point(MARGIN + x * 5.2, y),
+        MouseButton::Left,
+        Modifiers::none(),
+    );
+    cx.simulate_mouse_up(
+        point(MARGIN + x * 5.2, y),
+        MouseButton::Left,
+        Modifiers::none(),
+    );
     cx.simulate_input("X");
     assert_eq!(text(&editor, cx), "oXwo");
 }
@@ -404,7 +416,7 @@ fn a_click_selects_nothing_when_its_line_shows_the_syntax() {
     let mut app = app();
     let (editor, cx) = open(&mut app, "start\n\nsome **bold** text", WIDTH, HEIGHT);
     // The click shows the "**", so the same point now lands on another byte.
-    let position = point(advance(cx) * 6.2, LINE_HEIGHT * 2.5);
+    let position = point(column_x(cx, 6.2), LINE_HEIGHT * 2.5);
     cx.simulate_mouse_down(position, MouseButton::Left, Modifiers::none());
     cx.simulate_mouse_move(position, MouseButton::Left, Modifiers::none());
     cx.simulate_mouse_up(position, MouseButton::Left, Modifiers::none());
@@ -418,14 +430,26 @@ fn a_drag_starts_only_a_few_pixels_from_the_click() {
     let (editor, cx) = open(&mut app, "one two", WIDTH, HEIGHT);
     let x = advance(cx);
     let y = LINE_HEIGHT * 0.5;
-    cx.simulate_mouse_down(point(x * 1.2, y), MouseButton::Left, Modifiers::none());
-    cx.simulate_mouse_move(
-        point(x * 1.2 + px(2.), y),
+    cx.simulate_mouse_down(
+        point(MARGIN + x * 1.2, y),
         MouseButton::Left,
         Modifiers::none(),
     );
-    cx.simulate_mouse_move(point(x * 5.2, y), MouseButton::Left, Modifiers::none());
-    cx.simulate_mouse_up(point(x * 5.2, y), MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_move(
+        point(MARGIN + x * 1.2 + px(2.), y),
+        MouseButton::Left,
+        Modifiers::none(),
+    );
+    cx.simulate_mouse_move(
+        point(MARGIN + x * 5.2, y),
+        MouseButton::Left,
+        Modifiers::none(),
+    );
+    cx.simulate_mouse_up(
+        point(MARGIN + x * 5.2, y),
+        MouseButton::Left,
+        Modifiers::none(),
+    );
     cx.simulate_input("X");
     assert_eq!(text(&editor, cx), "oXwo");
 }

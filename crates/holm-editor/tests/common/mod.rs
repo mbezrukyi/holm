@@ -16,6 +16,8 @@ use holm_editor::Editor;
 pub const FONT: &str = "Fira Mono";
 pub const FONT_SIZE: Pixels = px(16.);
 pub const LINE_HEIGHT: Pixels = px(20.);
+/// The space between the editor edge and the text column, in a test window.
+pub const MARGIN: Pixels = px(32.);
 
 /// Gives the editor its text style, like the app does.
 pub struct Host {
@@ -68,6 +70,11 @@ pub fn open<'a>(
 }
 
 /// The width of one char of the repo font.
+/// The x of a char column, from the left of the editor.
+pub fn column_x(cx: &VisualTestContext, column: f32) -> Pixels {
+    MARGIN + advance(cx) * column
+}
+
 pub fn advance(cx: &VisualTestContext) -> Pixels {
     let text_system = cx.text_system().clone();
     let font_id = text_system.resolve_font(&font(FONT));

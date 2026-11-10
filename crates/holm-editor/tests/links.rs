@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use common::{LINE_HEIGHT, advance, app, open};
+use common::{LINE_HEIGHT, app, column_x, open};
 use gpui_kit::{
     ClipboardEntry, ClipboardItem, Entity, ExternalPaths, FileDropEvent, Image, ImageFormat,
     Modifiers, Pixels, VisualTestContext, point, px,
@@ -53,7 +53,7 @@ fn link_at_cursor(editor: &Entity<Editor>, cx: &VisualTestContext) -> Option<Cur
 
 /// A point at a char column and a pixel height, from the top left of the editor.
 fn at(cx: &VisualTestContext, column: f32, y: Pixels) -> gpui_kit::Point<Pixels> {
-    point(advance(cx) * column, y)
+    point(column_x(cx, column), y)
 }
 
 const LINKS: &str = "top\n\nsee [plans](holm:X) and [site](https://a.org)";

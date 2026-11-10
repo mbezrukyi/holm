@@ -20,7 +20,7 @@ pub(crate) use theme::Theme;
 use crate::Editor;
 use crate::ink;
 use crate::model::{LineKind, Mark, Quote, Run};
-use layout::{COLUMN_WIDTH, Content, LaidCard, LaidLine, Shaper, lay_out, run_font};
+use layout::{COLUMN_WIDTH, Content, LaidCard, LaidLine, SIDE_MARGIN, Shaper, lay_out, run_font};
 
 /// The width of a quote bar.
 const BAR: Pixels = px(3.);
@@ -38,9 +38,11 @@ impl IntoElement for EditorElement {
     }
 }
 
-/// The text column in the middle of `bounds`.
+/// The text column in the middle of `bounds`, with at least [`SIDE_MARGIN`] on each side.
 fn column(bounds: Bounds<Pixels>) -> Bounds<Pixels> {
-    let width = bounds.size.width.min(COLUMN_WIDTH);
+    let width = (bounds.size.width - SIDE_MARGIN * 2.)
+        .max(px(0.))
+        .min(COLUMN_WIDTH);
     Bounds::new(
         point(
             bounds.origin.x + (bounds.size.width - width) / 2.,

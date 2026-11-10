@@ -332,6 +332,17 @@ impl Editor {
         changed
     }
 
+    /// Selects the text of the title, so typing replaces it. The title is a `# heading` that is
+    /// the first block. With no title, the cursor goes to the start of the text.
+    pub fn select_title(&mut self, cx: &mut Context<Self>) {
+        match self.model.title_range() {
+            Some(range) => self.model.select(range),
+            None => self.model.set_cursor(0, false),
+        }
+        self.goal_x = None;
+        self.moved(cx);
+    }
+
     /// Opens `target`: moves to a heading in this note, or tells the app.
     fn open_link(&mut self, target: Target, cx: &mut Context<Self>) {
         match target {
