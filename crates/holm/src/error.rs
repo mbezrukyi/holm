@@ -22,6 +22,8 @@ pub(crate) enum AppError {
     },
     #[error("cannot find the home folder")]
     NoHome,
+    #[error("cannot open the window: {0}")]
+    Window(String),
 }
 
 impl AppError {
@@ -42,6 +44,7 @@ impl AppError {
             Self::ConfigWrite { .. } => text::CONFIG_WRITE,
             Self::Log { .. } => text::LOG,
             Self::NoHome => text::NO_HOME,
+            Self::Window(_) => text::WINDOW,
         }
     }
 }

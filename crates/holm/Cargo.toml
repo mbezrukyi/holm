@@ -7,6 +7,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+gpui-kit = { workspace = true, features = ["component"] }
 holm-core.workspace = true
 holm-editor.workspace = true
 holm-markdown.workspace = true
@@ -16,6 +17,9 @@ toml_edit.workspace = true
 tracing.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true
+
+[dev-dependencies]
+gpui-kit = { workspace = true, features = ["component", "test-support"] }
 
 [lints]
 workspace = true

@@ -13,9 +13,26 @@ pub(crate) const BAD_TAG: &str = "This is not a tag name.";
 pub(crate) const UNKNOWN: &str = "Something went wrong. The log has the details.";
 pub(crate) const CONFIG_WRITE: &str = "Holm can't save the settings.";
 pub(crate) const LOG: &str = "Holm can't write its log.";
+pub(crate) const WINDOW: &str = "Holm can't open its window.";
 pub(crate) const NO_HOME: &str = "Holm can't find your home folder.";
 pub(crate) const CONFIG_BROKEN: &str =
     "The config file has an error. Holm uses the default settings and does not change the file.";
+
+pub(crate) const TITLE: &str = "Holm";
+pub(crate) const ASK_FOLDER: &str = "Where do your notes live?";
+pub(crate) const ABOUT_FOLDER: &str = "Holm keeps each note as a Markdown file in one folder.";
+pub(crate) const USE_DEFAULT: &str = "Use ~/Notes";
+pub(crate) const PICK_FOLDER: &str = "Pick a folder";
+pub(crate) const PICK_PROMPT: &str = "Use this folder";
+pub(crate) const OPENING: &str = "Holm opens the notes folder.";
+pub(crate) const CHANGED_ON_DISK: &str = "Changed on disk. Reload or keep mine?";
+pub(crate) const RELOAD: &str = "Reload";
+pub(crate) const KEEP_MINE: &str = "Keep mine";
+pub(crate) const CLOSE: &str = "Close";
+
+pub(crate) fn folder_missing(folder: &Path) -> String {
+    format!("Holm can't find the notes folder {}.", folder.display())
+}
 
 pub(crate) fn crashed(log: &Path) -> String {
     format!(

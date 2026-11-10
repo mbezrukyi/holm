@@ -113,7 +113,6 @@ impl Config {
 
     /// Keeps `settings` and writes them to the file. It does not write a broken file or a file
     /// with a newer version. A folder path that is not UTF-8 stays out of the file.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the settings window calls it"))]
     pub(crate) fn save(&mut self, settings: Settings) -> Result<(), AppError> {
         self.settings = settings;
         if self.state != State::Writable {
