@@ -4,6 +4,7 @@
     {
       "name": "Holm Light",
       "mode": "light",
+      "font.family": "Inter",
       "font.size": 14,
       "radius": 6,
       "radius.lg": 8,
@@ -42,6 +43,7 @@
     {
       "name": "Holm Dark",
       "mode": "dark",
+      "font.family": "Inter",
       "font.size": 14,
       "radius": 6,
       "radius.lg": 8,
