@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use pulldown_cmark::{Event, Parser};
 
 /// Longest file stem in bytes. It leaves room for a clash number and `.md`
@@ -9,13 +11,48 @@ const MAX_PREVIEW_CHARS: usize = 200;
 
 /// The title of a note body: its first block, when that is a `# heading`.
 pub(crate) fn title(body: &str) -> Option<String> {
-    let line = body.lines().find(|line| !line.trim().is_empty())?;
-    if !is_h1(line) {
-        return None;
-    }
+    let (_, line) = title_line(body)?;
     // A `#` heading is always one line, so the line alone parses the same.
     let text = line_text(line);
     (!text.is_empty()).then_some(text)
+}
+
+/// Where the title text is in a note body, as a byte range. The title is a `# heading` that
+/// is the first block. The range leaves out the `#` marks and the spaces around the text.
+/// It can be empty, for a `#` line with no text.
+///
+/// ```
+/// use holm_markdown::title_range;
+///
+/// let body = "\n# Plans ##\ntext\n";
+/// assert_eq!(title_range(body).map(|range| &body[range]), Some("Plans"));
+/// assert_eq!(title_range("## Plans\n"), None);
+/// ```
+pub fn title_range(body: &str) -> Option<Range<usize>> {
+    let (start, line) = title_line(body)?;
+    let after = line.trim_start_matches(' ').strip_prefix('#')?;
+    let mut text = after.trim();
+    // A closing run of `#` after a space is not part of the text.
+    let open = text.trim_end_matches('#');
+    if open.is_empty() || open.ends_with([' ', '\t']) {
+        text = open.trim_end();
+    }
+    let from = start + line.len() - after.trim_start().len();
+    Some(from..from + text.len())
+}
+
+/// The first line with text and its byte offset, when that line is a `# heading`.
+/// The line has no line break.
+fn title_line(body: &str) -> Option<(usize, &str)> {
+    let mut start = 0;
+    for line in body.split_inclusive('\n') {
+        let text = line.trim_end_matches(['\n', '\r']);
+        if !text.trim().is_empty() {
+            return is_h1(text).then_some((start, text));
+        }
+        start += line.len();
+    }
+    None
 }
 
 /// The first line of text after the title, with no Markdown syntax. It is empty when the

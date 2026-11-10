@@ -91,6 +91,17 @@ proptest! {
     }
 
     #[test]
+    fn a_title_always_has_a_range_in_the_body(body in "[#a-z \t\r\n]{0,40}") {
+        let range = holm_markdown::title_range(&body);
+        if Note::parse(&body).title().is_some() {
+            prop_assert!(range.is_some());
+        }
+        if let Some(range) = range {
+            prop_assert!(body.get(range).is_some());
+        }
+    }
+
+    #[test]
     fn setting_a_field_never_changes_an_unknown_line(
         (lines, unknown_lines) in frontmatter(),
         crlf in any::<bool>(),

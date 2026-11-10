@@ -17,7 +17,7 @@ pub use body::{
 };
 pub use note::{LineEnding, Note};
 pub use tag::normalize_tag;
-pub use title::file_stem;
+pub use title::{file_stem, title_range};
 
 /// An error from `holm-markdown`.
 #[derive(Debug, thiserror::Error)]

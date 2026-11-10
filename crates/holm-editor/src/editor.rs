@@ -8,7 +8,8 @@ use gpui_kit::{
     App, Bounds, ClipboardEntry, ClipboardItem, Context, CursorStyle, EntityInputHandler,
     EventEmitter, ExternalPaths, FocusHandle, Focusable, InteractiveElement, IntoElement,
     KeyDownEvent, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ParentElement, Pixels, Point, Render, ScrollEvent, Styled, UTF16Selection, Window, div, px,
+    ParentElement, Pixels, Point, Render, ScrollEvent, Styled, TestSupportExt as _, UTF16Selection,
+    Window, div, px,
 };
 use holm_markdown::{Color, Target};
 
@@ -335,7 +336,7 @@ impl Editor {
     /// Selects the text of the title, so typing replaces it. The title is a `# heading` that is
     /// the first block. With no title, the cursor goes to the start of the text.
     pub fn select_title(&mut self, cx: &mut Context<Self>) {
-        match self.model.title_range() {
+        match holm_markdown::title_range(self.model.text()) {
             Some(range) => self.model.select(range),
             None => self.model.set_cursor(0, false),
         }
@@ -876,6 +877,8 @@ impl Render for Editor {
             window.view(&self.theme, &self.custom_colors, at.unwrap_or_default())
         });
         div()
+            .id("editor")
+            .test_support()
             .key_context("Editor")
             .track_focus(&self.focus)
             .size_full()

@@ -147,29 +147,6 @@ impl Model {
         self.set_cursor(range.end, true);
     }
 
-    /// The text of the title: a `# heading` that is the first block. The range leaves out the
-    /// `#` marks and the spaces around the text.
-    pub(crate) fn title_range(&self) -> Option<Range<usize>> {
-        let text = self.text();
-        let blank = text.len() - text.trim_start().len();
-        let start = text[..blank].rfind('\n').map_or(0, |i| i + 1);
-        let line = text[start..].split('\n').next().unwrap_or_default();
-        let marks = line.trim_start_matches(' ');
-        let indent = line.len() - marks.len();
-        let after = marks.strip_prefix('#')?;
-        if indent > 3 || !(after.trim().is_empty() || after.starts_with([' ', '\t'])) {
-            return None;
-        }
-        let mut content = after.trim();
-        // A closing run of `#` after a space is not part of the text.
-        let closed = content.trim_end_matches('#');
-        if closed.is_empty() || closed.ends_with([' ', '\t']) {
-            content = closed.trim_end();
-        }
-        let from = start + line.len() - after.trim_start().len();
-        Some(from..from + content.len())
-    }
-
     pub(crate) fn select_all(&mut self) {
         self.select(0..self.text.len());
     }
@@ -590,24 +567,6 @@ mod tests {
         let mut model = Model::new(text);
         model.set_cursor(cursor, false);
         model
-    }
-
-    #[test]
-    fn the_title_range_holds_only_the_heading_text() {
-        let title = |text: &str| {
-            let model = Model::new(text);
-            model
-                .title_range()
-                .map(|range| model.text()[range].to_owned())
-        };
-        assert_eq!(title("# Plans\ntext\n").as_deref(), Some("Plans"));
-        assert_eq!(title("\n\n  #   Plans  ##\n").as_deref(), Some("Plans"));
-        assert_eq!(title("# C#\n").as_deref(), Some("C#"));
-        assert_eq!(title("#\n").as_deref(), Some(""));
-        assert_eq!(title("## Plans\n"), None);
-        assert_eq!(title("#Plans\n"), None);
-        assert_eq!(title("text\n# Plans\n"), None);
-        assert_eq!(title(""), None);
     }
 
     #[test]
