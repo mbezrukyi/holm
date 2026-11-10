@@ -10,8 +10,9 @@ use gpui_kit::{
     KeyDownEvent, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     ParentElement, Pixels, Point, Render, ScrollEvent, Styled, UTF16Selection, Window, div, px,
 };
-use holm_markdown::Target;
+use holm_markdown::{Color, Target};
 
+use crate::color::{self, ColorWindow, Paint, Step};
 use crate::element::{EditorElement, Hit, ImageSizes, Layout, Scroll, Theme};
 use crate::find::Find;
 use crate::highlight::{self, Highlighter};
@@ -50,10 +51,14 @@ const DRAG_START: Pixels = px(4.);
 ///   there. Other links send [`OpenLink`] or [`OpenFile`].
 /// - Ctrl+V with files or an image on the clipboard sends [`PasteFiles`], and so does a drop of
 ///   files.
+/// - Ctrl+T opens the color window for the text color, and Ctrl+M for the highlight color.
+///   Keys 1 to 6 pick a palette color, 7 to 9 one of the last custom colors, and 0 removes the
+///   color. `+` opens a hex field, and Enter takes its value. Esc closes the window. A new
+///   custom color sends [`CustomColors`].
 /// - Ctrl+F opens find. Typed text goes into its query. Enter and Shift+Enter select the next
 ///   and the match before. Esc or a click in the text closes it.
 ///
-/// [`WritingHelp`] turns off the format keys and the list keys.
+/// [`WritingHelp`] turns off the format keys, the color window and the list keys.
 pub struct Editor {
     pub(crate) model: Model,
     pub(crate) folder: Option<PathBuf>,
@@ -71,6 +76,9 @@ pub struct Editor {
     drag: Option<Drag>,
     help: WritingHelp,
     pub(crate) find: Option<Find>,
+    color: Option<ColorWindow>,
+    /// The last custom colors, the newest first.
+    custom_colors: Vec<Color>,
 }
 
 /// A mouse drag after a click. The selection grows by `unit` from `origin`.
@@ -96,7 +104,7 @@ enum Unit {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct WritingHelp {
-    /// The keys that add or remove Markdown syntax, like Ctrl+B.
+    /// The keys that add or remove Markdown syntax, like Ctrl+B, and the color window.
     pub format_keys: bool,
     /// Enter in a list item starts the next item.
     pub continue_lists: bool,
@@ -172,6 +180,16 @@ pub enum PastedFile {
     },
 }
 
+/// The last custom colors changed, after the user picked a color that is not in the palette.
+/// The app stores them and gives them back with [`Editor::set_custom_colors`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CustomColors {
+    /// The colors, the newest first. There are at most 3.
+    pub colors: Vec<Color>,
+}
+
+impl EventEmitter<CustomColors> for Editor {}
+
 /// The link at the cursor, from [`Editor::link_at_cursor`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CursorLink {
@@ -205,6 +223,8 @@ impl Editor {
             drag: None,
             help: WritingHelp::default(),
             find: None,
+            color: None,
+            custom_colors: Vec::new(),
         }
     }
 
@@ -215,6 +235,7 @@ impl Editor {
         self.model = Model::new(text);
         self.model.set_broken(broken);
         self.find = None;
+        self.color = None;
         self.scroll = Scroll::default();
         self.goal_x = None;
         self.version += 1;
@@ -242,6 +263,13 @@ impl Editor {
     /// Sets the writing helps, from the settings.
     pub fn set_writing_help(&mut self, help: WritingHelp) {
         self.help = help;
+    }
+
+    /// Sets the last custom colors, the newest first, from the settings. The color window shows
+    /// the first 3 on keys 7 to 9.
+    pub fn set_custom_colors(&mut self, colors: &[Color], cx: &mut Context<Self>) {
+        self.custom_colors = colors.iter().copied().take(color::CUSTOM_COUNT).collect();
+        cx.notify();
     }
 
     /// Sets light or dark mode, from the app theme.
@@ -351,6 +379,12 @@ impl Editor {
             return;
         }
         let key = event.keystroke.key.as_str();
+        if self.color.is_some() {
+            if self.color_key(event, cx) {
+                cx.stop_propagation();
+            }
+            return;
+        }
         if self.find.is_some() {
             if self.find_key(key, modifiers, cx) {
                 cx.stop_propagation();
@@ -439,6 +473,16 @@ impl Editor {
                 return true;
             }
             _ if !self.help.format_keys => return false,
+            "t" | "m" => {
+                let paint = if key == "t" {
+                    Paint::Text
+                } else {
+                    Paint::Highlight
+                };
+                self.color = Some(ColorWindow::new(paint));
+                cx.notify();
+                return true;
+            }
             _ if format.is_some() || heading.is_some() => {
                 let changed = match (format, heading) {
                     (Some(format), _) => self.model.toggle_format(format),
@@ -452,6 +496,44 @@ impl Editor {
         }
         self.goal_x = None;
         self.moved(cx);
+        true
+    }
+
+    /// A key while the color window is open. It returns whether the key stops here. Ctrl+V
+    /// pastes into the hex field. Other keys with Ctrl do nothing.
+    fn color_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
+        let Some(window) = &mut self.color else {
+            return false;
+        };
+        let keystroke = &event.keystroke;
+        if keystroke.modifiers.control {
+            if keystroke.key == "v"
+                && let Some(text) = cx.read_from_clipboard().and_then(|item| item.text())
+            {
+                window.push(&text);
+                cx.notify();
+            }
+            return true;
+        }
+        match window.key(keystroke, &self.custom_colors) {
+            Step::Type => return false,
+            Step::Stay => {}
+            Step::Close => self.color = None,
+            Step::Apply(color) => {
+                let paint = window.paint;
+                self.color = None;
+                let changed = self.model.toggle_format(paint.format(color));
+                self.finish(changed, cx);
+                if let Some(color) = color.filter(|c| paint.is_custom(*c))
+                    && color::remember(&mut self.custom_colors, color)
+                {
+                    cx.emit(CustomColors {
+                        colors: self.custom_colors.clone(),
+                    });
+                }
+            }
+        }
+        cx.notify();
         true
     }
 
@@ -634,6 +716,7 @@ impl Editor {
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
         self.find = None;
+        self.color = None;
         let hit = self
             .current_layout()
             .and_then(|layout| layout.hit(event.position));
@@ -735,6 +818,7 @@ impl Editor {
     fn drop_files(&mut self, paths: &ExternalPaths, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
         self.find = None;
+        self.color = None;
         if let Some(offset) = self.offset_at(window.mouse_position()) {
             self.model.set_cursor(offset, false);
         }
@@ -770,6 +854,16 @@ impl Focusable for Editor {
 
 impl Render for Editor {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let color = self.color.as_ref().map(|window| {
+            // Below the cursor, or at the top of the text column when the cursor is not laid out.
+            let at = self.current_layout().and_then(|layout| {
+                layout
+                    .cursor_bounds(self.model.cursor())
+                    .map(|cursor| cursor.bottom_left() + Point::new(px(0.), px(4.)))
+                    .or(Some(layout.bounds.origin))
+            });
+            window.view(&self.theme, &self.custom_colors, at.unwrap_or_default())
+        });
         div()
             .key_context("Editor")
             .track_focus(&self.focus)
@@ -787,6 +881,7 @@ impl Render for Editor {
                 editor: cx.entity(),
             })
             .children(self.find.as_ref().map(|find| find.bar(&self.theme)))
+            .children(color)
     }
 }
 
@@ -833,6 +928,11 @@ impl EntityInputHandler for Editor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(window) = &mut self.color {
+            window.push(text);
+            cx.notify();
+            return;
+        }
         if let Some(find) = &mut self.find {
             find.push(text);
             find.refresh(&mut self.model);

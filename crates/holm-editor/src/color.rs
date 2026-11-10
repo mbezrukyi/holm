@@ -1,0 +1,245 @@
+//! The color window: it sets the text color or the highlight color of the selection.
+
+use gpui_kit::{
+    AnyElement, Hsla, InteractiveElement, IntoElement, Keystroke, MouseButton, ParentElement,
+    Pixels, Point, Styled, anchored, deferred, div, px, rems,
+};
+use holm_markdown::Color;
+
+use crate::element::Theme;
+use crate::model::Format;
+use crate::palette;
+
+/// How many custom colors the window keeps.
+pub(crate) const CUSTOM_COUNT: usize = 3;
+/// The most hex digits the field takes.
+const HEX_DIGITS: usize = 6;
+
+/// What the window colors.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Paint {
+    Text,
+    Highlight,
+}
+
+impl Paint {
+    fn palette(self) -> &'static [Color; 6] {
+        match self {
+            Self::Text => &palette::TEXT,
+            Self::Highlight => &palette::HIGHLIGHT,
+        }
+    }
+
+    /// The format key that sets `color`, or removes the color with `None`.
+    pub(crate) fn format(self, color: Option<Color>) -> Format {
+        match self {
+            Self::Text => Format::TextColor(color),
+            Self::Highlight => Format::HighlightColor(color),
+        }
+    }
+
+    /// Whether `color` is not in the palette of this window.
+    pub(crate) fn is_custom(self, color: Color) -> bool {
+        !self.palette().contains(&color)
+    }
+}
+
+/// What a key in the window does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Step {
+    /// The window stays open.
+    Stay,
+    /// The window closes with no change.
+    Close,
+    /// The window sets the color, or removes it with `None`, and closes.
+    Apply(Option<Color>),
+    /// The key goes on to the text input, which adds a typed char to the hex field.
+    Type,
+}
+
+/// An open color window.
+pub(crate) struct ColorWindow {
+    pub(crate) paint: Paint,
+    /// The typed hex digits, while the hex field is open.
+    hex: Option<String>,
+}
+
+impl ColorWindow {
+    pub(crate) fn new(paint: Paint) -> Self {
+        Self { paint, hex: None }
+    }
+
+    /// A key with no Ctrl. `custom` are the last custom colors, the newest first.
+    ///
+    /// Keys 1 to 6 pick a palette color, 7 to 9 a custom color, and 0 removes the color. `+`
+    /// opens the hex field. In the field, Enter takes a `rgb` or `rrggbb` value. Esc closes.
+    pub(crate) fn key(&mut self, keystroke: &Keystroke, custom: &[Color]) -> Step {
+        let key = keystroke.key.as_str();
+        if key == "escape" {
+            return Step::Close;
+        }
+        if let Some(hex) = &mut self.hex {
+            return match key {
+                "enter" => Color::from_hex(&format!("#{hex}"))
+                    .map_or(Step::Stay, |color| Step::Apply(Some(color))),
+                "backspace" => {
+                    hex.pop();
+                    Step::Stay
+                }
+                _ if keystroke.key_char.is_some() => Step::Type,
+                _ => Step::Stay,
+            };
+        }
+        if keystroke.key_char.as_deref() == Some("+") || key == "+" {
+            self.hex = Some(String::new());
+            return Step::Stay;
+        }
+        let Some(digit) = key.parse::<usize>().ok().filter(|_| key.len() == 1) else {
+            return Step::Stay;
+        };
+        match digit {
+            0 => Step::Apply(None),
+            1..=6 => Step::Apply(Some(self.paint.palette()[digit - 1])),
+            _ => custom
+                .get(digit - 7)
+                .map_or(Step::Stay, |color| Step::Apply(Some(*color))),
+        }
+    }
+
+    /// Adds typed or pasted text to the hex field. It keeps only hex digits.
+    pub(crate) fn push(&mut self, text: &str) {
+        if let Some(hex) = &mut self.hex {
+            let room = HEX_DIGITS - hex.len();
+            hex.extend(text.chars().filter(char::is_ascii_hexdigit).take(room));
+        }
+    }
+
+    /// The window below `at`, a point in the window. It moves to stay inside the window.
+    pub(crate) fn view(&self, theme: &Theme, custom: &[Color], at: Point<Pixels>) -> AnyElement {
+        let paint = self.paint;
+        let palette = paint
+            .palette()
+            .iter()
+            .enumerate()
+            .map(|(ix, color)| swatch(theme, paint, Some(*color), ix + 1));
+        let custom =
+            (0..CUSTOM_COUNT).map(|ix| swatch(theme, paint, custom.get(ix).copied(), ix + 7));
+        let remove = key_box(theme).text_color(theme.muted).child("0");
+        let window = div()
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .p(px(6.))
+            .rounded(px(8.))
+            .bg(theme.panel)
+            .border_1()
+            .border_color(theme.line)
+            .text_color(theme.text)
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .children(palette)
+            .child(div().w(px(1.)).h(rems(1.2)).bg(theme.line))
+            .children(custom)
+            .child(remove)
+            .child(self.hex_field(theme));
+        deferred(
+            anchored()
+                .position(at)
+                .snap_to_window_with_margin(px(8.))
+                .child(window),
+        )
+        .into_any_element()
+    }
+
+    /// The `+` key, or the hex field with a sample of its color when the value is whole.
+    fn hex_field(&self, theme: &Theme) -> AnyElement {
+        let Some(hex) = &self.hex else {
+            return key_box(theme)
+                .text_color(theme.muted)
+                .child("+")
+                .into_any_element();
+        };
+        let caret = div().w(px(2.)).h(rems(1.)).bg(theme.cursor);
+        let sample = Color::from_hex(&format!("#{hex}"))
+            .map(|color| key_box(theme).bg(theme.note_color(color)));
+        div()
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .min_w(rems(4.5))
+                    .child(format!("#{hex}"))
+                    .child(caret),
+            )
+            .children(sample)
+            .into_any_element()
+    }
+}
+
+/// The box of one key in the window.
+fn key_box(theme: &Theme) -> gpui_kit::Div {
+    div()
+        .flex()
+        .items_center()
+        .justify_center()
+        .size(rems(1.5))
+        .rounded(px(4.))
+        .border_1()
+        .border_color(theme.line)
+}
+
+/// The key `number` with its color. A text color shows as the color of the number, and a
+/// highlight as its background. A free custom key shows only its number, muted.
+fn swatch(theme: &Theme, paint: Paint, color: Option<Color>, number: usize) -> gpui_kit::Div {
+    let label = number.to_string();
+    let base = key_box(theme);
+    let Some(color) = color else {
+        return base.text_color(theme.muted.opacity(0.5)).child(label);
+    };
+    let shown: Hsla = theme.note_color(color);
+    match paint {
+        Paint::Text => base.bg(theme.background).text_color(shown).child(label),
+        Paint::Highlight => base.bg(shown).text_color(theme.text).child(label),
+    }
+}
+
+/// Puts `color` first in the custom colors and keeps the newest ones. Returns whether the list
+/// changed.
+pub(crate) fn remember(custom: &mut Vec<Color>, color: Color) -> bool {
+    let before = custom.clone();
+    custom.retain(|c| *c != color);
+    custom.insert(0, color);
+    custom.truncate(CUSTOM_COUNT);
+    *custom != before
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn color(value: &str) -> Color {
+        Color::from_hex(value).unwrap_or_else(|| panic!("{value} is a color"))
+    }
+
+    #[test]
+    fn a_used_color_goes_first_and_the_list_keeps_three() {
+        let mut custom = vec![color("#111"), color("#222"), color("#333")];
+        assert!(remember(&mut custom, color("#444")));
+        assert_eq!(custom, [color("#444"), color("#111"), color("#222")]);
+        assert!(remember(&mut custom, color("#222")));
+        assert_eq!(custom, [color("#222"), color("#444"), color("#111")]);
+        assert!(!remember(&mut custom, color("#222")));
+    }
+
+    #[test]
+    fn the_hex_field_takes_only_six_hex_digits() {
+        let mut window = ColorWindow::new(Paint::Text);
+        window.push("ab");
+        assert_eq!(window.hex, None);
+        window.hex = Some(String::new());
+        window.push("#12x3456789");
+        assert_eq!(window.hex.as_deref(), Some("123456"));
+    }
+}

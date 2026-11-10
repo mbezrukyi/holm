@@ -3,6 +3,9 @@
 Some ==big== ideas, a <u>happy key</u> word, <span style="color: #c4553a">red</span> and <span style="color: #3f6fa8">blue</span> text, and a <mark style="background: #fde68a">soft</mark> mark.
 Also `inline code`, **strong**, *calm* and ~~old~~ text, with a [link](https://example.com).
 
+Text colors: <span style="color: #b5442c">red</span>, <span style="color: #a85d12">orange</span>, <span style="color: #4f7d3c">green</span>, <span style="color: #2f7a78">teal</span>, <span style="color: #3a66a0">blue</span> and <span style="color: #8250a0">purple</span>.
+Highlights: <mark style="background: #fde68a">yellow</mark>, <mark style="background: #f9cfa4">orange</mark>, <mark style="background: #f5c6d3">pink</mark>, <mark style="background: #cfe6b8">green</mark>, <mark style="background: #c6dbf2">blue</mark> and <mark style="background: #dccff0">purple</mark>.
+
 ## Lists
 
 - Bread and milk

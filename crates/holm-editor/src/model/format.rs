@@ -9,8 +9,8 @@ use holm_markdown::{Block, BlockKind};
 use super::{Edit, Group, Model, map_offset};
 
 impl Model {
-    /// Adds or removes the style of `format` on the selection, or at the cursor.
-    /// Returns whether the text changed.
+    /// Adds or removes the style of `format` on the selection, or at the cursor. A color key
+    /// sets its color. Returns whether the text changed.
     pub(crate) fn toggle_format(&mut self, format: Format) -> bool {
         let Some(edit) = restyle(&self.text, &self.body, self.selection(), format) else {
             return false;
