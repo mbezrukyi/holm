@@ -56,6 +56,7 @@ const DRAG_START: Pixels = px(4.);
 ///   Keys 1 to 6 pick a palette color, 7 to 9 one of the last custom colors, and 0 removes the
 ///   color. `+` opens a hex field, and Enter takes its value. Esc closes the window. A new
 ///   custom color sends [`CustomColors`].
+/// - Up with the cursor at the very start of the text sends [`UpFromStart`].
 /// - Ctrl+F opens find. Typed text goes into its query. Enter and Shift+Enter select the next
 ///   and the match before. Esc or a click in the text closes it.
 ///
@@ -138,6 +139,13 @@ pub enum Appearance {
 pub struct Changed;
 
 impl EventEmitter<Changed> for Editor {}
+
+/// The user pressed Up with the cursor at the very start of the text, and no selection.
+/// The app can move the focus to a part above the editor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UpFromStart;
+
+impl EventEmitter<UpFromStart> for Editor {}
 
 /// The user asked to open a file: with the "Open" button of a file card, or a file link.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -611,6 +619,10 @@ impl Editor {
         match key {
             "left" => self.model.move_left(shift),
             "right" => self.model.move_right(shift),
+            "up" if !shift && self.model.selection() == (0..0) => {
+                cx.emit(UpFromStart);
+                return true;
+            }
             "up" | "down" => {
                 self.move_vertical(key == "down", shift);
                 self.moved(cx);

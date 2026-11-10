@@ -11,7 +11,7 @@ use gpui_kit::{
     ClipboardItem, Entity, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels,
     VisualTestContext, point, px,
 };
-use holm_editor::{Changed, Editor, WritingHelp};
+use holm_editor::{Changed, Editor, UpFromStart, WritingHelp};
 
 const WIDTH: Pixels = px(600.);
 const HEIGHT: Pixels = px(400.);
@@ -94,6 +94,24 @@ fn set_text_sends_no_change() {
     cx.run_until_parked();
     assert_eq!(text(&editor, cx), "two");
     assert_eq!(changes.get(), 0);
+}
+
+#[test]
+fn up_at_the_very_start_sends_up_from_start() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "one\ntwo", WIDTH, HEIGHT);
+    let ups = Rc::new(Cell::new(0));
+    let counter = ups.clone();
+    cx.update(|_, cx| {
+        cx.subscribe(&editor, move |_, _: &UpFromStart, _| {
+            counter.set(counter.get() + 1);
+        })
+        .detach();
+    });
+    cx.simulate_keystrokes("down right up shift-left up");
+    assert_eq!(ups.get(), 0, "only with no selection at the start");
+    cx.simulate_keystrokes("left up");
+    assert_eq!(ups.get(), 1);
 }
 
 #[test]

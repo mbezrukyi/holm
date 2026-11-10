@@ -20,7 +20,8 @@ pub(crate) use theme::Theme;
 use crate::Editor;
 use crate::ink;
 use crate::model::{LineKind, Mark, Quote, Run};
-use layout::{COLUMN_WIDTH, Content, LaidCard, LaidLine, SIDE_MARGIN, Shaper, lay_out, run_font};
+pub use layout::{COLUMN_WIDTH, SIDE_MARGIN};
+use layout::{Content, LaidCard, LaidLine, Shaper, lay_out, run_font};
 
 /// The width of a quote bar.
 const BAR: Pixels = px(3.);
