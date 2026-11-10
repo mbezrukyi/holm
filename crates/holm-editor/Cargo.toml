@@ -17,6 +17,10 @@ thiserror.workspace = true
 ttf-parser.workspace = true
 two-face.workspace = true
 
+[features]
+# Publishes the editor text for UI tests. A normal build never copies it.
+test-support = ["gpui-kit/test-support"]
+
 [dev-dependencies]
 divan.workspace = true
 gpui-kit = { workspace = true, features = ["test-support"] }

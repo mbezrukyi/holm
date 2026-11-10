@@ -419,13 +419,6 @@ impl NotesView {
     }
 }
 
-#[cfg(test)]
-impl NotesView {
-    pub(crate) fn pane(&self) -> &Entity<NotePane> {
-        &self.pane
-    }
-}
-
 impl Render for NotesView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();

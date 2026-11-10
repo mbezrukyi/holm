@@ -3,8 +3,8 @@
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex};
 use gpui_kit::{
-    App, ElementId, InteractiveElement as _, IntoElement, ParentElement, RenderOnce, SharedString,
-    Styled, Window, div,
+    App, ElementId, InteractiveElement as _, IntoElement, ParentElement, RenderOnce, Role,
+    SharedString, StatefulInteractiveElement as _, Styled, TestSupportExt as _, Window, div,
 };
 
 #[derive(IntoElement)]
@@ -40,6 +40,9 @@ impl RenderOnce for Bar {
         let theme = cx.theme();
         h_flex()
             .id(self.id)
+            .role(Role::Status)
+            .aria_label(self.text.clone())
+            .test_support()
             .w_full()
             .px_4()
             .py_1()

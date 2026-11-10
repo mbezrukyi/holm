@@ -383,17 +383,6 @@ impl NotePane {
 
 impl EventEmitter<PaneEvent> for NotePane {}
 
-#[cfg(test)]
-impl NotePane {
-    pub(crate) fn text(&self, cx: &gpui_kit::App) -> String {
-        self.editor.read(cx).text().to_owned()
-    }
-
-    pub(crate) fn has_conflict(&self) -> bool {
-        self.conflict
-    }
-}
-
 impl Focusable for NotePane {
     fn focus_handle(&self, cx: &gpui_kit::App) -> FocusHandle {
         self.editor.focus_handle(cx)

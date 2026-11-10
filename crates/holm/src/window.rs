@@ -10,8 +10,9 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, App, AppContext as _, Bounds, Context, ElementId, Entity, InteractiveElement as _,
-    IntoElement, ParentElement, PathPromptOptions, Render, SharedString, Styled, Subscription,
-    TitlebarOptions, Window, WindowBounds, WindowDecorations, WindowOptions, div, px, size,
+    IntoElement, ParentElement, PathPromptOptions, Render, Role, SharedString,
+    StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _, TitlebarOptions,
+    Window, WindowBounds, WindowDecorations, WindowOptions, div, px, size,
 };
 use holm_core::Core;
 use holm_core::model::Note;
@@ -230,40 +231,53 @@ impl HolmWindow {
         let pick = Button::new("pick-folder")
             .label(text::PICK_FOLDER)
             .on_click(cx.listener(|_, _, window, cx| Self::pick(window, cx)));
-        let content = match &self.stage {
-            Stage::Ask => v_flex()
-                .gap_2()
-                .child(div().text_lg().child(text::ASK_FOLDER))
-                .child(
-                    div()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(text::ABOUT_FOLDER),
-                )
-                .child(
-                    h_flex()
-                        .pt_4()
-                        .gap_2()
-                        .child(
-                            Button::new("use-default")
-                                .primary()
-                                .label(text::USE_DEFAULT)
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    let folder = this.default_folder.clone();
-                                    this.choose(folder, true, window, cx);
-                                })),
-                        )
-                        .child(pick),
-                ),
-            Stage::Failed(message) => v_flex()
-                .gap_2()
-                .child(div().id("failed").child(message.clone()))
-                .child(h_flex().pt_4().child(pick.primary())),
-            Stage::Opening => v_flex()
-                .text_color(cx.theme().muted_foreground)
-                .child(text::OPENING),
+        let (message, content) = match &self.stage {
+            Stage::Ask => (
+                SharedString::from(text::ASK_FOLDER),
+                v_flex()
+                    .gap_2()
+                    .child(div().text_lg().child(text::ASK_FOLDER))
+                    .child(
+                        div()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(text::ABOUT_FOLDER),
+                    )
+                    .child(
+                        h_flex()
+                            .pt_4()
+                            .gap_2()
+                            .child(
+                                Button::new("use-default")
+                                    .primary()
+                                    .label(text::USE_DEFAULT)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        let folder = this.default_folder.clone();
+                                        this.choose(folder, true, window, cx);
+                                    })),
+                            )
+                            .child(pick),
+                    ),
+            ),
+            Stage::Failed(message) => (
+                message.clone(),
+                v_flex()
+                    .gap_2()
+                    .child(message.clone())
+                    .child(h_flex().pt_4().child(pick.primary())),
+            ),
+            Stage::Opening => (
+                SharedString::from(text::OPENING),
+                v_flex()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(text::OPENING),
+            ),
             Stage::Open(pane) => return pane.clone().into_any_element(),
         };
         div()
+            .id("folder-screen")
+            .role(Role::Group)
+            .aria_label(message)
+            .test_support()
             .flex_1()
             .flex()
             .items_center()

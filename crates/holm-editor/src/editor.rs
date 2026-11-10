@@ -876,8 +876,16 @@ impl Render for Editor {
             });
             window.view(&self.theme, &self.custom_colors, at.unwrap_or_default())
         });
-        div()
-            .id("editor")
+        let editor = div().id("editor");
+        // A copy of the text per frame would cost too much in a large note.
+        #[cfg(feature = "test-support")]
+        let editor = {
+            use gpui_kit::StatefulInteractiveElement as _;
+            editor
+                .role(gpui_kit::Role::MultilineTextInput)
+                .aria_value(self.text().to_owned())
+        };
+        editor
             .test_support()
             .key_context("Editor")
             .track_focus(&self.focus)

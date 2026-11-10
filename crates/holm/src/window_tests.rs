@@ -8,14 +8,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use gpui_kit::test::{TestQueryExt as _, TestWindowExt as _};
-use gpui_kit::{AnyWindowHandle, AppContext as _, Entity, Role, TestAppContext, Window};
+use gpui_kit::{AnyWindowHandle, AppContext as _, Role, TestAppContext, Window};
 use holm_core::{Core, Feed};
 use tempfile::TempDir;
 
-use super::{HolmWindow, Stage, Startup};
+use super::{HolmWindow, Startup};
 use crate::config::Config;
-use crate::notes::NotesView;
-use crate::pane::NotePane;
 use crate::sidebar::{Item, View};
 use crate::{changes, text, theme};
 
@@ -84,7 +82,7 @@ impl Fixture {
     }
 }
 
-fn open(cx: &mut TestAppContext, startup: Startup) -> (AnyWindowHandle, Entity<HolmWindow>) {
+fn open(cx: &mut TestAppContext, startup: Startup) -> AnyWindowHandle {
     let opened = cx.update(|cx| {
         gpui_kit::init(cx);
         theme::init(cx);
@@ -92,9 +90,9 @@ fn open(cx: &mut TestAppContext, startup: Startup) -> (AnyWindowHandle, Entity<H
             cx.new(|cx| HolmWindow::new(startup, window, cx))
         })
     });
-    let opened = opened.unwrap();
+    let (handle, _) = opened.unwrap();
     cx.run_until_parked();
-    opened
+    handle
 }
 
 /// Lets the UI see the outside changes, and runs all tasks. The autosave does not run yet.
@@ -109,36 +107,51 @@ fn autosave(cx: &mut TestAppContext) {
     cx.run_until_parked();
 }
 
-fn notes(cx: &TestAppContext, window: &Entity<HolmWindow>) -> Option<Entity<NotesView>> {
-    cx.read(|cx| match &window.read(cx).stage {
-        Stage::Open(notes) => Some(notes.clone()),
-        _ => None,
-    })
-}
-
-fn pane(cx: &TestAppContext, window: &Entity<HolmWindow>) -> Option<Entity<NotePane>> {
-    let notes = notes(cx, window)?;
-    Some(cx.read(|cx| notes.read(cx).pane().clone()))
-}
-
-fn editor_text(cx: &TestAppContext, window: &Entity<HolmWindow>) -> String {
-    let pane = pane(cx, window).expect("a note is open");
-    cx.read(|cx| pane.read(cx).text(cx))
-}
-
 fn click(cx: &mut TestAppContext, handle: AnyWindowHandle, id: &'static str) {
     cx.update_window(handle, |_, window, cx| window.click(id, cx))
         .unwrap();
     cx.run_until_parked();
 }
 
-fn notices(cx: &TestAppContext, window: &Entity<HolmWindow>) -> Vec<String> {
-    cx.read(|cx| {
+/// Draws a frame and reads the screen with `read`.
+fn screen<R>(
+    cx: &mut TestAppContext,
+    handle: AnyWindowHandle,
+    read: impl FnOnce(&mut Window) -> R,
+) -> R {
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        read(window)
+    })
+    .unwrap()
+}
+
+/// The message of the folder screen, or `None` when the notes are open.
+fn folder_screen(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
+    screen(cx, handle, |window| {
         window
-            .read(cx)
-            .notices
+            .try_find("folder-screen")
+            .and_then(|screen| screen.label().map(str::to_owned))
+    })
+}
+
+fn editor_text(cx: &mut TestAppContext, handle: AnyWindowHandle) -> String {
+    screen(cx, handle, |window| {
+        window
+            .find("editor")
+            .value()
+            .expect("the editor shows its text")
+            .to_owned()
+    })
+}
+
+/// The text of each quiet bar, from the top.
+fn bars(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
+    screen(cx, handle, |window| {
+        window
+            .find_all_by_role(Role::Status)
             .iter()
-            .map(|notice| notice.text.to_string())
+            .filter_map(|bar| bar.label().map(str::to_owned))
             .collect()
     })
 }
@@ -151,8 +164,8 @@ fn read(path: &Path) -> String {
 fn the_first_start_asks_for_the_folder_and_keeps_the_pick(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     fs::write(fixture.notes().join("Plans.md"), "# Plans\n").unwrap();
-    let (handle, window) = open(cx, fixture.startup(None));
-    assert!(cx.read(|cx| matches!(window.read(cx).stage, Stage::Ask)));
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(folder_screen(cx, handle).as_deref(), Some(text::ASK_FOLDER));
 
     click(cx, handle, "pick-folder");
     assert!(cx.did_prompt_for_paths());
@@ -160,7 +173,7 @@ fn the_first_start_asks_for_the_folder_and_keeps_the_pick(cx: &mut TestAppContex
     cx.simulate_path_prompt_response(|_| Some(vec![notes]));
     cx.run_until_parked();
 
-    assert_eq!(editor_text(cx, &window), "# Plans\n");
+    assert_eq!(editor_text(cx, handle), "# Plans\n");
     let config = Config::load(fixture.config());
     assert_eq!(config.settings().notes_folder, Some(fixture.notes()));
 }
@@ -168,11 +181,12 @@ fn the_first_start_asks_for_the_folder_and_keeps_the_pick(cx: &mut TestAppContex
 #[gpui_kit::test]
 fn the_first_start_can_make_the_default_folder(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
-    let (handle, window) = open(cx, fixture.startup(None));
+    let handle = open(cx, fixture.startup(None));
 
     click(cx, handle, "use-default");
 
-    assert!(pane(cx, &window).is_some());
+    assert_eq!(folder_screen(cx, handle), None);
+    assert_eq!(editor_text(cx, handle), "");
     let default = fixture.dir.path().join("Notes");
     assert!(default.join("Untitled.md").is_file());
     let config = Config::load(fixture.config());
@@ -183,12 +197,11 @@ fn the_first_start_can_make_the_default_folder(cx: &mut TestAppContext) {
 fn a_missing_folder_offers_to_pick_another(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     fs::remove_dir(fixture.notes()).unwrap();
-    let (handle, window) = open(cx, fixture.startup(None));
-    let message = cx.read(|cx| match &window.read(cx).stage {
-        Stage::Failed(message) => message.to_string(),
-        _ => String::new(),
-    });
-    assert_eq!(message, text::folder_missing(&fixture.notes()));
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(
+        folder_screen(cx, handle),
+        Some(text::folder_missing(&fixture.notes()))
+    );
 
     let other = fixture.dir.path().join("other");
     fs::create_dir(&other).unwrap();
@@ -197,7 +210,7 @@ fn a_missing_folder_offers_to_pick_another(cx: &mut TestAppContext) {
     cx.simulate_path_prompt_response(|_| Some(vec![other]));
     cx.run_until_parked();
 
-    assert_eq!(editor_text(cx, &window), "a\n");
+    assert_eq!(editor_text(cx, handle), "a\n");
 }
 
 #[gpui_kit::test]
@@ -206,8 +219,8 @@ fn typing_saves_the_note_with_its_line_breaks(cx: &mut TestAppContext) {
     let note = fixture.notes().join("Note.md");
     fs::write(&note, "---\nid: 01A\n---\r\none\r\ntwo\r\n").unwrap();
     let fixture = fixture.with_folder();
-    let (handle, window) = open(cx, fixture.startup(None));
-    assert_eq!(editor_text(cx, &window), "one\ntwo\n");
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(editor_text(cx, handle), "one\ntwo\n");
 
     cx.simulate_input(handle, "zero ");
     settle(cx);
@@ -224,13 +237,12 @@ fn typing_saves_the_note_with_its_line_breaks(cx: &mut TestAppContext) {
 fn an_outside_change_reloads_quietly_with_no_unsaved_text(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     fs::write(fixture.notes().join("Note.md"), "old\n").unwrap();
-    let (_, window) = open(cx, fixture.startup(None));
+    let handle = open(cx, fixture.startup(None));
 
     fixture.write_outside(cx, "Note.md", "new\n");
 
-    assert_eq!(editor_text(cx, &window), "new\n");
-    let pane = pane(cx, &window).unwrap();
-    assert!(!cx.read(|cx| pane.read(cx).has_conflict()));
+    assert_eq!(editor_text(cx, handle), "new\n");
+    assert_eq!(bars(cx, handle), Vec::<String>::new());
 }
 
 #[gpui_kit::test]
@@ -238,47 +250,46 @@ fn an_outside_change_with_unsaved_text_asks_to_reload_or_keep_mine(cx: &mut Test
     let fixture = Fixture::new().with_folder();
     let note = fixture.notes().join("Note.md");
     fs::write(&note, "old\n").unwrap();
-    let (handle, window) = open(cx, fixture.startup(None));
-    let pane = pane(cx, &window).unwrap();
+    let handle = open(cx, fixture.startup(None));
 
     cx.simulate_input(handle, "mine ");
     fixture.write_outside(cx, "Note.md", "theirs\n");
-    assert!(cx.read(|cx| pane.read(cx).has_conflict()));
+    assert_eq!(bars(cx, handle), [text::CHANGED_ON_DISK]);
     autosave(cx);
     assert_eq!(read(&note), "theirs\n", "no autosave during the question");
 
     click(cx, handle, "keep-mine");
     assert!(read(&note).ends_with("\n---\nmine old\n"));
-    assert!(!cx.read(|cx| pane.read(cx).has_conflict()));
+    assert_eq!(bars(cx, handle), Vec::<String>::new());
 
     cx.simulate_input(handle, "x");
     fixture.write_outside(cx, "Note.md", "theirs again\n");
     click(cx, handle, "reload");
-    assert_eq!(editor_text(cx, &window), "theirs again\n");
-    assert!(!cx.read(|cx| pane.read(cx).has_conflict()));
+    assert_eq!(editor_text(cx, handle), "theirs again\n");
+    assert_eq!(bars(cx, handle), Vec::<String>::new());
 }
 
 #[gpui_kit::test]
 fn a_broken_config_shows_a_bar_and_stays_as_it_is(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     fixture.write_config("version = [broken\n");
-    let (handle, window) = open(cx, fixture.startup(None));
-    assert_eq!(notices(cx, &window), [text::CONFIG_BROKEN]);
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(bars(cx, handle), [text::CONFIG_BROKEN]);
 
     click(cx, handle, "use-default");
-    assert!(pane(cx, &window).is_some());
+    assert_eq!(editor_text(cx, handle), "");
     assert_eq!(read(&fixture.config()), "version = [broken\n");
 
     click(cx, handle, "config-broken-close");
-    assert_eq!(notices(cx, &window), Vec::<String>::new());
+    assert_eq!(bars(cx, handle), Vec::<String>::new());
 }
 
 #[gpui_kit::test]
 fn a_crash_in_the_last_run_shows_the_log_path(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     let log = PathBuf::from("/state/holm/holm.log");
-    let (_, window) = open(cx, fixture.startup(Some(log.clone())));
-    assert_eq!(notices(cx, &window), [text::crashed(&log)]);
+    let handle = open(cx, fixture.startup(Some(log.clone())));
+    assert_eq!(bars(cx, handle), [text::crashed(&log)]);
 }
 
 fn set_time(path: &Path, seconds: u64) {
@@ -294,19 +305,6 @@ fn set_time(path: &Path, seconds: u64) {
 fn keys(cx: &mut TestAppContext, handle: AnyWindowHandle, keys: &str) {
     cx.simulate_keystrokes(handle, keys);
     settle(cx);
-}
-
-/// Draws a frame and reads the screen with `read`.
-fn screen<R>(
-    cx: &mut TestAppContext,
-    handle: AnyWindowHandle,
-    read: impl FnOnce(&mut Window) -> R,
-) -> R {
-    cx.update_window(handle, |_, window, cx| {
-        window.render_frame(cx);
-        read(window)
-    })
-    .unwrap()
 }
 
 /// What the sidebar shows: "tree <selected item>", "list <item>", or "hidden".
@@ -365,8 +363,8 @@ fn the_delete_dialog_counts_and_deletes(cx: &mut TestAppContext) {
     fs::write(notes_dir.join("B.md"), "# B\n").unwrap();
     set_time(&notes_dir.join("A.md"), 200);
     set_time(&notes_dir.join("B.md"), 100);
-    let (handle, window) = open(cx, fixture.startup(None));
-    assert_eq!(editor_text(cx, &window), "# A\n![](attachments/x.png)\n");
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(editor_text(cx, handle), "# A\n![](attachments/x.png)\n");
 
     keys(cx, handle, "ctrl-shift-l delete");
     assert_eq!(
@@ -387,7 +385,7 @@ fn the_delete_dialog_counts_and_deletes(cx: &mut TestAppContext) {
     assert_eq!(question(cx, handle), None);
     assert!(!notes_dir.join("A.md").exists());
     assert!(!notes_dir.join("attachments/x.png").exists());
-    assert_eq!(editor_text(cx, &window), "# B\n");
+    assert_eq!(editor_text(cx, handle), "# B\n");
     assert!(!Config::load(fixture.config()).settings().ask_before_delete);
 
     keys(cx, handle, "delete");
@@ -397,7 +395,7 @@ fn the_delete_dialog_counts_and_deletes(cx: &mut TestAppContext) {
         "no dialog after Do not show again"
     );
     assert!(!notes_dir.join("B.md").exists());
-    assert_eq!(editor_text(cx, &window), "");
+    assert_eq!(editor_text(cx, handle), "");
     assert!(notes_dir.join("Untitled.md").is_file());
 }
 
@@ -410,7 +408,7 @@ fn the_keyboard_moves_through_tree_list_and_editor(cx: &mut TestAppContext) {
     fs::write(notes_dir.join("Top.md"), "# Top\n").unwrap();
     set_time(&notes_dir.join("work/Plan.md"), 100);
     set_time(&notes_dir.join("Top.md"), 200);
-    let (handle, window) = open(cx, fixture.startup(None));
+    let handle = open(cx, fixture.startup(None));
     assert_eq!(sidebar(cx, handle), "list All notes");
     assert_eq!(focus(cx, handle), "editor");
 
@@ -421,7 +419,7 @@ fn the_keyboard_moves_through_tree_list_and_editor(cx: &mut TestAppContext) {
     assert_eq!(sidebar(cx, handle), "list work");
 
     keys(cx, handle, "down");
-    assert_eq!(editor_text(cx, &window), "# Plan\n");
+    assert_eq!(editor_text(cx, handle), "# Plan\n");
     keys(cx, handle, "f2");
     assert_eq!(focus(cx, handle), "editor");
     cx.simulate_input(handle, "Goals");
@@ -432,7 +430,7 @@ fn the_keyboard_moves_through_tree_list_and_editor(cx: &mut TestAppContext) {
     keys(cx, handle, "escape");
     assert_eq!(sidebar(cx, handle), "tree work");
     keys(cx, handle, "up enter down");
-    assert_eq!(editor_text(cx, &window), "# Top\n");
+    assert_eq!(editor_text(cx, handle), "# Top\n");
     assert!(read(&notes_dir.join("work/Goals.md")).ends_with("---\n# Goals\n"));
     assert!(!notes_dir.join("work/Plan.md").exists());
 
@@ -455,7 +453,7 @@ fn keys_make_rename_and_move_notes_and_folders(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     let notes_dir = fixture.notes();
     fs::write(notes_dir.join("Top.md"), "# Top\n").unwrap();
-    let (handle, window) = open(cx, fixture.startup(None));
+    let handle = open(cx, fixture.startup(None));
 
     keys(cx, handle, "ctrl-shift-n");
     assert!(notes_dir.join(text::NEW_FOLDER).is_dir());
@@ -470,14 +468,16 @@ fn keys_make_rename_and_move_notes_and_folders(cx: &mut TestAppContext) {
     assert_eq!(focus(cx, handle), "editor");
 
     keys(cx, handle, "ctrl-shift-l escape up enter down");
-    assert_eq!(editor_text(cx, &window), "# Top\n");
+    assert_eq!(editor_text(cx, handle), "# Top\n");
     keys(cx, handle, "ctrl-shift-m");
     keys(cx, handle, "down enter");
     assert!(notes_dir.join("work/Top.md").is_file());
     assert!(!notes_dir.join("Top.md").exists());
-    let pane = pane(cx, &window).unwrap();
-    assert_eq!(
-        cx.read(|cx| pane.read(cx).path().to_owned()),
-        PathBuf::from("work/Top.md")
-    );
+
+    // The editor follows the move, so the next save goes to the new file.
+    keys(cx, handle, "enter");
+    cx.simulate_input(handle, "x");
+    autosave(cx);
+    assert!(read(&notes_dir.join("work/Top.md")).contains('x'));
+    assert!(!notes_dir.join("Top.md").exists());
 }
