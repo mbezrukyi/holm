@@ -13,11 +13,13 @@ use std::time::SystemTime;
 
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, ClickEvent, Context, ElementId, Entity, EventEmitter,
     FocusHandle, Focusable, FontWeight, InteractiveElement as _, IntoElement, KeyDownEvent,
-    ParentElement, Render, ScrollStrategy, SharedString, StatefulInteractiveElement as _, Styled,
-    Subscription, Task, UniformListScrollHandle, Window, div, px, uniform_list,
+    ParentElement, Render, Role, ScrollStrategy, SharedString, StatefulInteractiveElement as _,
+    Styled, Subscription, Task, TestSupportExt as _, UniformListScrollHandle, Window, div, px,
+    uniform_list,
 };
 use holm_core::Core;
 use holm_core::model::{NoteInfo, Order};
@@ -101,7 +103,7 @@ impl Sidebar {
         current: Option<PathBuf>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let changes = changes::watch(&core, cx, |sidebar, _, cx| sidebar.refresh(cx));
+        let changes = changes::watch_revision(&core, cx, Self::refresh);
         let mut sidebar = Self {
             core,
             order,
@@ -127,16 +129,19 @@ impl Sidebar {
         &self.view
     }
 
-    /// Reads the notes, folders and tags again.
-    pub(crate) fn refresh(&mut self, cx: &mut Context<Self>) {
+    /// Reads the notes, folders and tags again. The sidebar calls it itself when the core
+    /// revision grows.
+    fn refresh(&mut self, cx: &mut Context<Self>) {
         let core = self.core.clone();
         let order = self.order;
         let job = cx.background_spawn(async move {
-            Ok::<_, holm_core::Error>(Snapshot {
+            let revision = core.revision();
+            let snapshot = Snapshot {
                 notes: core.notes(order)?,
                 folders: core.folders()?,
                 tags: core.tags()?,
-            })
+            };
+            Ok::<_, holm_core::Error>((revision, snapshot))
         });
         self.loading = Some(cx.spawn(async move |sidebar, cx| {
             let result = job.await;
@@ -146,13 +151,15 @@ impl Sidebar {
         }));
     }
 
-    fn loaded(&mut self, result: holm_core::Result<Snapshot>, cx: &mut Context<Self>) {
+    fn loaded(&mut self, result: holm_core::Result<(u64, Snapshot)>, cx: &mut Context<Self>) {
         self.loading = None;
         match result {
-            Ok(snapshot) => {
+            Ok((revision, snapshot)) => {
                 self.snapshot = snapshot;
                 self.error = None;
-                if !self.snapshot.has(self.view.item()) {
+                // An old copy may miss an item that a later write made. The next copy decides.
+                let current = revision == self.core.revision();
+                if current && !self.snapshot.has(self.view.item()) {
                     self.view = View::List(Item::All);
                     cx.emit(SidebarEvent::ViewChanged);
                 }
@@ -515,12 +522,19 @@ impl Sidebar {
         let item = row.item.clone();
         h_flex()
             .id(ElementId::NamedInteger("tree-row".into(), at as u64))
+            .role(Role::TreeItem)
+            .aria_label(item_label(&row.item))
+            .aria_selected(selected)
+            .when(row.has_children, |row_element| {
+                row_element.aria_expanded(row.open)
+            })
+            .test_support()
             .w_full()
             .h(px(TREE_ROW))
             .pr_3()
             .pl(px(12. + 16. * depth))
             .gap_2()
-            .when_selected(selected, cx)
+            .when(selected, |row| row.bg(theme.selection))
             .child(toggle)
             .child(label)
             .child(
@@ -565,12 +579,16 @@ impl Sidebar {
                 };
                 v_flex()
                     .id(ElementId::NamedInteger("note-row".into(), at as u64))
+                    .role(Role::ListItem)
+                    .aria_label(note.title.clone())
+                    .aria_selected(selected == Some(at))
+                    .test_support()
                     .w_full()
                     .h(px(NOTE_ROW))
                     .px_3()
                     .gap_0p5()
                     .justify_center()
-                    .when_selected(selected == Some(at), cx)
+                    .when(selected == Some(at), |row| row.bg(theme.selection))
                     .child(title)
                     .child(
                         div()
@@ -607,17 +625,14 @@ fn when(time: SystemTime) -> String {
     time.strftime(format).to_string()
 }
 
-trait Selected: Styled + Sized {
-    fn when_selected(self, selected: bool, cx: &App) -> Self {
-        if selected {
-            self.bg(cx.theme().selection)
-        } else {
-            self
-        }
+/// The accessible name of a tree item: "All notes", the folder path, or `#` and the tag.
+fn item_label(item: &Item) -> String {
+    match item {
+        Item::All => text::ALL_NOTES.to_owned(),
+        Item::Folder(path) => path.display().to_string(),
+        Item::Tag(name) => format!("#{name}"),
     }
 }
-
-impl<T: Styled> Selected for T {}
 
 impl EventEmitter<SidebarEvent> for Sidebar {}
 
@@ -645,6 +660,9 @@ impl Render for Sidebar {
                 Some(
                     h_flex()
                         .id("back")
+                        .role(Role::Button)
+                        .aria_label(item_label(&item))
+                        .test_support()
                         .w_full()
                         .flex_none()
                         .px_3()
@@ -686,6 +704,7 @@ impl Render for Sidebar {
         let empty = matches!(self.view, View::List(_)) && self.list.is_empty();
         v_flex()
             .id("sidebar")
+            .test_support()
             .key_context("Sidebar")
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key_down))

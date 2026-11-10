@@ -60,7 +60,7 @@ pub(crate) fn delete_question(name: &str, notes: usize, files: usize) -> String 
         0 => notes,
         files => format!("{notes} and {}", count(files, "file", "files")),
     };
-    format!("Delete {name}? This deletes {what} forever.")
+    format!("Delete “{name}”? This deletes {what} forever.")
 }
 
 fn count(n: usize, one: &str, many: &str) -> String {

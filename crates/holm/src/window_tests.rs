@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use gpui_kit::test::TestWindowExt as _;
-use gpui_kit::{AnyWindowHandle, AppContext as _, Entity, Focusable as _, TestAppContext};
+use gpui_kit::test::{TestQueryExt as _, TestWindowExt as _};
+use gpui_kit::{AnyWindowHandle, AppContext as _, Entity, Role, TestAppContext, Window};
 use holm_core::{Core, Feed};
 use tempfile::TempDir;
 
@@ -296,46 +296,62 @@ fn keys(cx: &mut TestAppContext, handle: AnyWindowHandle, keys: &str) {
     settle(cx);
 }
 
-fn view(cx: &TestAppContext, notes: &Entity<NotesView>) -> View {
-    cx.read(|cx| notes.read(cx).sidebar().read(cx).view().clone())
-}
-
-fn sidebar_focused(
+/// Draws a frame and reads the screen with `read`.
+fn screen<R>(
     cx: &mut TestAppContext,
     handle: AnyWindowHandle,
-    notes: &Entity<NotesView>,
-) -> bool {
+    read: impl FnOnce(&mut Window) -> R,
+) -> R {
     cx.update_window(handle, |_, window, cx| {
-        notes
-            .read(cx)
-            .sidebar()
-            .focus_handle(cx)
-            .contains_focused(window, cx)
+        window.render_frame(cx);
+        read(window)
     })
     .unwrap()
 }
 
-fn editor_focused(
-    cx: &mut TestAppContext,
-    handle: AnyWindowHandle,
-    notes: &Entity<NotesView>,
-) -> bool {
-    cx.update_window(handle, |_, window, cx| {
-        notes
-            .read(cx)
-            .pane()
-            .focus_handle(cx)
-            .contains_focused(window, cx)
+/// What the sidebar shows: "tree <selected item>", "list <item>", or "hidden".
+fn sidebar(cx: &mut TestAppContext, handle: AnyWindowHandle) -> String {
+    screen(cx, handle, |window| {
+        if window.try_find("sidebar").is_none() {
+            return "hidden".to_owned();
+        }
+        if let Some(back) = window.try_find("back") {
+            return format!("list {}", back.label().unwrap_or_default());
+        }
+        let selected = window
+            .find_all_by_role(Role::TreeItem)
+            .into_iter()
+            .find(|row| row.selected() == Some(true));
+        format!(
+            "tree {}",
+            selected
+                .and_then(|row| row.label().map(str::to_owned))
+                .unwrap_or_default()
+        )
     })
-    .unwrap()
 }
 
-fn question(cx: &TestAppContext, notes: &Entity<NotesView>) -> Option<String> {
-    cx.read(|cx| {
-        notes
-            .read(cx)
-            .dialog()
-            .map(|dialog| dialog.read(cx).question().to_owned())
+/// Which part has the focus: "sidebar", "editor", or "other".
+fn focus(cx: &mut TestAppContext, handle: AnyWindowHandle) -> &'static str {
+    screen(cx, handle, |window| {
+        let focused = |id| window.try_find(id).and_then(|part| part.focused()) == Some(true);
+        if focused("sidebar") {
+            "sidebar"
+        } else if focused("editor") {
+            "editor"
+        } else {
+            "other"
+        }
+    })
+}
+
+/// The question of the open dialog.
+fn question(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
+    screen(cx, handle, |window| {
+        window
+            .find_all_by_role(Role::Dialog)
+            .first()
+            .and_then(|dialog| dialog.label().map(str::to_owned))
     })
 }
 
@@ -350,23 +366,25 @@ fn the_delete_dialog_counts_and_deletes(cx: &mut TestAppContext) {
     set_time(&notes_dir.join("A.md"), 200);
     set_time(&notes_dir.join("B.md"), 100);
     let (handle, window) = open(cx, fixture.startup(None));
-    let notes = notes(cx, &window).unwrap();
     assert_eq!(editor_text(cx, &window), "# A\n![](attachments/x.png)\n");
 
     keys(cx, handle, "ctrl-shift-l delete");
     assert_eq!(
-        question(cx, &notes).as_deref(),
+        question(cx, handle).as_deref(),
         Some("Delete “A”? This deletes 1 note and 1 file forever.")
     );
     keys(cx, handle, "escape");
-    assert_eq!(question(cx, &notes), None);
+    assert_eq!(question(cx, handle), None);
     assert!(notes_dir.join("A.md").is_file());
-    assert!(sidebar_focused(cx, handle, &notes));
+    assert_eq!(focus(cx, handle), "sidebar");
 
     // The dialog opens after the count, so the keys go one step at a time.
     keys(cx, handle, "delete");
-    keys(cx, handle, "space enter");
-    assert_eq!(question(cx, &notes), None);
+    keys(cx, handle, "space");
+    let checked = screen(cx, handle, |window| window.find("do-not-ask").checked());
+    assert_eq!(checked, Some(true));
+    keys(cx, handle, "enter");
+    assert_eq!(question(cx, handle), None);
     assert!(!notes_dir.join("A.md").exists());
     assert!(!notes_dir.join("attachments/x.png").exists());
     assert_eq!(editor_text(cx, &window), "# B\n");
@@ -374,7 +392,7 @@ fn the_delete_dialog_counts_and_deletes(cx: &mut TestAppContext) {
 
     keys(cx, handle, "delete");
     assert_eq!(
-        question(cx, &notes),
+        question(cx, handle),
         None,
         "no dialog after Do not show again"
     );
@@ -393,41 +411,39 @@ fn the_keyboard_moves_through_tree_list_and_editor(cx: &mut TestAppContext) {
     set_time(&notes_dir.join("work/Plan.md"), 100);
     set_time(&notes_dir.join("Top.md"), 200);
     let (handle, window) = open(cx, fixture.startup(None));
-    let notes = notes(cx, &window).unwrap();
-    assert_eq!(view(cx, &notes), View::List(Item::All));
-    assert!(editor_focused(cx, handle, &notes));
+    assert_eq!(sidebar(cx, handle), "list All notes");
+    assert_eq!(focus(cx, handle), "editor");
 
     keys(cx, handle, "ctrl-shift-l");
-    assert!(sidebar_focused(cx, handle, &notes));
+    assert_eq!(focus(cx, handle), "sidebar");
 
     keys(cx, handle, "escape down enter");
-    let work = Item::Folder("work".into());
-    assert_eq!(view(cx, &notes), View::List(work.clone()));
+    assert_eq!(sidebar(cx, handle), "list work");
 
     keys(cx, handle, "down");
     assert_eq!(editor_text(cx, &window), "# Plan\n");
     keys(cx, handle, "f2");
-    assert!(editor_focused(cx, handle, &notes));
+    assert_eq!(focus(cx, handle), "editor");
     cx.simulate_input(handle, "Goals");
     autosave(cx);
 
     keys(cx, handle, "ctrl-shift-l");
-    assert!(sidebar_focused(cx, handle, &notes));
+    assert_eq!(focus(cx, handle), "sidebar");
     keys(cx, handle, "escape");
-    assert_eq!(view(cx, &notes), View::Tree(work));
+    assert_eq!(sidebar(cx, handle), "tree work");
     keys(cx, handle, "up enter down");
     assert_eq!(editor_text(cx, &window), "# Top\n");
     assert!(read(&notes_dir.join("work/Goals.md")).ends_with("---\n# Goals\n"));
     assert!(!notes_dir.join("work/Plan.md").exists());
 
     keys(cx, handle, "enter");
-    assert!(editor_focused(cx, handle, &notes));
+    assert_eq!(focus(cx, handle), "editor");
     keys(cx, handle, "ctrl-shift-l ctrl-shift-l");
-    assert!(cx.read(|cx| notes.read(cx).is_hidden()));
-    assert!(editor_focused(cx, handle, &notes));
+    assert_eq!(sidebar(cx, handle), "hidden");
+    assert_eq!(focus(cx, handle), "editor");
     keys(cx, handle, "ctrl-shift-l");
-    assert!(!cx.read(|cx| notes.read(cx).is_hidden()));
-    assert!(sidebar_focused(cx, handle, &notes));
+    assert_eq!(sidebar(cx, handle), "list All notes");
+    assert_eq!(focus(cx, handle), "sidebar");
 
     let settings = Config::load(fixture.config()).settings().clone();
     assert_eq!(settings.sidebar.view, View::List(Item::All));
@@ -440,7 +456,6 @@ fn keys_make_rename_and_move_notes_and_folders(cx: &mut TestAppContext) {
     let notes_dir = fixture.notes();
     fs::write(notes_dir.join("Top.md"), "# Top\n").unwrap();
     let (handle, window) = open(cx, fixture.startup(None));
-    let notes = notes(cx, &window).unwrap();
 
     keys(cx, handle, "ctrl-shift-n");
     assert!(notes_dir.join(text::NEW_FOLDER).is_dir());
@@ -448,12 +463,11 @@ fn keys_make_rename_and_move_notes_and_folders(cx: &mut TestAppContext) {
     keys(cx, handle, "enter");
     assert!(notes_dir.join("work").is_dir());
     assert!(!notes_dir.join(text::NEW_FOLDER).exists());
-    let work = Item::Folder("work".into());
-    assert_eq!(view(cx, &notes), View::Tree(work.clone()));
+    assert_eq!(sidebar(cx, handle), "tree work");
 
     keys(cx, handle, "enter ctrl-n");
     assert!(notes_dir.join("work/Untitled.md").is_file());
-    assert!(editor_focused(cx, handle, &notes));
+    assert_eq!(focus(cx, handle), "editor");
 
     keys(cx, handle, "ctrl-shift-l escape up enter down");
     assert_eq!(editor_text(cx, &window), "# Top\n");

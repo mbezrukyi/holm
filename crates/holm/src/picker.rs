@@ -2,17 +2,17 @@
 
 use std::path::{Path, PathBuf};
 
-use gpui_kit::component::{ActiveTheme as _, v_flex};
+use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, ClickEvent, Context, ElementId, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement, Render, ScrollStrategy,
-    SharedString, StatefulInteractiveElement as _, Styled, UniformListScrollHandle, Window, div,
-    px, uniform_list,
+    InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement, Render, Role,
+    ScrollStrategy, SharedString, StatefulInteractiveElement as _, Styled, TestSupportExt as _,
+    UniformListScrollHandle, Window, div, px, uniform_list,
 };
 
-use crate::dialog::overlay;
 use crate::sidebar::Target;
-use crate::text;
+use crate::{popup, text};
 
 /// The answer of the picker.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -114,8 +114,13 @@ impl Render for FolderPicker {
                         } else {
                             folder.display().to_string().into()
                         };
-                        let row = div()
+                        let selected = at == picker.selected;
+                        div()
                             .id(ElementId::NamedInteger("folder-row".into(), at as u64))
+                            .role(Role::ListItem)
+                            .aria_label(name.clone())
+                            .aria_selected(selected)
+                            .test_support()
                             .w_full()
                             .h(px(28.))
                             .px_3()
@@ -125,12 +130,8 @@ impl Render for FolderPicker {
                             .child(name)
                             .on_click(cx.listener(move |picker, _: &ClickEvent, _, cx| {
                                 picker.pick(at, cx);
-                            }));
-                        if at == picker.selected {
-                            row.bg(theme.selection)
-                        } else {
-                            row
-                        }
+                            }))
+                            .when(selected, |row| row.bg(theme.selection))
                     })
                     .collect::<Vec<_>>()
             }),
@@ -138,18 +139,16 @@ impl Render for FolderPicker {
         .track_scroll(&self.scroll)
         .w_full()
         .h(px(300.));
-        overlay(theme.overlay)
+        popup::layer(cx)
             .id("folder-picker")
+            .role(Role::Dialog)
+            .aria_label(text::MOVE_TO)
+            .test_support()
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key_down))
             .child(
-                v_flex()
-                    .w(px(360.))
+                popup::panel(px(360.), cx)
                     .py_2()
-                    .bg(theme.popover)
-                    .border_1()
-                    .border_color(theme.border)
-                    .rounded(theme.radius)
                     .child(
                         div()
                             .px_3()

@@ -34,8 +34,6 @@ const AUTOSAVE: Duration = Duration::from_millis(500);
 pub(crate) enum PaneEvent {
     /// The pane shows the note at this path.
     Opened(PathBuf),
-    /// The pane changed a note file: a save or a rename.
-    Wrote,
 }
 
 /// What happens to the open note when the pane opens another one.
@@ -188,7 +186,6 @@ impl NotePane {
                 if self.is_dirty(cx) {
                     self.schedule_save(cx);
                 }
-                cx.emit(PaneEvent::Wrote);
             }
             Err(error) => {
                 let error = AppError::from(error);
@@ -250,7 +247,7 @@ impl NotePane {
 
     /// Saves unsaved text now. Like at quit, the text wins over an outside change.
     /// The task ends when the file is written, or when the save failed.
-    pub(crate) fn flush(&mut self, cx: &mut Context<Self>) -> Task<()> {
+    fn flush(&mut self, cx: &mut Context<Self>) -> Task<()> {
         self.autosave = None;
         let running = self.saving.take();
         cx.spawn(async move |pane, cx| {
@@ -306,17 +303,9 @@ impl NotePane {
         cx: &mut Context<Self>,
     ) {
         self.opening = None;
-        match renamed {
-            Some(Ok(info)) => {
-                if info.path != self.note.info.path {
-                    cx.emit(PaneEvent::Wrote);
-                }
-            }
-            Some(Err(error)) => {
-                let error = AppError::from(error);
-                tracing::warn!(error = %crate::chain(&error), "cannot rename the note to its title");
-            }
-            None => {}
+        if let Some(Err(error)) = renamed {
+            let error = AppError::from(error);
+            tracing::warn!(error = %crate::chain(&error), "cannot rename the note to its title");
         }
         match read {
             Ok(note) => {
@@ -333,9 +322,42 @@ impl NotePane {
         }
     }
 
+    /// Runs a file action off the UI thread, after the pane saves the open note. So a late
+    /// save never writes a file back after the action moved or deleted it.
+    pub(crate) fn run<T: Send + 'static>(
+        &mut self,
+        job: impl FnOnce(&Core) -> holm_core::Result<T> + Send + 'static,
+        cx: &mut Context<Self>,
+    ) -> Task<holm_core::Result<T>> {
+        let flush = self.flush(cx);
+        let core = self.core.clone();
+        cx.spawn(async move |_, cx| {
+            flush.await;
+            cx.background_spawn(async move { job(&core) }).await
+        })
+    }
+
+    /// Like [`Self::run`], for an action that moves the note or folder at `from` and gives its
+    /// new path. When that holds the open note, the pane follows it.
+    pub(crate) fn run_move(
+        &mut self,
+        from: PathBuf,
+        job: impl FnOnce(&Core) -> holm_core::Result<PathBuf> + Send + 'static,
+        cx: &mut Context<Self>,
+    ) -> Task<holm_core::Result<PathBuf>> {
+        let run = self.run(job, cx);
+        cx.spawn(async move |pane, cx| {
+            let result = run.await;
+            if let Ok(to) = &result {
+                pane.update(cx, |pane, cx| pane.moved(&from, to, cx)).ok();
+            }
+            result
+        })
+    }
+
     /// Follows a move of the open note, or of a folder that holds it, and reads it again.
-    /// A move can change the file links in the note. Call [`Self::flush`] before the move.
-    pub(crate) fn moved(&mut self, from: &Path, to: &Path, cx: &mut Context<Self>) {
+    /// A move can change the file links in the note.
+    fn moved(&mut self, from: &Path, to: &Path, cx: &mut Context<Self>) {
         let Ok(rest) = self.note.info.path.strip_prefix(from) else {
             return;
         };

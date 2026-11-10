@@ -13,6 +13,7 @@ mod log;
 mod notes;
 mod pane;
 mod picker;
+mod popup;
 mod sidebar;
 mod text;
 mod theme;

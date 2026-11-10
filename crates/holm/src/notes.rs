@@ -1,8 +1,7 @@
 //! The open notes folder: the sidebar, the editor pane, and the file actions between them.
 //!
-//! Each file action saves the open note first and runs the core call off the UI thread.
-//! The sidebar then reads the notes again. Holm's own changes don't come back as changes
-//! from the core.
+//! Each file action runs through the pane, which saves the open note first. The sidebar
+//! reads the notes again by itself after each change.
 
 use std::path::{Path, PathBuf};
 
@@ -30,7 +29,6 @@ const MAX_WIDTH: f32 = 600.;
 const MIN_EDITOR: f32 = 360.;
 
 pub(crate) struct NotesView {
-    core: Core,
     config: Entity<Config>,
     sidebar: Entity<Sidebar>,
     pane: Entity<NotePane>,
@@ -58,7 +56,7 @@ impl NotesView {
         let pane = cx.new(|cx| NotePane::new(core.clone(), notes_folder, note, window, cx));
         let sidebar = cx.new(|cx| {
             Sidebar::new(
-                core.clone(),
+                core,
                 settings.note_order,
                 settings.sidebar.view.clone(),
                 Some(current),
@@ -74,11 +72,9 @@ impl NotesView {
                         .update(cx, |sidebar, cx| sidebar.set_current(path, cx));
                     this.keep_state(cx);
                 }
-                PaneEvent::Wrote => this.sidebar.update(cx, Sidebar::refresh),
             }),
         ];
         let mut this = Self {
-            core,
             config,
             sidebar,
             pane,
@@ -124,15 +120,14 @@ impl NotesView {
             }
             SidebarEvent::RenameFolder { folder, name } => {
                 let (folder, name) = (folder.clone(), name.clone());
-                self.run(
-                    window,
-                    cx,
-                    {
-                        let folder = folder.clone();
-                        move |core| core.rename_folder(&folder, &name)
-                    },
-                    move |this, new, _, cx| this.folder_moved(&folder, new, cx),
-                );
+                let job = self.pane.update(cx, |pane, cx| {
+                    pane.run_move(
+                        folder.clone(),
+                        move |core| core.rename_folder(&folder, &name),
+                        cx,
+                    )
+                });
+                self.finish(job, Self::show_folder, window, cx);
             }
             SidebarEvent::ViewChanged => self.keep_state(cx),
         }
@@ -152,33 +147,33 @@ impl NotesView {
             return;
         };
         match target {
-            Target::Note(path) => self.run(
-                window,
-                cx,
-                {
-                    let path = path.clone();
-                    move |core| core.move_note(&path, &folder).map(|info| info.path)
-                },
-                move |this, new, _, cx| {
-                    this.pane.update(cx, |pane, cx| pane.moved(&path, &new, cx));
-                },
-            ),
-            Target::Folder(path) => self.run(
-                window,
-                cx,
-                {
-                    let path = path.clone();
-                    move |core| core.move_folder(&path, &folder)
-                },
-                move |this, new, _, cx| this.folder_moved(&path, new, cx),
-            ),
+            Target::Note(path) => {
+                let job = self.pane.update(cx, |pane, cx| {
+                    pane.run_move(
+                        path.clone(),
+                        move |core| core.move_note(&path, &folder).map(|info| info.path),
+                        cx,
+                    )
+                });
+                self.finish(job, |_, _, _, _| {}, window, cx);
+            }
+            Target::Folder(path) => {
+                let job = self.pane.update(cx, |pane, cx| {
+                    pane.run_move(
+                        path.clone(),
+                        move |core| core.move_folder(&path, &folder),
+                        cx,
+                    )
+                });
+                self.finish(job, Self::show_folder, window, cx);
+            }
         }
     }
 
-    fn folder_moved(&mut self, from: &Path, to: PathBuf, cx: &mut Context<Self>) {
-        self.pane.update(cx, |pane, cx| pane.moved(from, &to, cx));
-        self.sidebar
-            .update(cx, |sidebar, cx| sidebar.show_in_tree(Item::Folder(to), cx));
+    fn show_folder(&mut self, folder: PathBuf, _: &mut Window, cx: &mut Context<Self>) {
+        self.sidebar.update(cx, |sidebar, cx| {
+            sidebar.show_in_tree(Item::Folder(folder), cx);
+        });
     }
 
     /// Shows the delete dialog, or deletes at once after "Do not show again".
@@ -198,16 +193,7 @@ impl NotesView {
                 }
             },
             move |this, count, window, cx| {
-                let path = match &target {
-                    Target::Note(path) | Target::Folder(path) => path,
-                };
-                let name = path
-                    .file_stem()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                let question =
-                    text::delete_question(&format!("“{name}”"), count.notes, count.attachments);
-                let dialog = cx.new(|cx| DeleteDialog::new(target, question, window, cx));
+                let dialog = cx.new(|cx| DeleteDialog::new(target, count, window, cx));
                 this.subscriptions
                     .push(cx.subscribe_in(&dialog, window, Self::dialog_event));
                 this.dialog = Some(dialog);
@@ -311,8 +297,8 @@ impl NotesView {
         );
     }
 
-    /// Saves the open note, runs `job` off the UI thread, and gives its result to `done`.
-    /// An error shows in a quiet bar. The sidebar reads the notes again after each action.
+    /// Runs `job` through the pane, which saves the open note first, and gives its result to
+    /// `done`.
     fn run<T: Send + 'static>(
         &mut self,
         window: &mut Window,
@@ -320,11 +306,20 @@ impl NotesView {
         job: impl FnOnce(&Core) -> holm_core::Result<T> + Send + 'static,
         done: impl FnOnce(&mut Self, T, &mut Window, &mut Context<Self>) + 'static,
     ) {
-        let flush = self.pane.update(cx, NotePane::flush);
-        let core = self.core.clone();
+        let job = self.pane.update(cx, |pane, cx| pane.run(job, cx));
+        self.finish(job, done, window, cx);
+    }
+
+    /// Waits for a file action and gives its result to `done`. An error shows in a quiet bar.
+    fn finish<T: 'static>(
+        &mut self,
+        job: Task<holm_core::Result<T>>,
+        done: impl FnOnce(&mut Self, T, &mut Window, &mut Context<Self>) + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.action = Some(cx.spawn_in(window, async move |this, cx| {
-            flush.await;
-            let result = cx.background_spawn(async move { job(&core) }).await;
+            let result = job.await;
             this.update_in(cx, |this, window, cx| {
                 this.action = None;
                 match result {
@@ -335,7 +330,6 @@ impl NotesView {
                         this.error = Some(error.message());
                     }
                 }
-                this.sidebar.update(cx, Sidebar::refresh);
                 cx.notify();
             })
             .ok();
@@ -429,18 +423,6 @@ impl NotesView {
 impl NotesView {
     pub(crate) fn pane(&self) -> &Entity<NotePane> {
         &self.pane
-    }
-
-    pub(crate) fn sidebar(&self) -> &Entity<Sidebar> {
-        &self.sidebar
-    }
-
-    pub(crate) fn is_hidden(&self) -> bool {
-        self.hidden
-    }
-
-    pub(crate) fn dialog(&self) -> Option<&Entity<DeleteDialog>> {
-        self.dialog.as_ref()
     }
 }
 

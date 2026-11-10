@@ -4,22 +4,6 @@ use std::borrow::Cow;
 
 use gpui_kit::{AssetSource, Hsla, IntoElement, SharedString, Styled, Svg, px, svg};
 
-/// The icon files, by asset path.
-const FILES: [(&str, &[u8]); 6] = [
-    ("icons/all.svg", include_bytes!("../icons/all.svg")),
-    ("icons/folder.svg", include_bytes!("../icons/folder.svg")),
-    (
-        "icons/folder-open.svg",
-        include_bytes!("../icons/folder-open.svg"),
-    ),
-    ("icons/tag.svg", include_bytes!("../icons/tag.svg")),
-    ("icons/tags.svg", include_bytes!("../icons/tags.svg")),
-    (
-        "icons/tags-open.svg",
-        include_bytes!("../icons/tags-open.svg"),
-    ),
-];
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Icon {
     All,
@@ -33,20 +17,36 @@ pub(crate) enum Icon {
 }
 
 impl Icon {
-    fn path(self) -> &'static str {
+    const EVERY: [Self; 6] = [
+        Self::All,
+        Self::Folder,
+        Self::FolderOpen,
+        Self::Tag,
+        Self::Tags,
+        Self::TagsOpen,
+    ];
+
+    /// The asset path and the SVG file.
+    fn file(self) -> (&'static str, &'static [u8]) {
         match self {
-            Self::All => "icons/all.svg",
-            Self::Folder => "icons/folder.svg",
-            Self::FolderOpen => "icons/folder-open.svg",
-            Self::Tag => "icons/tag.svg",
-            Self::Tags => "icons/tags.svg",
-            Self::TagsOpen => "icons/tags-open.svg",
+            Self::All => ("icons/all.svg", include_bytes!("../icons/all.svg")),
+            Self::Folder => ("icons/folder.svg", include_bytes!("../icons/folder.svg")),
+            Self::FolderOpen => (
+                "icons/folder-open.svg",
+                include_bytes!("../icons/folder-open.svg"),
+            ),
+            Self::Tag => ("icons/tag.svg", include_bytes!("../icons/tag.svg")),
+            Self::Tags => ("icons/tags.svg", include_bytes!("../icons/tags.svg")),
+            Self::TagsOpen => (
+                "icons/tags-open.svg",
+                include_bytes!("../icons/tags-open.svg"),
+            ),
         }
     }
 
     /// The icon at 16 px in `color`.
     pub(crate) fn view(self, color: Hsla) -> impl IntoElement {
-        let icon: Svg = svg().path(self.path()).size(px(16.)).flex_none();
+        let icon: Svg = svg().path(self.file().0).size(px(16.)).flex_none();
         icon.text_color(color)
     }
 }
@@ -56,40 +56,38 @@ pub(crate) struct Icons;
 
 impl AssetSource for Icons {
     fn load(&self, path: &str) -> gpui_kit::Result<Option<Cow<'static, [u8]>>> {
-        Ok(FILES
+        Ok(Icon::EVERY
             .iter()
+            .map(|icon| icon.file())
             .find(|(name, _)| *name == path)
-            .map(|(_, bytes)| Cow::Borrowed(*bytes)))
+            .map(|(_, bytes)| Cow::Borrowed(bytes)))
     }
 
     fn list(&self, path: &str) -> gpui_kit::Result<Vec<SharedString>> {
-        Ok(FILES
+        Ok(Icon::EVERY
             .iter()
-            .filter(|(name, _)| name.starts_with(path))
-            .map(|(name, _)| (*name).into())
+            .map(|icon| icon.file().0)
+            .filter(|name| name.starts_with(path))
+            .map(SharedString::from)
             .collect())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, reason = "tests")]
+
     use super::*;
 
     #[test]
-    fn every_icon_has_a_file() {
-        for icon in [
-            Icon::All,
-            Icon::Folder,
-            Icon::FolderOpen,
-            Icon::Tag,
-            Icon::Tags,
-            Icon::TagsOpen,
-        ] {
-            let file = Icons.load(icon.path()).ok().flatten();
+    fn every_icon_loads_by_its_path() {
+        for icon in Icon::EVERY {
+            let file = Icons.load(icon.file().0).ok().flatten();
             assert!(
                 file.is_some_and(|bytes| bytes.starts_with(b"<svg")),
                 "{icon:?}"
             );
         }
+        assert_eq!(Icons.list("icons/").unwrap().len(), Icon::EVERY.len());
     }
 }
