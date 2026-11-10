@@ -491,6 +491,7 @@ fn note(rel: &Path, text: &Text, stamp: Stamp) -> Note {
             path: rel.to_owned(),
             id: text.id().map(NoteId::from_field),
             title,
+            preview: text.preview(),
             tags: text.tags(),
             pinned: text.pinned(),
             modified: time(stamp.modified),

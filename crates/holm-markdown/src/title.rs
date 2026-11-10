@@ -4,6 +4,9 @@ use pulldown_cmark::{Event, Parser};
 /// under the 255 byte name limit of Linux.
 const MAX_STEM_BYTES: usize = 240;
 
+/// Longest preview line in chars. A note list shows only the start of it.
+const MAX_PREVIEW_CHARS: usize = 200;
+
 /// The title of a note body: its first block, when that is a `# heading`.
 pub(crate) fn title(body: &str) -> Option<String> {
     let line = body.lines().find(|line| !line.trim().is_empty())?;
@@ -11,14 +14,43 @@ pub(crate) fn title(body: &str) -> Option<String> {
         return None;
     }
     // A `#` heading is always one line, so the line alone parses the same.
+    let text = line_text(line);
+    (!text.is_empty()).then_some(text)
+}
+
+/// The first line of text after the title, with no Markdown syntax. It is empty when the
+/// body has no such line.
+pub(crate) fn preview(body: &str) -> String {
+    let mut lines = body
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .peekable();
+    if lines.peek().is_some_and(|line| is_h1(line)) {
+        lines.next();
+    }
+    lines
+        .map(line_text)
+        .find(|text| !text.is_empty())
+        .map(|text| cut(text, MAX_PREVIEW_CHARS))
+        .unwrap_or_default()
+}
+
+/// The text of one line, parsed alone, with no Markdown syntax.
+fn line_text(line: &str) -> String {
     let mut text = String::new();
     for event in Parser::new(line) {
         if let Event::Text(t) | Event::Code(t) = event {
             text.push_str(&t);
         }
     }
-    let text = text.trim();
-    (!text.is_empty()).then(|| text.to_owned())
+    text.trim().to_owned()
+}
+
+fn cut(mut text: String, max: usize) -> String {
+    if let Some((end, _)) = text.char_indices().nth(max) {
+        text.truncate(end);
+    }
+    text
 }
 
 fn is_h1(line: &str) -> bool {

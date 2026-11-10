@@ -22,7 +22,7 @@ use crate::store::{ATTACHMENTS, Stamp, Store, folder_of, time};
 
 const FILE: &str = "index.sqlite";
 /// Change this number with each change to [`SCHEMA`]. An index with another number is rebuilt.
-const SHAPE: i32 = 1;
+const SHAPE: i32 = 2;
 
 const SCHEMA: &str = "
 CREATE TABLE notes (
@@ -31,6 +31,7 @@ CREATE TABLE notes (
     folder BLOB NOT NULL,
     id TEXT UNIQUE,
     title TEXT NOT NULL,
+    preview TEXT NOT NULL,
     pinned INTEGER NOT NULL,
     modified INTEGER NOT NULL,
     changed INTEGER NOT NULL,
@@ -61,7 +62,7 @@ CREATE VIRTUAL TABLE search USING fts5 (
 ";
 
 const NOTE_INFO: &str = "
-SELECT path, id, title, pinned, modified,
+SELECT path, id, title, pinned, modified, preview,
     (SELECT group_concat(tag, char(10) ORDER BY pos) FROM tags WHERE note = notes.key)
 FROM notes";
 
@@ -517,10 +518,10 @@ fn write(conn: &Connection, root: &Path, note: &Note, stamp: Stamp) -> Result<()
     let folder = folder_of(&info.path);
     let key: i64 = conn
         .prepare_cached(
-            "INSERT INTO notes (path, folder, id, title, pinned, modified, changed, size)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            "INSERT INTO notes (path, folder, id, title, preview, pinned, modified, changed, size)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
             ON CONFLICT (path) DO UPDATE SET folder = excluded.folder, id = excluded.id,
-                title = excluded.title, pinned = excluded.pinned, modified = excluded.modified,
+                title = excluded.title, preview = excluded.preview, pinned = excluded.pinned, modified = excluded.modified,
                 changed = excluded.changed, size = excluded.size
             RETURNING key",
         )?
@@ -530,6 +531,7 @@ fn write(conn: &Connection, root: &Path, note: &Note, stamp: Stamp) -> Result<()
                 bytes(folder),
                 info.id.as_ref().map(NoteId::as_str),
                 info.title,
+                info.preview,
                 info.pinned,
                 stamp.modified,
                 stamp.changed,
@@ -652,11 +654,12 @@ fn tag_children(
 }
 
 fn note_info(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteInfo> {
-    let tags: Option<String> = row.get(5)?;
+    let tags: Option<String> = row.get(6)?;
     Ok(NoteInfo {
         path: path(row.get(0)?),
         id: row.get::<_, Option<String>>(1)?.map(NoteId::from_field),
         title: row.get(2)?,
+        preview: row.get(5)?,
         tags: tags
             .map(|tags| tags.split('\n').map(str::to_owned).collect())
             .unwrap_or_default(),

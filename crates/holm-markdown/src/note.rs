@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::frontmatter::{Frontmatter, Key};
 use crate::tag::clean_tags;
-use crate::title::title;
+use crate::title::{preview, title};
 
 /// The line ending of a note.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -104,6 +104,20 @@ impl Note {
     /// It is `None` when the first block is something else. The caller then uses the file name.
     pub fn title(&self) -> Option<String> {
         title(&self.body)
+    }
+
+    /// The first line of text after the title, with no Markdown syntax, for a note list.
+    ///
+    /// It is empty when the body has no other text. A long line is cut to 200 chars.
+    ///
+    /// ```
+    /// use holm_markdown::Note;
+    ///
+    /// let note = Note::parse("# Plans\n\n- Buy **milk**\n");
+    /// assert_eq!(note.preview(), "Buy milk");
+    /// ```
+    pub fn preview(&self) -> String {
+        preview(&self.body)
     }
 
     /// Replaces the text after the frontmatter. The frontmatter stays as it is.

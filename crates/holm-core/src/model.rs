@@ -41,6 +41,8 @@ pub struct NoteInfo {
     pub id: Option<NoteId>,
     /// The first `# heading` of the body, or the file name without `.md`.
     pub title: String,
+    /// The first line of text after the title, with no Markdown syntax. It can be empty.
+    pub preview: String,
     /// The `tags:` field, normalized, with no repeats.
     pub tags: Vec<String>,
     /// Whether the frontmatter has `pinned: true`.

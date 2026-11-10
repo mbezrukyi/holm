@@ -82,7 +82,7 @@ proptest! {
         let note = Note::parse(&text);
         prop_assert_eq!(note.to_string(), text);
         // The readers never panic.
-        let _ = (note.id(), note.tags(), note.pinned(), note.title());
+        let _ = (note.id(), note.tags(), note.pinned(), note.title(), note.preview());
     }
 
     #[test]

@@ -8,6 +8,7 @@ id: None
 tags: []
 pinned: false
 title: Some("Just a title")
+preview: "No frontmatter here."
 
 --- frontmatter ---
 

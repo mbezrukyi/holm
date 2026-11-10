@@ -100,13 +100,15 @@ fn a_folder_lists_only_its_own_notes() {
 
 #[test]
 fn notes_keep_their_fields_in_the_index() {
-    let text = "---\nid: 01A\ntags: [work/holm, home]\npinned: true\n---\n# Plans\n";
+    let text =
+        "---\nid: 01A\ntags: [work/holm, home]\npinned: true\n---\n# Plans\n\n- Buy *milk*\n";
     let folder = Folder::new(&[("a.md", text)]);
 
     let listed = folder.core.notes(Order::LastChange).unwrap();
 
     assert_eq!(listed, [folder.core.read("a.md").unwrap().info]);
     assert_eq!(listed[0].tags, ["work/holm", "home"]);
+    assert_eq!(listed[0].preview, "Buy milk");
 }
 
 #[test]
