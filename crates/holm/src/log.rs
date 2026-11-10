@@ -19,6 +19,7 @@ pub(crate) fn start(dir: &Path) -> Result<PathBuf, AppError> {
         path: dir.to_path_buf(),
         source,
     };
+    std::fs::create_dir_all(dir).map_err(|e| error(e.into()))?;
     let appender = RollingFileAppender::builder()
         .rotation(Rotation::DAILY)
         .filename_prefix("holm")
