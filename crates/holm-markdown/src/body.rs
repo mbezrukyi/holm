@@ -183,6 +183,45 @@ pub struct Color {
     pub b: u8,
 }
 
+impl Color {
+    /// The color of a `#rgb` or `#rrggbb` hex value.
+    ///
+    /// ```
+    /// use holm_markdown::Color;
+    ///
+    /// assert_eq!(Color::from_hex("#c4553a"), Some(Color { r: 0xc4, g: 0x55, b: 0x3a }));
+    /// assert_eq!(Color::from_hex("#fff"), Some(Color { r: 255, g: 255, b: 255 }));
+    /// assert_eq!(Color::from_hex("c4553a"), None);
+    /// ```
+    pub fn from_hex(value: &str) -> Option<Self> {
+        let hex = value.strip_prefix('#')?;
+        if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        let digit = |i: usize| u8::from_str_radix(&hex[i..=i], 16).ok();
+        match hex.len() {
+            3 => Some(Color {
+                r: digit(0)? * 17,
+                g: digit(1)? * 17,
+                b: digit(2)? * 17,
+            }),
+            6 => Some(Color {
+                r: digit(0)? * 16 + digit(1)?,
+                g: digit(2)? * 16 + digit(3)?,
+                b: digit(4)? * 16 + digit(5)?,
+            }),
+            _ => None,
+        }
+    }
+}
+
+/// Writes `#rrggbb`, the form that Holm stores.
+impl std::fmt::Display for Color {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "#{:02x}{:02x}{:02x}", self.r, self.g, self.b)
+    }
+}
+
 /// A link or an embedded file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Link {

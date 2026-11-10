@@ -86,28 +86,7 @@ fn css_color(style: &str, properties: &[&str]) -> Option<Color> {
         properties
             .iter()
             .any(|p| p.eq_ignore_ascii_case(property))
-            .then(|| hex_color(value.trim()))
+            .then(|| Color::from_hex(value.trim()))
             .flatten()
     })
-}
-
-fn hex_color(value: &str) -> Option<Color> {
-    let hex = value.strip_prefix('#')?;
-    if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return None;
-    }
-    let digit = |i: usize| u8::from_str_radix(&hex[i..=i], 16).ok();
-    match hex.len() {
-        3 => Some(Color {
-            r: digit(0)? * 17,
-            g: digit(1)? * 17,
-            b: digit(2)? * 17,
-        }),
-        6 => Some(Color {
-            r: digit(0)? * 16 + digit(1)?,
-            g: digit(2)? * 16 + digit(3)?,
-            b: digit(4)? * 16 + digit(5)?,
-        }),
-        _ => None,
-    }
 }

@@ -4,7 +4,7 @@ use std::fmt::Write as _;
 use std::ops::Range;
 
 use holm_markdown::inline::{Format, Kind, Node, restyle};
-use holm_markdown::{BlockKind, Body, Style};
+use holm_markdown::{BlockKind, Body, Color, Style};
 use proptest::prelude::*;
 
 const FORMATS: [Format; 6] = [
@@ -24,6 +24,9 @@ fn style_of(format: Format) -> Style {
         Format::Strikethrough => Style::Strikethrough,
         Format::Highlight => Style::Highlight(None),
         Format::Code => Style::Code,
+        Format::TextColor(_) | Format::HighlightColor(_) => {
+            unreachable!("color keys set a color, they do not toggle")
+        }
     }
 }
 
@@ -154,6 +157,11 @@ fn keys_with_no_selection() {
         ("x `code` y", 4, Format::Code),
         ("x `code` y", 4, Format::Bold),
         ("```\nx y\n```", 5, Format::Bold),
+        ("one two", 1, Format::TextColor(Some(RED))),
+        ("one ", 4, Format::TextColor(Some(RED))),
+        ("one ", 4, Format::HighlightColor(Some(BLUE))),
+        ("one ", 4, Format::TextColor(None)),
+        ("==one== two", 3, Format::HighlightColor(None)),
     ]
     .iter()
     .map(|(text, at, format)| match press(text, *at..*at, *format) {
@@ -163,6 +171,66 @@ fn keys_with_no_selection() {
         None => format!("{text:?} {at} {format:?}: no change"),
     })
     .collect();
+    insta::assert_snapshot!(cases.join("\n"));
+}
+
+const RED: Color = Color {
+    r: 0xb5,
+    g: 0x44,
+    b: 0x2c,
+};
+const BLUE: Color = Color {
+    r: 0x3a,
+    g: 0x66,
+    b: 0xa0,
+};
+
+#[test]
+fn color_keys() {
+    use Format::{HighlightColor, TextColor};
+    let cases = [
+        steps("a word here", &[("word", TextColor(Some(RED)))]),
+        steps(
+            "a word here",
+            &[
+                ("word here", TextColor(Some(RED))),
+                ("here", TextColor(Some(BLUE))),
+                (
+                    "ord</span> <span style=\"color: #3a66a0\">he",
+                    TextColor(None),
+                ),
+            ],
+        ),
+        steps(
+            "a <span style=\"color: #b5442c\">word</span>",
+            &[
+                ("word", TextColor(Some(RED))),
+                ("wo", TextColor(Some(BLUE))),
+            ],
+        ),
+        steps("a **word** b", &[("a **word** b", TextColor(Some(RED)))]),
+        steps(
+            "a ==word== b",
+            &[
+                ("wor", HighlightColor(Some(BLUE))),
+                ("a", HighlightColor(None)),
+            ],
+        ),
+        steps(
+            "<mark style=\"background: #3a66a0\">all</mark> of it",
+            &[("all", HighlightColor(None))],
+        ),
+        steps("plain", &[("plain", TextColor(None))]),
+        // Ctrl+H removes a colored highlight, and adds `==` only where no highlight is.
+        steps(
+            "a <mark style=\"background: #3a66a0\">word</mark> b",
+            &[("word", Format::Highlight)],
+        ),
+        steps(
+            "<mark style=\"background: #3a66a0\">a</mark> word",
+            &[("a</mark> word", Format::Highlight)],
+        ),
+    ];
     insta::assert_snapshot!(cases.join("\n"));
 }
 
@@ -218,6 +286,11 @@ fn check_press(text: &str, selection: Range<usize>, format: Format) {
     }
     let old = shown(text);
     let style = style_of(format);
+    // Ctrl+H sees a colored highlight as a highlight too.
+    let is_style = |s: &Style| match style {
+        Style::Highlight(_) => matches!(s, Style::Highlight(_)),
+        _ => *s == style,
+    };
     // A selection end inside an atom moves out to hold all of it.
     let cut = |at: usize| {
         raw.iter()
@@ -253,9 +326,9 @@ fn check_press(text: &str, selection: Range<usize>, format: Format) {
         visible(text),
         "{format:?} on {selection:?}: {text:?} became {new_text:?}"
     );
-    let add = picked.iter().any(|s| !s.styles.contains(&style));
+    let add = picked.iter().any(|s| !s.styles.iter().any(is_style));
     let others = |styles: &[Style]| {
-        let mut others: Vec<Style> = styles.iter().copied().filter(|s| *s != style).collect();
+        let mut others: Vec<Style> = styles.iter().copied().filter(|s| !is_style(s)).collect();
         others.sort_by_key(|s| format!("{s:?}"));
         others.dedup();
         others
@@ -269,7 +342,7 @@ fn check_press(text: &str, selection: Range<usize>, format: Format) {
             old.at
         );
         if selected(old.at) {
-            assert_eq!(new.styles.contains(&style), add, "{why}");
+            assert_eq!(new.styles.iter().any(is_style), add, "{why}");
             // Code drops the styles that cover only a part of it.
             if format != Format::Code {
                 assert_eq!(others(&new.styles), others(&old.styles), "{why}");
@@ -280,12 +353,79 @@ fn check_press(text: &str, selection: Range<usize>, format: Format) {
         {
             // A key on a part of a code span, link, tag, entity or escape takes all of it.
             assert_eq!(others(&new.styles), others(&old.styles), "{why}");
-            assert_eq!(
-                new.styles.contains(&style),
-                old.styles.contains(&style),
-                "{why}"
-            );
+            let kept = |styles: &[Style]| {
+                let mut kept: Vec<Style> = styles.iter().copied().filter(is_style).collect();
+                kept.dedup();
+                kept
+            };
+            assert_eq!(kept(&new.styles), kept(&old.styles), "{why}");
         }
+    }
+}
+
+const COLOR_KEYS: [Format; 6] = [
+    Format::TextColor(Some(RED)),
+    Format::TextColor(Some(BLUE)),
+    Format::TextColor(None),
+    Format::HighlightColor(Some(RED)),
+    Format::HighlightColor(Some(BLUE)),
+    Format::HighlightColor(None),
+];
+
+/// Checks one color key on plain words and styles away from links and code. The visible text
+/// stays, the selected letters get only the new color, and the other styles stay.
+fn check_color(text: &str, selection: Range<usize>, format: Format) {
+    let body = Body::parse(text);
+    if selection.is_empty() || body.blocks().iter().any(|b| b.kind != BlockKind::Paragraph) {
+        return;
+    }
+    let mut raw = Vec::new();
+    for leaf in body.leaves() {
+        atom_ranges(&body.inline(text, leaf), &mut raw);
+    }
+    let touches_raw = raw
+        .iter()
+        .any(|r| r.start < selection.end && selection.start < r.end);
+    if touches_raw || text.contains(['\\', '&', '`']) {
+        return;
+    }
+    let Some((new_text, _)) = press(text, selection.clone(), format) else {
+        return;
+    };
+    let why = format!("{format:?} on {selection:?}: {text:?} became {new_text:?}");
+    assert_eq!(visible(&new_text), visible(text), "{why}");
+    let (family, wanted): (fn(&Style) -> bool, Option<Style>) = match format {
+        Format::TextColor(color) => (|s| matches!(s, Style::Color(_)), color.map(Style::Color)),
+        Format::HighlightColor(color) => (
+            |s| matches!(s, Style::Highlight(_)),
+            color.map(|c| Style::Highlight(Some(c))),
+        ),
+        _ => unreachable!("only color keys"),
+    };
+    let others = |styles: &[Style]| {
+        let mut others: Vec<Style> = styles.iter().copied().filter(|s| !family(s)).collect();
+        others.sort_by_key(|s| format!("{s:?}"));
+        others.dedup();
+        others
+    };
+    for (old, new) in shown(text).iter().zip(&shown(&new_text)) {
+        if old.c.is_whitespace() || !selection.contains(&old.at) {
+            continue;
+        }
+        let mut colors: Vec<Style> = new.styles.iter().copied().filter(family).collect();
+        colors.dedup();
+        assert_eq!(
+            colors,
+            wanted.into_iter().collect::<Vec<_>>(),
+            "{why} at {}",
+            old.at
+        );
+        assert_eq!(
+            others(&new.styles),
+            others(&old.styles),
+            "{why} at {}",
+            old.at
+        );
     }
 }
 
@@ -363,6 +503,23 @@ proptest! {
         let start = bounds[a % bounds.len()].min(bounds[b % bounds.len()]);
         let end = bounds[a % bounds.len()].max(bounds[b % bounds.len()]);
         check_press(&text, start..end, FORMATS[key]);
+    }
+
+    /// A random block, selection and color key: the output keeps the visible text, and the
+    /// selected text has only the new color.
+    #[test]
+    fn a_color_key_keeps_the_text_and_sets_the_color(
+        pieces in prop::collection::vec(piece(), 1..14),
+        a in 0..200_usize,
+        b in 0..200_usize,
+        key in 0..6_usize,
+    ) {
+        let text = pieces.concat();
+        let mut bounds: Vec<usize> = (0..=text.len()).filter(|&i| text.is_char_boundary(i)).collect();
+        bounds.dedup();
+        let start = bounds[a % bounds.len()].min(bounds[b % bounds.len()]);
+        let end = bounds[a % bounds.len()].max(bounds[b % bounds.len()]);
+        check_color(&text, start..end, COLOR_KEYS[key]);
     }
 
     /// The same key twice on the new selection gives back text with the old styles.

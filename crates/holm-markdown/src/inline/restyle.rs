@@ -10,7 +10,7 @@ use super::{Kind, Leaf, Node};
 use super::{scan, tag};
 use crate::{BlockKind, Body, Color};
 
-/// A format key: the inline style it adds or removes.
+/// A format key: the inline style it adds or removes, or the color it sets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
     /// Ctrl+B: `**text**`.
@@ -21,10 +21,16 @@ pub enum Format {
     Underline,
     /// Ctrl+D: `~~text~~`.
     Strikethrough,
-    /// Ctrl+H: `==text==`.
+    /// Ctrl+H: `==text==`. Text with any highlight counts as highlighted, so the key removes it.
     Highlight,
     /// Ctrl+E: `` `text` ``.
     Code,
+    /// The text color: `<span style="color: #rrggbb">`. It takes the place of any other text
+    /// color. `None` removes the text color.
+    TextColor(Option<Color>),
+    /// The highlight color: `<mark style="background: #rrggbb">`. It takes the place of any other
+    /// highlight, also `==text==`. `None` removes the highlight.
+    HighlightColor(Option<Color>),
 }
 
 /// A change to the note text from [`restyle`].
@@ -42,7 +48,7 @@ pub struct Edit {
 /// `text`.
 ///
 /// The key adds the style when any selected text lacks it. It removes the style when all of it
-/// has it. With no selection, the key works on the word at the cursor. Between words, it puts
+/// has it. A color key sets its color on all selected text. With no selection, the key works on the word at the cursor. Between words, it puts
 /// in an empty pair of markers. It gives `None` when nothing changes, or when no valid Markdown
 /// gives the wanted styles.
 ///
@@ -111,7 +117,40 @@ enum Look {
     Color(Color),
 }
 
+/// Looks that differ only in their color. A piece has at most one look of each family.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Family {
+    Color,
+    Highlight,
+}
+
+impl Family {
+    fn has(self, look: Look) -> bool {
+        look.family() == Some(self)
+    }
+
+    fn look(self, color: Color) -> Look {
+        match self {
+            Self::Color => Look::Color(color),
+            Self::Highlight => Look::Highlight(Some(color)),
+        }
+    }
+}
+
 impl Look {
+    fn family(self) -> Option<Family> {
+        match self {
+            Self::Color(_) => Some(Family::Color),
+            Self::Highlight(_) => Some(Family::Highlight),
+            _ => None,
+        }
+    }
+
+    /// Whether `other` is this look, or a look of its family.
+    fn is_kin(self, other: Self) -> bool {
+        self == other || self.family().is_some_and(|family| family.has(other))
+    }
+
     /// Whether the style shows on a space. Bold and italic do not.
     fn shows_on_space(self) -> bool {
         !matches!(self, Self::Emphasis | Self::Strong)
@@ -136,11 +175,9 @@ impl Look {
             Self::Strong => Spelling::Delim("**"),
             Self::Strike => Spelling::Delim("~~"),
             Self::Highlight(None) => Spelling::Delim("=="),
-            Self::Highlight(Some(c)) => {
-                tag(&format!("mark style=\"background: {}\"", hex(c)), "mark")
-            }
+            Self::Highlight(Some(c)) => tag(&format!("mark style=\"background: {c}\""), "mark"),
             Self::Underline => tag("u", "u"),
-            Self::Color(c) => tag(&format!("span style=\"color: {}\"", hex(c)), "span"),
+            Self::Color(c) => tag(&format!("span style=\"color: {c}\""), "span"),
         }
     }
 
@@ -164,25 +201,27 @@ impl Format {
             Self::Underline => Some(Look::Underline),
             Self::Strikethrough => Some(Look::Strike),
             Self::Highlight => Some(Look::Highlight(None)),
-            Self::Code => None,
+            Self::Code | Self::TextColor(_) | Self::HighlightColor(_) => None,
         }
     }
 
-    /// The empty marker pair, and the length of its first half.
-    fn pair(self) -> (&'static str, usize) {
+    /// The empty marker pair, and the length of its first half. A key that only removes has
+    /// none.
+    fn pair(self) -> Option<(String, usize)> {
+        let delim = |pair: &str| Some((pair.to_owned(), pair.len() / 2));
         match self {
-            Self::Bold => ("****", 2),
-            Self::Italic => ("**", 1),
-            Self::Underline => ("<u></u>", 3),
-            Self::Strikethrough => ("~~~~", 2),
-            Self::Highlight => ("====", 2),
-            Self::Code => ("``", 1),
+            Self::Bold => delim("****"),
+            Self::Italic => delim("**"),
+            Self::Underline => Some(("<u></u>".to_owned(), 3)),
+            Self::Strikethrough => delim("~~~~"),
+            Self::Highlight => delim("===="),
+            Self::Code => delim("``"),
+            Self::TextColor(color) => color.map(|c| Look::Color(c).default_spelling().pair()),
+            Self::HighlightColor(color) => {
+                color.map(|c| Look::Highlight(Some(c)).default_spelling().pair())
+            }
         }
     }
-}
-
-fn hex(c: Color) -> String {
-    format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)
 }
 
 fn tag(open: &str, close: &str) -> Spelling {
@@ -221,6 +260,14 @@ impl Spelling {
             Self::Delim(d) => d,
             Self::Tag(_, close) => close,
         }
+    }
+
+    /// The empty pair, and the length of its first half.
+    fn pair(&self) -> (String, usize) {
+        (
+            format!("{}{}", self.open(), self.close()),
+            self.open().len(),
+        )
     }
 
     /// `*` and `_`, or `**` and `__`, swapped.
@@ -286,6 +333,11 @@ struct Piece {
 impl Piece {
     fn has(&self, look: Look) -> bool {
         self.marks.iter().any(|m| m.look == look)
+    }
+
+    /// Whether the piece has `look` or a look of its family, like a colored highlight.
+    fn has_kin(&self, look: Look) -> bool {
+        self.marks.iter().any(|m| look.is_kin(m.look))
     }
 
     fn mark(&self, look: Look) -> Option<&Mark> {
@@ -420,6 +472,21 @@ enum Action {
     Remove(Look),
     AddCode,
     RemoveCode,
+    /// Takes off each look of the family, then adds the color.
+    Set(Family, Option<Color>),
+}
+
+impl Action {
+    /// Whether the action takes `look` off the selected text.
+    fn removes(self, look: Look) -> bool {
+        match self {
+            Self::Remove(removed) => removed == look,
+            Self::Set(family, color) => {
+                family.has(look) && color.map(|c| family.look(c)) != Some(look)
+            }
+            _ => false,
+        }
+    }
 }
 
 /// One touched leaf.
@@ -507,11 +574,17 @@ fn change(
             .filter(|p| p.selected && !p.class.is_blank())
     };
     selected().next()?;
-    let action = match format.look() {
-        Some(look) if selected().all(|p| p.has(look)) => Action::Remove(look),
-        Some(look) => Action::Add(look),
-        None if selected().all(|p| p.class == Class::Code) => Action::RemoveCode,
-        None => Action::AddCode,
+    let action = match (format, format.look()) {
+        (Format::TextColor(color), _) => Action::Set(Family::Color, color),
+        (Format::HighlightColor(color), _) => Action::Set(Family::Highlight, color),
+        // Ctrl+H on any highlight removes it, so that a piece never gets two highlights.
+        (_, Some(look)) if selected().all(|p| p.has_kin(look)) => match look.family() {
+            Some(family) => Action::Set(family, None),
+            None => Action::Remove(look),
+        },
+        (_, Some(look)) => Action::Add(look),
+        _ if selected().all(|p| p.class == Class::Code) => Action::RemoveCode,
+        _ => Action::AddCode,
     };
     let mut changes = Vec::with_capacity(works.len());
     for work in &works {
@@ -595,6 +668,7 @@ fn write_region(
     let wanted = flat(&work.joined, &wanted);
     let target = match action {
         Action::Add(look) | Action::Remove(look) => Some(look),
+        Action::Set(family, color) => color.map(|c| family.look(c)),
         _ => None,
     };
     let breaks = work.joined[region.clone()].matches('\n').count();
@@ -657,10 +731,10 @@ fn region(
             break first..end;
         }
     };
-    if let Action::Remove(look) = action {
+    if matches!(action, Action::Remove(_) | Action::Set(..)) {
         let mut outer = nodes;
         for (depth, &k) in path.iter().enumerate() {
-            if Look::of(&outer[k].kind) == Some(look) {
+            if Look::of(&outer[k].kind).is_some_and(|look| action.removes(look)) {
                 path.truncate(depth);
                 return Some((path, widen(outer, k..k + 1)));
             }
@@ -701,22 +775,13 @@ fn apply(
     table: bool,
 ) -> Option<()> {
     match action {
-        Action::Add(look) => {
-            if outer.iter().any(|m| m.look == look) {
-                return Some(());
-            }
-            for piece in pieces.iter_mut().filter(|p| p.selected && !p.has(look)) {
-                piece.marks.push(Mark {
-                    look,
-                    spelling: look.default_spelling(),
-                    node: None,
-                    count: 0,
-                });
-            }
-        }
-        Action::Remove(look) => {
+        Action::Add(look) => add(pieces, outer, look),
+        Action::Remove(_) | Action::Set(..) => {
             for piece in pieces.iter_mut().filter(|p| p.selected) {
-                piece.marks.retain(|m| m.look != look);
+                piece.marks.retain(|m| !action.removes(m.look));
+            }
+            if let Action::Set(family, Some(color)) = action {
+                add(pieces, outer, family.look(color));
             }
         }
         Action::RemoveCode => {
@@ -772,6 +837,22 @@ fn apply(
         }
     }
     Some(())
+}
+
+/// Adds `look` to the selected pieces that have no look of its kind, unless a style around them
+/// has one.
+fn add(pieces: &mut [Piece], outer: &[Mark], look: Look) {
+    if outer.iter().any(|m| look.is_kin(m.look)) {
+        return;
+    }
+    for piece in pieces.iter_mut().filter(|p| p.selected && !p.has_kin(look)) {
+        piece.marks.push(Mark {
+            look,
+            spelling: look.default_spelling(),
+            node: None,
+            count: 0,
+        });
+    }
 }
 
 /// Writes `text` with a backslash before each char that could pair with a marker.
@@ -1310,11 +1391,11 @@ fn pair(text: &str, body: &Body, cursor: usize, format: Format) -> Option<Edit> 
     if !blank(before) || !blank(after) || in_raw_block(body.blocks(), cursor) {
         return None;
     }
-    let (pair, half) = format.pair();
+    let (pair, half) = format.pair()?;
     let inner = cursor + half;
     Some(Edit {
         range: cursor..cursor,
-        text: pair.to_owned(),
+        text: pair,
         selection: inner..inner,
     })
 }
