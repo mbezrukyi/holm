@@ -64,13 +64,20 @@ pub(crate) enum SidebarEvent {
         folder: PathBuf,
         name: String,
     },
+    /// Rename a tag in all notes, with the dialog.
+    RenameTag {
+        from: String,
+        to: String,
+    },
+    /// Remove a tag from all notes, with the dialog.
+    DeleteTag(String),
     /// The view changed. The app keeps it in the config.
     ViewChanged,
 }
 
-/// A folder name field in the tree, after `F2`.
+/// A name field for a folder or a tag in the tree, after `F2`.
 struct Rename {
-    folder: PathBuf,
+    item: Item,
     input: Entity<InputState>,
     _subscription: Subscription,
 }
@@ -267,18 +274,18 @@ impl Sidebar {
         self.list.iter().position(|note| &note.path == current)
     }
 
-    /// Starts the name field for `folder` in the tree.
-    pub(crate) fn rename_folder(
-        &mut self,
-        folder: PathBuf,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.show_in_tree(Item::Folder(folder.clone()), cx);
-        let name = folder
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
+    /// Starts the name field for a folder or a tag in the tree. A tag field holds the full
+    /// name, so a rename can also move the tag under another parent.
+    pub(crate) fn rename(&mut self, item: Item, window: &mut Window, cx: &mut Context<Self>) {
+        let name = match &item {
+            Item::All => return,
+            Item::Folder(folder) => folder
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            Item::Tag(tag) => tag.clone(),
+        };
+        self.show_in_tree(item.clone(), cx);
         let input = cx.new(|cx| InputState::new(window, cx).default_value(name));
         let subscription =
             cx.subscribe_in(
@@ -290,10 +297,15 @@ impl Sidebar {
                         if let Some(rename) = sidebar.rename.take()
                             && !name.is_empty()
                         {
-                            cx.emit(SidebarEvent::RenameFolder {
-                                folder: rename.folder,
-                                name,
-                            });
+                            match rename.item {
+                                Item::Folder(folder) => {
+                                    cx.emit(SidebarEvent::RenameFolder { folder, name });
+                                }
+                                Item::Tag(from) if from != name => {
+                                    cx.emit(SidebarEvent::RenameTag { from, to: name });
+                                }
+                                Item::Tag(_) | Item::All => {}
+                            }
                         }
                         window.focus(&sidebar.focus, cx);
                         cx.notify();
@@ -310,7 +322,7 @@ impl Sidebar {
             input.select_all(window, cx);
         });
         self.rename = Some(Rename {
-            folder,
+            item,
             input,
             _subscription: subscription,
         });
@@ -397,16 +409,12 @@ impl Sidebar {
             }
             "enter" => self.set_view(View::List(item), cx),
             "escape" => cx.emit(SidebarEvent::FocusEditor),
-            "f2" => {
-                if let Item::Folder(folder) = item {
-                    self.rename_folder(folder, window, cx);
-                }
-            }
-            "delete" => {
-                if let Some(target) = self.target() {
-                    cx.emit(SidebarEvent::Delete(target));
-                }
-            }
+            "f2" => self.rename(item, window, cx),
+            "delete" => match item {
+                Item::Tag(tag) => cx.emit(SidebarEvent::DeleteTag(tag)),
+                Item::Folder(folder) => cx.emit(SidebarEvent::Delete(Target::Folder(folder))),
+                Item::All => {}
+            },
             _ => return false,
         }
         true
@@ -489,10 +497,10 @@ impl Sidebar {
             Item::All => text::ALL_NOTES.into(),
             Item::Folder(_) | Item::Tag(_) => row.name.clone().into(),
         };
-        let renaming = self.rename.as_ref().filter(|rename| match &row.item {
-            Item::Folder(folder) => folder == &rename.folder,
-            _ => false,
-        });
+        let renaming = self
+            .rename
+            .as_ref()
+            .filter(|rename| rename.item == row.item);
         let label = match renaming {
             Some(rename) => Input::new(&rename.input).into_any_element(),
             None => div()

@@ -15,6 +15,7 @@ mod pane;
 mod picker;
 mod popup;
 mod sidebar;
+mod tags;
 mod text;
 mod theme;
 mod window;

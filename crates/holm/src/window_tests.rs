@@ -329,7 +329,7 @@ fn sidebar(cx: &mut TestAppContext, handle: AnyWindowHandle) -> String {
     })
 }
 
-/// Which part has the focus: "sidebar", "editor", or "other".
+/// Which part has the focus: "sidebar", "editor", "tag field", "tag row", or "other".
 fn focus(cx: &mut TestAppContext, handle: AnyWindowHandle) -> &'static str {
     screen(cx, handle, |window| {
         let focused = |id| window.try_find(id).and_then(|part| part.focused()) == Some(true);
@@ -337,10 +337,51 @@ fn focus(cx: &mut TestAppContext, handle: AnyWindowHandle) -> &'static str {
             "sidebar"
         } else if focused("editor") {
             "editor"
+        } else if focused("tag-input") {
+            "tag field"
+        } else if focused("tag-row") {
+            "tag row"
         } else {
             "other"
         }
     })
+}
+
+/// The labels of the elements with `role` in the part `id`. The chip or row in focus has `*`.
+fn labels(cx: &mut TestAppContext, handle: AnyWindowHandle, id: &str, role: Role) -> Vec<String> {
+    let id = id.to_owned();
+    screen(cx, handle, |window| {
+        if window.try_find(id.clone()).is_none() {
+            return Vec::new();
+        }
+        window
+            .within(id)
+            .find_all_by_role(role)
+            .iter()
+            .map(|item| {
+                let label = item.label().unwrap_or_default();
+                if item.selected() == Some(true) {
+                    format!("{label}*")
+                } else {
+                    label.to_owned()
+                }
+            })
+            .collect()
+    })
+}
+
+fn chips(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
+    labels(cx, handle, "tag-row", Role::ListItem)
+}
+
+/// The tags and the pin in the file of a note.
+fn fields(path: &Path) -> (Vec<String>, bool) {
+    let note = holm_markdown::Note::parse(&read(path));
+    (note.tags(), note.pinned())
+}
+
+fn modified(path: &Path) -> std::time::SystemTime {
+    fs::metadata(path).unwrap().modified().unwrap()
 }
 
 /// The question of the open dialog.
@@ -480,4 +521,161 @@ fn keys_make_rename_and_move_notes_and_folders(cx: &mut TestAppContext) {
     autosave(cx);
     assert!(read(&notes_dir.join("work/Top.md")).contains('x'));
     assert!(!notes_dir.join("Top.md").exists());
+}
+
+#[gpui_kit::test]
+fn the_tag_row_adds_and_removes_tags_and_pins(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    let a = notes_dir.join("A.md");
+    fs::write(&a, "---\ntags:\n  - work\n---\n# A\n").unwrap();
+    fs::write(
+        notes_dir.join("B.md"),
+        "---\ntags:\n  - project/holm\n---\n# B\n",
+    )
+    .unwrap();
+    set_time(&a, 200);
+    set_time(&notes_dir.join("B.md"), 100);
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(editor_text(cx, handle), "# A\n");
+    assert_eq!(chips(cx, handle), ["work"]);
+    assert!(screen(cx, handle, |window| window
+        .try_find("tag-input")
+        .is_none()));
+
+    keys(cx, handle, "ctrl-shift-t");
+    assert_eq!(focus(cx, handle), "tag field");
+    cx.simulate_input(handle, "ho");
+    settle(cx);
+    assert_eq!(
+        labels(cx, handle, "tag-suggestions", Role::ListBoxOption),
+        ["project/holm"]
+    );
+    keys(cx, handle, "tab");
+    cx.simulate_input(handle, "big plans");
+    keys(cx, handle, "enter");
+    assert_eq!(chips(cx, handle), ["work", "project/holm", "big-plans"]);
+    assert_eq!(fields(&a).0, ["work", "project/holm", "big-plans"]);
+
+    keys(cx, handle, "left left");
+    assert_eq!(focus(cx, handle), "tag row");
+    assert_eq!(chips(cx, handle), ["work", "project/holm*", "big-plans"]);
+    keys(cx, handle, "backspace");
+    assert_eq!(chips(cx, handle), ["work", "big-plans*"]);
+    keys(cx, handle, "escape");
+    assert_eq!(focus(cx, handle), "editor");
+
+    keys(cx, handle, "ctrl-shift-p");
+    assert!(screen(cx, handle, |window| window
+        .try_find("pin-mark")
+        .is_some()));
+    assert_eq!(
+        fields(&a),
+        (vec!["work".to_owned(), "big-plans".to_owned()], true)
+    );
+
+    keys(cx, handle, "ctrl-z");
+    autosave(cx);
+    assert_eq!(
+        fields(&a),
+        (vec!["work".to_owned(), "big-plans".to_owned()], true)
+    );
+    assert_eq!(
+        modified(&a),
+        std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(200),
+        "tags and pins keep the modification time"
+    );
+
+    keys(cx, handle, "up");
+    assert_eq!(focus(cx, handle), "tag field");
+    keys(cx, handle, "down");
+    assert_eq!(focus(cx, handle), "editor");
+    assert_eq!(editor_text(cx, handle), "# A\n");
+}
+
+#[gpui_kit::test]
+fn tags_rename_and_delete_in_all_notes_after_the_dialog(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    let a = notes_dir.join("A.md");
+    let b = notes_dir.join("B.md");
+    fs::write(&a, "---\ntags:\n  - work\n---\n# A\n").unwrap();
+    fs::write(&b, "---\ntags:\n  - work/holm\n  - home\n---\n# B\n").unwrap();
+    set_time(&a, 200);
+    set_time(&b, 100);
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(chips(cx, handle), ["work"]);
+
+    // The tree: All notes, then the tags home and work.
+    keys(cx, handle, "ctrl-shift-l escape down down");
+    assert_eq!(sidebar(cx, handle), "tree #work");
+    keys(cx, handle, "f2");
+    cx.update_window(handle, |_, window, cx| {
+        window.dispatch_action(Box::new(gpui_kit::component::input::SelectAll), cx);
+    })
+    .unwrap();
+    cx.simulate_input(handle, "job");
+    keys(cx, handle, "enter");
+    assert_eq!(
+        question(cx, handle).as_deref(),
+        Some("Rename “#work” to “#job”? This changes 2 notes.")
+    );
+    keys(cx, handle, "escape");
+    assert_eq!(question(cx, handle), None);
+    assert_eq!(fields(&a).0, ["work"]);
+
+    keys(cx, handle, "f2");
+    cx.update_window(handle, |_, window, cx| {
+        window.dispatch_action(Box::new(gpui_kit::component::input::SelectAll), cx);
+    })
+    .unwrap();
+    cx.simulate_input(handle, "job");
+    keys(cx, handle, "enter");
+    keys(cx, handle, "enter");
+    assert_eq!(question(cx, handle), None);
+    assert_eq!(fields(&a).0, ["job"]);
+    assert_eq!(fields(&b).0, ["job/holm", "home"]);
+    assert_eq!(sidebar(cx, handle), "tree #job");
+    assert_eq!(
+        chips(cx, handle),
+        ["job"],
+        "the open note shows the new name"
+    );
+
+    // The tag dialogs have no "Do not show again", so Space does nothing.
+    keys(cx, handle, "delete");
+    assert_eq!(
+        question(cx, handle).as_deref(),
+        Some("Remove “#job” from all notes? This changes 2 notes.")
+    );
+    assert!(screen(cx, handle, |window| window
+        .try_find("do-not-ask")
+        .is_none()));
+    keys(cx, handle, "space enter");
+    assert_eq!(fields(&a).0, Vec::<String>::new());
+    assert_eq!(fields(&b).0, ["home"]);
+    assert_eq!(chips(cx, handle), Vec::<String>::new());
+    assert!(Config::load(fixture.config()).settings().ask_before_delete);
+
+    // The gone tag leaves the list of all notes. The tree has All notes, then the tag home.
+    assert_eq!(sidebar(cx, handle), "list All notes");
+    keys(cx, handle, "escape down");
+    assert_eq!(sidebar(cx, handle), "tree #home");
+    keys(cx, handle, "delete");
+    assert_eq!(
+        question(cx, handle).as_deref(),
+        Some("Remove “#home” from all notes? This changes 1 note.")
+    );
+    keys(cx, handle, "enter");
+    assert_eq!(fields(&b).0, Vec::<String>::new());
+
+    // A later save of the open note keeps the new tags.
+    keys(cx, handle, "ctrl-shift-l");
+    cx.simulate_input(handle, "x");
+    autosave(cx);
+    assert_eq!(fields(&a).0, Vec::<String>::new());
+    assert_eq!(
+        modified(&b),
+        std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(100)
+    );
 }

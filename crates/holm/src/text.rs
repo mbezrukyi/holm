@@ -44,6 +44,10 @@ pub(crate) fn crashed(log: &Path) -> String {
 pub(crate) const ALL_NOTES: &str = "All notes";
 pub(crate) const NO_NOTES: &str = "No notes";
 pub(crate) const PIN_MARK: &str = "●";
+pub(crate) const PINNED: &str = "Pinned";
+pub(crate) const TAGS_LABEL: &str = "Tags";
+pub(crate) const ADD_TAG: &str = "Add tag";
+pub(crate) const RENAME: &str = "Rename";
 pub(crate) const FOLDERS: &str = "FOLDERS";
 pub(crate) const TAGS: &str = "TAGS";
 pub(crate) const NEW_FOLDER: &str = "New folder";
@@ -69,4 +73,20 @@ fn count(n: usize, one: &str, many: &str) -> String {
     } else {
         format!("{n} {many}")
     }
+}
+
+/// The question before a tag rename in all notes.
+pub(crate) fn rename_tag_question(from: &str, to: &str, notes: usize) -> String {
+    format!(
+        "Rename “#{from}” to “#{to}”? This changes {}.",
+        count(notes, "note", "notes")
+    )
+}
+
+/// The question before a tag delete in all notes.
+pub(crate) fn delete_tag_question(tag: &str, notes: usize) -> String {
+    format!(
+        "Remove “#{tag}” from all notes? This changes {}.",
+        count(notes, "note", "notes")
+    )
 }

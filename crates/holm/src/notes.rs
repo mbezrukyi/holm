@@ -16,7 +16,7 @@ use holm_core::model::{Note, Order};
 
 use crate::bar::{self, Bar};
 use crate::config::{Config, SidebarSettings};
-use crate::dialog::{DeleteDialog, DialogEvent};
+use crate::dialog::{Ask, Dialog, DialogEvent};
 use crate::error::AppError;
 use crate::pane::{Leave, NotePane, PaneEvent};
 use crate::picker::{FolderPicker, PickerEvent};
@@ -35,7 +35,7 @@ pub(crate) struct NotesView {
     hidden: bool,
     width: Pixels,
     resizing: bool,
-    dialog: Option<Entity<DeleteDialog>>,
+    dialog: Option<Entity<Dialog>>,
     picker: Option<Entity<FolderPicker>>,
     error: Option<&'static str>,
     action: Option<Task<()>>,
@@ -129,8 +129,49 @@ impl NotesView {
                 });
                 self.finish(job, Self::show_folder, window, cx);
             }
+            SidebarEvent::RenameTag { from, to } => {
+                let (from, to) = (from.clone(), to.clone());
+                self.run(
+                    window,
+                    cx,
+                    {
+                        let (from, to) = (from.clone(), to.clone());
+                        move |core| core.tag_rename_count(&from, &to)
+                    },
+                    move |this, notes, window, cx| {
+                        this.ask(Ask::RenameTag { from, to, notes }, window, cx);
+                    },
+                );
+            }
+            SidebarEvent::DeleteTag(tag) => {
+                let tag = tag.clone();
+                self.run(
+                    window,
+                    cx,
+                    {
+                        let tag = tag.clone();
+                        move |core| core.tag_delete_count(&tag)
+                    },
+                    move |this, notes, window, cx| {
+                        this.ask(Ask::DeleteTag { tag, notes }, window, cx);
+                    },
+                );
+            }
             SidebarEvent::ViewChanged => self.keep_state(cx),
         }
+    }
+
+    /// Shows the dialog for `ask`, or deletes at once after "Do not show again".
+    fn ask(&mut self, ask: Ask, window: &mut Window, cx: &mut Context<Self>) {
+        if ask.can_skip() && !self.config.read(cx).settings().ask_before_delete {
+            self.confirmed(ask, window, cx);
+            return;
+        }
+        let dialog = cx.new(|cx| Dialog::new(ask, window, cx));
+        self.subscriptions
+            .push(cx.subscribe_in(&dialog, window, Self::dialog_event));
+        self.dialog = Some(dialog);
+        cx.notify();
     }
 
     fn picker_event(
@@ -176,12 +217,7 @@ impl NotesView {
         });
     }
 
-    /// Shows the delete dialog, or deletes at once after "Do not show again".
     fn ask_delete(&mut self, target: Target, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.config.read(cx).settings().ask_before_delete {
-            self.delete(target, window, cx);
-            return;
-        }
         self.run(
             window,
             cx,
@@ -192,19 +228,13 @@ impl NotesView {
                     Target::Folder(path) => core.folder_delete_count(path),
                 }
             },
-            move |this, count, window, cx| {
-                let dialog = cx.new(|cx| DeleteDialog::new(target, count, window, cx));
-                this.subscriptions
-                    .push(cx.subscribe_in(&dialog, window, Self::dialog_event));
-                this.dialog = Some(dialog);
-                cx.notify();
-            },
+            move |this, count, window, cx| this.ask(Ask::Delete { target, count }, window, cx),
         );
     }
 
     fn dialog_event(
         &mut self,
-        _: &Entity<DeleteDialog>,
+        _: &Entity<Dialog>,
         event: &DialogEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -212,13 +242,43 @@ impl NotesView {
         self.dialog = None;
         self.focus_sidebar(window, cx);
         cx.notify();
-        if let DialogEvent::Delete { target, do_not_ask } = event.clone() {
-            if do_not_ask {
-                let mut settings = self.config.read(cx).settings().clone();
-                settings.ask_before_delete = false;
-                self.save_settings(settings, cx);
+        let DialogEvent::Confirm { ask, do_not_ask } = event.clone() else {
+            return;
+        };
+        if do_not_ask {
+            let mut settings = self.config.read(cx).settings().clone();
+            settings.ask_before_delete = false;
+            self.save_settings(settings, cx);
+        }
+        self.confirmed(ask, window, cx);
+    }
+
+    fn confirmed(&mut self, ask: Ask, window: &mut Window, cx: &mut Context<Self>) {
+        match ask {
+            Ask::Delete { target, .. } => self.delete(target, window, cx),
+            Ask::RenameTag { from, to, .. } => {
+                let shown = holm_markdown::normalize_tag(&to);
+                self.run(
+                    window,
+                    cx,
+                    move |core| core.rename_tag(&from, &to),
+                    move |this, _, _, cx| {
+                        if let Some(tag) = shown {
+                            this.sidebar.update(cx, |sidebar, cx| {
+                                sidebar.show_in_tree(Item::Tag(tag), cx);
+                            });
+                        }
+                    },
+                );
             }
-            self.delete(target, window, cx);
+            Ask::DeleteTag { tag, .. } => {
+                self.run(
+                    window,
+                    cx,
+                    move |core| core.delete_tag(&tag),
+                    |_, _, _, _| {},
+                );
+            }
         }
     }
 
@@ -291,8 +351,9 @@ impl NotesView {
             move |core| core.create_folder(&parent, text::NEW_FOLDER),
             |this, folder, window, cx| {
                 this.hidden = false;
-                this.sidebar
-                    .update(cx, |sidebar, cx| sidebar.rename_folder(folder, window, cx));
+                this.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.rename(Item::Folder(folder), window, cx);
+                });
             },
         );
     }
@@ -373,6 +434,8 @@ impl NotesView {
         }
         match (modifiers.shift, keystroke.key.as_str()) {
             (true, "l") => self.toggle_sidebar(window, cx),
+            (true, "p") => self.pane.update(cx, NotePane::toggle_pin),
+            (true, "t") => self.pane.update(cx, |pane, cx| pane.focus_tags(window, cx)),
             (false, "n") => self.new_note(window, cx),
             (true, "n") => self.new_folder(window, cx),
             _ => return,

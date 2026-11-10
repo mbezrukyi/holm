@@ -7,6 +7,9 @@
 //!
 //! When the user opens another note, the pane saves the old one. It also renames the old file
 //! to match the title.
+//!
+//! The tag row above the text shows the tags and the pin of the note. The pane writes their
+//! changes at once. The editor undo stack holds only the text, so Ctrl+Z does not undo them.
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -19,11 +22,12 @@ use gpui_kit::{
     ParentElement, Render, Styled, Subscription, Task, Window, div,
 };
 use holm_core::Core;
-use holm_core::model::{Change, Note};
-use holm_editor::{Changed, Editor};
+use holm_core::model::{Change, Note, NoteInfo};
+use holm_editor::{COLUMN_WIDTH, Changed, Editor, SIDE_MARGIN, UpFromStart};
 
 use crate::bar::{self, Bar};
 use crate::error::AppError;
+use crate::tags::{TagRow, TagRowEvent};
 use crate::{changes, text, theme};
 
 /// How long the pane waits after the last change before it saves.
@@ -49,8 +53,15 @@ pub(crate) struct NotePane {
     core: Core,
     notes_folder: PathBuf,
     editor: Entity<Editor>,
-    /// The note as it is on disk, after the last read or save.
+    tag_row: Entity<TagRow>,
+    /// The note as it is on disk, after the last read or save. Its tags and pin can be newer:
+    /// a write of them may still run.
     note: Note,
+    /// Grows with each change of the tags or the pin. A read of the fields that started
+    /// before a change does not undo it.
+    fields_version: u64,
+    /// The last write of the tags or the pin. The next write waits for it.
+    writing: Option<Task<()>>,
     ending: LineEnding,
     /// The editor text that matches the file on disk.
     saved: String,
@@ -73,9 +84,14 @@ impl NotePane {
         cx: &mut Context<Self>,
     ) -> Self {
         let editor = cx.new(Editor::new);
+        let tag_row = cx.new(|cx| TagRow::new(core.clone(), window, cx));
         let changes = changes::watch(&core, cx, Self::outside_change);
         let subscriptions = vec![
             cx.subscribe(&editor, |pane, _, _: &Changed, cx| pane.schedule_save(cx)),
+            cx.subscribe_in(&editor, window, |pane, _, _: &UpFromStart, window, cx| {
+                pane.focus_tags(window, cx);
+            }),
+            cx.subscribe_in(&tag_row, window, Self::tag_row_event),
             cx.observe_global::<Ui>(|pane, cx| {
                 let appearance = theme::appearance(cx);
                 pane.editor
@@ -103,7 +119,10 @@ impl NotePane {
             core,
             notes_folder,
             editor,
+            tag_row,
             note: note.clone(),
+            fields_version: 0,
+            writing: None,
             ending: LineEnding::Lf,
             saved: String::new(),
             autosave: None,
@@ -136,9 +155,96 @@ impl NotePane {
             editor.text().to_owned()
         });
         self.note = note;
+        self.fields_version += 1;
+        self.show_fields(cx);
         self.conflict = false;
         self.error = None;
         cx.notify();
+    }
+
+    fn show_fields(&mut self, cx: &mut Context<Self>) {
+        let info = &self.note.info;
+        self.tag_row
+            .update(cx, |row, cx| row.show(&info.tags, info.pinned, cx));
+    }
+
+    fn tag_row_event(
+        &mut self,
+        _: &Entity<TagRow>,
+        event: &TagRowEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            TagRowEvent::Changed(tags) => {
+                self.note.info.tags.clone_from(tags);
+                let (path, tags) = (self.note.info.path.clone(), tags.clone());
+                self.write_fields(move |core| core.set_tags(&path, &tags), cx);
+            }
+            TagRowEvent::Leave => window.focus(&self.editor.focus_handle(cx), cx),
+        }
+    }
+
+    /// Moves the focus to the tag row.
+    pub(crate) fn focus_tags(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.tag_row.update(cx, |row, cx| row.enter(window, cx));
+    }
+
+    /// Pins or unpins the open note.
+    pub(crate) fn toggle_pin(&mut self, cx: &mut Context<Self>) {
+        let pinned = !self.note.info.pinned;
+        self.note.info.pinned = pinned;
+        self.show_fields(cx);
+        let path = self.note.info.path.clone();
+        self.write_fields(move |core| core.set_pinned(&path, pinned), cx);
+    }
+
+    /// Writes a change of the tags or the pin, after the writes before it.
+    fn write_fields(
+        &mut self,
+        job: impl FnOnce(&Core) -> holm_core::Result<NoteInfo> + Send + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        self.fields_version += 1;
+        let before = self.writing.take();
+        self.writing = Some(cx.spawn(async move |pane, cx| {
+            if let Some(before) = before {
+                before.await;
+            }
+            let Ok(run) = pane.update(cx, |pane, cx| pane.run(job, cx)) else {
+                return;
+            };
+            if let Err(error) = run.await {
+                pane.update(cx, |pane, cx| {
+                    let error = AppError::from(error);
+                    tracing::warn!(error = %crate::chain(&error), "cannot change the tags or the pin");
+                    pane.error = Some(error.message());
+                    cx.notify();
+                })
+                .ok();
+            }
+        }));
+    }
+
+    /// Reads the tags and the pin of the open note again, after a file action.
+    /// It keeps a change of them that came while it read.
+    fn read_fields(&mut self, cx: &mut Context<Self>) -> Task<()> {
+        let core = self.core.clone();
+        let path = self.note.info.path.clone();
+        let version = self.fields_version;
+        let job = cx.background_spawn(async move { core.read(&path) });
+        cx.spawn(async move |pane, cx| {
+            let Ok(note) = job.await else {
+                return;
+            };
+            pane.update(cx, |pane, cx| {
+                if pane.fields_version == version && pane.note.info.path == note.info.path {
+                    pane.note.info = note.info;
+                    pane.show_fields(cx);
+                }
+            })
+            .ok();
+        })
     }
 
     fn is_dirty(&self, cx: &Context<Self>) -> bool {
@@ -323,7 +429,8 @@ impl NotePane {
     }
 
     /// Runs a file action off the UI thread, after the pane saves the open note. So a late
-    /// save never writes a file back after the action moved or deleted it.
+    /// save never writes a file back after the action moved or deleted it. After the action,
+    /// the pane reads the tags and the pin of the open note again, so its next save keeps them.
     pub(crate) fn run<T: Send + 'static>(
         &mut self,
         job: impl FnOnce(&Core) -> holm_core::Result<T> + Send + 'static,
@@ -331,9 +438,13 @@ impl NotePane {
     ) -> Task<holm_core::Result<T>> {
         let flush = self.flush(cx);
         let core = self.core.clone();
-        cx.spawn(async move |_, cx| {
+        cx.spawn(async move |pane, cx| {
             flush.await;
-            cx.background_spawn(async move { job(&core) }).await
+            let result = cx.background_spawn(async move { job(&core) }).await;
+            if let Ok(read) = pane.update(cx, Self::read_fields) {
+                read.await;
+            }
+            result
         })
     }
 
@@ -408,6 +519,20 @@ impl Render for NotePane {
             .bg(cx.theme().background)
             .children(conflict)
             .children(error)
+            .child(
+                div()
+                    .w_full()
+                    .px(SIDE_MARGIN)
+                    .flex()
+                    .justify_center()
+                    .child(
+                        div()
+                            .w_full()
+                            .max_w(COLUMN_WIDTH)
+                            .pt_2()
+                            .child(self.tag_row.clone()),
+                    ),
+            )
             .child(
                 div()
                     .flex_1()
