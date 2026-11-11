@@ -14,6 +14,7 @@ mod notes;
 mod pane;
 mod picker;
 mod popup;
+mod quick_open;
 mod sidebar;
 mod tags;
 mod text;

@@ -90,3 +90,12 @@ pub(crate) fn delete_tag_question(tag: &str, notes: usize) -> String {
         count(notes, "note", "notes")
     )
 }
+
+pub(crate) const SEARCH: &str = "Search";
+pub(crate) const QUICK_OPEN: &str = "Open a note";
+pub(crate) const NO_MATCH: &str = "No note has this title";
+
+/// The head of the note list with search results.
+pub(crate) fn search_header(query: &str) -> String {
+    format!("Search: {query}")
+}

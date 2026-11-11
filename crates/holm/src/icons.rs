@@ -14,16 +14,18 @@ pub(crate) enum Icon {
     /// A closed tag with child tags.
     Tags,
     TagsOpen,
+    Search,
 }
 
 impl Icon {
-    const EVERY: [Self; 6] = [
+    const EVERY: [Self; 7] = [
         Self::All,
         Self::Folder,
         Self::FolderOpen,
         Self::Tag,
         Self::Tags,
         Self::TagsOpen,
+        Self::Search,
     ];
 
     /// The asset path and the SVG file.
@@ -41,6 +43,7 @@ impl Icon {
                 "icons/tags-open.svg",
                 include_bytes!("../icons/tags-open.svg"),
             ),
+            Self::Search => ("icons/search.svg", include_bytes!("../icons/search.svg")),
         }
     }
 

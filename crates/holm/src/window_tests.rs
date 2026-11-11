@@ -329,11 +329,14 @@ fn sidebar(cx: &mut TestAppContext, handle: AnyWindowHandle) -> String {
     })
 }
 
-/// Which part has the focus: "sidebar", "editor", "tag field", "tag row", or "other".
+/// Which part has the focus: "sidebar", "editor", "tag field", "tag row", "search", or
+/// "other".
 fn focus(cx: &mut TestAppContext, handle: AnyWindowHandle) -> &'static str {
     screen(cx, handle, |window| {
         let focused = |id| window.try_find(id).and_then(|part| part.focused()) == Some(true);
-        if focused("sidebar") {
+        if focused("search") {
+            "search"
+        } else if focused("sidebar") {
             "sidebar"
         } else if focused("editor") {
             "editor"
@@ -678,4 +681,117 @@ fn tags_rename_and_delete_in_all_notes_after_the_dialog(cx: &mut TestAppContext)
         modified(&b),
         std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(100)
     );
+}
+
+/// Three notes: Plan, then Goals with the tag `work`, then Top, in the order of their last change.
+fn three_notes(notes_dir: &Path) {
+    fs::write(notes_dir.join("Plan.md"), "# Plan\nbuy milk\n").unwrap();
+    fs::write(
+        notes_dir.join("Goals.md"),
+        "---\ntags:\n  - work\n---\n# Goals\nread more\n",
+    )
+    .unwrap();
+    fs::write(notes_dir.join("Top.md"), "# Top\n").unwrap();
+    set_time(&notes_dir.join("Plan.md"), 300);
+    set_time(&notes_dir.join("Goals.md"), 200);
+    set_time(&notes_dir.join("Top.md"), 100);
+}
+
+fn notes_list(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
+    labels(cx, handle, "sidebar", Role::ListItem)
+}
+
+#[gpui_kit::test]
+fn search_lists_the_notes_that_match_and_esc_returns(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    three_notes(&fixture.notes());
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-shift-l escape");
+    assert_eq!(sidebar(cx, handle), "tree All notes");
+
+    keys(cx, handle, "ctrl-shift-f");
+    assert_eq!(focus(cx, handle), "search");
+    cx.simulate_input(handle, "read");
+    settle(cx);
+    assert_eq!(sidebar(cx, handle), "list Search: read");
+    assert_eq!(notes_list(cx, handle), ["Goals"]);
+
+    keys(cx, handle, "down");
+    assert_eq!(focus(cx, handle), "sidebar");
+    assert_eq!(editor_text(cx, handle), "# Goals\nread more\n");
+    assert_eq!(notes_list(cx, handle), ["Goals*"]);
+
+    // The search also matches tags, and a new search selects the old text.
+    keys(cx, handle, "ctrl-shift-f");
+    cx.simulate_input(handle, "work");
+    settle(cx);
+    assert_eq!(sidebar(cx, handle), "list Search: work");
+    assert_eq!(notes_list(cx, handle), ["Goals*"]);
+
+    keys(cx, handle, "escape");
+    assert_eq!(sidebar(cx, handle), "tree All notes");
+    assert_eq!(focus(cx, handle), "sidebar");
+
+    // A search with no match, and `Esc` in the field.
+    keys(cx, handle, "ctrl-shift-f");
+    cx.simulate_input(handle, "zebra");
+    settle(cx);
+    assert_eq!(notes_list(cx, handle), Vec::<String>::new());
+    keys(cx, handle, "escape");
+    assert_eq!(sidebar(cx, handle), "tree All notes");
+    assert_eq!(focus(cx, handle), "sidebar");
+
+    // Ctrl+Shift+F also shows a hidden sidebar. The view is not part of the config.
+    keys(cx, handle, "ctrl-shift-l");
+    assert_eq!(sidebar(cx, handle), "hidden");
+    keys(cx, handle, "ctrl-shift-f");
+    cx.simulate_input(handle, "milk");
+    settle(cx);
+    assert_eq!(notes_list(cx, handle), ["Plan"]);
+    let settings = Config::load(fixture.config()).settings().clone();
+    assert_eq!(settings.sidebar.view, View::Tree(Item::All));
+    assert!(!settings.sidebar.hidden);
+
+    // The find bar of the editor lets Ctrl+Shift+F through.
+    keys(cx, handle, "down enter");
+    keys(cx, handle, "ctrl-f");
+    assert_eq!(focus(cx, handle), "editor");
+    keys(cx, handle, "ctrl-shift-f");
+    assert_eq!(focus(cx, handle), "search");
+}
+
+#[gpui_kit::test]
+fn quick_open_opens_a_note_by_its_title(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    three_notes(&fixture.notes());
+    let handle = open(cx, fixture.startup(None));
+    let options = |cx: &mut TestAppContext| labels(cx, handle, "quick-open", Role::ListBoxOption);
+    assert_eq!(editor_text(cx, handle), "# Plan\nbuy milk\n");
+
+    keys(cx, handle, "ctrl-shift-o");
+    assert_eq!(question(cx, handle).as_deref(), Some(text::QUICK_OPEN));
+    assert_eq!(options(cx), ["Plan*", "Goals", "Top"]);
+
+    // Titles only: "milk" is in the text of Plan.
+    cx.simulate_input(handle, "milk");
+    settle(cx);
+    assert_eq!(options(cx), Vec::<String>::new());
+
+    keys(cx, handle, "escape");
+    assert_eq!(question(cx, handle), None);
+    assert_eq!(focus(cx, handle), "editor");
+
+    keys(cx, handle, "ctrl-shift-l ctrl-shift-o");
+    cx.simulate_input(handle, "o");
+    settle(cx);
+    assert_eq!(options(cx), ["Goals*", "Top"]);
+    keys(cx, handle, "down enter");
+    assert_eq!(question(cx, handle), None);
+    assert_eq!(editor_text(cx, handle), "# Top\n");
+    assert_eq!(focus(cx, handle), "editor");
+    assert_eq!(notes_list(cx, handle), ["Plan", "Goals", "Top*"]);
+
+    // `Esc` gives the focus back to the part that had it.
+    keys(cx, handle, "ctrl-shift-l ctrl-shift-o escape");
+    assert_eq!(focus(cx, handle), "sidebar");
 }

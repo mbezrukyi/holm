@@ -3,6 +3,9 @@
 //! The tree has "All notes", then the folders, then the tags. In a list, `↑` and `↓` open each
 //! note at once. The sidebar changes no files itself. It sends a [`SidebarEvent`], and the app
 //! saves the open note before each change.
+//!
+//! The search field sits at the top. While it holds text, the note list shows the notes that
+//! match it, and `Esc` clears it and shows the last view again.
 
 mod tree;
 
@@ -11,8 +14,8 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
+use gpui_kit::component::input::{Enter, Escape, Input, InputEvent, InputState, MoveDown, MoveUp};
+use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, ClickEvent, Context, ElementId, Entity, EventEmitter,
@@ -95,11 +98,17 @@ pub(crate) struct Sidebar {
     /// The note in the editor. It is the selected row of a list.
     current: Option<PathBuf>,
     rename: Option<Rename>,
+    search: Entity<InputState>,
+    /// The trimmed text of the search field. With text, the list shows `found`.
+    query: String,
+    found: Vec<NoteInfo>,
+    finding: Option<Task<()>>,
     focus: FocusHandle,
     scroll: UniformListScrollHandle,
     error: Option<&'static str>,
     loading: Option<Task<()>>,
     _changes: Task<()>,
+    _search: Subscription,
 }
 
 impl Sidebar {
@@ -108,9 +117,20 @@ impl Sidebar {
         order: Order,
         view: View,
         current: Option<PathBuf>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let changes = changes::watch_revision(&core, cx, Self::refresh);
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder(text::SEARCH));
+        let search_changed = cx.subscribe(&search, |sidebar, input, event, cx| {
+            if matches!(event, InputEvent::Change) {
+                let query = input.read(cx).value().trim().to_owned();
+                if query != sidebar.query {
+                    sidebar.query = query;
+                    sidebar.find(cx);
+                }
+            }
+        });
         let mut sidebar = Self {
             core,
             order,
@@ -122,11 +142,16 @@ impl Sidebar {
             list: Vec::new(),
             current,
             rename: None,
+            search,
+            query: String::new(),
+            found: Vec::new(),
+            finding: None,
             focus: cx.focus_handle(),
             scroll: UniformListScrollHandle::new(),
             error: None,
             loading: None,
             _changes: changes,
+            _search: search_changed,
         };
         sidebar.refresh(cx);
         sidebar
@@ -156,6 +181,85 @@ impl Sidebar {
                 .update(cx, |sidebar, cx| sidebar.loaded(result, cx))
                 .ok();
         }));
+        if self.searching() {
+            self.find(cx);
+        }
+    }
+
+    fn searching(&self) -> bool {
+        !self.query.is_empty()
+    }
+
+    /// Whether the sidebar shows a note list: the list of a tree item, or the search results.
+    fn shows_list(&self) -> bool {
+        self.searching() || matches!(self.view, View::List(_))
+    }
+
+    /// Searches the notes for the query. A result for an old query is dropped.
+    fn find(&mut self, cx: &mut Context<Self>) {
+        if !self.searching() {
+            self.finding = None;
+            self.found.clear();
+            self.rebuild();
+            cx.notify();
+            return;
+        }
+        let core = self.core.clone();
+        let order = self.order;
+        let query = self.query.clone();
+        let job = cx.background_spawn(async move {
+            let found = core.search(&query, order);
+            (query, found)
+        });
+        self.finding = Some(cx.spawn(async move |sidebar, cx| {
+            let (query, found) = job.await;
+            sidebar
+                .update(cx, |sidebar, cx| {
+                    if query != sidebar.query {
+                        return;
+                    }
+                    sidebar.finding = None;
+                    match found {
+                        Ok(found) => sidebar.found = found,
+                        Err(error) => {
+                            let error = AppError::from(error);
+                            tracing::warn!(error = %crate::chain(&error), "cannot search the notes");
+                            sidebar.error = Some(error.message());
+                        }
+                    }
+                    sidebar.rebuild();
+                    sidebar.scroll_to_selection();
+                    cx.notify();
+                })
+                .ok();
+        }));
+    }
+
+    /// Ctrl+Shift+F: gives the search field the focus, with its text selected.
+    pub(crate) fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.search.update(cx, |input, cx| {
+            input.focus(window, cx);
+            input.select_all(window, cx);
+        });
+    }
+
+    /// Empties the search field, so the last view shows again. The list gets the focus.
+    fn clear_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.query.clear();
+        self.search
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.find(cx);
+        window.focus(&self.focus, cx);
+        self.scroll_to_selection();
+    }
+
+    /// `Enter` or `↓` in the search field: the first result opens, and the list gets the focus.
+    fn enter_results(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.focus, cx);
+        if let Some(note) = self.list.first() {
+            let path = note.path.clone();
+            self.choose(path, cx);
+        }
     }
 
     fn loaded(&mut self, result: holm_core::Result<(u64, Snapshot)>, cx: &mut Context<Self>) {
@@ -197,12 +301,15 @@ impl Sidebar {
             }
             self.entries.push(Entry::Row(at));
         }
-        self.list = self
-            .snapshot
-            .list(self.view.item())
-            .into_iter()
-            .cloned()
-            .collect();
+        self.list = if self.searching() {
+            self.found.clone()
+        } else {
+            self.snapshot
+                .list(self.view.item())
+                .into_iter()
+                .cloned()
+                .collect()
+        };
     }
 
     /// Marks the note in the editor.
@@ -212,8 +319,12 @@ impl Sidebar {
         cx.notify();
     }
 
-    /// The folder for a new note, and the tag it gets, from the item of the view.
+    /// The folder for a new note, and the tag it gets, from the item of the view. A note from
+    /// the search results goes in the root folder.
     pub(crate) fn new_note_place(&self) -> (PathBuf, Option<String>) {
+        if self.searching() {
+            return (PathBuf::new(), None);
+        }
         let item = self.view.item();
         let tag = match item {
             Item::Tag(name) => Some(name.clone()),
@@ -229,6 +340,11 @@ impl Sidebar {
             .get(at + 1)
             .or_else(|| at.checked_sub(1).and_then(|before| self.list.get(before)))
             .map(|note| note.path.clone())
+    }
+
+    /// Every note, in the order of the lists.
+    pub(crate) fn notes(&self) -> &[NoteInfo] {
+        &self.snapshot.notes
     }
 
     /// Every folder, sorted by path, for the folder picker.
@@ -258,6 +374,7 @@ impl Sidebar {
 
     fn scroll_to_selection(&self) {
         let at = match &self.view {
+            _ if self.shows_list() => self.selected_note(),
             View::Tree(item) => self
                 .entries
                 .iter()
@@ -341,7 +458,7 @@ impl Sidebar {
             }
             return;
         }
-        if modifiers.alt || modifiers.platform {
+        if modifiers.alt || modifiers.platform || self.search.focus_handle(cx).is_focused(window) {
             return;
         }
         let key = keystroke.key.as_str();
@@ -352,10 +469,8 @@ impl Sidebar {
                 }
                 true
             }
-            (false, false, _) => match &self.view {
-                View::Tree(_) => self.tree_key(key, window, cx),
-                View::List(_) => self.list_key(key, cx),
-            },
+            (false, false, _) if self.shows_list() => self.list_key(key, window, cx),
+            (false, false, _) => self.tree_key(key, window, cx),
             _ => false,
         };
         if handled {
@@ -366,11 +481,11 @@ impl Sidebar {
     /// The note or folder that `Delete` and Ctrl+Shift+M act on.
     fn target(&self) -> Option<Target> {
         match &self.view {
-            View::Tree(Item::Folder(folder)) => Some(Target::Folder(folder.clone())),
-            View::Tree(_) => None,
-            View::List(_) => self
+            _ if self.shows_list() => self
                 .selected_note()
                 .map(|at| Target::Note(self.list[at].path.clone())),
+            View::Tree(Item::Folder(folder)) => Some(Target::Folder(folder.clone())),
+            View::Tree(_) | View::List(_) => None,
         }
     }
 
@@ -420,7 +535,7 @@ impl Sidebar {
         true
     }
 
-    fn list_key(&mut self, key: &str, cx: &mut Context<Self>) -> bool {
+    fn list_key(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
         match key {
             "up" | "down" => {
                 let next = match (self.selected_note(), key) {
@@ -434,6 +549,7 @@ impl Sidebar {
                 }
             }
             "enter" => cx.emit(SidebarEvent::FocusEditor),
+            "escape" if self.searching() => self.clear_search(window, cx),
             "escape" => {
                 let item = self.view.item().clone();
                 self.show_in_tree(item, cx);
@@ -558,6 +674,44 @@ impl Sidebar {
             .into_any_element()
     }
 
+    /// The head of a note list: `‹`, the name of the list, and its count. A click leaves the
+    /// list.
+    fn back(
+        &self,
+        label: impl Into<SharedString>,
+        name: impl Into<SharedString>,
+        leave: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let theme = cx.theme();
+        h_flex()
+            .id("back")
+            .role(Role::Button)
+            .aria_label(label)
+            .test_support()
+            .w_full()
+            .flex_none()
+            .px_3()
+            .py_2()
+            .gap_1p5()
+            .border_b_1()
+            .border_color(theme.border)
+            .text_color(theme.muted_foreground)
+            .child("‹")
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme.foreground)
+                    .child(name.into()),
+            )
+            .child(div().text_size(px(12.)).child(self.list.len().to_string()))
+            .on_click(leave)
+            .into_any_element()
+    }
+
     fn note_rows(&mut self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let theme = cx.theme();
         let selected = self.selected_note();
@@ -654,6 +808,14 @@ impl Render for Sidebar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let header = match &self.view {
+            _ if self.searching() => Some(self.back(
+                text::search_header(&self.query),
+                text::search_header(&self.query),
+                cx.listener(|sidebar, _: &ClickEvent, window, cx| {
+                    sidebar.clear_search(window, cx);
+                }),
+                cx,
+            )),
             View::Tree(_) => None,
             View::List(item) => {
                 let name = match item {
@@ -664,52 +826,57 @@ impl Render for Sidebar {
                         .unwrap_or_default(),
                     Item::Tag(name) => format!("#{name}"),
                 };
+                let label = item_label(item);
                 let item = item.clone();
-                Some(
-                    h_flex()
-                        .id("back")
-                        .role(Role::Button)
-                        .aria_label(item_label(&item))
-                        .test_support()
-                        .w_full()
-                        .flex_none()
-                        .px_3()
-                        .py_2()
-                        .gap_1p5()
-                        .border_b_1()
-                        .border_color(theme.border)
-                        .text_color(theme.muted_foreground)
-                        .child("‹")
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(theme.foreground)
-                                .child(name),
-                        )
-                        .child(div().text_size(px(12.)).child(self.list.len().to_string()))
-                        .on_click(cx.listener(move |sidebar, _: &ClickEvent, window, cx| {
-                            window.focus(&sidebar.focus, cx);
-                            sidebar.show_in_tree(item.clone(), cx);
-                        })),
-                )
+                Some(self.back(
+                    label,
+                    name,
+                    cx.listener(move |sidebar, _: &ClickEvent, window, cx| {
+                        window.focus(&sidebar.focus, cx);
+                        sidebar.show_in_tree(item.clone(), cx);
+                    }),
+                    cx,
+                ))
             }
         };
-        let body = match &self.view {
-            View::Tree(_) => uniform_list(
-                "tree",
-                self.entries.len(),
-                cx.processor(|sidebar, range, _, cx| sidebar.tree_rows(range, cx)),
-            ),
-            View::List(_) => uniform_list(
+        let body = if self.shows_list() {
+            uniform_list(
                 "notes",
                 self.list.len(),
                 cx.processor(|sidebar, range, _, cx| sidebar.note_rows(range, cx)),
-            ),
+            )
+        } else {
+            uniform_list(
+                "tree",
+                self.entries.len(),
+                cx.processor(|sidebar, range, _, cx| sidebar.tree_rows(range, cx)),
+            )
         };
-        let empty = matches!(self.view, View::List(_)) && self.list.is_empty();
+        let empty = self.shows_list() && self.list.is_empty() && self.finding.is_none();
+        let search = div()
+            .flex_none()
+            .px_2()
+            .py_2()
+            .capture_action(cx.listener(|sidebar, _: &Escape, window, cx| {
+                sidebar.clear_search(window, cx);
+                cx.stop_propagation();
+            }))
+            .capture_action(cx.listener(|sidebar, _: &Enter, window, cx| {
+                sidebar.enter_results(window, cx);
+                cx.stop_propagation();
+            }))
+            .capture_action(cx.listener(|sidebar, _: &MoveDown, window, cx| {
+                sidebar.enter_results(window, cx);
+                cx.stop_propagation();
+            }))
+            .capture_action(cx.listener(|_, _: &MoveUp, _, cx| cx.stop_propagation()))
+            .child(
+                Input::new(&self.search)
+                    .id("search")
+                    .aria_label(text::SEARCH)
+                    .prefix(Icon::view(Icon::Search, theme.muted_foreground))
+                    .small(),
+            );
         v_flex()
             .id("sidebar")
             .test_support()
@@ -718,6 +885,7 @@ impl Render for Sidebar {
             .on_key_down(cx.listener(Self::key_down))
             .size_full()
             .bg(theme.sidebar)
+            .child(search)
             .children(header)
             .children(self.error.map(|error| {
                 div()

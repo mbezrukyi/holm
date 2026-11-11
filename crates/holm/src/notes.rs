@@ -7,9 +7,9 @@ use std::path::{Path, PathBuf};
 
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::{
-    AppContext as _, Context, CursorStyle, Entity, Focusable as _, InteractiveElement as _,
-    IntoElement, KeyDownEvent, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
-    Render, Styled, Subscription, Task, Window, div, px,
+    AppContext as _, Context, CursorStyle, Entity, FocusHandle, Focusable as _,
+    InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseMoveEvent, MouseUpEvent,
+    ParentElement, Pixels, Render, Styled, Subscription, Task, Window, div, px,
 };
 use holm_core::Core;
 use holm_core::model::{Note, Order};
@@ -20,6 +20,7 @@ use crate::dialog::{Ask, Dialog, DialogEvent};
 use crate::error::AppError;
 use crate::pane::{Leave, NotePane, PaneEvent};
 use crate::picker::{FolderPicker, PickerEvent};
+use crate::quick_open::{QuickOpen, QuickOpenEvent};
 use crate::sidebar::{Item, Sidebar, SidebarEvent, Target};
 use crate::text;
 
@@ -37,6 +38,9 @@ pub(crate) struct NotesView {
     resizing: bool,
     dialog: Option<Entity<Dialog>>,
     picker: Option<Entity<FolderPicker>>,
+    quick_open: Option<Entity<QuickOpen>>,
+    /// The part that had the focus before quick open. It gets the focus back on `Esc`.
+    before_quick_open: Option<FocusHandle>,
     error: Option<&'static str>,
     action: Option<Task<()>>,
     subscriptions: Vec<Subscription>,
@@ -60,6 +64,7 @@ impl NotesView {
                 settings.note_order,
                 settings.sidebar.view.clone(),
                 Some(current),
+                window,
                 cx,
             )
         });
@@ -83,6 +88,8 @@ impl NotesView {
             resizing: false,
             dialog: None,
             picker: None,
+            quick_open: None,
+            before_quick_open: None,
             error: None,
             action: None,
             subscriptions,
@@ -209,6 +216,40 @@ impl NotesView {
                 self.finish(job, Self::show_folder, window, cx);
             }
         }
+    }
+
+    fn open_quick_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let notes = self.sidebar.read(cx).notes().to_vec();
+        self.before_quick_open = window.focused(cx);
+        let quick_open = cx.new(|cx| QuickOpen::new(notes, window, cx));
+        self.subscriptions
+            .push(cx.subscribe_in(&quick_open, window, Self::quick_open_event));
+        self.quick_open = Some(quick_open);
+        cx.notify();
+    }
+
+    fn quick_open_event(
+        &mut self,
+        _: &Entity<QuickOpen>,
+        event: &QuickOpenEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.quick_open = None;
+        let before = self.before_quick_open.take();
+        match event {
+            QuickOpenEvent::Open(path) => {
+                let path = path.clone();
+                self.pane
+                    .update(cx, |pane, cx| pane.open(path, Leave::Keep, cx));
+                self.focus_editor(window, cx);
+            }
+            QuickOpenEvent::Close => match before {
+                Some(before) => window.focus(&before, cx),
+                None => self.focus_editor(window, cx),
+            },
+        }
+        cx.notify();
     }
 
     fn show_folder(&mut self, folder: PathBuf, _: &mut Window, cx: &mut Context<Self>) {
@@ -423,8 +464,17 @@ impl NotesView {
         cx.notify();
     }
 
+    /// Ctrl+Shift+F: show the sidebar and give its search field the focus.
+    fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.hidden = false;
+        self.sidebar
+            .update(cx, |sidebar, cx| sidebar.focus_search(window, cx));
+        self.keep_state(cx);
+        cx.notify();
+    }
+
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if self.dialog.is_some() || self.picker.is_some() {
+        if self.dialog.is_some() || self.picker.is_some() || self.quick_open.is_some() {
             return;
         }
         let keystroke = &event.keystroke;
@@ -434,6 +484,8 @@ impl NotesView {
         }
         match (modifiers.shift, keystroke.key.as_str()) {
             (true, "l") => self.toggle_sidebar(window, cx),
+            (true, "f") => self.focus_search(window, cx),
+            (true, "o") => self.open_quick_open(window, cx),
             (true, "p") => self.pane.update(cx, NotePane::toggle_pin),
             (true, "t") => self.pane.update(cx, |pane, cx| pane.focus_tags(window, cx)),
             (false, "n") => self.new_note(window, cx),
@@ -541,6 +593,7 @@ impl Render for NotesView {
             )
             .children(self.dialog.clone())
             .children(self.picker.clone())
+            .children(self.quick_open.clone())
     }
 }
 
