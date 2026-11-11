@@ -574,6 +574,46 @@ impl Sidebar {
         cx.emit(SidebarEvent::Open(path));
     }
 
+    fn search_field(&self, window: &Window, cx: &Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        div()
+            .flex_none()
+            .px_2()
+            .py_2()
+            .capture_action(cx.listener(|sidebar, _: &Escape, window, cx| {
+                sidebar.clear_search(window, cx);
+                cx.stop_propagation();
+            }))
+            .capture_action(cx.listener(|sidebar, _: &Enter, window, cx| {
+                sidebar.enter_results(window, cx);
+                cx.stop_propagation();
+            }))
+            .capture_action(cx.listener(|sidebar, _: &MoveDown, window, cx| {
+                sidebar.enter_results(window, cx);
+                cx.stop_propagation();
+            }))
+            .capture_action(cx.listener(|_, _: &MoveUp, _, cx| cx.stop_propagation()))
+            .child(
+                Input::new(&self.search)
+                    .id("search")
+                    .aria_label(text::SEARCH)
+                    .prefix(Icon::view(Icon::Search, theme.muted_foreground))
+                    .small()
+                    .appearance(false)
+                    .rounded(theme.radius)
+                    .border_1()
+                    .map(|field| {
+                        if self.search.focus_handle(cx).is_focused(window) {
+                            field.bg(theme.background).border_color(theme.border)
+                        } else {
+                            field
+                                .bg(theme.accent)
+                                .border_color(gpui_kit::transparent_black())
+                        }
+                    }),
+            )
+    }
+
     fn tree_rows(&mut self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let entries: Vec<Entry> = range
             .filter_map(|at| self.entries.get(at).copied())
@@ -618,7 +658,15 @@ impl Sidebar {
             .as_ref()
             .filter(|rename| rename.item == row.item);
         let label = match renaming {
-            Some(rename) => Input::new(&rename.input).into_any_element(),
+            Some(rename) => Input::new(&rename.input)
+                .appearance(false)
+                .small()
+                .flex_1()
+                .min_w_0()
+                .px_0()
+                .py_0()
+                .text_size(theme.font_size)
+                .into_any_element(),
             None => div()
                 .flex_1()
                 .min_w_0()
@@ -642,6 +690,7 @@ impl Sidebar {
                     cx.stop_propagation();
                 }
             }));
+        let editing = renaming.is_some();
         let depth = f32::from(u16::try_from(row.depth).unwrap_or(u16::MAX));
         let item = row.item.clone();
         h_flex()
@@ -659,6 +708,17 @@ impl Sidebar {
             .pl(px(12. + 16. * depth))
             .gap_2()
             .when(selected, |row| row.bg(theme.selection))
+            .when(editing, |row| {
+                row.relative().child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top_0()
+                        .bottom_0()
+                        .w(px(2.))
+                        .bg(theme.ring),
+                )
+            })
             .child(toggle)
             .child(label)
             .child(
@@ -805,7 +865,7 @@ impl Focusable for Sidebar {
 }
 
 impl Render for Sidebar {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let header = match &self.view {
             _ if self.searching() => Some(self.back(
@@ -853,30 +913,6 @@ impl Render for Sidebar {
             )
         };
         let empty = self.shows_list() && self.list.is_empty() && self.finding.is_none();
-        let search = div()
-            .flex_none()
-            .px_2()
-            .py_2()
-            .capture_action(cx.listener(|sidebar, _: &Escape, window, cx| {
-                sidebar.clear_search(window, cx);
-                cx.stop_propagation();
-            }))
-            .capture_action(cx.listener(|sidebar, _: &Enter, window, cx| {
-                sidebar.enter_results(window, cx);
-                cx.stop_propagation();
-            }))
-            .capture_action(cx.listener(|sidebar, _: &MoveDown, window, cx| {
-                sidebar.enter_results(window, cx);
-                cx.stop_propagation();
-            }))
-            .capture_action(cx.listener(|_, _: &MoveUp, _, cx| cx.stop_propagation()))
-            .child(
-                Input::new(&self.search)
-                    .id("search")
-                    .aria_label(text::SEARCH)
-                    .prefix(Icon::view(Icon::Search, theme.muted_foreground))
-                    .small(),
-            );
         v_flex()
             .id("sidebar")
             .test_support()
@@ -885,7 +921,7 @@ impl Render for Sidebar {
             .on_key_down(cx.listener(Self::key_down))
             .size_full()
             .bg(theme.sidebar)
-            .child(search)
+            .child(self.search_field(window, cx))
             .children(header)
             .children(self.error.map(|error| {
                 div()
