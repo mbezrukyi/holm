@@ -321,8 +321,8 @@ impl Editor {
 
     /// Puts a link to `target` in place of the selection, as one undo step, and the cursor
     /// after it. The selection becomes the link text. With no selection, `text` does, written
-    /// so that it shows as it is. `embedded` writes `![..](..)`, which shows an image or a file
-    /// card. It sends [`Changed`].
+    /// so that it shows as it is. `embedded` writes `![..](..)` on a line of its own, which shows
+    /// an image or a file card. It sends [`Changed`].
     pub fn insert_link(
         &mut self,
         text: &str,

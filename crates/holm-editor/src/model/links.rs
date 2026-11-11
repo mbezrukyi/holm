@@ -60,7 +60,7 @@ impl Model {
 
     /// Puts a link to `target` in place of the selection, and the cursor after it. The selected
     /// source becomes the link text. With no selection, the link text is `text`.
-    /// `embedded` writes `![..](..)`.
+    /// `embedded` writes `![..](..)` on a line of its own, and the cursor goes to the next line.
     pub(crate) fn insert_link(&mut self, text: &str, target: &Target, embedded: bool) -> bool {
         let range = self.selection();
         let label = if range.is_empty() {
@@ -69,9 +69,29 @@ impl Model {
             self.text[range.clone()].to_owned()
         };
         let bang = if embedded { "!" } else { "" };
-        let source = format!("{bang}[{label}]({})", target.to_destination());
-        let cursor = range.start + source.len();
-        self.edit(vec![(range, source)], (cursor, cursor), Group::Alone, None)
+        let link = format!("{bang}[{label}]({})", target.to_destination());
+        // An embedded file shows as a block, so it gets a line of its own. The cursor goes to the
+        // start of the next line, below the block.
+        let (start, end) = if embedded {
+            let before = &self.text[..range.start];
+            let after = &self.text[range.end..];
+            let start = if before.is_empty() || before.ends_with('\n') {
+                ""
+            } else {
+                "\n"
+            };
+            let end = if after.starts_with('\n') { "" } else { "\n" };
+            (start, end)
+        } else {
+            ("", "")
+        };
+        let cursor = range.start + start.len() + link.len() + usize::from(embedded);
+        self.edit(
+            vec![(range, format!("{start}{link}{end}"))],
+            (cursor, cursor),
+            Group::Alone,
+            None,
+        )
     }
 
     /// Writes `target` in place of the target of the link at the cursor. The link text stays.
@@ -176,7 +196,8 @@ mod tests {
         assert_eq!(m.text(), r"x [A \*bold\* \[idea\]](holm:X)");
         let mut m = model("", 0..0);
         assert!(m.insert_link("photo", &Target::File("attachments/a b.png".into()), true));
-        assert_eq!(m.text(), "![photo](<attachments/a b.png>)");
+        assert_eq!(m.text(), "![photo](<attachments/a b.png>)\n");
+        assert_eq!(m.selection(), 32..32);
         assert!(m.undo());
         assert_eq!(m.text(), "");
     }

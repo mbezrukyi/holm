@@ -199,7 +199,7 @@ fn ctrl_v_with_files_sends_paste_files() {
             editor.insert_link("", &Target::File("attachments/a.pdf".into()), true, cx);
         });
     });
-    assert_eq!(text(&editor, cx), "![](attachments/a.pdf)");
+    assert_eq!(text(&editor, cx), "![](attachments/a.pdf)\n");
 }
 
 #[test]
@@ -286,4 +286,23 @@ fn the_end_view_shows_after_the_text_and_takes_its_clicks() {
     assert_eq!(*clicks.borrow(), 1);
     cx.simulate_input("Y");
     assert_eq!(text(&editor, cx), "Xone\ntwoY");
+}
+
+#[test]
+fn an_embedded_link_gets_a_line_of_its_own() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "ab", WIDTH, HEIGHT);
+    cx.simulate_keystrokes("right");
+    let file = |path: &str| Target::File(path.into());
+    cx.update(|_, cx| {
+        editor.update(cx, |editor, cx| {
+            editor.insert_link("x", &file("x.pdf"), true, cx);
+            editor.insert_link("y", &file("y.pdf"), true, cx);
+            editor.insert_link("z", &file("z.pdf"), false, cx);
+        });
+    });
+    assert_eq!(
+        text(&editor, cx),
+        "a\n![x](x.pdf)\n![y](y.pdf)\n[z](z.pdf)b"
+    );
 }
