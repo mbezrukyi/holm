@@ -598,7 +598,7 @@ impl Editor {
                 find.pop(modifiers.control);
                 find.refresh(&mut self.model);
             }
-            (true, "f") => {}
+            (true, "f") if !modifiers.shift => {}
             (true, "v") => {
                 if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
                     find.push(&text);
