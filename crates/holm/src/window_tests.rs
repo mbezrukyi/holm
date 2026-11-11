@@ -340,8 +340,6 @@ fn focus(cx: &mut TestAppContext, handle: AnyWindowHandle) -> &'static str {
             "sidebar"
         } else if focused("tag-input") {
             "tag field"
-        } else if focused("tag-row") {
-            "tag row"
         } else if focused("editor") {
             "editor"
         } else {
@@ -375,6 +373,34 @@ fn labels(cx: &mut TestAppContext, handle: AnyWindowHandle, id: &str, role: Role
 
 fn chips(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
     labels(cx, handle, "tag-row", Role::ListItem)
+}
+
+/// The lines of the list in the tag popup. A tag of the note has `✓`, the cursor has `*`.
+fn options(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
+    screen(cx, handle, |window| {
+        if window.try_find("tag-options").is_none() {
+            return Vec::new();
+        }
+        window
+            .within("tag-options")
+            .find_all_by_role(Role::ListBoxOption)
+            .iter()
+            .map(|line| {
+                let mut label = line.label().unwrap_or_default().to_owned();
+                if line.checked() == Some(true) {
+                    label.push_str(" ✓");
+                }
+                if line.selected() == Some(true) {
+                    label.push('*');
+                }
+                label
+            })
+            .collect()
+    })
+}
+
+fn popup_open(cx: &mut TestAppContext, handle: AnyWindowHandle) -> bool {
+    screen(cx, handle, |window| window.try_find("tag-popup").is_some())
 }
 
 /// The tags and the pin in the file of a note.
@@ -527,46 +553,63 @@ fn keys_make_rename_and_move_notes_and_folders(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn the_tag_row_adds_and_removes_tags_and_pins(cx: &mut TestAppContext) {
+fn the_tag_popup_adds_and_removes_tags_and_pins(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     let notes_dir = fixture.notes();
     let a = notes_dir.join("A.md");
-    fs::write(&a, "---\ntags:\n  - work\n---\n# A\n").unwrap();
+    fs::write(&a, "---\ntags:\n  - work\n  - home\n---\n# A\n").unwrap();
     fs::write(
         notes_dir.join("B.md"),
-        "---\ntags:\n  - project/holm\n---\n# B\n",
+        "---\ntags:\n  - project/holm\n  - holiday\n---\n# B\n",
     )
     .unwrap();
     set_time(&a, 200);
     set_time(&notes_dir.join("B.md"), 100);
     let handle = open(cx, fixture.startup(None));
     assert_eq!(editor_text(cx, handle), "# A\n");
-    assert_eq!(chips(cx, handle), ["work"]);
-    assert!(screen(cx, handle, |window| window
-        .try_find("tag-input")
-        .is_none()));
+    assert_eq!(chips(cx, handle), ["work", "home"]);
+    assert!(!popup_open(cx, handle));
 
     keys(cx, handle, "ctrl-shift-t");
+    assert!(popup_open(cx, handle));
     assert_eq!(focus(cx, handle), "tag field");
+    assert_eq!(options(cx, handle), ["#work ✓", "#home ✓"]);
     cx.simulate_input(handle, "ho");
     settle(cx);
     assert_eq!(
-        labels(cx, handle, "tag-suggestions", Role::ListBoxOption),
-        ["project/holm"]
+        options(cx, handle),
+        ["#home ✓", "#holiday", "#project/holm", "Add #ho"]
     );
-    keys(cx, handle, "tab");
+    keys(cx, handle, "down down enter");
+    assert_eq!(chips(cx, handle), ["work", "home", "holiday"]);
     cx.simulate_input(handle, "big plans");
     keys(cx, handle, "enter");
-    assert_eq!(chips(cx, handle), ["work", "project/holm", "big-plans"]);
-    assert_eq!(fields(&a).0, ["work", "project/holm", "big-plans"]);
+    assert_eq!(chips(cx, handle), ["work", "home", "holiday", "big-plans"]);
+    assert_eq!(fields(&a).0, ["work", "home", "holiday", "big-plans"]);
 
-    keys(cx, handle, "left left");
-    assert_eq!(focus(cx, handle), "tag row");
-    assert_eq!(chips(cx, handle), ["work", "project/holm*", "big-plans"]);
-    keys(cx, handle, "backspace");
-    assert_eq!(chips(cx, handle), ["work", "big-plans*"]);
+    keys(cx, handle, "down down enter");
+    assert_eq!(
+        options(cx, handle),
+        ["#work ✓", "#holiday ✓*", "#big-plans ✓"]
+    );
+    assert_eq!(chips(cx, handle), ["work", "holiday", "big-plans"]);
+
+    cx.update_window(handle, |_, window, cx| {
+        window.click(
+            gpui_kit::ElementId::NamedInteger("tag-option".into(), 2),
+            cx,
+        );
+    })
+    .unwrap();
+    settle(cx);
+    assert_eq!(chips(cx, handle), ["work", "holiday"]);
+    assert_eq!(options(cx, handle), ["#work ✓", "#holiday ✓*"]);
+    assert_eq!(focus(cx, handle), "tag field");
+    assert_eq!(fields(&a).0, ["work", "holiday"]);
+
     keys(cx, handle, "escape");
     assert_eq!(focus(cx, handle), "editor");
+    assert!(!popup_open(cx, handle));
 
     keys(cx, handle, "ctrl-shift-p");
     assert!(screen(cx, handle, |window| window
@@ -574,14 +617,14 @@ fn the_tag_row_adds_and_removes_tags_and_pins(cx: &mut TestAppContext) {
         .is_some()));
     assert_eq!(
         fields(&a),
-        (vec!["work".to_owned(), "big-plans".to_owned()], true)
+        (vec!["work".to_owned(), "holiday".to_owned()], true)
     );
 
     keys(cx, handle, "ctrl-z");
     autosave(cx);
     assert_eq!(
         fields(&a),
-        (vec!["work".to_owned(), "big-plans".to_owned()], true)
+        (vec!["work".to_owned(), "holiday".to_owned()], true)
     );
     assert_eq!(
         modified(&a),
@@ -591,7 +634,7 @@ fn the_tag_row_adds_and_removes_tags_and_pins(cx: &mut TestAppContext) {
 
     keys(cx, handle, "up");
     assert_eq!(focus(cx, handle), "tag field");
-    keys(cx, handle, "down");
+    keys(cx, handle, "escape");
     assert_eq!(focus(cx, handle), "editor");
     assert_eq!(editor_text(cx, handle), "# A\n");
 }
@@ -630,7 +673,7 @@ fn the_tag_row_scrolls_with_the_text_and_ctrl_shift_t_brings_it_back(cx: &mut Te
     });
     assert!(widest <= crate::tags::CHIP_WIDTH, "a long tag ends with …");
 
-    // The field opens with no move of the row or its chips.
+    // The popup opens with no move of the row or its chips.
     let row_shape = |cx: &mut TestAppContext| {
         screen(cx, handle, |window| {
             let mut shape = vec![window.find("tag-row").bounds()];
@@ -646,33 +689,12 @@ fn the_tag_row_scrolls_with_the_text_and_ctrl_shift_t_brings_it_back(cx: &mut Te
     };
     let closed = row_shape(cx);
     keys(cx, handle, "ctrl-shift-t");
+    assert!(popup_open(cx, handle));
+    assert_eq!(row_shape(cx), closed);
+    cx.simulate_input(handle, "x");
+    settle(cx);
     assert_eq!(row_shape(cx), closed);
     keys(cx, handle, "escape");
-
-    // A click on a chip selects it. A click elsewhere in the row opens the field.
-    cx.update_window(handle, |_, window, cx| {
-        window.click(gpui_kit::ElementId::NamedInteger("tag-chip".into(), 0), cx);
-    })
-    .unwrap();
-    settle(cx);
-    assert_eq!(focus(cx, handle), "tag row");
-    assert_eq!(chips(cx, handle), ["work*".to_owned(), "a".repeat(300)]);
-    keys(cx, handle, "escape");
-    let right = screen(cx, handle, |window| {
-        window.find("tag-row").bounds().size.width
-    });
-    cx.update_window(handle, |_, window, cx| {
-        window.click_at(
-            "tag-row",
-            gpui_kit::point(right - gpui_kit::px(4.), gpui_kit::px(16.)),
-            cx,
-        );
-    })
-    .unwrap();
-    settle(cx);
-    assert_eq!(focus(cx, handle), "tag field");
-    keys(cx, handle, "escape");
-    assert_eq!(focus(cx, handle), "editor");
 
     keys(cx, handle, "ctrl-end");
     assert!(!tag_row_in_sight(cx, handle));
@@ -688,6 +710,94 @@ fn the_tag_row_scrolls_with_the_text_and_ctrl_shift_t_brings_it_back(cx: &mut Te
     cx.simulate_input(handle, "end");
     settle(cx);
     assert!(editor_text(cx, handle).ends_with("line 199\nend"));
+}
+
+/// Clicks the chip at `at` in the tag row.
+fn click_chip(cx: &mut TestAppContext, handle: AnyWindowHandle, at: u64) {
+    cx.update_window(handle, |_, window, cx| {
+        window.click(gpui_kit::ElementId::NamedInteger("tag-chip".into(), at), cx);
+    })
+    .unwrap();
+    settle(cx);
+}
+
+#[gpui_kit::test]
+fn clicks_open_and_close_the_tag_popup(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    fs::write(
+        fixture.notes().join("A.md"),
+        "---\ntags:\n  - work\n  - home\n---\n# A\n",
+    )
+    .unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    // A click on a chip opens the popup with the cursor on its tag. A click elsewhere in the
+    // row opens it with no cursor.
+    click_chip(cx, handle, 0);
+    assert_eq!(focus(cx, handle), "tag field");
+    assert_eq!(options(cx, handle), ["#work ✓*", "#home ✓"]);
+    click_chip(cx, handle, 1);
+    assert!(
+        popup_open(cx, handle),
+        "a click on the row keeps the popup open"
+    );
+    assert_eq!(options(cx, handle), ["#work ✓", "#home ✓*"]);
+    keys(cx, handle, "escape");
+    let right = screen(cx, handle, |window| {
+        window.find("tag-row").bounds().size.width
+    });
+    cx.update_window(handle, |_, window, cx| {
+        window.click_at(
+            "tag-row",
+            gpui_kit::point(right - gpui_kit::px(4.), gpui_kit::px(16.)),
+            cx,
+        );
+    })
+    .unwrap();
+    settle(cx);
+    assert_eq!(focus(cx, handle), "tag field");
+    assert_eq!(options(cx, handle), ["#work ✓", "#home ✓"]);
+
+    // A click outside the popup closes it, as Esc does.
+    let bottom = screen(cx, handle, |window| {
+        window.find("editor").bounds().size.height
+    });
+    cx.update_window(handle, |_, window, cx| {
+        window.click_at(
+            "editor",
+            gpui_kit::point(gpui_kit::px(200.), bottom - gpui_kit::px(20.)),
+            cx,
+        );
+    })
+    .unwrap();
+    settle(cx);
+    assert!(!popup_open(cx, handle));
+    assert_eq!(focus(cx, handle), "editor");
+}
+
+#[gpui_kit::test]
+fn the_first_tag_shows_the_hidden_tag_row(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let a = fixture.notes().join("A.md");
+    fs::write(&a, "# A\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+    let row_height = |cx: &mut TestAppContext| {
+        screen(cx, handle, |window| {
+            window.find("tag-row").bounds().size.height
+        })
+    };
+    assert_eq!(row_height(cx), gpui_kit::px(0.));
+
+    keys(cx, handle, "ctrl-shift-t");
+    assert!(popup_open(cx, handle));
+    assert_eq!(focus(cx, handle), "tag field");
+    assert_eq!(row_height(cx), gpui_kit::px(0.));
+
+    cx.simulate_input(handle, "work");
+    keys(cx, handle, "enter");
+    assert_eq!(chips(cx, handle), ["work"]);
+    assert!(row_height(cx) > gpui_kit::px(0.));
+    assert_eq!(fields(&a).0, ["work"]);
 }
 
 #[gpui_kit::test]

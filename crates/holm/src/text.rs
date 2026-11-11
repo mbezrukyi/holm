@@ -47,6 +47,12 @@ pub(crate) const PIN_MARK: &str = "●";
 pub(crate) const PINNED: &str = "Pinned";
 pub(crate) const TAGS_LABEL: &str = "Tags";
 pub(crate) const ADD_TAG: &str = "Add tag";
+pub(crate) const ON_THIS_NOTE: &str = "On this note";
+
+/// The line in the tag popup that adds a new tag.
+pub(crate) fn add_tag_line(tag: &str) -> String {
+    format!("Add #{tag}")
+}
 pub(crate) const RENAME: &str = "Rename";
 pub(crate) const FOLDERS: &str = "FOLDERS";
 pub(crate) const TAGS: &str = "TAGS";

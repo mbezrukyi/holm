@@ -412,7 +412,7 @@ impl NotePane {
         }
     }
 
-    /// Moves the focus to the tag row. The editor scrolls to it.
+    /// Opens the tag popup. The editor scrolls to it.
     pub(crate) fn focus_tags(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.tag_row.update(cx, |row, cx| row.enter(window, cx));
     }
