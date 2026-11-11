@@ -6,7 +6,7 @@ use gpui_kit::component::{ActiveTheme as _, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     ClickEvent, Context, CursorStyle, ElementId, EventEmitter, InteractiveElement as _,
-    IntoElement, MouseButton, ParentElement, Render, Role, StatefulInteractiveElement as _, Styled,
+    IntoElement, ParentElement, Render, Role, StatefulInteractiveElement as _, Styled,
     TestSupportExt as _, Window, div, px,
 };
 use holm_core::model::NoteInfo;
@@ -47,8 +47,6 @@ impl Render for Backlinks {
                 .hover(|row| row.text_color(theme.foreground))
                 .truncate()
                 .child(note.title.clone())
-                // A click here is not a click in the text.
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
                     cx.emit(OpenBacklink(path.clone()));
                 }))

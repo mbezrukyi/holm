@@ -330,7 +330,7 @@ fn sidebar(cx: &mut TestAppContext, handle: AnyWindowHandle) -> String {
 }
 
 /// Which part has the focus: "sidebar", "editor", "tag field", "tag row", "search", or
-/// "other".
+/// "other". The tag row lies inside the editor, so it comes first.
 fn focus(cx: &mut TestAppContext, handle: AnyWindowHandle) -> &'static str {
     screen(cx, handle, |window| {
         let focused = |id| window.try_find(id).and_then(|part| part.focused()) == Some(true);
@@ -338,12 +338,12 @@ fn focus(cx: &mut TestAppContext, handle: AnyWindowHandle) -> &'static str {
             "search"
         } else if focused("sidebar") {
             "sidebar"
-        } else if focused("editor") {
-            "editor"
         } else if focused("tag-input") {
             "tag field"
         } else if focused("tag-row") {
             "tag row"
+        } else if focused("editor") {
+            "editor"
         } else {
             "other"
         }
@@ -594,6 +594,100 @@ fn the_tag_row_adds_and_removes_tags_and_pins(cx: &mut TestAppContext) {
     keys(cx, handle, "down");
     assert_eq!(focus(cx, handle), "editor");
     assert_eq!(editor_text(cx, handle), "# A\n");
+}
+
+/// Whether the tag row is on the screen, with its top inside the window.
+fn tag_row_in_sight(cx: &mut TestAppContext, handle: AnyWindowHandle) -> bool {
+    screen(cx, handle, |window| {
+        window
+            .try_find("tag-row")
+            .is_some_and(|row| row.visible() && row.bounds().top() >= gpui_kit::px(0.))
+    })
+}
+
+#[gpui_kit::test]
+fn the_tag_row_scrolls_with_the_text_and_ctrl_shift_t_brings_it_back(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let lines: Vec<String> = (0..200).map(|line| format!("line {line}")).collect();
+    fs::write(
+        fixture.notes().join("Long.md"),
+        format!(
+            "---\ntags:\n  - work\n  - {}\n---\n# Long\n{}\n",
+            "a".repeat(300),
+            lines.join("\n")
+        ),
+    )
+    .unwrap();
+    let handle = open(cx, fixture.startup(None));
+    assert!(tag_row_in_sight(cx, handle));
+    let widest = screen(cx, handle, |window| {
+        window
+            .within("tag-row")
+            .find_all_by_role(Role::ListItem)
+            .iter()
+            .map(|chip| chip.bounds().size.width)
+            .fold(gpui_kit::px(0.), gpui_kit::Pixels::max)
+    });
+    assert!(widest <= crate::tags::CHIP_WIDTH, "a long tag ends with …");
+
+    // The field opens with no move of the row or its chips.
+    let row_shape = |cx: &mut TestAppContext| {
+        screen(cx, handle, |window| {
+            let mut shape = vec![window.find("tag-row").bounds()];
+            shape.extend(
+                window
+                    .within("tag-row")
+                    .find_all_by_role(Role::ListItem)
+                    .iter()
+                    .map(gpui_kit::test::ElementSnapshot::bounds),
+            );
+            shape
+        })
+    };
+    let closed = row_shape(cx);
+    keys(cx, handle, "ctrl-shift-t");
+    assert_eq!(row_shape(cx), closed);
+    keys(cx, handle, "escape");
+
+    // A click on a chip selects it. A click elsewhere in the row opens the field.
+    cx.update_window(handle, |_, window, cx| {
+        window.click(gpui_kit::ElementId::NamedInteger("tag-chip".into(), 0), cx);
+    })
+    .unwrap();
+    settle(cx);
+    assert_eq!(focus(cx, handle), "tag row");
+    assert_eq!(chips(cx, handle), ["work*".to_owned(), "a".repeat(300)]);
+    keys(cx, handle, "escape");
+    let right = screen(cx, handle, |window| {
+        window.find("tag-row").bounds().size.width
+    });
+    cx.update_window(handle, |_, window, cx| {
+        window.click_at(
+            "tag-row",
+            gpui_kit::point(right - gpui_kit::px(4.), gpui_kit::px(16.)),
+            cx,
+        );
+    })
+    .unwrap();
+    settle(cx);
+    assert_eq!(focus(cx, handle), "tag field");
+    keys(cx, handle, "escape");
+    assert_eq!(focus(cx, handle), "editor");
+
+    keys(cx, handle, "ctrl-end");
+    assert!(!tag_row_in_sight(cx, handle));
+
+    keys(cx, handle, "ctrl-shift-t");
+    assert!(tag_row_in_sight(cx, handle));
+    assert_eq!(focus(cx, handle), "tag field");
+    assert_eq!(chips(cx, handle), ["work".to_owned(), "a".repeat(300)]);
+
+    keys(cx, handle, "escape");
+    assert_eq!(focus(cx, handle), "editor");
+    assert!(!tag_row_in_sight(cx, handle));
+    cx.simulate_input(handle, "end");
+    settle(cx);
+    assert!(editor_text(cx, handle).ends_with("line 199\nend"));
 }
 
 #[gpui_kit::test]

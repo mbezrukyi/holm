@@ -8,8 +8,9 @@
 //! When the user opens another note, the pane saves the old one. It also renames the old file
 //! to match the title.
 //!
-//! The tag row above the text shows the tags and the pin of the note. The pane writes their
-//! changes at once. The editor undo stack holds only the text, so Ctrl+Z does not undo them.
+//! The tag row before the first line shows the tags and the pin of the note. It scrolls with
+//! the text. The pane writes their changes at once. The editor undo stack holds only the text,
+//! so Ctrl+Z does not undo them.
 //!
 //! The pane opens the links of the editor: a note, a heading in a note, a file in its system
 //! app, or a web address. It copies pasted files into `attachments/`. After each change in the
@@ -29,8 +30,7 @@ use gpui_kit::{
 use holm_core::Core;
 use holm_core::model::{Change, LinkTarget, Note, NoteInfo, Order};
 use holm_editor::{
-    COLUMN_WIDTH, Changed, CursorLink, Editor, OpenFile, OpenLink, PasteFiles, PastedFile,
-    SIDE_MARGIN, UpFromStart,
+    Changed, CursorLink, Editor, OpenFile, OpenLink, PasteFiles, PastedFile, UpFromStart,
 };
 use holm_markdown::Target;
 
@@ -102,6 +102,7 @@ impl NotePane {
         let tag_row = cx.new(|cx| TagRow::new(core.clone(), window, cx));
         let backlinks = cx.new(|_| Backlinks::default());
         editor.update(cx, |editor, cx| {
+            editor.set_start(Some(tag_row.clone().into()), cx);
             editor.set_end(Some(backlinks.clone().into()), cx);
         });
         let changes = changes::watch(&core, cx, Self::outside_change);
@@ -411,7 +412,7 @@ impl NotePane {
         }
     }
 
-    /// Moves the focus to the tag row.
+    /// Moves the focus to the tag row. The editor scrolls to it.
     pub(crate) fn focus_tags(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.tag_row.update(cx, |row, cx| row.enter(window, cx));
     }
@@ -745,20 +746,6 @@ impl Render for NotePane {
             .bg(cx.theme().background)
             .children(conflict)
             .children(error)
-            .child(
-                div()
-                    .w_full()
-                    .px(SIDE_MARGIN)
-                    .flex()
-                    .justify_center()
-                    .child(
-                        div()
-                            .w_full()
-                            .max_w(COLUMN_WIDTH)
-                            .pt_2()
-                            .child(self.tag_row.clone()),
-                    ),
-            )
             .child(
                 div()
                     .flex_1()

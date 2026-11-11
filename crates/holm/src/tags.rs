@@ -1,4 +1,4 @@
-//! The tag row above the note: one chip for each tag, and a pin mark.
+//! The tag row before the first line of the note: one chip for each tag, and a pin mark.
 //!
 //! The row changes no files itself. It sends the new tags as a [`TagRowEvent`].
 //!
@@ -6,19 +6,20 @@
 //!   `←` or `Backspace` in an empty field moves the focus to the last chip.
 //! - On a chip, `←` and `→` move between chips, and `Backspace` or `Delete` removes it.
 //! - `Esc` or `↓` gives the focus back to the text.
+//! - A click on a chip selects it. A click elsewhere in the row opens the field.
 //!
 //! With no tags and no pin, the row shows only while it has the focus.
 
 use gpui_kit::component::input::{
     Backspace, Enter, Escape, IndentInline, Input, InputState, MoveDown, MoveLeft, MoveUp,
 };
-use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, AppContext as _, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement, Render, Role,
-    StatefulInteractiveElement as _, Styled, Subscription, Task, TestSupportExt as _, Window, div,
-    px,
+    App, AppContext as _, Context, CursorStyle, ElementId, Entity, EventEmitter, FocusHandle,
+    Focusable, InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, ParentElement,
+    Pixels, Render, Role, StatefulInteractiveElement as _, Styled, Subscription, Task,
+    TestSupportExt as _, Window, div, px,
 };
 use holm_core::Core;
 use holm_core::model::Tag;
@@ -27,6 +28,12 @@ use crate::text;
 
 /// The most suggestions under the field.
 const SUGGESTIONS: usize = 5;
+
+/// The widest a chip gets. A longer tag ends with `…`.
+pub(crate) const CHIP_WIDTH: Pixels = px(200.);
+
+/// The height of a chip and of the field, so the row keeps its height when the field opens.
+const CHIP_HEIGHT: Pixels = px(20.);
 
 /// What the tag row tells the pane.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -217,6 +224,7 @@ impl TagRow {
                     .id("tag-input")
                     .aria_label(text::ADD_TAG)
                     .appearance(false)
+                    .xsmall()
                     .text_size(px(12.)),
             )
             .when(!suggestions.is_empty(), |field| {
@@ -248,7 +256,7 @@ impl TagRow {
             })
     }
 
-    fn chip(&self, at: usize, tag: &str, cx: &App) -> impl IntoElement {
+    fn chip(&self, at: usize, tag: &str, cx: &Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let selected = self.chip == Some(at);
         div()
@@ -257,6 +265,8 @@ impl TagRow {
             .aria_label(tag.to_owned())
             .aria_selected(selected)
             .test_support()
+            .max_w(CHIP_WIDTH)
+            .truncate()
             .px_2()
             .rounded(theme.radius)
             .text_size(px(12.))
@@ -267,6 +277,16 @@ impl TagRow {
             })
             .text_color(theme.secondary_foreground)
             .child(format!("#{tag}"))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |row, _, window, cx| {
+                    row.chip = Some(at);
+                    window.focus(&row.focus, cx);
+                    // The row and the editor would take the focus after this.
+                    window.prevent_default();
+                    cx.notify();
+                }),
+            )
     }
 }
 
@@ -310,6 +330,16 @@ impl Render for TagRow {
             .track_focus(&self.focus)
             .key_context("TagRow")
             .on_key_down(cx.listener(Self::key_down))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|row, _, window, cx| {
+                    // A chip or the field took the click already.
+                    if !window.default_prevented() {
+                        row.enter(window, cx);
+                        window.prevent_default();
+                    }
+                }),
+            )
             .capture_action(cx.listener(|row, _: &Enter, window, cx| {
                 let typed = row.typed(cx);
                 row.add(&typed, window, cx);
@@ -342,7 +372,12 @@ impl Render for TagRow {
                     cx.stop_propagation();
                 }
             }))
-            .when(visible, |row| row.min_h(px(28.)).py_1())
+            .w_full()
+            .cursor(CursorStyle::Arrow)
+            // The row lies in the editor, which sets the note font.
+            .font_family(theme.font_family.clone())
+            .line_height(CHIP_HEIGHT)
+            .when(visible, |row| row.min_h(px(36.)).pt_3().pb_1())
             .flex_wrap()
             .gap_1p5()
             .items_center()
