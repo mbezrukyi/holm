@@ -8,8 +8,8 @@ use std::rc::Rc;
 
 use common::{LINE_HEIGHT, app, column_x, open};
 use gpui_kit::{
-    ClipboardEntry, ClipboardItem, Entity, ExternalPaths, FileDropEvent, Image, ImageFormat,
-    Modifiers, Pixels, VisualTestContext, point, px,
+    AppContext as _, ClipboardEntry, ClipboardItem, Entity, ExternalPaths, FileDropEvent, Image,
+    ImageFormat, Modifiers, Pixels, VisualTestContext, point, px,
 };
 use holm_editor::{CursorLink, Editor, OpenFile, OpenLink, PasteFiles, PastedFile};
 use holm_markdown::Target;
@@ -220,4 +220,70 @@ fn a_drop_moves_the_cursor_and_sends_paste_files() {
     );
     cx.simulate_input("X");
     assert_eq!(text(&editor, cx), "one\n\ntXwo");
+}
+
+#[test]
+fn show_heading_puts_the_cursor_at_the_heading() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "# Top\n\ntext\n\n## Bug list\n", WIDTH, HEIGHT);
+    let found =
+        cx.update(|_, cx| editor.update(cx, |editor, cx| editor.show_heading("Bug list", cx)));
+    assert!(found);
+    cx.simulate_input("X");
+    assert_eq!(text(&editor, cx), "# Top\n\ntext\n\nX## Bug list\n");
+
+    let found =
+        cx.update(|_, cx| editor.update(cx, |editor, cx| editor.show_heading("bug list", cx)));
+    assert!(!found);
+}
+
+/// A view with one row that counts its clicks.
+struct End {
+    clicks: Rc<RefCell<usize>>,
+}
+
+impl gpui_kit::Render for End {
+    fn render(
+        &mut self,
+        _window: &mut gpui_kit::Window,
+        _cx: &mut gpui_kit::Context<Self>,
+    ) -> impl gpui_kit::IntoElement {
+        use gpui_kit::{InteractiveElement as _, MouseButton, Styled as _};
+        let clicks = self.clicks.clone();
+        gpui_kit::div()
+            .id("end")
+            .w_full()
+            .h(LINE_HEIGHT * 2.)
+            .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                *clicks.borrow_mut() += 1;
+                cx.stop_propagation();
+            })
+    }
+}
+
+#[test]
+fn the_end_view_shows_after_the_text_and_takes_its_clicks() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "one\ntwo", WIDTH, HEIGHT);
+    let clicks = Rc::new(RefCell::new(0));
+    cx.update(|_, cx| {
+        let end = cx.new(|_| End {
+            clicks: clicks.clone(),
+        });
+        editor.update(cx, |editor, cx| editor.set_end(Some(end.into()), cx));
+    });
+    cx.run_until_parked();
+
+    // The end view lies right under the second line.
+    cx.simulate_click(at(cx, 1., LINE_HEIGHT * 2.5), Modifiers::none());
+    assert_eq!(*clicks.borrow(), 1);
+    // The click does not move the cursor.
+    cx.simulate_input("X");
+    assert_eq!(text(&editor, cx), "Xone\ntwo");
+
+    // Below the end view, a click is the editor's again.
+    cx.simulate_click(at(cx, 10., LINE_HEIGHT * 5.), Modifiers::none());
+    assert_eq!(*clicks.borrow(), 1);
+    cx.simulate_input("Y");
+    assert_eq!(text(&editor, cx), "Xone\ntwoY");
 }

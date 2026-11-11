@@ -7,10 +7,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui_kit::{
-    App, BorderStyle, Bounds, ContentMask, Corners, ElementId, ElementInputHandler, Entity,
-    FontStyle, FontWeight, GlobalElementId, ImgResourceLoader, InspectorElementId, IntoElement,
-    LayoutId, PathBuilder, Pixels, Point, Resource, Style, TextAlign, Window, WrappedLine, fill,
-    outline, point, px, relative, size,
+    AnyElement, App, AvailableSpace, BorderStyle, Bounds, ContentMask, Corners, ElementId,
+    ElementInputHandler, Entity, FontStyle, FontWeight, GlobalElementId, ImgResourceLoader,
+    InspectorElementId, IntoElement, LayoutId, PathBuilder, Pixels, Point, Resource, Style,
+    TextAlign, Window, WrappedLine, fill, outline, point, px, relative, size,
 };
 
 pub(crate) use layout::{Hit, ImageSizes, Layout, Scroll};
@@ -53,9 +53,15 @@ fn column(bounds: Bounds<Pixels>) -> Bounds<Pixels> {
     )
 }
 
+/// The layout of a frame, and the view after the text when the last line is in sight.
+pub(crate) struct Prepainted {
+    layout: Rc<Layout>,
+    end: Option<AnyElement>,
+}
+
 impl gpui_kit::Element for EditorElement {
     type RequestLayoutState = ();
-    type PrepaintState = Option<Rc<Layout>>;
+    type PrepaintState = Option<Prepainted>;
 
     fn id(&self) -> Option<ElementId> {
         None
@@ -89,7 +95,7 @@ impl gpui_kit::Element for EditorElement {
     ) -> Self::PrepaintState {
         let style = window.text_style();
         let column = column(bounds);
-        let layout = self.editor.update(cx, |editor, _| {
+        let (layout, end) = self.editor.update(cx, |editor, _| {
             let mut shaper = Shaper::new(
                 style,
                 column.size.width,
@@ -107,15 +113,34 @@ impl gpui_kit::Element for EditorElement {
                 window,
             );
             editor.autoscroll = false;
+            let shows_end = editor.scroll.line + lines.len() == editor.model.line_count();
+            let end = shows_end.then(|| editor.end.clone()).flatten();
             let layout = Rc::new(Layout {
                 version: editor.version,
                 bounds: column,
                 lines,
             });
             editor.layout = Some(layout.clone());
-            layout
+            (layout, end)
         });
-        Some(layout)
+        let end = end.map(|end| {
+            let bottom = layout
+                .lines
+                .last()
+                .map_or(px(0.), |line| line.top + line.height);
+            let mut end = end.into_any_element();
+            end.prepaint_as_root(
+                column.origin + point(px(0.), bottom),
+                size(
+                    AvailableSpace::Definite(column.size.width),
+                    AvailableSpace::MinContent,
+                ),
+                window,
+                cx,
+            );
+            end
+        });
+        Some(Prepainted { layout, end })
     }
 
     fn paint(
@@ -128,7 +153,9 @@ impl gpui_kit::Element for EditorElement {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let Some(layout) = layout.take() else { return };
+        let Some(Prepainted { layout, mut end }) = layout.take() else {
+            return;
+        };
         let editor = self.editor.read(cx);
         let focus = editor.focus.clone();
         let selection = editor.model.selection();
@@ -162,6 +189,9 @@ impl gpui_kit::Element for EditorElement {
                 && let Some(rect) = layout.cursor_bounds(cursor)
             {
                 window.paint_quad(fill(rect, theme.cursor));
+            }
+            if let Some(end) = &mut end {
+                end.paint(window, cx);
             }
         });
     }

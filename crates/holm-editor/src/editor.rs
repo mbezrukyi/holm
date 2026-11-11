@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::collections::HashSet;
 
 use gpui_kit::{
-    App, Bounds, ClipboardEntry, ClipboardItem, Context, CursorStyle, EntityInputHandler,
+    AnyView, App, Bounds, ClipboardEntry, ClipboardItem, Context, CursorStyle, EntityInputHandler,
     EventEmitter, ExternalPaths, FocusHandle, Focusable, InteractiveElement, IntoElement,
     KeyDownEvent, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     ParentElement, Pixels, Point, Render, ScrollEvent, Styled, TestSupportExt as _, UTF16Selection,
@@ -81,6 +81,7 @@ pub struct Editor {
     color: Option<ColorWindow>,
     /// The last custom colors, the newest first.
     custom_colors: Vec<Color>,
+    pub(crate) end: Option<AnyView>,
 }
 
 /// A mouse drag after a click. The selection grows by `unit` from `origin`.
@@ -234,6 +235,7 @@ impl Editor {
             find: None,
             color: None,
             custom_colors: Vec::new(),
+            end: None,
         }
     }
 
@@ -339,6 +341,29 @@ impl Editor {
         let changed = self.model.set_link_target(target);
         self.finish(changed, cx);
         changed
+    }
+
+    /// Puts the cursor at the first heading with the text `heading`, and shows that heading at
+    /// the top of the view. It returns whether the text has such a heading.
+    pub fn show_heading(&mut self, heading: &str, cx: &mut Context<Self>) -> bool {
+        let Some(start) = self.model.heading_start(heading) else {
+            return false;
+        };
+        self.model.set_cursor(start, false);
+        self.goal_x = None;
+        self.scroll = Scroll {
+            line: self.model.line_of(start),
+            offset: px(0.),
+        };
+        cx.notify();
+        true
+    }
+
+    /// Sets a view that shows after the last line of the text, in the text column, or none.
+    /// It scrolls with the text.
+    pub fn set_end(&mut self, end: Option<AnyView>, cx: &mut Context<Self>) {
+        self.end = end;
+        cx.notify();
     }
 
     /// Selects the text of the title, so typing replaces it. The title is a `# heading` that is
