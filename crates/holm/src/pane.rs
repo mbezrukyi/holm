@@ -10,8 +10,13 @@
 //!
 //! The tag row above the text shows the tags and the pin of the note. The pane writes their
 //! changes at once. The editor undo stack holds only the text, so Ctrl+Z does not undo them.
+//!
+//! The pane opens the links of the editor: a note, a heading in a note, a file in its system
+//! app, or a web address. It copies pasted files into `attachments/`. After each change in the
+//! notes folder, it reads the backlinks again and tells the editor which note links are broken.
 
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -19,12 +24,17 @@ use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::{Theme as Ui, v_flex};
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
-    ParentElement, Render, Styled, Subscription, Task, Window, div,
+    ParentElement, PathPromptOptions, Render, Styled, Subscription, Task, Window, div,
 };
 use holm_core::Core;
-use holm_core::model::{Change, Note, NoteInfo};
-use holm_editor::{COLUMN_WIDTH, Changed, Editor, SIDE_MARGIN, UpFromStart};
+use holm_core::model::{Change, LinkTarget, Note, NoteInfo, Order};
+use holm_editor::{
+    COLUMN_WIDTH, Changed, CursorLink, Editor, OpenFile, OpenLink, PasteFiles, PastedFile,
+    SIDE_MARGIN, UpFromStart,
+};
+use holm_markdown::Target;
 
+use crate::backlinks::{Backlinks, OpenBacklink};
 use crate::bar::{self, Bar};
 use crate::error::AppError;
 use crate::tags::{TagRow, TagRowEvent};
@@ -54,6 +64,7 @@ pub(crate) struct NotePane {
     notes_folder: PathBuf,
     editor: Entity<Editor>,
     tag_row: Entity<TagRow>,
+    backlinks: Entity<Backlinks>,
     /// The note as it is on disk, after the last read or save. Its tags and pin can be newer:
     /// a write of them may still run.
     note: Note,
@@ -71,7 +82,11 @@ pub(crate) struct NotePane {
     conflict: bool,
     error: Option<&'static str>,
     opening: Option<Task<()>>,
+    /// The heading to show when the note that opens is ready.
+    open_heading: Option<String>,
+    links: Option<Task<()>>,
     _changes: Task<()>,
+    _revisions: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -85,13 +100,30 @@ impl NotePane {
     ) -> Self {
         let editor = cx.new(Editor::new);
         let tag_row = cx.new(|cx| TagRow::new(core.clone(), window, cx));
+        let backlinks = cx.new(|_| Backlinks::default());
+        editor.update(cx, |editor, cx| {
+            editor.set_end(Some(backlinks.clone().into()), cx);
+        });
         let changes = changes::watch(&core, cx, Self::outside_change);
+        let revisions = changes::watch_revision(&core, cx, Self::read_links);
         let subscriptions = vec![
             cx.subscribe(&editor, |pane, _, _: &Changed, cx| pane.schedule_save(cx)),
             cx.subscribe_in(&editor, window, |pane, _, _: &UpFromStart, window, cx| {
                 pane.focus_tags(window, cx);
             }),
             cx.subscribe_in(&tag_row, window, Self::tag_row_event),
+            cx.subscribe(&editor, |pane, _, event: &OpenLink, cx| {
+                pane.open_link(event.target.clone(), cx);
+            }),
+            cx.subscribe(&editor, |_, _, event: &OpenFile, cx| {
+                cx.open_with_system(&event.path);
+            }),
+            cx.subscribe(&editor, |pane, _, event: &PasteFiles, cx| {
+                pane.paste_files(event.files.clone(), cx);
+            }),
+            cx.subscribe(&backlinks, |pane, _, event: &OpenBacklink, cx| {
+                pane.open(event.0.clone(), Leave::Keep, cx);
+            }),
             cx.observe_global::<Ui>(|pane, cx| {
                 let appearance = theme::appearance(cx);
                 pane.editor
@@ -120,6 +152,7 @@ impl NotePane {
             notes_folder,
             editor,
             tag_row,
+            backlinks,
             note: note.clone(),
             fields_version: 0,
             writing: None,
@@ -130,7 +163,10 @@ impl NotePane {
             conflict: false,
             error: None,
             opening: None,
+            open_heading: None,
+            links: None,
             _changes: changes,
+            _revisions: revisions,
             _subscriptions: subscriptions,
         };
         pane.show(note, false, cx);
@@ -159,7 +195,197 @@ impl NotePane {
         self.show_fields(cx);
         self.conflict = false;
         self.error = None;
+        if !reload && let Some(heading) = self.open_heading.take() {
+            self.editor
+                .update(cx, |editor, cx| editor.show_heading(&heading, cx));
+        }
+        self.read_links(cx);
         cx.notify();
+    }
+
+    /// Reads the backlinks and the broken note links of the open note, and shows them.
+    fn read_links(&mut self, cx: &mut Context<Self>) {
+        let core = self.core.clone();
+        let path = self.note.info.path.clone();
+        let job = cx.background_spawn(async move {
+            let backlinks = core.backlinks(&path, Order::Title)?;
+            let broken = core.broken_links(&path)?;
+            Ok::<_, holm_core::Error>((path, backlinks, broken))
+        });
+        self.links = Some(cx.spawn(async move |pane, cx| {
+            let result = job.await;
+            pane.update(cx, |pane, cx| match result {
+                Ok((path, backlinks, broken)) if path == pane.note.info.path => {
+                    pane.backlinks
+                        .update(cx, |list, cx| list.show(backlinks, cx));
+                    let broken: HashSet<Target> = broken.into_iter().filter_map(target).collect();
+                    pane.editor
+                        .update(cx, |editor, cx| editor.set_link_states(broken, cx));
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    let error = AppError::from(error);
+                    tracing::warn!(error = %crate::chain(&error), "cannot read the links of the note");
+                }
+            })
+            .ok();
+        }));
+    }
+
+    /// Opens a note link or a web link.
+    fn open_link(&mut self, target: Target, cx: &mut Context<Self>) {
+        let (id, heading) = match target {
+            Target::Note { id, heading } => (id, heading),
+            Target::Web(url) => {
+                cx.open_url(&url);
+                return;
+            }
+            Target::Heading(_) | Target::File(_) => return,
+        };
+        let core = self.core.clone();
+        let job = cx.background_spawn(async move { core.note_with_id(&id) });
+        cx.spawn(async move |pane, cx| {
+            let found = job.await;
+            pane.update(cx, |pane, cx| match found {
+                Ok(Some(note)) => pane.open_at(note.path, heading, cx),
+                Ok(None) => {
+                    pane.error = Some(text::NOTE_GONE);
+                    cx.notify();
+                }
+                Err(error) => {
+                    let error = AppError::from(error);
+                    tracing::warn!(error = %crate::chain(&error), "cannot find the note of a link");
+                    pane.error = Some(error.message());
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Opens the note at `path` at `heading`, or at the top when the note has no such heading.
+    fn open_at(&mut self, path: PathBuf, heading: Option<String>, cx: &mut Context<Self>) {
+        if path == self.note.info.path {
+            if let Some(heading) = heading {
+                self.editor
+                    .update(cx, |editor, cx| editor.show_heading(&heading, cx));
+            }
+            return;
+        }
+        self.open_heading = heading;
+        self.open(path, Leave::Keep, cx);
+    }
+
+    /// Copies pasted or dropped files into `attachments/`, and puts a link to each copy at the
+    /// cursor.
+    fn paste_files(&mut self, files: Vec<PastedFile>, cx: &mut Context<Self>) {
+        let core = self.core.clone();
+        let note = self.note.info.path.clone();
+        let job = cx.background_spawn(async move {
+            files
+                .iter()
+                .map(|file| match file {
+                    PastedFile::Path(path) => core.attach_file(&note, path),
+                    PastedFile::Image { extension, bytes } => {
+                        core.paste_image(&note, extension, bytes)
+                    }
+                })
+                .collect::<Vec<_>>()
+        });
+        cx.spawn(async move |pane, cx| {
+            let copies = job.await;
+            pane.update(cx, |pane, cx| {
+                pane.insert_file_links(copies, true, cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Opens the system file picker, and puts a link to each picked file at the cursor, with
+    /// no copy.
+    pub(crate) fn link_files(&mut self, cx: &mut Context<Self>) {
+        let picked = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some(text::LINK_FILE.into()),
+        });
+        let core = self.core.clone();
+        let note = self.note.info.path.clone();
+        cx.spawn(async move |pane, cx| {
+            let files = match picked.await {
+                Ok(Ok(Some(files))) => files,
+                Ok(Err(error)) => {
+                    tracing::warn!(%error, "the file picker failed");
+                    return;
+                }
+                _ => return,
+            };
+            let links = cx
+                .background_spawn(async move {
+                    files
+                        .iter()
+                        .map(|file| core.file_link(&note, file))
+                        .collect::<Vec<_>>()
+                })
+                .await;
+            pane.update(cx, |pane, cx| pane.insert_file_links(links, false, cx))
+                .ok();
+        })
+        .detach();
+    }
+
+    /// Puts a link to each file at the cursor. `embedded` writes `![..](..)`, which shows an
+    /// image or a file card. An error shows in a quiet bar.
+    fn insert_file_links(
+        &mut self,
+        files: Vec<holm_core::Result<PathBuf>>,
+        embedded: bool,
+        cx: &mut Context<Self>,
+    ) {
+        for file in files {
+            match file {
+                Ok(path) => {
+                    let name = path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    let target = Target::File(path.to_string_lossy().into_owned());
+                    self.editor.update(cx, |editor, cx| {
+                        editor.insert_link(&name, &target, embedded, cx);
+                    });
+                }
+                Err(error) => {
+                    let error = AppError::from(error);
+                    tracing::warn!(error = %crate::chain(&error), "cannot link a file");
+                    self.error = Some(error.message());
+                    cx.notify();
+                }
+            }
+        }
+    }
+
+    /// The link at the cursor of the editor.
+    pub(crate) fn cursor_link(&self, cx: &gpui_kit::App) -> Option<CursorLink> {
+        self.editor.read(cx).link_at_cursor()
+    }
+
+    /// Puts a link to `target` at the cursor, with the selection or `text` as its text.
+    /// With `replace`, it points the link at the cursor to `target` and keeps its text.
+    pub(crate) fn put_link(
+        &mut self,
+        target: &Target,
+        text: &str,
+        replace: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.editor.update(cx, |editor, cx| {
+            if !(replace && editor.set_link_target(target, cx)) {
+                editor.insert_link(text, target, false, cx);
+            }
+        });
     }
 
     fn show_fields(&mut self, cx: &mut Context<Self>) {
@@ -569,6 +795,17 @@ impl LineEnding {
             Self::Lf => Cow::Borrowed(text),
             Self::CrLf => Cow::Owned(text.replace('\n', "\r\n")),
         }
+    }
+}
+
+/// The editor target of a broken link from the core.
+fn target(link: LinkTarget) -> Option<Target> {
+    match link {
+        LinkTarget::Note { id, heading } => Some(Target::Note {
+            id: id.to_string(),
+            heading,
+        }),
+        _ => None,
     }
 }
 

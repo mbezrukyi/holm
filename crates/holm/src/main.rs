@@ -2,6 +2,7 @@
 //!
 //! The binary joins the core and the editor. It owns windows, settings and themes.
 
+mod backlinks;
 mod bar;
 mod changes;
 mod config;
@@ -9,6 +10,7 @@ mod crash;
 mod dialog;
 mod error;
 mod icons;
+mod link_rows;
 mod log;
 mod notes;
 mod pane;

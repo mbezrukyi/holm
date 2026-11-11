@@ -99,3 +99,14 @@ pub(crate) const NO_MATCH: &str = "No note has this title";
 pub(crate) fn search_header(query: &str) -> String {
     format!("Search: {query}")
 }
+
+pub(crate) const LINK_TO_NOTE: &str = "Link to note";
+pub(crate) const NO_HEADING: &str = "No heading matches";
+pub(crate) const NOTE_GONE: &str = "Holm can't find the note of this link.";
+pub(crate) const LINKED_FROM: &str = "Linked from";
+pub(crate) const LINK_FILE: &str = "Link";
+
+/// The last row of the link picker, which makes a note.
+pub(crate) fn create_note(title: &str) -> String {
+    format!("Create “{title}”")
+}

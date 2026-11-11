@@ -795,3 +795,156 @@ fn quick_open_opens_a_note_by_its_title(cx: &mut TestAppContext) {
     keys(cx, handle, "ctrl-shift-l ctrl-shift-o escape");
     assert_eq!(focus(cx, handle), "sidebar");
 }
+
+/// The id in the frontmatter of a note file.
+fn id_of(path: &Path) -> String {
+    holm_markdown::Note::parse(&read(path))
+        .id()
+        .expect("the note has an id")
+}
+
+#[gpui_kit::test]
+fn the_link_picker_links_notes_headings_and_new_notes(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes = fixture.notes();
+    fs::create_dir(notes.join("work")).unwrap();
+    fs::write(notes.join("Alpha.md"), "# Alpha\n").unwrap();
+    fs::write(
+        notes.join("work/Beta.md"),
+        "# Beta\n\n## Bug list\n\n## Ideas\n",
+    )
+    .unwrap();
+    set_time(&notes.join("Alpha.md"), 300);
+    set_time(&notes.join("work/Beta.md"), 200);
+    let handle = open(cx, fixture.startup(None));
+    let options = |cx: &mut TestAppContext| labels(cx, handle, "quick-open", Role::ListBoxOption);
+    assert_eq!(editor_text(cx, handle), "# Alpha\n");
+    keys(cx, handle, "ctrl-end");
+
+    // A note link. The note had no id, so it gets one.
+    keys(cx, handle, "ctrl-k");
+    assert_eq!(question(cx, handle).as_deref(), Some(text::LINK_TO_NOTE));
+    assert_eq!(options(cx), ["Alpha*", "Beta"]);
+    cx.simulate_input(handle, "bet");
+    settle(cx);
+    assert_eq!(options(cx), ["Beta*", "Create “bet”"]);
+    keys(cx, handle, "enter");
+    assert_eq!(question(cx, handle), None);
+    assert_eq!(focus(cx, handle), "editor");
+    let beta = id_of(&notes.join("work/Beta.md"));
+    assert_eq!(
+        editor_text(cx, handle),
+        format!("# Alpha\n[Beta](holm:{beta})")
+    );
+
+    // A heading link. Tab fills in the title and switches to its headings.
+    cx.simulate_input(handle, " ");
+    keys(cx, handle, "ctrl-k");
+    cx.simulate_input(handle, "be");
+    keys(cx, handle, "tab");
+    assert_eq!(options(cx), ["Bug list*", "Ideas"]);
+    cx.simulate_input(handle, "bug");
+    settle(cx);
+    keys(cx, handle, "enter");
+    assert_eq!(
+        editor_text(cx, handle),
+        format!("# Alpha\n[Beta](holm:{beta}) [Bug list](<holm:{beta}#Bug list>)")
+    );
+
+    // A new note, in the folder of the open note. The user stays in this note.
+    cx.simulate_input(handle, " ");
+    keys(cx, handle, "ctrl-k");
+    cx.simulate_input(handle, "Gamma");
+    settle(cx);
+    assert_eq!(options(cx), ["Create “Gamma”*"]);
+    keys(cx, handle, "enter");
+    let gamma_path = notes.join("Gamma.md");
+    assert!(read(&gamma_path).ends_with("---\n# Gamma\n"));
+    let gamma = id_of(&gamma_path);
+    let text = editor_text(cx, handle);
+    assert!(text.starts_with("# Alpha\n"));
+    assert!(text.ends_with(&format!(" [Gamma](holm:{gamma})")));
+
+    // In a link, the field starts with its target. Enter changes the target and keeps the text.
+    keys(cx, handle, "ctrl-k");
+    assert_eq!(options(cx), ["Gamma*"]);
+    keys(cx, handle, "ctrl-a backspace");
+    cx.simulate_input(handle, "Beta");
+    settle(cx);
+    keys(cx, handle, "enter");
+    assert!(
+        editor_text(cx, handle).ends_with(&format!(" [Gamma](holm:{beta})")),
+        "{}",
+        editor_text(cx, handle)
+    );
+
+    // Esc changes nothing.
+    let before = editor_text(cx, handle);
+    keys(cx, handle, "ctrl-k");
+    cx.simulate_input(handle, "Alpha");
+    keys(cx, handle, "escape");
+    assert_eq!(question(cx, handle), None);
+    assert_eq!(editor_text(cx, handle), before);
+}
+
+#[gpui_kit::test]
+fn links_open_notes_at_headings_and_backlinks_lead_back(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes = fixture.notes();
+    fs::write(
+        notes.join("Alpha.md"),
+        "---\nid: 01A\n---\n# Alpha\n[ideas](holm:01B#Ideas)\n[gone](holm:01X)\n",
+    )
+    .unwrap();
+    fs::write(
+        notes.join("Beta.md"),
+        "---\nid: 01B\n---\n# Beta\n\ntext\n\n## Ideas\n",
+    )
+    .unwrap();
+    set_time(&notes.join("Alpha.md"), 300);
+    set_time(&notes.join("Beta.md"), 200);
+    let handle = open(cx, fixture.startup(None));
+    let backlinks = |cx: &mut TestAppContext| labels(cx, handle, "backlinks", Role::ListItem);
+    assert_eq!(backlinks(cx), Vec::<String>::new());
+
+    // Ctrl+Enter on a heading link opens the note at the heading.
+    keys(cx, handle, "down ctrl-enter");
+    assert_eq!(editor_text(cx, handle), "# Beta\n\ntext\n\n## Ideas\n");
+    cx.simulate_input(handle, "X");
+    assert_eq!(editor_text(cx, handle), "# Beta\n\ntext\n\nX## Ideas\n");
+
+    // The backlinks of Beta lead back to Alpha.
+    assert_eq!(backlinks(cx), ["Alpha"]);
+    cx.update_window(handle, |_, window, cx| {
+        window.click(gpui_kit::ElementId::NamedInteger("backlink".into(), 0), cx);
+    })
+    .unwrap();
+    settle(cx);
+    assert!(editor_text(cx, handle).starts_with("# Alpha\n"));
+    assert_eq!(
+        read(&notes.join("Beta.md")).lines().last(),
+        Some("X## Ideas")
+    );
+
+    // A link to a missing note shows a quiet bar.
+    keys(cx, handle, "down down ctrl-enter");
+    assert_eq!(bars(cx, handle), [text::NOTE_GONE]);
+}
+
+#[gpui_kit::test]
+fn ctrl_o_links_a_file_where_it_is(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes = fixture.notes();
+    fs::create_dir(notes.join("work")).unwrap();
+    fs::create_dir(notes.join("docs")).unwrap();
+    fs::write(notes.join("work/a.md"), "# A\n").unwrap();
+    fs::write(notes.join("docs/plan.pdf"), "pdf").unwrap();
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-end ctrl-o");
+    assert!(cx.did_prompt_for_paths());
+    let picked = notes.join("docs/plan.pdf");
+    cx.simulate_path_prompt_response(move |_| Some(vec![picked]));
+    settle(cx);
+    assert_eq!(editor_text(cx, handle), "# A\n[plan.pdf](../docs/plan.pdf)");
+    assert_eq!(fs::read_dir(notes.join("work")).unwrap().count(), 1);
+}
