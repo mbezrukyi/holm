@@ -7,10 +7,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui_kit::{
-    AnyElement, App, AvailableSpace, BorderStyle, Bounds, ContentMask, Corners, ElementId,
-    ElementInputHandler, Entity, FontStyle, FontWeight, GlobalElementId, ImgResourceLoader,
-    InspectorElementId, IntoElement, LayoutId, PathBuilder, Pixels, Point, Resource, Style,
-    TextAlign, Window, WrappedLine, fill, outline, point, px, relative, size,
+    AnyElement, App, AvailableSpace, BorderStyle, Bounds, ContentMask, Corners, CursorStyle,
+    DispatchPhase, ElementId, ElementInputHandler, Entity, FontStyle, FontWeight, GlobalElementId,
+    Hitbox, HitboxBehavior, ImgResourceLoader, InspectorElementId, IntoElement, LayoutId,
+    MouseMoveEvent, PathBuilder, Pixels, Point, Resource, Style, TextAlign, Window, WrappedLine,
+    fill, outline, point, px, relative, size,
 };
 
 pub(crate) use layout::{Hit, ImageSizes, Layout, Scroll};
@@ -53,10 +54,12 @@ fn column(bounds: Bounds<Pixels>) -> Bounds<Pixels> {
     )
 }
 
-/// The layout of a frame, and the view after the text when the last line is in sight.
+/// The layout of a frame, the view after the text when the last line is in sight, and the
+/// "Open" buttons of the file cards.
 pub(crate) struct Prepainted {
     layout: Rc<Layout>,
     end: Option<AnyElement>,
+    buttons: Vec<Hitbox>,
 }
 
 impl gpui_kit::Element for EditorElement {
@@ -141,7 +144,27 @@ impl gpui_kit::Element for EditorElement {
             );
             end
         });
-        Some(Prepainted { layout, end })
+        let buttons = layout
+            .lines
+            .iter()
+            .flat_map(|line| {
+                let origin = column.origin + point(px(0.), line.top);
+                line.cards
+                    .iter()
+                    .map(move |card| Bounds::new(origin + card.button.origin, card.button.size))
+            })
+            .collect::<Vec<_>>();
+        let buttons = window.with_content_mask(Some(ContentMask { bounds }), |window| {
+            buttons
+                .into_iter()
+                .map(|button| window.insert_hitbox(button, HitboxBehavior::Normal))
+                .collect()
+        });
+        Some(Prepainted {
+            layout,
+            end,
+            buttons,
+        })
     }
 
     fn paint(
@@ -154,9 +177,32 @@ impl gpui_kit::Element for EditorElement {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let Some(Prepainted { layout, mut end }) = layout.take() else {
+        let Some(Prepainted {
+            layout,
+            mut end,
+            buttons,
+        }) = layout.take()
+        else {
             return;
         };
+        let hovered: Vec<Bounds<Pixels>> = buttons
+            .iter()
+            .filter(|button| button.is_hovered(window))
+            .map(|button| button.bounds)
+            .collect();
+        for button in &buttons {
+            window.set_cursor_style(CursorStyle::PointingHand, button);
+        }
+        // Draw again when the mouse moves onto a button or off it.
+        let shown = hovered.clone();
+        window.on_mouse_event(move |_: &MouseMoveEvent, phase, window, _| {
+            let changed = buttons
+                .iter()
+                .any(|button| button.is_hovered(window) != shown.contains(&button.bounds));
+            if phase == DispatchPhase::Bubble && changed {
+                window.refresh();
+            }
+        });
         let editor = self.editor.read(cx);
         let focus = editor.focus.clone();
         let selection = editor.model.selection();
@@ -185,7 +231,7 @@ impl gpui_kit::Element for EditorElement {
                 window.paint_quad(fill(rect, theme.selection));
             }
             for line in &layout.lines {
-                paint_line(line, layout.bounds, &theme, window, cx);
+                paint_line(line, layout.bounds, &theme, &hovered, window, cx);
             }
             if focus.is_focused(window)
                 && let Some(rect) = layout.cursor_bounds(cursor, row_start)
@@ -269,10 +315,12 @@ fn paint_blocks(line: &LaidLine, column: Bounds<Pixels>, theme: &Theme, window: 
 }
 
 /// Paints the text, the list marker, the images and the file cards of a line.
+/// `hovered` holds the bounds of the card button under the mouse.
 fn paint_line(
     line: &LaidLine,
     column: Bounds<Pixels>,
     theme: &Theme,
+    hovered: &[Bounds<Pixels>],
     window: &mut Window,
     cx: &mut App,
 ) {
@@ -342,7 +390,7 @@ fn paint_line(
         }
     }
     for card in &line.cards {
-        paint_card(card, origin, line.line_height, theme, window, cx);
+        paint_card(card, origin, line.line_height, theme, hovered, window, cx);
     }
 }
 
@@ -495,6 +543,7 @@ fn paint_card(
     origin: Point<Pixels>,
     line_height: Pixels,
     theme: &Theme,
+    hovered: &[Bounds<Pixels>],
     window: &mut Window,
     cx: &mut App,
 ) {
@@ -534,8 +583,13 @@ fn paint_card(
             .paint(name_origin, line_height, TextAlign::Left, None, window, cx);
     });
     let button = Bounds::new(origin + card.button.origin, card.button.size);
+    let fill_color = if hovered.contains(&button) {
+        theme.line
+    } else {
+        theme.background
+    };
     window.paint_quad(
-        fill(button, theme.background)
+        fill(button, fill_color)
             .corner_radii(px(4.))
             .border_widths(px(1.))
             .border_color(theme.line),
