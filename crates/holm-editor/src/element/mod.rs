@@ -120,6 +120,7 @@ impl gpui_kit::Element for EditorElement {
                 bounds: column,
                 lines,
             });
+            editor.reach_goal_row(&layout);
             editor.layout = Some(layout.clone());
             (layout, end)
         });
@@ -160,6 +161,7 @@ impl gpui_kit::Element for EditorElement {
         let focus = editor.focus.clone();
         let selection = editor.model.selection();
         let cursor = editor.model.cursor();
+        let row_start = editor.row_start();
         let theme = editor.theme.clone();
         let matches = editor
             .find
@@ -186,7 +188,7 @@ impl gpui_kit::Element for EditorElement {
                 paint_line(line, layout.bounds, &theme, window, cx);
             }
             if focus.is_focused(window)
-                && let Some(rect) = layout.cursor_bounds(cursor)
+                && let Some(rect) = layout.cursor_bounds(cursor, row_start)
             {
                 window.paint_quad(fill(rect, theme.cursor));
             }

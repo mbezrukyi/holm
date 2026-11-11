@@ -75,6 +75,13 @@ pub struct Editor {
     pub(crate) highlighter: Highlighter,
     pub(crate) theme: Theme,
     goal_x: Option<Pixels>,
+    /// The cursor offset that shows at the start of its row, not at the end of the row above.
+    /// A wrap inside a word puts both places at the same offset. Only Up, Down, Home and End
+    /// set it.
+    row_start: Option<usize>,
+    /// After Up or Down into a line that showed no text: the row to put the cursor on at the
+    /// goal x, once the next frame shows the source of that line.
+    pub(crate) goal_row: Option<GoalRow>,
     drag: Option<Drag>,
     help: WritingHelp,
     pub(crate) find: Option<Find>,
@@ -82,6 +89,16 @@ pub struct Editor {
     /// The last custom colors, the newest first.
     custom_colors: Vec<Color>,
     pub(crate) end: Option<AnyView>,
+}
+
+/// The row for the cursor after Up or Down into a line that showed no text.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct GoalRow {
+    /// The cursor that Up or Down set. Any other cursor drops the goal row.
+    cursor: usize,
+    /// The first row after Down, the last row after Up.
+    first: bool,
+    extend: bool,
 }
 
 /// A mouse drag after a click. The selection grows by `unit` from `origin`.
@@ -230,6 +247,8 @@ impl Editor {
             highlighter: Highlighter::default(),
             theme: Theme::new(Appearance::Light),
             goal_x: None,
+            row_start: None,
+            goal_row: None,
             drag: None,
             help: WritingHelp::default(),
             find: None,
@@ -398,6 +417,26 @@ impl Editor {
         }
     }
 
+    /// Puts the cursor on its goal row after Up or Down, now that `layout` shows its line.
+    pub(crate) fn reach_goal_row(&mut self, layout: &Layout) {
+        let Some(goal) = self.goal_row.take() else {
+            return;
+        };
+        let cursor = self.model.cursor();
+        let Some(x) = self.goal_x.filter(|_| cursor == goal.cursor) else {
+            return;
+        };
+        if let Some((offset, row_start)) = layout.row_at(cursor, x, goal.first) {
+            self.model.set_cursor(offset, goal.extend);
+            self.row_start = row_start.then_some(offset);
+        }
+    }
+
+    /// Whether the cursor shows at the start of its row. See [`Self::row_start`].
+    pub(crate) fn row_start(&self) -> bool {
+        self.row_start == Some(self.model.cursor())
+    }
+
     /// The last layout, when it still shows the current text.
     fn current_layout(&self) -> Option<&Layout> {
         self.layout
@@ -407,6 +446,7 @@ impl Editor {
 
     fn edited(&mut self, cx: &mut Context<Self>) {
         self.version += 1;
+        self.row_start = None;
         self.goal_x = None;
         self.autoscroll = true;
         cx.emit(Changed);
@@ -424,6 +464,10 @@ impl Editor {
             return;
         }
         let key = event.keystroke.key.as_str();
+        // These keys set the row start again. Any other key drops it.
+        if !matches!(key, "up" | "down" | "home" | "end") {
+            self.row_start = None;
+        }
         if self.color.is_some() {
             if self.color_key(event, cx) {
                 cx.stop_propagation();
@@ -661,14 +705,16 @@ impl Editor {
             "home" | "end" => {
                 let cursor = self.model.cursor();
                 let end = key == "end";
-                let offset = self
+                let row_start = self.row_start();
+                let (offset, row_start) = self
                     .current_layout()
-                    .and_then(|layout| layout.row_edge(cursor, end))
+                    .and_then(|layout| layout.row_edge(cursor, row_start, end))
                     .unwrap_or_else(|| {
                         let line = self.model.line_range(self.model.line_of(cursor));
-                        if end { line.end } else { line.start }
+                        (if end { line.end } else { line.start }, false)
                     });
                 self.model.set_cursor(offset, shift);
+                self.row_start = row_start.then_some(offset);
             }
             "backspace" | "delete" if !shift || key == "backspace" => {
                 let changed = if key == "backspace" {
@@ -729,12 +775,19 @@ impl Editor {
 
     fn move_vertical(&mut self, down: bool, extend: bool) {
         let cursor = self.model.cursor();
-        if let Some((offset, x)) = self
+        let row_start = self.row_start();
+        if let Some(to) = self
             .current_layout()
-            .and_then(|layout| layout.vertical(cursor, self.goal_x, down))
+            .and_then(|layout| layout.vertical(cursor, row_start, self.goal_x, down))
         {
-            self.goal_x = Some(x);
-            self.model.set_cursor(offset, extend);
+            self.goal_x = Some(to.x);
+            self.model.set_cursor(to.offset, extend);
+            self.row_start = to.row_start.then_some(to.offset);
+            self.goal_row = to.hidden.then_some(GoalRow {
+                cursor: to.offset,
+                first: down,
+                extend,
+            });
             return;
         }
         // The row is out of view: keep the byte column on the next source line.
@@ -763,6 +816,7 @@ impl Editor {
     }
 
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.row_start = None;
         window.focus(&self.focus, cx);
         self.find = None;
         self.color = None;
@@ -907,7 +961,7 @@ impl Render for Editor {
             // Below the cursor, or at the top of the text column when the cursor is not laid out.
             let at = self.current_layout().and_then(|layout| {
                 layout
-                    .cursor_bounds(self.model.cursor())
+                    .cursor_bounds(self.model.cursor(), self.row_start())
                     .map(|cursor| cursor.bottom_left() + Point::new(px(0.), px(4.)))
                     .or(Some(layout.bounds.origin))
             });
@@ -1023,7 +1077,8 @@ impl EntityInputHandler for Editor {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
-        self.current_layout()?.cursor_bounds(self.model.cursor())
+        self.current_layout()?
+            .cursor_bounds(self.model.cursor(), self.row_start())
     }
 
     fn character_index_for_point(

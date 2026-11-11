@@ -164,6 +164,48 @@ fn long_lines_wrap_at_the_editor_width() {
 }
 
 #[test]
+fn up_and_down_pass_a_wrap_inside_a_word() {
+    let mut app = app();
+    let width = {
+        let (_, cx) = open(&mut app, "", WIDTH, HEIGHT);
+        advance(cx) * 20.5 + MARGIN * 2.
+    };
+    let word = "a".repeat(30);
+    let (editor, cx) = open(&mut app, &format!("{word}\nend"), width, HEIGHT);
+    cx.simulate_keystrokes("down down");
+    cx.simulate_input("X");
+    assert_eq!(text(&editor, cx), format!("{word}\nXend"));
+    cx.simulate_keystrokes("left up up");
+    cx.simulate_input("Y");
+    assert_eq!(text(&editor, cx), format!("Y{word}\nXend"));
+    // Home on the second row stays on that row.
+    cx.simulate_keystrokes("backspace down home");
+    cx.simulate_input("Z");
+    assert_eq!(
+        text(&editor, cx),
+        format!("{}Z{}\nXend", &word[..20], &word[20..])
+    );
+}
+
+#[test]
+fn up_and_down_keep_the_column_into_a_line_with_only_a_card() {
+    let note = "abcdef\n![x](x.pdf)\nabcdef";
+    for (keys, expected) in [
+        ("right right right down", "abcdef\n![xX](x.pdf)\nabcdef"),
+        (
+            "down down right right right up",
+            "abcdef\n![xX](x.pdf)\nabcdef",
+        ),
+    ] {
+        let mut app = app();
+        let (editor, cx) = open(&mut app, note, WIDTH, HEIGHT);
+        cx.simulate_keystrokes(keys);
+        cx.simulate_input("X");
+        assert_eq!(text(&editor, cx), expected, "{keys}");
+    }
+}
+
+#[test]
 fn up_and_down_keep_the_column() {
     let mut app = app();
     let (editor, cx) = open(&mut app, "abcdef\nxy\nabcdef", WIDTH, HEIGHT);

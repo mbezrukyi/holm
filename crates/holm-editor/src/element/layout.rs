@@ -53,6 +53,18 @@ pub(crate) struct Scroll {
     pub(crate) offset: Pixels,
 }
 
+/// Where Up or Down puts the cursor.
+pub(crate) struct Vertical {
+    pub(crate) offset: usize,
+    /// The goal x for the next Up or Down.
+    pub(crate) x: Pixels,
+    /// Whether the offset shows at the start of its row, as in [`LaidLine::caret`].
+    pub(crate) row_start: bool,
+    /// The offset is in a line that showed no text, like a line with only an image. Its source
+    /// shows in the next frame, and only then can the cursor go to `x`.
+    pub(crate) hidden: bool,
+}
+
 /// The lines of the last frame, for drawing, clicks and up and down.
 pub(crate) struct Layout {
     /// The edit count of the text that this layout shows.
@@ -817,6 +829,29 @@ impl LaidLine {
     pub(crate) fn text_top(&self) -> Pixels {
         self.top + self.pad
     }
+
+    /// Where `offset` shows, from the top left of the text. A wrap inside a word puts the end
+    /// of a row and the start of the next row at the same offset. `row_start` picks the start
+    /// of the next row there.
+    fn caret(&self, offset: usize, row_start: bool) -> Option<Point<Pixels>> {
+        let text = self.text()?;
+        let index = self.display.to_display(offset);
+        let at = text.position_for_index(index, self.line_height)?;
+        if row_start && at.x > px(0.) {
+            let next = point(px(0.), at.y + self.line_height);
+            if text.closest_index_for_position(next, self.line_height) == Ok(index) {
+                return Some(next);
+            }
+        }
+        Some(at)
+    }
+
+    /// Whether `offset`, which a point on the row at `row_y` gave, shows at the end of the row
+    /// above. Then only `row_start` keeps it on its row.
+    fn shows_above(&self, offset: usize, row_y: Pixels) -> bool {
+        self.caret(offset, false)
+            .is_some_and(|at| at.y + self.line_height <= row_y)
+    }
 }
 
 impl Layout {
@@ -880,23 +915,28 @@ impl Layout {
     pub(crate) fn vertical(
         &self,
         cursor: usize,
+        row_start: bool,
         goal_x: Option<Pixels>,
         down: bool,
-    ) -> Option<(usize, Pixels)> {
+    ) -> Option<Vertical> {
         let ix = self
             .lines
             .iter()
             .position(|line| contains(&line.display.source(), cursor))?;
         let line = &self.lines[ix];
-        let at = line
-            .text()?
-            .position_for_index(line.display.to_display(cursor), line.line_height)?;
+        let at = line.caret(cursor, row_start)?;
         let x = goal_x.unwrap_or(line.left + at.x);
         let origin = self.bounds.origin;
-        let target = if down && at.y + line.line_height < line.text_height {
-            point(x, line.text_top() + at.y + line.line_height * 1.5)
+        let (line, target) = if down && at.y + line.line_height < line.text_height {
+            (
+                line,
+                point(x, line.text_top() + at.y + line.line_height * 1.5),
+            )
         } else if !down && at.y >= line.line_height {
-            point(x, line.text_top() + at.y - line.line_height * 0.5)
+            (
+                line,
+                point(x, line.text_top() + at.y - line.line_height * 0.5),
+            )
         } else {
             let other = if down {
                 self.lines[ix + 1..].iter().find(|l| l.height > px(0.))?
@@ -906,37 +946,75 @@ impl Layout {
             // A line with no text row: the cursor goes to its start or end.
             if other.text().is_none() {
                 let source = other.display.source();
-                return Some((if down { source.start } else { source.end }, x));
-            }
-            if down {
-                point(x, other.text_top() + other.line_height * 0.5)
-            } else {
-                point(
+                return Some(Vertical {
+                    offset: if down { source.start } else { source.end },
                     x,
-                    other.text_top() + other.text_height - other.line_height * 0.5,
-                )
+                    row_start: false,
+                    hidden: true,
+                });
             }
+            let y = if down {
+                other.text_top() + other.line_height * 0.5
+            } else {
+                other.text_top() + other.text_height - other.line_height * 0.5
+            };
+            (other, point(x, y))
         };
-        Some((self.offset_at(origin + target)?, x))
+        let offset = self.offset_at(origin + target)?;
+        let row_y = target.y - line.text_top();
+        Some(Vertical {
+            offset,
+            x,
+            row_start: line.shows_above(offset, row_y),
+            hidden: false,
+        })
+    }
+
+    /// The source offset at `x` on the first or the last text row of the line with the cursor,
+    /// and whether it is the start of its row, as in [`LaidLine::caret`].
+    pub(crate) fn row_at(&self, cursor: usize, x: Pixels, first: bool) -> Option<(usize, bool)> {
+        let line = self
+            .lines
+            .iter()
+            .find(|line| contains(&line.display.source(), cursor))?;
+        line.text()?;
+        let row_y = if first {
+            px(0.)
+        } else {
+            line.text_height - line.line_height
+        };
+        let target = point(x, line.text_top() + row_y + line.line_height * 0.5);
+        let offset = self.offset_at(self.bounds.origin + target)?;
+        Some((
+            offset,
+            line.shows_above(offset, row_y + line.line_height * 0.5),
+        ))
     }
 
     /// The source offset at the start or the end of the screen row with the cursor.
     /// It returns `None` when that row is not in this layout.
-    pub(crate) fn row_edge(&self, cursor: usize, end: bool) -> Option<usize> {
+    /// It also returns whether the offset is the start of its row, as in [`LaidLine::caret`].
+    pub(crate) fn row_edge(
+        &self,
+        cursor: usize,
+        row_start: bool,
+        end: bool,
+    ) -> Option<(usize, bool)> {
         let line = self
             .lines
             .iter()
             .find(|line| contains(&line.display.source(), cursor))?;
         let Some(text) = line.text() else {
             let source = line.display.source();
-            return Some(if end { source.end } else { source.start });
+            return Some((if end { source.end } else { source.start }, false));
         };
-        let at = text.position_for_index(line.display.to_display(cursor), line.line_height)?;
+        let at = line.caret(cursor, row_start)?;
         let x = if end { self.bounds.size.width } else { px(0.) };
         let index = text
             .closest_index_for_position(point(x, at.y), line.line_height)
             .unwrap_or_else(|index| index);
-        Some(line.display.to_source(index))
+        let offset = line.display.to_source(index);
+        Some((offset, line.shows_above(offset, at.y)))
     }
 
     /// How many rows of the base line height fit in the view, at least one.
@@ -958,14 +1036,13 @@ impl Layout {
     }
 
     /// The window bounds of the cursor, when its line is in this layout.
-    pub(crate) fn cursor_bounds(&self, cursor: usize) -> Option<Bounds<Pixels>> {
+    /// `row_start` is as in [`LaidLine::caret`].
+    pub(crate) fn cursor_bounds(&self, cursor: usize, row_start: bool) -> Option<Bounds<Pixels>> {
         let line = self
             .lines
             .iter()
             .find(|line| line.display.raw && contains(&line.display.source(), cursor))?;
-        let at = line
-            .text()?
-            .position_for_index(line.display.to_display(cursor), line.line_height)?;
+        let at = line.caret(cursor, row_start)?;
         // The cursor is as tall as the text, in the middle of its row.
         let height = (line.font_size * 1.3).min(line.line_height);
         let y = line.text_top() + at.y + (line.line_height - height) / 2.;
