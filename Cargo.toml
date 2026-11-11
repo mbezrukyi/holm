@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+exclude = ["vendor"]
 
 [workspace.package]
 version = "0.1.0"
@@ -52,3 +53,8 @@ dbg_macro = "warn"
 todo = "warn"
 module_name_repetitions = "allow"
 must_use_candidate = "allow"
+
+# A copy of gpui-pre-linux 0.3.11 with one fix: X11 file drop positions are divided by the
+# screen scale, like other pointer positions. Remove it when a release has the fix.
+[patch.crates-io]
+gpui-pre-linux = { path = "vendor/gpui-pre-linux" }
