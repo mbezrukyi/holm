@@ -303,8 +303,8 @@ impl NotePane {
         .detach();
     }
 
-    /// Opens the system file picker, and puts a link to each picked file at the cursor, with
-    /// no copy.
+    /// Opens the system file picker, and embeds each picked file at the cursor, with no copy.
+    /// It shows as an image or a file card, like a pasted file.
     pub(crate) fn link_files(&mut self, cx: &mut Context<Self>) {
         let picked = cx.prompt_for_paths(PathPromptOptions {
             files: true,
@@ -331,7 +331,7 @@ impl NotePane {
                         .collect::<Vec<_>>()
                 })
                 .await;
-            pane.update(cx, |pane, cx| pane.insert_file_links(links, false, cx))
+            pane.update(cx, |pane, cx| pane.insert_file_links(links, true, cx))
                 .ok();
         })
         .detach();

@@ -932,7 +932,7 @@ fn links_open_notes_at_headings_and_backlinks_lead_back(cx: &mut TestAppContext)
 }
 
 #[gpui_kit::test]
-fn ctrl_o_links_a_file_where_it_is(cx: &mut TestAppContext) {
+fn ctrl_o_embeds_a_file_where_it_is(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     let notes = fixture.notes();
     fs::create_dir(notes.join("work")).unwrap();
@@ -945,6 +945,9 @@ fn ctrl_o_links_a_file_where_it_is(cx: &mut TestAppContext) {
     let picked = notes.join("docs/plan.pdf");
     cx.simulate_path_prompt_response(move |_| Some(vec![picked]));
     settle(cx);
-    assert_eq!(editor_text(cx, handle), "# A\n[plan.pdf](../docs/plan.pdf)");
+    assert_eq!(
+        editor_text(cx, handle),
+        "# A\n![plan.pdf](../docs/plan.pdf)\n"
+    );
     assert_eq!(fs::read_dir(notes.join("work")).unwrap().count(), 1);
 }
