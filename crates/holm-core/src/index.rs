@@ -77,6 +77,8 @@ pub(crate) enum Filter<'a> {
     Search(&'a str),
     /// The notes that link to this note, by id or by path.
     Backlinks(&'a Path),
+    /// The note with this id.
+    Id(&'a str),
 }
 
 /// What a [`Index::refresh`] found.
@@ -159,6 +161,7 @@ impl Index {
                         OR (links.kind = 'file' AND links.target = target.path)))",
                 vec![bytes(rel)],
             ),
+            Filter::Id(id) => ("WHERE id = ?1", vec![Value::Text((*id).to_owned())]),
         };
         let sql = format!("{NOTE_INFO} {filter}");
         let mut notes = self.run(store, |conn| {

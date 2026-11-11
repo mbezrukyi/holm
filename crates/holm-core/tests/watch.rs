@@ -193,7 +193,7 @@ fn holm_s_own_tag_pin_and_attachment_changes_do_not_come_back() {
 
     fed.core.set_pinned("a.md", true).unwrap();
     fed.core.rename_tag("work", "job").unwrap();
-    let image = fed.core.paste_image("a.md", b"png").unwrap();
+    let image = fed.core.paste_image("a.md", "png", b"png").unwrap();
     fed.feed
         .changed([PathBuf::from("a.md"), PathBuf::from("attachments"), image])
         .unwrap();

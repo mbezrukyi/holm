@@ -10,6 +10,7 @@ mod retag;
 mod store;
 mod watch;
 
+use std::collections::{HashMap, hash_map};
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -22,7 +23,7 @@ pub use error::{Error, Result};
 pub use watch::Feed;
 
 use index::{Filter, Index};
-use model::{Change, DeleteCount, Link, Note, NoteId, NoteInfo, Order, Tag};
+use model::{Change, DeleteCount, Link, LinkTarget, Note, NoteId, NoteInfo, Order, Tag};
 use retag::TagEdit;
 use store::{ATTACHMENTS, Entry, Store, folder_of};
 use watch::{Apply, Batch};
@@ -204,6 +205,107 @@ impl Core {
         let path = path.as_ref();
         Store::check_note(path)?;
         self.list(&Filter::Backlinks(path), order)
+    }
+
+    /// The note with `id`, or `None` when no note has it.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Index`] as in [`Core::notes`].
+    pub fn note_with_id(&self, id: &str) -> Result<Option<NoteInfo>> {
+        Ok(self.list(&Filter::Id(id), Order::Title)?.into_iter().next())
+    }
+
+    /// The text of each heading in the note at `path`, in order, without the title.
+    ///
+    /// # Errors
+    ///
+    /// As in [`Core::read`].
+    pub fn headings(&self, path: impl AsRef<Path>) -> Result<Vec<String>> {
+        let body = self.read(path)?.body;
+        let title = holm_markdown::title_range(&body);
+        let parsed = holm_markdown::Body::parse(&body);
+        Ok(parsed
+            .headings()
+            .iter()
+            .filter(|heading| {
+                !title.as_ref().is_some_and(|title| {
+                    heading.range.start <= title.start && title.start <= heading.range.end
+                })
+            })
+            .map(|heading| heading.text.clone())
+            .collect())
+    }
+
+    /// The note links in the note at `path` that point to a missing note or heading,
+    /// each once. A heading link needs a heading with the same text, also in capital letters.
+    ///
+    /// # Errors
+    ///
+    /// - As in [`Core::links`].
+    /// - As in [`Core::read`], when a linked note can't be read.
+    pub fn broken_links(&self, path: impl AsRef<Path>) -> Result<Vec<LinkTarget>> {
+        let mut known: HashMap<NoteId, Option<Vec<String>>> = HashMap::new();
+        let mut broken = Vec::new();
+        for link in self.links(path)? {
+            let LinkTarget::Note { id, heading } = &link.target else {
+                continue;
+            };
+            let headings = match known.entry(id.clone()) {
+                hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                hash_map::Entry::Vacant(entry) => entry.insert(self.all_headings(id)?),
+            };
+            let found = match (headings, heading) {
+                (None, _) => false,
+                (Some(_), None) => true,
+                (Some(headings), Some(heading)) => headings.contains(heading),
+            };
+            if !found && !broken.contains(&link.target) {
+                broken.push(link.target);
+            }
+        }
+        Ok(broken)
+    }
+
+    /// Every heading of the note with `id`, the title too, or `None` with no such note.
+    fn all_headings(&self, id: &NoteId) -> Result<Option<Vec<String>>> {
+        let Some(info) = self.note_with_id(id.as_str())? else {
+            return Ok(None);
+        };
+        let body = self.read(&info.path)?.body;
+        let parsed = holm_markdown::Body::parse(&body);
+        Ok(Some(
+            parsed
+                .headings()
+                .iter()
+                .map(|heading| heading.text.clone())
+                .collect(),
+        ))
+    }
+
+    /// The path for a link from the note at `note` to `file`, with no copy. A file inside the
+    /// notes folder gets a path from the folder of the note. A file outside keeps its absolute
+    /// path.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::BadPath`] when `note` is not a `.md` path inside the notes folder, or `file` is
+    /// not absolute.
+    pub fn file_link(&self, note: impl AsRef<Path>, file: impl AsRef<Path>) -> Result<PathBuf> {
+        let (note, file) = (note.as_ref(), file.as_ref());
+        Store::check_note(note)?;
+        if !file.is_absolute() {
+            return Err(Error::BadPath {
+                path: file.to_owned(),
+            });
+        }
+        let file = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_owned());
+        let root = self.inner.store.root();
+        if file.starts_with(root) {
+            Ok(relink::relative(&root.join(folder_of(note)), &file))
+        } else {
+            Ok(file)
+        }
     }
 
     /// Every subfolder of the notes folder, sorted by path.
@@ -566,8 +668,8 @@ impl Core {
         self.attach(note.as_ref(), &OsString::from(stem), &ext, source)
     }
 
-    /// Saves a pasted PNG image into `attachments/`, and returns its path from the folder
-    /// of `note`, for a link.
+    /// Saves a pasted image into `attachments/`, and returns its path from the folder
+    /// of `note`, for a link. `extension` names the image format, like `png`.
     ///
     /// The name holds the local time: `Pasted image 2026-11-08 15-30-12.png`.
     /// Else it works as [`Core::attach_file`].
@@ -576,11 +678,17 @@ impl Core {
     ///
     /// - [`Error::BadPath`] as in [`Core::attach_file`].
     /// - [`Error::Write`] when the image can't be written.
-    pub fn paste_image(&self, note: impl AsRef<Path>, png: &[u8]) -> Result<PathBuf> {
+    pub fn paste_image(
+        &self,
+        note: impl AsRef<Path>,
+        extension: &str,
+        bytes: &[u8],
+    ) -> Result<PathBuf> {
         let stem = jiff::Zoned::now()
             .strftime("Pasted image %Y-%m-%d %H-%M-%S")
             .to_string();
-        self.attach(note.as_ref(), &OsString::from(stem), ".png", png)
+        let ext = format!(".{}", holm_markdown::file_stem(extension));
+        self.attach(note.as_ref(), &OsString::from(stem), &ext, bytes)
     }
 
     fn attach(

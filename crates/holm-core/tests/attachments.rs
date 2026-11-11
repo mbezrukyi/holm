@@ -94,7 +94,7 @@ fn attach_file_fails_when_attachments_is_a_file() {
 fn paste_image_names_the_file_by_the_time() {
     let folder = Folder::new(&[("work/a.md", "# A\n")]);
 
-    let path = folder.core.paste_image("work/a.md", b"png").unwrap();
+    let path = folder.core.paste_image("work/a.md", "png", b"png").unwrap();
 
     let name = path
         .strip_prefix("../attachments")
@@ -121,7 +121,7 @@ fn paste_image_names_the_file_by_the_time() {
 fn attachments_do_not_show_as_folders_or_notes() {
     let folder = Folder::new(&[("a.md", "# A\n")]);
 
-    folder.core.paste_image("a.md", b"png").unwrap();
+    folder.core.paste_image("a.md", "png", b"png").unwrap();
 
     assert_eq!(
         folder.core.folders().unwrap(),
