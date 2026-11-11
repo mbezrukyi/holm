@@ -54,10 +54,11 @@ fn column(bounds: Bounds<Pixels>) -> Bounds<Pixels> {
     )
 }
 
-/// The layout of a frame, the view after the text when the last line is in sight, and the
+/// The layout of a frame, the views before and after the text when they are in sight, and the
 /// "Open" buttons of the file cards.
 pub(crate) struct Prepainted {
     layout: Rc<Layout>,
+    start: Option<AnyElement>,
     end: Option<AnyElement>,
     buttons: Vec<Hitbox>,
 }
@@ -98,7 +99,24 @@ impl gpui_kit::Element for EditorElement {
     ) -> Self::PrepaintState {
         let style = window.text_style();
         let column = column(bounds);
-        let (layout, end) = self.editor.update(cx, |editor, _| {
+        let width = size(
+            AvailableSpace::Definite(column.size.width),
+            AvailableSpace::MinContent,
+        );
+        let editor = self.editor.read(cx);
+        let focus = editor.focus.clone();
+        let mut start_view = editor.start.clone().map(IntoElement::into_any_element);
+        let mut end_view = editor.end.clone().map(IntoElement::into_any_element);
+        let mut height = |view: Option<&mut AnyElement>| {
+            view.map_or(px(0.), |view| view.layout_as_root(width, window, cx).height)
+        };
+        let start_height = height(start_view.as_mut());
+        let end_height = height(end_view.as_mut());
+        // Nothing else in the editor takes the focus, so it can only be in the start view.
+        let focused = focus.is_focused(window);
+        let in_start = start_view.is_some() && !focused && focus.contains_focused(window, cx);
+        let (layout, start_origin, end_origin) = self.editor.update(cx, |editor, _| {
+            editor.follow_focus(in_start, focused);
             let mut shaper = Shaper::new(
                 style,
                 column.size.width,
@@ -113,55 +131,57 @@ impl gpui_kit::Element for EditorElement {
                 editor.autoscroll,
                 &mut shaper,
                 column,
+                start_height,
                 window,
             );
             editor.autoscroll = false;
+            let shows_start = editor.scroll.line == 0;
+            // Out of sight, the start view still gets drawn, far above the view and clipped. So
+            // it keeps the focus and its keys. Its popups stay out of the view too.
+            let start_origin = if shows_start {
+                column.origin - point(px(0.), editor.scroll.offset)
+            } else {
+                column.origin - point(px(0.), start_height + column.size.height)
+            };
             let shows_end = editor.scroll.line + lines.len() == editor.model.line_count();
-            let end = shows_end.then(|| editor.end.clone()).flatten();
+            let end_origin = shows_end.then(|| {
+                let top = lines.last().map_or(px(0.), |line| line.top + line.height);
+                column.origin + point(px(0.), top)
+            });
+            let mut views = Vec::new();
+            if shows_start && start_view.is_some() {
+                views.push(Bounds::new(
+                    start_origin,
+                    size(column.size.width, start_height),
+                ));
+            }
+            if let Some(origin) = end_origin.filter(|_| end_view.is_some()) {
+                views.push(Bounds::new(origin, size(column.size.width, end_height)));
+            }
             let layout = Rc::new(Layout {
                 version: editor.version,
                 bounds: column,
                 lines,
+                views,
             });
             editor.reach_goal_row(&layout);
             editor.layout = Some(layout.clone());
-            (layout, end)
+            (layout, start_origin, end_origin)
         });
-        let end = end.map(|end| {
-            let bottom = layout
-                .lines
-                .last()
-                .map_or(px(0.), |line| line.top + line.height);
-            let mut end = end.into_any_element();
-            end.prepaint_as_root(
-                column.origin + point(px(0.), bottom),
-                size(
-                    AvailableSpace::Definite(column.size.width),
-                    AvailableSpace::MinContent,
-                ),
-                window,
-                cx,
-            );
+        let start = start_view.map(|mut start| {
+            window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                start.prepaint_at(start_origin, window, cx);
+            });
+            start
+        });
+        let end = end_view.zip(end_origin).map(|(mut end, origin)| {
+            end.prepaint_at(origin, window, cx);
             end
         });
-        let buttons = layout
-            .lines
-            .iter()
-            .flat_map(|line| {
-                let origin = column.origin + point(px(0.), line.top);
-                line.cards
-                    .iter()
-                    .map(move |card| Bounds::new(origin + card.button.origin, card.button.size))
-            })
-            .collect::<Vec<_>>();
-        let buttons = window.with_content_mask(Some(ContentMask { bounds }), |window| {
-            buttons
-                .into_iter()
-                .map(|button| window.insert_hitbox(button, HitboxBehavior::Normal))
-                .collect()
-        });
+        let buttons = card_buttons(&layout, bounds, window);
         Some(Prepainted {
             layout,
+            start,
             end,
             buttons,
         })
@@ -179,6 +199,7 @@ impl gpui_kit::Element for EditorElement {
     ) {
         let Some(Prepainted {
             layout,
+            mut start,
             mut end,
             buttons,
         }) = layout.take()
@@ -241,8 +262,33 @@ impl gpui_kit::Element for EditorElement {
             if let Some(end) = &mut end {
                 end.paint(window, cx);
             }
+            // Last, so a popup of the start view shows over the text.
+            if let Some(start) = &mut start {
+                start.paint(window, cx);
+            }
         });
     }
+}
+
+/// The hitboxes of the "Open" buttons of the file cards, clipped to the editor `bounds`.
+fn card_buttons(layout: &Layout, bounds: Bounds<Pixels>, window: &mut Window) -> Vec<Hitbox> {
+    let column = layout.bounds;
+    let buttons = layout
+        .lines
+        .iter()
+        .flat_map(|line| {
+            let origin = column.origin + point(px(0.), line.top);
+            line.cards
+                .iter()
+                .map(move |card| Bounds::new(origin + card.button.origin, card.button.size))
+        })
+        .collect::<Vec<_>>();
+    window.with_content_mask(Some(ContentMask { bounds }), |window| {
+        buttons
+            .into_iter()
+            .map(|button| window.insert_hitbox(button, HitboxBehavior::Normal))
+            .collect()
+    })
 }
 
 /// Paints what lies behind the text: code backgrounds, quote bars, callouts, tables and rules.

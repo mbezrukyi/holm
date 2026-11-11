@@ -88,6 +88,9 @@ pub struct Editor {
     color: Option<ColorWindow>,
     /// The last custom colors, the newest first.
     custom_colors: Vec<Color>,
+    pub(crate) start: Option<AnyView>,
+    /// Whether the start view had the focus in the last frame.
+    start_focused: bool,
     pub(crate) end: Option<AnyView>,
 }
 
@@ -254,6 +257,8 @@ impl Editor {
             find: None,
             color: None,
             custom_colors: Vec::new(),
+            start: None,
+            start_focused: false,
             end: None,
         }
     }
@@ -378,8 +383,35 @@ impl Editor {
         true
     }
 
+    /// Sets a view that shows before the first line of the text, in the text column, or none.
+    /// It scrolls with the text, and its height is a part of the scroll. A click in it does not
+    /// move the cursor, and keys there do not reach the text.
+    ///
+    /// When the focus moves into the view, the editor scrolls to the very top. When the focus
+    /// comes back to the editor, the view goes back to the cursor. Out of sight, the view
+    /// keeps the focus and its keys.
+    pub fn set_start(&mut self, start: Option<AnyView>, cx: &mut Context<Self>) {
+        self.start = start;
+        cx.notify();
+    }
+
+    /// Scrolls when the focus moves into the start view or back to the editor.
+    /// `in_start` and `focused` describe the focus now.
+    pub(crate) fn follow_focus(&mut self, in_start: bool, focused: bool) {
+        if in_start == self.start_focused {
+            return;
+        }
+        self.start_focused = in_start;
+        if in_start {
+            self.scroll = Scroll::default();
+            self.autoscroll = false;
+        } else if focused {
+            self.autoscroll = true;
+        }
+    }
+
     /// Sets a view that shows after the last line of the text, in the text column, or none.
-    /// It scrolls with the text.
+    /// It scrolls with the text. A click in it does not move the cursor.
     pub fn set_end(&mut self, end: Option<AnyView>, cx: &mut Context<Self>) {
         self.end = end;
         cx.notify();
@@ -458,7 +490,11 @@ impl Editor {
         cx.notify();
     }
 
-    fn key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+    fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // A key in the start view, which lies inside the editor.
+        if !self.focus.is_focused(window) {
+            return;
+        }
         let modifiers = event.keystroke.modifiers;
         if modifiers.alt || modifiers.platform || modifiers.function {
             return;
@@ -816,6 +852,13 @@ impl Editor {
     }
 
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self
+            .layout
+            .as_ref()
+            .is_some_and(|layout| layout.in_view(event.position))
+        {
+            return;
+        }
         self.row_start = None;
         window.focus(&self.focus, cx);
         self.find = None;

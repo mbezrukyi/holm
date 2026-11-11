@@ -72,6 +72,8 @@ pub(crate) struct Layout {
     /// The bounds of the text column.
     pub(crate) bounds: Bounds<Pixels>,
     pub(crate) lines: Vec<LaidLine>,
+    /// The window bounds of the views before and after the text that are in sight.
+    pub(crate) views: Vec<Bounds<Pixels>>,
 }
 
 /// What a line shows in its text row.
@@ -730,6 +732,9 @@ fn cell_place(head: bool) -> Place {
 
 /// Lays out the lines that fill `bounds`, from `scroll` on.
 ///
+/// `start` is the height of the view before the first line. The scroll counts it as a part of
+/// line 0, so `scroll.offset` on line 0 starts at the top of that view.
+///
 /// It first moves `scroll` to a line start. With `autoscroll`, it then moves it so the cursor is
 /// in view.
 pub(crate) fn lay_out(
@@ -738,10 +743,14 @@ pub(crate) fn lay_out(
     autoscroll: bool,
     shaper: &mut Shaper<'_>,
     bounds: Bounds<Pixels>,
+    start: Pixels,
     window: &Window,
 ) -> Vec<LaidLine> {
     let last = model.line_count() - 1;
     let view = bounds.size.height;
+    let start_of = |line: usize| if line == 0 { start } else { px(0.) };
+    let height =
+        |shaper: &mut Shaper<'_>, line| shaper.line(model, line, window).height + start_of(line);
     scroll.line = scroll.line.min(last);
     while scroll.offset < px(0.) {
         if scroll.line == 0 {
@@ -749,23 +758,25 @@ pub(crate) fn lay_out(
             break;
         }
         scroll.line -= 1;
-        scroll.offset += shaper.line(model, scroll.line, window).height;
+        scroll.offset += height(shaper, scroll.line);
     }
     while scroll.line < last {
-        let height = shaper.line(model, scroll.line, window).height;
-        if scroll.offset < height {
+        let line_height = height(shaper, scroll.line);
+        if scroll.offset < line_height {
             break;
         }
-        scroll.offset -= height;
+        scroll.offset -= line_height;
         scroll.line += 1;
     }
 
-    let mut lines = fill_view(model, *scroll, shaper, view, window);
+    let mut lines = fill_view(model, *scroll, shaper, view, start, window);
     if !autoscroll {
         return lines;
     }
     let cursor = model.line_of(model.cursor());
-    if cursor < scroll.line || (cursor == scroll.line && scroll.offset > px(0.)) {
+    // On line 0 the start view can be cut off while the text still shows. Then nothing moves.
+    let text_cut_off = lines.first().is_some_and(|line| line.text_top() < px(0.));
+    if cursor < scroll.line || (cursor == scroll.line && text_cut_off) {
         *scroll = Scroll {
             line: cursor,
             offset: px(0.),
@@ -780,31 +791,36 @@ pub(crate) fn lay_out(
         }
         // Put the text of the cursor line at the bottom of the view.
         let laid = shaper.line(model, cursor, window);
-        let mut top = view - laid.pad - laid.text_height;
+        let mut top = view - laid.pad - laid.text_height - start_of(cursor);
         let mut line = cursor;
         while line > 0 && top > px(0.) {
             line -= 1;
-            top -= shaper.line(model, line, window).height;
+            top -= height(shaper, line);
         }
         *scroll = Scroll {
             line,
             offset: (-top).max(px(0.)),
         };
     }
-    lines = fill_view(model, *scroll, shaper, view, window);
+    lines = fill_view(model, *scroll, shaper, view, start, window);
     lines
 }
 
+/// The lines that fill a view of height `view`, after a start view of height `start`.
 fn fill_view(
     model: &Model,
     scroll: Scroll,
     shaper: &mut Shaper<'_>,
     view: Pixels,
+    start: Pixels,
     window: &Window,
 ) -> Vec<LaidLine> {
     let mut lines = Vec::new();
     let mut top = -scroll.offset;
     for ix in scroll.line..model.line_count() {
+        if ix == 0 {
+            top += start;
+        }
         if top >= view {
             break;
         }
@@ -855,6 +871,11 @@ impl LaidLine {
 }
 
 impl Layout {
+    /// Whether a window point lies in a view before or after the text.
+    pub(crate) fn in_view(&self, position: Point<Pixels>) -> bool {
+        self.views.iter().any(|view| view.contains(&position))
+    }
+
     /// The source offset under a window point. Image space maps to the last text row above it.
     pub(crate) fn offset_at(&self, position: Point<Pixels>) -> Option<usize> {
         let local = position - self.bounds.origin;

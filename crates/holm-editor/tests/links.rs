@@ -254,9 +254,8 @@ impl gpui_kit::Render for End {
             .id("end")
             .w_full()
             .h(LINE_HEIGHT * 2.)
-            .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+            .on_mouse_down(MouseButton::Left, move |_, _, _| {
                 *clicks.borrow_mut() += 1;
-                cx.stop_propagation();
             })
     }
 }
