@@ -1625,7 +1625,7 @@ fn the_delete_dialog_names_the_note_by_its_title(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn a_quit_renames_the_open_note_to_its_title(cx: &mut TestAppContext) {
+fn a_quit_keeps_the_name_of_the_open_note(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     let handle = open(cx, fixture.startup(None));
     keys(cx, handle, "ctrl-n");
@@ -1633,14 +1633,14 @@ fn a_quit_renames_the_open_note_to_its_title(cx: &mut TestAppContext) {
     assert_eq!(files(&fixture.notes()), ["Untitled.md"]);
 
     cx.quit();
-    assert_eq!(files(&fixture.notes()), ["Plans.md"]);
-    assert!(read(&fixture.notes().join("Plans.md")).ends_with("\n# Plans\n"));
+    assert_eq!(files(&fixture.notes()), ["Untitled.md"]);
+    assert!(read(&fixture.notes().join("Untitled.md")).ends_with("\n# Plans\n"));
     let settings = Config::load(fixture.config()).settings().clone();
-    assert_eq!(settings.last_note, Some(PathBuf::from("Plans.md")));
+    assert_eq!(settings.last_note, Some(PathBuf::from("Untitled.md")));
 }
 
 #[gpui_kit::test]
-fn a_window_close_renames_the_open_note_to_its_title(cx: &mut TestAppContext) {
+fn a_window_close_keeps_the_name_of_the_open_note(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     let handle = open(cx, fixture.startup(None));
     keys(cx, handle, "ctrl-n");
@@ -1649,8 +1649,8 @@ fn a_window_close_renames_the_open_note_to_its_title(cx: &mut TestAppContext) {
     cx.update_window(handle, |_, window, _| window.remove_window())
         .unwrap();
     cx.run_until_parked();
-    assert_eq!(files(&fixture.notes()), ["Plans.md"]);
-    assert!(read(&fixture.notes().join("Plans.md")).ends_with("\n# Plans\n"));
+    assert_eq!(files(&fixture.notes()), ["Untitled.md"]);
+    assert!(read(&fixture.notes().join("Untitled.md")).ends_with("\n# Plans\n"));
     let settings = Config::load(fixture.config()).settings().clone();
-    assert_eq!(settings.last_note, Some(PathBuf::from("Plans.md")));
+    assert_eq!(settings.last_note, Some(PathBuf::from("Untitled.md")));
 }

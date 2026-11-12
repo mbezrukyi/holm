@@ -8,8 +8,8 @@
 //! When another tool deletes the note, the app opens another one. With unsaved changes, a quiet
 //! bar first asks to write the note again or to close it.
 //!
-//! When the user opens another note or closes the window, the pane saves the note. It also renames the file
-//! to match the title.
+//! When the user opens another note, the pane saves the note and renames the file to match
+//! the title. When the window closes, the pane only saves the note.
 //!
 //! The tag row before the first line shows the tags and the pin of the note. It scrolls with
 //! the text. The pane writes their changes at once. The editor undo stack holds only the text,
@@ -143,6 +143,7 @@ impl NotePane {
                 pane.editor
                     .update(cx, |editor, cx| editor.set_appearance(appearance, cx));
             }),
+            cx.on_release(Self::released),
         ];
         let appearance = theme::appearance(cx);
         editor.update(cx, |editor, cx| editor.set_appearance(appearance, cx));
@@ -442,7 +443,7 @@ impl NotePane {
         })
     }
 
-    fn is_dirty(&self, cx: &Context<Self>) -> bool {
+    fn is_dirty(&self, cx: &App) -> bool {
         self.editor.read(cx).text() != self.saved
     }
 
@@ -600,38 +601,28 @@ impl NotePane {
         cx.emit(PaneEvent::Gone(path));
     }
 
-    /// When the window closes: writes unsaved text, then renames the file to match the title.
-    /// Unsaved text wins over an outside change. It works on the UI thread, because no task
-    /// runs after the window is gone.
-    pub(crate) fn leave(&mut self, cx: &mut Context<Self>) {
-        self.autosave = None;
+    /// When the window closes or the app quits: writes unsaved text. Unsaved text wins over
+    /// an outside change. It works on the UI thread, because no task runs after the window
+    /// is gone.
+    fn released(&mut self, cx: &mut App) {
+        if !self.is_dirty(cx) {
+            return;
+        }
         let Some(mut note) = self.note.clone() else {
             return;
         };
-        if self.is_dirty(cx) {
-            let write = if self.deleted {
-                Core::restore
-            } else {
-                Core::save
-            };
-            note.body = self
-                .ending
-                .to_disk(self.editor.read(cx).text())
-                .into_owned();
-            if let Err(error) = write(&self.core, &note) {
-                let error = AppError::from(error);
-                tracing::warn!(error = %crate::chain(&error), "cannot save the note");
-                return;
-            }
-        } else if self.deleted {
-            return;
-        }
-        match self.core.rename_to_title(&note.info.path) {
-            Ok(info) => self.note = Some(Note { info, ..note }),
-            Err(error) => {
-                let error = AppError::from(error);
-                tracing::warn!(error = %crate::chain(&error), "cannot rename the note to its title");
-            }
+        let write = if self.deleted {
+            Core::restore
+        } else {
+            Core::save
+        };
+        note.body = self
+            .ending
+            .to_disk(self.editor.read(cx).text())
+            .into_owned();
+        if let Err(error) = write(&self.core, &note) {
+            let error = AppError::from(error);
+            tracing::warn!(error = %crate::chain(&error), "cannot save the note");
         }
     }
 

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::{
-    App, AppContext as _, Context, CursorStyle, Entity, FocusHandle, Focusable as _,
+    AppContext as _, Context, CursorStyle, Entity, FocusHandle, Focusable as _,
     InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseMoveEvent, MouseUpEvent,
     ParentElement, Pixels, Render, Styled, Subscription, Task, Window, div, px,
 };
@@ -78,7 +78,6 @@ impl NotesView {
         let subscriptions = vec![
             cx.subscribe_in(&sidebar, window, Self::sidebar_event),
             cx.subscribe_in(&pane, window, Self::pane_event),
-            cx.on_release(Self::released),
         ];
         let mut this = Self {
             core,
@@ -100,20 +99,6 @@ impl NotesView {
         this.keep_state(cx);
         this.focus_home(window, cx);
         this
-    }
-
-    /// When the window closes or the app quits: saves and renames the open note, and keeps its
-    /// new path in the config.
-    fn released(&mut self, cx: &mut App) {
-        self.pane.update(cx, NotePane::leave);
-        let path = self.pane.read(cx).path().map(Path::to_owned);
-        let mut settings = self.config.read(cx).settings().clone();
-        if settings.last_note != path {
-            settings.last_note = path;
-            if let Err(error) = self.config.update(cx, |config, _| config.save(settings)) {
-                tracing::warn!(error = %crate::chain(&error), "cannot save the settings");
-            }
-        }
     }
 
     fn pane_event(
