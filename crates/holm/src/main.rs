@@ -9,6 +9,7 @@ mod config;
 mod crash;
 mod dialog;
 mod error;
+mod fold;
 mod icons;
 mod link_picker;
 mod link_rows;

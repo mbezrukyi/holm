@@ -13,8 +13,11 @@
 //!   [`Dropdown`] for the focus.
 //! - A click on the row opens the popup. A click on a chip also puts the cursor on its tag.
 //!
-//! The [`Backlinks`] count sits at the right end of the row. With no tags, no pin and no
-//! backlinks, the row stays hidden.
+//! The row is one line. Chips that do not fit fold into a "+N" chip. A click on it opens the
+//! popup with the cursor on the first folded tag. The [`Backlinks`] count sits at the right
+//! end of the row. With no tags, no pin and no backlinks, the row stays hidden.
+
+use std::ops::Range;
 
 use gpui_kit::component::input::{
     Enter, Escape, IndentInline, Input, InputEvent, InputState, MoveDown, MoveUp,
@@ -22,15 +25,16 @@ use gpui_kit::component::input::{
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AppContext as _, Context, CursorStyle, ElementId, Entity, EventEmitter, FocusHandle,
-    InteractiveElement as _, IntoElement, MouseButton, ParentElement, Pixels, Render, Role,
-    StatefulInteractiveElement, Styled, Subscription, Task, TestSupportExt as _, Toggled, Window,
-    div, px,
+    AnyElement, AppContext as _, Context, CursorStyle, ElementId, Entity, EventEmitter,
+    FocusHandle, InteractiveElement as _, IntoElement, MouseButton, ParentElement, Pixels, Render,
+    Role, StatefulInteractiveElement, Styled, Subscription, Task, TestSupportExt as _, Toggled,
+    Window, div, px,
 };
 use holm_core::Core;
 use holm_core::model::Tag;
 
 use crate::backlinks::Backlinks;
+use crate::fold::Fold;
 use crate::popup::Dropdown;
 use crate::text;
 
@@ -258,6 +262,35 @@ impl TagRow {
         cx.notify();
     }
 
+    /// Builds the quiet "+N" chip for a range of folded tags.
+    fn more_chip(cx: &Context<Self>) -> impl Fn(Range<usize>) -> AnyElement + 'static {
+        let theme = cx.theme();
+        let (radius, text, hover) = (theme.radius, theme.muted_foreground, theme.secondary);
+        let row = cx.entity().downgrade();
+        move |folded| {
+            let first = folded.start;
+            let row = row.clone();
+            div()
+                .id("tag-more")
+                .role(Role::Button)
+                .px_2()
+                .rounded(radius)
+                .text_size(px(12.))
+                .text_color(text)
+                .cursor(CursorStyle::PointingHand)
+                .hover(move |chip| chip.bg(hover))
+                .child(format!("+{}", folded.len()))
+                .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                    row.update(cx, |row, cx| row.open_at(Some(first), window, cx))
+                        .ok();
+                    // The row and the editor would take the focus after this.
+                    window.prevent_default();
+                })
+                .test_support()
+                .into_any_element()
+        }
+    }
+
     fn row_chip(at: usize, tag: &str, cx: &Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         div()
@@ -441,17 +474,19 @@ impl Render for TagRow {
             )
             .w_full()
             .when(visible, |row| row.min_h(px(36.)).pt_3().pb_1())
-            .flex_wrap()
-            .gap_1p5()
             .items_center()
-            .children(pin)
-            .children(
-                self.tags
-                    .iter()
-                    .enumerate()
-                    .map(|(at, tag)| Self::row_chip(at, tag, cx)),
-            )
-            .when(has_backlinks, |row| row.child(self.backlinks.clone()));
+            .child(
+                Fold::new(
+                    px(6.),
+                    self.tags
+                        .iter()
+                        .enumerate()
+                        .map(|(at, tag)| Self::row_chip(at, tag, cx).into_any_element()),
+                    Self::more_chip(cx),
+                )
+                .lead(pin)
+                .tail(has_backlinks.then(|| self.backlinks.clone())),
+            );
         self.dropdown
             .root()
             .w_full()

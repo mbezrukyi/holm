@@ -803,6 +803,81 @@ fn the_first_tag_shows_the_hidden_tag_row(cx: &mut TestAppContext) {
     assert_eq!(fields(&a).0, ["work"]);
 }
 
+/// The bounds of the part `id`, or `None` when it is not on the screen.
+fn bounds_of(
+    cx: &mut TestAppContext,
+    handle: AnyWindowHandle,
+    id: &'static str,
+) -> Option<gpui_kit::Bounds<gpui_kit::Pixels>> {
+    screen(cx, handle, |window| {
+        window.try_find(id).map(|part| part.bounds())
+    })
+}
+
+#[gpui_kit::test]
+fn the_tag_row_stays_on_one_line_and_folds_the_rest_into_a_chip(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes = fixture.notes();
+    fs::write(
+        notes.join("A.md"),
+        "---\nid: 01A\ntags:\n  - work\n---\n# A\n",
+    )
+    .unwrap();
+    fs::write(notes.join("B.md"), "# B\n[a](holm:01A)\n").unwrap();
+    set_time(&notes.join("A.md"), 200);
+    set_time(&notes.join("B.md"), 100);
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(editor_text(cx, handle), "# A\n");
+    assert_eq!(chips(cx, handle), ["work"]);
+    assert_eq!(bounds_of(cx, handle, "tag-more"), None);
+    let one_tag = bounds_of(cx, handle, "tag-row").unwrap().size.height;
+
+    let tags: Vec<String> = (0..12)
+        .map(|at| format!("a-long-tag-number-{at:02}-with-words"))
+        .collect();
+    let lines = tags.join("\n  - ");
+    fixture.write_outside(
+        cx,
+        "A.md",
+        &format!("---\nid: 01A\ntags:\n  - {lines}\n---\n# A\n"),
+    );
+    let shown = chips(cx, handle);
+    assert!(!shown.is_empty() && shown.len() < tags.len(), "{shown:?}");
+    assert_eq!(shown, tags[..shown.len()]);
+    let row = bounds_of(cx, handle, "tag-row").unwrap();
+    assert_eq!(row.size.height, one_tag);
+    let count = bounds_of(cx, handle, "backlinks-button").unwrap();
+    let more = bounds_of(cx, handle, "tag-more").unwrap();
+    assert_eq!(
+        count.top(),
+        more.top(),
+        "the count is on the line of the chips"
+    );
+    assert!(more.right() <= count.left());
+    assert!(count.right() <= row.right());
+
+    // A narrow window folds more tags.
+    cx.simulate_window_resize(
+        handle,
+        gpui_kit::size(gpui_kit::px(560.), gpui_kit::px(600.)),
+    );
+    cx.run_until_parked();
+    let narrow = chips(cx, handle);
+    assert!(narrow.len() < shown.len(), "{narrow:?}");
+    assert_eq!(
+        bounds_of(cx, handle, "tag-row").unwrap().size.height,
+        one_tag
+    );
+
+    // A click on the "+N" chip puts the cursor on the first folded tag.
+    click(cx, handle, "tag-more");
+    assert_eq!(focus(cx, handle), "tag field");
+    let cursor = options(cx, handle)
+        .iter()
+        .position(|line| line.ends_with('*'));
+    assert_eq!(cursor, Some(narrow.len()));
+}
+
 #[gpui_kit::test]
 fn tags_rename_and_delete_in_all_notes_after_the_dialog(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
