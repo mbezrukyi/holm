@@ -269,12 +269,11 @@ impl Sidebar {
                 self.snapshot = snapshot;
                 self.error = None;
                 // An old copy may miss an item that a later write made. The next copy decides.
-                let current = revision == self.core.revision();
-                if current && !self.snapshot.has(self.view.item()) {
+                if revision == self.core.revision() {
                     let item = self.snapshot.nearest(self.view.item());
-                    self.open_parents(&item);
-                    self.view = View::Tree(item);
-                    cx.emit(SidebarEvent::ViewChanged);
+                    if &item != self.view.item() {
+                        self.show_in_tree(item, cx);
+                    }
                 }
                 self.open.retain(|item| self.snapshot.has(item));
             }
@@ -356,16 +355,12 @@ impl Sidebar {
 
     /// Shows the tree with `item` selected, and opens its parents.
     pub(crate) fn show_in_tree(&mut self, item: Item, cx: &mut Context<Self>) {
-        self.open_parents(&item);
-        self.set_view(View::Tree(item), cx);
-    }
-
-    fn open_parents(&mut self, item: &Item) {
         let mut parent = item.parent();
         while let Some(item) = parent {
             parent = item.parent();
             self.open.insert(item);
         }
+        self.set_view(View::Tree(item), cx);
     }
 
     fn set_view(&mut self, view: View, cx: &mut Context<Self>) {
