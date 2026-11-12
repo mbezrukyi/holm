@@ -96,6 +96,15 @@ impl Snapshot {
         }
     }
 
+    /// `item` if the tree has it, or else its nearest parent in the tree, or "All notes".
+    pub(crate) fn nearest(&self, item: &Item) -> Item {
+        let mut item = item.clone();
+        while !self.has(&item) {
+            item = item.parent().unwrap_or(Item::All);
+        }
+        item
+    }
+
     /// The visible rows: "All notes", then the folders, then the tags. Only the children of
     /// `open` items show.
     pub(crate) fn rows(&self, open: &HashSet<Item>) -> Vec<Row> {
@@ -316,5 +325,25 @@ mod tests {
         assert_eq!(Item::Tag("work/holm".into()).folder(), Path::new(""));
         assert!(snapshot().has(&Item::Tag("work/holm".into())));
         assert!(!snapshot().has(&Item::Folder("gone".into())));
+    }
+
+    #[test]
+    fn a_gone_item_falls_back_to_its_nearest_parent() {
+        let snapshot = snapshot();
+        let nearest = |item: Item| snapshot.nearest(&item);
+        assert_eq!(
+            nearest(Item::Folder("work/deep".into())),
+            Item::Folder("work/deep".into())
+        );
+        assert_eq!(
+            nearest(Item::Folder("work/gone/deeper".into())),
+            Item::Folder("work".into())
+        );
+        assert_eq!(nearest(Item::Folder("gone".into())), Item::All);
+        assert_eq!(
+            nearest(Item::Tag("work/gone".into())),
+            Item::Tag("work".into())
+        );
+        assert_eq!(nearest(Item::Tag("gone/holm".into())), Item::All);
     }
 }

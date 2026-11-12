@@ -864,9 +864,9 @@ fn tags_rename_and_delete_in_all_notes_after_the_dialog(cx: &mut TestAppContext)
     assert_eq!(chips(cx, handle), Vec::<String>::new());
     assert!(Config::load(fixture.config()).settings().ask_before_delete);
 
-    // The gone tag leaves the list of all notes. The tree has All notes, then the tag home.
-    assert_eq!(sidebar(cx, handle), "list All notes");
-    keys(cx, handle, "escape down");
+    // A gone top tag leaves the tree with All notes. The tree has All notes, then the tag home.
+    assert_eq!(sidebar(cx, handle), "tree All notes");
+    keys(cx, handle, "down");
     assert_eq!(sidebar(cx, handle), "tree #home");
     keys(cx, handle, "delete");
     assert_eq!(
@@ -885,6 +885,61 @@ fn tags_rename_and_delete_in_all_notes_after_the_dialog(cx: &mut TestAppContext)
         modified(&b),
         std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(100)
     );
+}
+
+#[gpui_kit::test]
+fn a_folder_delete_selects_the_parent_folder(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    fs::create_dir_all(notes_dir.join("work/plans")).unwrap();
+    fs::write(notes_dir.join("work/Goals.md"), "# Goals\n").unwrap();
+    fs::write(notes_dir.join("work/plans/Plan.md"), "# Plan\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    keys(cx, handle, "ctrl-shift-l escape down right down");
+    assert_eq!(sidebar(cx, handle), "tree work/plans");
+    keys(cx, handle, "delete");
+    assert!(question(cx, handle).is_some());
+    keys(cx, handle, "enter");
+    assert!(!notes_dir.join("work/plans").exists());
+    assert_eq!(sidebar(cx, handle), "tree work");
+
+    keys(cx, handle, "delete");
+    assert!(question(cx, handle).is_some());
+    keys(cx, handle, "enter");
+    assert!(!notes_dir.join("work").exists());
+    assert_eq!(sidebar(cx, handle), "tree All notes");
+    assert_eq!(
+        Config::load(fixture.config()).settings().sidebar.view,
+        View::Tree(Item::All)
+    );
+}
+
+#[gpui_kit::test]
+fn a_child_tag_delete_selects_the_parent_tag_while_it_exists(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    let a = notes_dir.join("A.md");
+    let b = notes_dir.join("B.md");
+    fs::write(&a, "---\ntags:\n  - work\n  - work/holm\n---\n# A\n").unwrap();
+    fs::write(&b, "---\ntags:\n  - home/garden\n---\n# B\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    // The tree: All notes, then the tags home and work.
+    keys(cx, handle, "ctrl-shift-l escape down down right down");
+    assert_eq!(sidebar(cx, handle), "tree #work/holm");
+    keys(cx, handle, "delete");
+    keys(cx, handle, "enter");
+    assert_eq!(fields(&a).0, ["work"]);
+    assert_eq!(sidebar(cx, handle), "tree #work");
+
+    // No note keeps the tag home, so it goes with its child.
+    keys(cx, handle, "up right down");
+    assert_eq!(sidebar(cx, handle), "tree #home/garden");
+    keys(cx, handle, "delete");
+    keys(cx, handle, "enter");
+    assert_eq!(fields(&b).0, Vec::<String>::new());
+    assert_eq!(sidebar(cx, handle), "tree All notes");
 }
 
 /// Three notes: Plan, then Goals with the tag `work`, then Top, in the order of their last change.
