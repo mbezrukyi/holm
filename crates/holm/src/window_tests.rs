@@ -1608,3 +1608,18 @@ fn close_after_an_outside_delete_writes_no_file(cx: &mut TestAppContext) {
     assert_eq!(files(&notes_dir), ["Goals.md", "Top.md"]);
     assert_eq!(times(), before);
 }
+
+#[gpui_kit::test]
+fn the_delete_dialog_names_the_note_by_its_title(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-n");
+    cx.simulate_input(handle, "# Plans");
+    assert_eq!(files(&fixture.notes()), ["Untitled.md"]);
+
+    keys(cx, handle, "ctrl-shift-l delete");
+    assert_eq!(
+        question(cx, handle).as_deref(),
+        Some("Delete “Plans”? This deletes 1 note forever.")
+    );
+}

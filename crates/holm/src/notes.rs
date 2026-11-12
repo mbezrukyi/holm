@@ -365,11 +365,30 @@ impl NotesView {
             {
                 let target = target.clone();
                 move |core| match &target {
-                    Target::Note(path) => core.note_delete_count(path),
-                    Target::Folder(path) => core.folder_delete_count(path),
+                    Target::Note(path) => {
+                        let title = core.read(path)?.info.title;
+                        Ok((title, core.note_delete_count(path)?))
+                    }
+                    Target::Folder(path) => {
+                        let name = path.file_name().unwrap_or_default();
+                        Ok((
+                            name.to_string_lossy().into_owned(),
+                            core.folder_delete_count(path)?,
+                        ))
+                    }
                 }
             },
-            move |this, count, window, cx| this.ask(Ask::Delete { target, count }, window, cx),
+            move |this, (name, count), window, cx| {
+                this.ask(
+                    Ask::Delete {
+                        target,
+                        name,
+                        count,
+                    },
+                    window,
+                    cx,
+                );
+            },
         );
     }
 

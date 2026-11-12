@@ -20,8 +20,12 @@ use crate::{popup, text};
 /// The change that the dialog asks about.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Ask {
-    /// Delete a note or a folder.
-    Delete { target: Target, count: DeleteCount },
+    /// Delete a note or a folder. `name` is the title of the note, or the name of the folder.
+    Delete {
+        target: Target,
+        name: String,
+        count: DeleteCount,
+    },
     /// Rename a tag in all notes.
     RenameTag {
         from: String,
@@ -59,15 +63,8 @@ impl Dialog {
     /// For example: "Delete “Plans”? This deletes 1 note and 2 files forever."
     fn question(&self) -> String {
         match &self.ask {
-            Ask::Delete { target, count } => {
-                let path = match target {
-                    Target::Note(path) | Target::Folder(path) => path,
-                };
-                let name = path
-                    .file_stem()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                text::delete_question(&name, count.notes, count.attachments)
+            Ask::Delete { name, count, .. } => {
+                text::delete_question(name, count.notes, count.attachments)
             }
             Ask::RenameTag { from, to, notes } => text::rename_tag_question(from, to, *notes),
             Ask::DeleteTag { tag, notes } => text::delete_tag_question(tag, *notes),
