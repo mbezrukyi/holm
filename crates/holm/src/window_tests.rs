@@ -552,6 +552,30 @@ fn the_keyboard_moves_through_tree_list_and_editor(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn tab_and_shift_tab_stay_in_the_editor(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    fs::write(fixture.notes().join("A.md"), "- a\n- b\n\nend").unwrap();
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(sidebar(cx, handle), "list All notes");
+    assert_eq!(focus(cx, handle), "editor");
+
+    keys(cx, handle, "down tab");
+    assert_eq!(editor_text(cx, handle), "- a\n  - b\n\nend");
+    assert_eq!(focus(cx, handle), "editor");
+    keys(cx, handle, "shift-tab");
+    assert_eq!(editor_text(cx, handle), "- a\n- b\n\nend");
+    assert_eq!(focus(cx, handle), "editor");
+
+    // Outside a list, Tab types spaces and Shift+Tab does nothing.
+    keys(cx, handle, "ctrl-end tab");
+    assert_eq!(editor_text(cx, handle), "- a\n- b\n\nend    ");
+    assert_eq!(focus(cx, handle), "editor");
+    keys(cx, handle, "shift-tab");
+    assert_eq!(editor_text(cx, handle), "- a\n- b\n\nend    ");
+    assert_eq!(focus(cx, handle), "editor");
+}
+
+#[gpui_kit::test]
 fn keys_make_rename_and_move_notes_and_folders(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     let notes_dir = fixture.notes();

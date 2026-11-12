@@ -6,10 +6,10 @@ use std::collections::HashSet;
 
 use gpui_kit::{
     AnyView, App, Bounds, ClipboardEntry, ClipboardItem, Context, CursorStyle, EntityInputHandler,
-    EventEmitter, ExternalPaths, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    KeyDownEvent, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ParentElement, Pixels, Point, Render, ScrollEvent, Styled, TestSupportExt as _, UTF16Selection,
-    Window, div, px,
+    EventEmitter, ExternalPaths, FocusHandle, Focusable, Global, InteractiveElement, IntoElement,
+    KeyBinding, KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, ParentElement, Pixels, Point, Render, ScrollEvent, Styled, TestSupportExt as _,
+    UTF16Selection, Window, actions, div, px,
 };
 use holm_markdown::{Color, Target};
 
@@ -22,6 +22,16 @@ use crate::model::{Caret, Format, GoalRow, Model};
 
 /// Spaces that Tab types outside a list.
 const TAB: &str = "    ";
+
+const KEY_CONTEXT: &str = "Editor";
+
+actions!(editor, [Tab, ShiftTab]);
+
+/// Marks that the app has the bindings of [`Tab`] and [`ShiftTab`].
+struct TabKeys;
+
+impl Global for TabKeys {}
+
 /// How far the mouse moves with the button down before a click becomes a drag.
 const DRAG_START: Pixels = px(4.);
 
@@ -213,6 +223,15 @@ pub struct CursorLink {
 impl Editor {
     /// An empty editor in light mode.
     pub fn new(cx: &mut Context<Self>) -> Self {
+        // A key binding runs before the key handlers. So the editor needs bindings for Tab
+        // and Shift+Tab, or the focus bindings of the window root take them.
+        if !cx.has_global::<TabKeys>() {
+            cx.set_global(TabKeys);
+            cx.bind_keys([
+                KeyBinding::new("tab", Tab, Some(KEY_CONTEXT)),
+                KeyBinding::new("shift-tab", ShiftTab, Some(KEY_CONTEXT)),
+            ]);
+        }
         cx.background_executor()
             .spawn(async {
                 highlight::warm_up();
@@ -449,34 +468,53 @@ impl Editor {
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.key(event, window, cx) {
+            cx.stop_propagation();
+        }
+    }
+
+    /// Tab or Shift+Tab from the key binding. A key that the editor does not take goes on to
+    /// the next binding.
+    fn tab(&mut self, shift: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let event = KeyDownEvent {
+            keystroke: Keystroke {
+                key: "tab".into(),
+                key_char: None,
+                modifiers: if shift {
+                    Modifiers::shift()
+                } else {
+                    Modifiers::none()
+                },
+            },
+            is_held: false,
+            prefer_character_input: false,
+        };
+        if !self.key(&event, window, cx) {
+            cx.propagate();
+        }
+    }
+
+    /// A key down. It returns whether the key stops here.
+    fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) -> bool {
         // A key in the start view, which lies inside the editor.
         if !self.focus.is_focused(window) {
-            return;
+            return false;
         }
         let modifiers = event.keystroke.modifiers;
         if modifiers.alt || modifiers.platform || modifiers.function {
-            return;
+            return false;
         }
         let key = event.keystroke.key.as_str();
         if self.color.is_some() {
-            if self.color_key(event, cx) {
-                cx.stop_propagation();
-            }
-            return;
+            return self.color_key(event, cx);
         }
         if self.find.is_some() {
-            if self.find_key(key, modifiers, cx) {
-                cx.stop_propagation();
-            }
-            return;
+            return self.find_key(key, modifiers, cx);
         }
-        let handled = if modifiers.control {
+        if modifiers.control {
             self.control_key(key, modifiers.shift, cx)
         } else {
             self.plain_key(key, modifiers.shift, cx)
-        };
-        if handled {
-            cx.stop_propagation();
         }
     }
 
@@ -972,11 +1010,13 @@ impl Render for Editor {
         };
         editor
             .test_support()
-            .key_context("Editor")
+            .key_context(KEY_CONTEXT)
             .track_focus(&self.focus)
             .size_full()
             .cursor(CursorStyle::IBeam)
             .on_key_down(cx.listener(Self::key_down))
+            .on_action(cx.listener(|editor, _: &Tab, window, cx| editor.tab(false, window, cx)))
+            .on_action(cx.listener(|editor, _: &ShiftTab, window, cx| editor.tab(true, window, cx)))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::mouse_up))
