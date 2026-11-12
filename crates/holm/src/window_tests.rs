@@ -1163,8 +1163,7 @@ fn links_open_notes_at_headings_and_backlinks_lead_back(cx: &mut TestAppContext)
     set_time(&notes.join("Alpha.md"), 300);
     set_time(&notes.join("Beta.md"), 200);
     let handle = open(cx, fixture.startup(None));
-    let backlinks = |cx: &mut TestAppContext| labels(cx, handle, "backlinks", Role::ListItem);
-    assert_eq!(backlinks(cx), Vec::<String>::new());
+    assert_eq!(backlink_count(cx, handle), None);
 
     // Ctrl+Enter on a heading link opens the note at the heading.
     keys(cx, handle, "down ctrl-enter");
@@ -1173,12 +1172,17 @@ fn links_open_notes_at_headings_and_backlinks_lead_back(cx: &mut TestAppContext)
     assert_eq!(editor_text(cx, handle), "# Beta\n\ntext\n\nX## Ideas\n");
 
     // The backlinks of Beta lead back to Alpha.
-    assert_eq!(backlinks(cx), ["Alpha"]);
+    assert_eq!(backlink_count(cx, handle).as_deref(), Some("← 1 note"));
+    // The heading is at the top of the view, so the tag row is out of sight.
+    keys(cx, handle, "ctrl-home");
+    click(cx, handle, "backlinks-button");
+    assert_eq!(backlinks(cx, handle), ["Alpha*"]);
     cx.update_window(handle, |_, window, cx| {
         window.click(gpui_kit::ElementId::NamedInteger("backlink".into(), 0), cx);
     })
     .unwrap();
     settle(cx);
+    assert_eq!(focus(cx, handle), "editor");
     assert!(editor_text(cx, handle).starts_with("# Alpha\n"));
     assert_eq!(
         read(&notes.join("Beta.md")).lines().last(),
@@ -1188,6 +1192,119 @@ fn links_open_notes_at_headings_and_backlinks_lead_back(cx: &mut TestAppContext)
     // A link to a missing note shows a quiet bar.
     keys(cx, handle, "down down ctrl-enter");
     assert_eq!(bars(cx, handle), [text::NOTE_GONE]);
+}
+
+/// The label of the backlink count button, or `None` with no button.
+fn backlink_count(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
+    screen(cx, handle, |window| {
+        window
+            .try_find("backlinks-button")
+            .and_then(|button| button.label().map(str::to_owned))
+    })
+}
+
+/// The notes in the open backlinks list. The cursor has `*`.
+fn backlinks(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
+    labels(cx, handle, "backlinks", Role::ListBoxOption)
+}
+
+#[gpui_kit::test]
+fn ctrl_shift_b_opens_the_backlinks_of_the_note(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes = fixture.notes();
+    fs::write(notes.join("Target.md"), "---\nid: 01T\n---\n# Target\n").unwrap();
+    fs::write(notes.join("Old.md"), "# Old\n[t](holm:01T)\n").unwrap();
+    fs::write(notes.join("New.md"), "# New\n[t](holm:01T)\n").unwrap();
+    set_time(&notes.join("Target.md"), 300);
+    set_time(&notes.join("New.md"), 200);
+    set_time(&notes.join("Old.md"), 100);
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(editor_text(cx, handle), "# Target\n");
+    assert_eq!(chips(cx, handle), Vec::<String>::new());
+    assert_eq!(backlink_count(cx, handle).as_deref(), Some("← 2 notes"));
+    assert!(
+        screen(cx, handle, |window| window
+            .find("tag-row")
+            .bounds()
+            .size
+            .height)
+            > gpui_kit::px(0.)
+    );
+
+    // Esc gives the focus back to the text.
+    keys(cx, handle, "ctrl-shift-b");
+    assert_eq!(backlinks(cx, handle), ["New*", "Old"]);
+    keys(cx, handle, "escape");
+    assert_eq!(backlinks(cx, handle), Vec::<String>::new());
+    assert_eq!(focus(cx, handle), "editor");
+
+    // `↓` and Enter open the second note.
+    keys(cx, handle, "ctrl-shift-b down");
+    assert_eq!(backlinks(cx, handle), ["New", "Old*"]);
+    keys(cx, handle, "enter");
+    assert_eq!(editor_text(cx, handle), "# Old\n[t](holm:01T)\n");
+    assert_eq!(focus(cx, handle), "editor");
+    assert_eq!(backlinks(cx, handle), Vec::<String>::new());
+}
+
+#[gpui_kit::test]
+fn the_tag_popup_and_the_backlinks_list_take_turns(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes = fixture.notes();
+    let target = "---\nid: 01T\ntags:\n  - work\n---\n# Target\n";
+    fs::write(notes.join("Target.md"), target).unwrap();
+    fs::write(notes.join("Other.md"), "# Other\n[t](holm:01T)\n").unwrap();
+    set_time(&notes.join("Target.md"), 300);
+    set_time(&notes.join("Other.md"), 100);
+    let handle = open(cx, fixture.startup(None));
+    // An inactive window sends no focus events.
+    cx.update_window(handle, |_, window, _| window.activate_window())
+        .unwrap();
+    cx.run_until_parked();
+
+    keys(cx, handle, "ctrl-shift-b");
+    assert_eq!(backlinks(cx, handle), ["Other*"]);
+    click_chip(cx, handle, 0);
+    assert_eq!(backlinks(cx, handle), Vec::<String>::new());
+    assert!(popup_open(cx, handle));
+    assert_eq!(focus(cx, handle), "tag field");
+
+    click(cx, handle, "backlinks-button");
+    settle(cx);
+    assert_eq!(backlinks(cx, handle), ["Other*"]);
+    assert!(!popup_open(cx, handle));
+
+    keys(cx, handle, "escape");
+    assert_eq!(backlinks(cx, handle), Vec::<String>::new());
+    assert!(!popup_open(cx, handle));
+    assert_eq!(focus(cx, handle), "editor");
+}
+
+#[gpui_kit::test]
+fn a_note_with_no_backlinks_has_no_count(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes = fixture.notes();
+    fs::write(notes.join("Target.md"), "---\nid: 01T\n---\n# Target\n").unwrap();
+    fs::write(notes.join("Other.md"), "# Other\n").unwrap();
+    set_time(&notes.join("Target.md"), 300);
+    set_time(&notes.join("Other.md"), 100);
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(backlink_count(cx, handle), None);
+    assert_eq!(
+        screen(cx, handle, |window| window
+            .find("tag-row")
+            .bounds()
+            .size
+            .height),
+        gpui_kit::px(0.)
+    );
+    keys(cx, handle, "ctrl-shift-b");
+    assert_eq!(backlinks(cx, handle), Vec::<String>::new());
+    assert_eq!(focus(cx, handle), "editor");
+
+    // A new link from another note makes the count grow.
+    fixture.write_outside(cx, "Other.md", "# Other\n[t](holm:01T)\n");
+    assert_eq!(backlink_count(cx, handle).as_deref(), Some("← 1 note"));
 }
 
 #[gpui_kit::test]

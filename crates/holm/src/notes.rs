@@ -554,6 +554,9 @@ impl NotesView {
             (true, "o") => self.open_quick_open(window, cx),
             (true, "p") => self.pane.update(cx, NotePane::toggle_pin),
             (true, "t") => self.pane.update(cx, |pane, cx| pane.focus_tags(window, cx)),
+            (true, "b") => self
+                .pane
+                .update(cx, |pane, cx| pane.show_backlinks(window, cx)),
             (false, "n") => self.new_note(window, cx),
             (true, "n") => self.new_folder(window, cx),
             (false, "k") if self.editor_focused(window, cx) => self.open_link_picker(window, cx),

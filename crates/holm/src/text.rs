@@ -110,6 +110,15 @@ pub(crate) const LINK_TO_NOTE: &str = "Link to note";
 pub(crate) const NO_HEADING: &str = "No heading matches";
 pub(crate) const NOTE_GONE: &str = "Holm can't find the note of this link.";
 pub(crate) const LINKED_FROM: &str = "Linked from";
+
+/// The backlink count button in the tag row.
+pub(crate) fn backlink_count(count: usize) -> String {
+    if count == 1 {
+        "← 1 note".to_owned()
+    } else {
+        format!("← {count} notes")
+    }
+}
 pub(crate) const LINK_FILE: &str = "Link";
 
 /// The last row of the link picker, which makes a note.

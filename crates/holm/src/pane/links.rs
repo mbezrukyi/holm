@@ -15,7 +15,7 @@ use holm_core::model::{LinkTarget, Order};
 use holm_editor::{Editor, OpenFile, OpenLink, PasteFiles, PastedFile};
 use holm_markdown::Target;
 
-use crate::backlinks::{Backlinks, OpenBacklink};
+use crate::backlinks::Backlinks;
 use crate::error::AppError;
 use crate::{changes, text};
 
@@ -43,12 +43,13 @@ pub(super) struct Links {
 }
 
 impl Links {
-    /// Puts the backlinks at the end of `editor`. [`Self::show`] reads them.
-    pub(super) fn new(core: Core, editor: Entity<Editor>, cx: &mut Context<Self>) -> Self {
-        let backlinks = cx.new(|_| Backlinks::default());
-        editor.update(cx, |editor, cx| {
-            editor.set_end(Some(backlinks.clone().into()), cx);
-        });
+    /// [`Self::show`] reads the links, and puts the backlinks in `backlinks`.
+    pub(super) fn new(
+        core: Core,
+        editor: Entity<Editor>,
+        backlinks: Entity<Backlinks>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let subscriptions = vec![
             cx.subscribe(&editor, |links, _, event: &OpenLink, cx| {
                 links.open_link(event.target.clone(), cx);
@@ -58,9 +59,6 @@ impl Links {
             }),
             cx.subscribe(&editor, |links, _, event: &PasteFiles, cx| {
                 links.paste_files(event.files.clone(), cx);
-            }),
-            cx.subscribe(&backlinks, |links, _, event: &OpenBacklink, cx| {
-                links.open_at(event.0.clone(), None, cx);
             }),
         ];
         let revisions = changes::watch_revision(&core, cx, Self::read);
@@ -121,7 +119,7 @@ impl Links {
         let core = self.core.clone();
         let path = self.note.clone();
         let job = cx.background_spawn(async move {
-            let backlinks = core.backlinks(&path, Order::Title)?;
+            let backlinks = core.backlinks(&path, Order::LastChange)?;
             let broken = core.broken_links(&path)?;
             Ok::<_, holm_core::Error>((path, backlinks, broken))
         });

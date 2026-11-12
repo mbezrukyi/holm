@@ -13,7 +13,8 @@
 //!   goes back to the text.
 //! - A click on the row opens the popup. A click on a chip also puts the cursor on its tag.
 //!
-//! With no tags and no pin, the row stays hidden.
+//! The [`Backlinks`] count sits at the right end of the row. With no tags, no pin and no
+//! backlinks, the row stays hidden.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -32,6 +33,7 @@ use gpui_kit::{
 use holm_core::Core;
 use holm_core::model::Tag;
 
+use crate::backlinks::Backlinks;
 use crate::{popup, text};
 
 /// The most known tags in the list while the user types.
@@ -64,6 +66,7 @@ pub(crate) struct TagRow {
     core: Core,
     tags: Vec<String>,
     pinned: bool,
+    backlinks: Entity<Backlinks>,
     /// Every tag name in the notes folder, for the list.
     known: Vec<String>,
     /// Whether the popup is open.
@@ -81,10 +84,16 @@ pub(crate) struct TagRow {
 }
 
 impl TagRow {
-    pub(crate) fn new(core: Core, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(
+        core: Core,
+        backlinks: Entity<Backlinks>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let focus = cx.focus_handle();
         let input = cx.new(|cx| InputState::new(window, cx).placeholder(text::ADD_TAG));
         let subscriptions = vec![
+            cx.observe(&backlinks, |_, _, cx| cx.notify()),
             cx.on_focus_out(&focus, window, |row, _, window, cx| row.close(window, cx)),
             cx.subscribe(&input, |row, input, event, cx| {
                 if matches!(event, InputEvent::Change) {
@@ -101,6 +110,7 @@ impl TagRow {
             core,
             tags: Vec::new(),
             pinned: false,
+            backlinks,
             known: Vec::new(),
             open: false,
             cursor: None,
@@ -438,7 +448,8 @@ impl EventEmitter<TagRowEvent> for TagRow {}
 impl Render for TagRow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
-        let visible = self.pinned || !self.tags.is_empty();
+        let has_backlinks = !self.backlinks.read(cx).is_empty();
+        let visible = self.pinned || !self.tags.is_empty() || has_backlinks;
         let pin = self.pinned.then(|| {
             div()
                 .id("pin-mark")
@@ -475,7 +486,8 @@ impl Render for TagRow {
                     .iter()
                     .enumerate()
                     .map(|(at, tag)| Self::row_chip(at, tag, cx)),
-            );
+            )
+            .when(has_backlinks, |row| row.child(self.backlinks.clone()));
         let row_bounds = self.row_bounds.clone();
         div()
             .on_children_prepainted(move |bounds, _, _| {

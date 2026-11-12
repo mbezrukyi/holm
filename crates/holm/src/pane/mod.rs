@@ -12,8 +12,8 @@
 //! the text. The pane writes their changes at once. The editor undo stack holds only the text,
 //! so Ctrl+Z does not undo them.
 //!
-//! The pane runs the link picker flow. `links` opens the links of the note and shows its
-//! backlinks.
+//! The pane runs the link picker flow. `links` opens the links of the note and reads its
+//! backlinks. The backlinks show in the tag row.
 
 mod links;
 
@@ -32,6 +32,7 @@ use holm_core::model::{Change, Note, NoteInfo, Order};
 use holm_editor::{Changed, Editor, UpFromStart};
 use holm_markdown::Target;
 
+use crate::backlinks::{Backlinks, BacklinksEvent};
 use crate::bar::{self, Bar};
 use crate::error::AppError;
 use crate::link_picker::{LinkChoice, LinkStart};
@@ -63,6 +64,7 @@ pub(crate) struct NotePane {
     notes_folder: PathBuf,
     editor: Entity<Editor>,
     tag_row: Entity<TagRow>,
+    backlinks: Entity<Backlinks>,
     links: Entity<Links>,
     /// The note as it is on disk, after the last read or save. Its tags and pin can be newer:
     /// a write of them may still run.
@@ -98,11 +100,12 @@ impl NotePane {
         cx: &mut Context<Self>,
     ) -> Self {
         let editor = cx.new(Editor::new);
-        let tag_row = cx.new(|cx| TagRow::new(core.clone(), window, cx));
+        let backlinks = cx.new(|cx| Backlinks::new(window, cx));
+        let tag_row = cx.new(|cx| TagRow::new(core.clone(), backlinks.clone(), window, cx));
         editor.update(cx, |editor, cx| {
             editor.set_start(Some(tag_row.clone().into()), cx);
         });
-        let links = cx.new(|cx| Links::new(core.clone(), editor.clone(), cx));
+        let links = cx.new(|cx| Links::new(core.clone(), editor.clone(), backlinks.clone(), cx));
         let changes = changes::watch(&core, cx, Self::outside_change);
         let subscriptions = vec![
             cx.subscribe(&editor, |pane, _, _: &Changed, cx| pane.schedule_save(cx)),
@@ -111,6 +114,7 @@ impl NotePane {
             }),
             cx.subscribe_in(&tag_row, window, Self::tag_row_event),
             cx.subscribe(&links, Self::links_event),
+            cx.subscribe_in(&backlinks, window, Self::backlinks_event),
             cx.observe_global::<Ui>(|pane, cx| {
                 let appearance = theme::appearance(cx);
                 pane.editor
@@ -139,6 +143,7 @@ impl NotePane {
             notes_folder,
             editor,
             tag_row,
+            backlinks,
             links,
             note: note.clone(),
             fields_version: 0,
@@ -325,6 +330,33 @@ impl NotePane {
     /// Opens the tag popup. The editor scrolls to it.
     pub(crate) fn focus_tags(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.tag_row.update(cx, |row, cx| row.enter(window, cx));
+    }
+
+    /// Ctrl+Shift+B: opens the backlinks list. The editor scrolls to it.
+    pub(crate) fn show_backlinks(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.backlinks
+            .update(cx, |backlinks, cx| backlinks.enter(window, cx));
+    }
+
+    fn backlinks_event(
+        &mut self,
+        _: &Entity<Backlinks>,
+        event: &BacklinksEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            BacklinksEvent::Open(path) => {
+                window.focus(&self.editor.focus_handle(cx), cx);
+                self.open(path.clone(), Leave::Keep, cx);
+            }
+            // A click outside the list can give the focus to the tag popup first.
+            BacklinksEvent::Leave => {
+                if self.backlinks.focus_handle(cx).contains_focused(window, cx) {
+                    window.focus(&self.editor.focus_handle(cx), cx);
+                }
+            }
+        }
     }
 
     /// Pins or unpins the open note.
