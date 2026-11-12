@@ -8,7 +8,7 @@
 //! When another tool deletes the note, the app opens another one. With unsaved changes, a quiet
 //! bar first asks to write the note again or to close it.
 //!
-//! When the user opens another note, the pane saves the old one. It also renames the old file
+//! When the user opens another note or closes the window, the pane saves the note. It also renames the file
 //! to match the title.
 //!
 //! The tag row before the first line shows the tags and the pin of the note. It scrolls with
@@ -600,28 +600,38 @@ impl NotePane {
         cx.emit(PaneEvent::Gone(path));
     }
 
-    /// When the window closes: writes unsaved text. Unsaved text wins over an outside change.
-    /// It works on the UI thread, because no task runs after the window is gone.
+    /// When the window closes: writes unsaved text, then renames the file to match the title.
+    /// Unsaved text wins over an outside change. It works on the UI thread, because no task
+    /// runs after the window is gone.
     pub(crate) fn leave(&mut self, cx: &mut Context<Self>) {
         self.autosave = None;
-        if !self.is_dirty(cx) {
-            return;
-        }
         let Some(mut note) = self.note.clone() else {
             return;
         };
-        let write = if self.deleted {
-            Core::restore
-        } else {
-            Core::save
-        };
-        note.body = self
-            .ending
-            .to_disk(self.editor.read(cx).text())
-            .into_owned();
-        if let Err(error) = write(&self.core, &note) {
-            let error = AppError::from(error);
-            tracing::warn!(error = %crate::chain(&error), "cannot save the note");
+        if self.is_dirty(cx) {
+            let write = if self.deleted {
+                Core::restore
+            } else {
+                Core::save
+            };
+            note.body = self
+                .ending
+                .to_disk(self.editor.read(cx).text())
+                .into_owned();
+            if let Err(error) = write(&self.core, &note) {
+                let error = AppError::from(error);
+                tracing::warn!(error = %crate::chain(&error), "cannot save the note");
+                return;
+            }
+        } else if self.deleted {
+            return;
+        }
+        match self.core.rename_to_title(&note.info.path) {
+            Ok(info) => self.note = Some(Note { info, ..note }),
+            Err(error) => {
+                let error = AppError::from(error);
+                tracing::warn!(error = %crate::chain(&error), "cannot rename the note to its title");
+            }
         }
     }
 

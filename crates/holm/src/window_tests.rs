@@ -1625,7 +1625,22 @@ fn the_delete_dialog_names_the_note_by_its_title(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn a_window_close_saves_the_open_note(cx: &mut TestAppContext) {
+fn a_quit_renames_the_open_note_to_its_title(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-n");
+    cx.simulate_input(handle, "# Plans");
+    assert_eq!(files(&fixture.notes()), ["Untitled.md"]);
+
+    cx.quit();
+    assert_eq!(files(&fixture.notes()), ["Plans.md"]);
+    assert!(read(&fixture.notes().join("Plans.md")).ends_with("\n# Plans\n"));
+    let settings = Config::load(fixture.config()).settings().clone();
+    assert_eq!(settings.last_note, Some(PathBuf::from("Plans.md")));
+}
+
+#[gpui_kit::test]
+fn a_window_close_renames_the_open_note_to_its_title(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     let handle = open(cx, fixture.startup(None));
     keys(cx, handle, "ctrl-n");
@@ -1634,5 +1649,8 @@ fn a_window_close_saves_the_open_note(cx: &mut TestAppContext) {
     cx.update_window(handle, |_, window, _| window.remove_window())
         .unwrap();
     cx.run_until_parked();
-    assert!(read(&fixture.notes().join("Untitled.md")).ends_with("\n# Plans\n"));
+    assert_eq!(files(&fixture.notes()), ["Plans.md"]);
+    assert!(read(&fixture.notes().join("Plans.md")).ends_with("\n# Plans\n"));
+    let settings = Config::load(fixture.config()).settings().clone();
+    assert_eq!(settings.last_note, Some(PathBuf::from("Plans.md")));
 }
