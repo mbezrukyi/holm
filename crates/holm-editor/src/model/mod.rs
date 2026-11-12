@@ -4,6 +4,7 @@
 //! This module has no GPUI. Every offset is a byte offset in the source text, on a char boundary.
 //! The text has only LF line breaks.
 
+mod caret;
 mod display;
 mod format;
 mod history;
@@ -17,6 +18,7 @@ use std::time::Instant;
 use holm_markdown::{BlockKind, Body, Target};
 use ropey::{LineType, Rope};
 
+pub(crate) use caret::{Caret, GoalRow};
 pub(crate) use display::{Cell, DisplayLine, Highlight, LineKind, Look, Mark, Quote, Run};
 pub(crate) use format::Format;
 pub(crate) use history::Group;
@@ -33,7 +35,7 @@ pub(crate) struct Model {
     /// What the splices since the last parse changed: a range of the old text, and the end of
     /// its new text.
     changed: Option<(Range<usize>, usize)>,
-    cursor: usize,
+    caret: Caret,
     anchor: usize,
     history: History,
     /// The link targets that the app knows are broken.
@@ -103,7 +105,7 @@ impl Model {
             body: Body::parse(&text),
             changed: None,
             text,
-            cursor: 0,
+            caret: Caret::default(),
             anchor: 0,
             history: History::default(),
             broken: HashSet::new(),
@@ -115,12 +117,16 @@ impl Model {
     }
 
     pub(crate) fn cursor(&self) -> usize {
-        self.cursor
+        self.caret.offset()
+    }
+
+    pub(crate) fn caret(&self) -> Caret {
+        self.caret
     }
 
     /// The selected source, from the lower offset to the higher one. It is empty with no selection.
     pub(crate) fn selection(&self) -> Range<usize> {
-        self.cursor.min(self.anchor)..self.cursor.max(self.anchor)
+        self.cursor().min(self.anchor)..self.cursor().max(self.anchor)
     }
 
     pub(crate) fn selected_text(&self) -> &str {
@@ -129,16 +135,34 @@ impl Model {
 
     /// Whether the cursor is at the start of the selection.
     pub(crate) fn is_reversed(&self) -> bool {
-        self.cursor < self.anchor
+        self.cursor() < self.anchor
     }
 
     /// Moves the cursor to `offset`, rounded down to a char boundary.
     /// With `extend`, the selection keeps its other end.
     pub(crate) fn set_cursor(&mut self, offset: usize, extend: bool) {
-        self.cursor = self.floor(offset);
+        self.set_caret(Caret::at(offset), extend);
+    }
+
+    /// Moves the cursor like [`Self::set_cursor`], and keeps the row start and the goals of
+    /// `caret` while its offset is on a char boundary.
+    pub(crate) fn set_caret(&mut self, caret: Caret, extend: bool) {
+        let offset = self.floor(caret.offset());
+        self.caret = if offset == caret.offset() {
+            caret
+        } else {
+            Caret::at(offset)
+        };
         if !extend {
-            self.anchor = self.cursor;
+            self.anchor = offset;
         }
+    }
+
+    /// Drops the goal row and returns it.
+    pub(crate) fn take_goal_row(&mut self) -> Option<GoalRow> {
+        let goal = self.caret.goal_row();
+        self.caret = self.caret.with_goal_row(None);
+        goal
     }
 
     /// Selects `range`, with the cursor at its end.
@@ -152,7 +176,7 @@ impl Model {
     }
 
     fn ends(&self) -> Ends {
-        (self.anchor, self.cursor)
+        (self.anchor, self.cursor())
     }
 
     fn set_ends(&mut self, (anchor, cursor): Ends) {
@@ -285,7 +309,7 @@ impl Model {
         )];
         let ends = (
             map_offset(&edits, self.anchor),
-            map_offset(&edits, self.cursor),
+            map_offset(&edits, self.cursor()),
         );
         self.edit(edits, ends, Group::Alone, None)
     }
@@ -326,9 +350,9 @@ impl Model {
         let mut range = self.selection();
         if range.is_empty() {
             range.start = if word {
-                self.word_left(self.cursor)
+                self.word_left(self.cursor())
             } else {
-                self.prev_char(self.cursor)
+                self.prev_char(self.cursor())
             };
         }
         self.remove(range, now)
@@ -340,9 +364,9 @@ impl Model {
         let mut range = self.selection();
         if range.is_empty() {
             range.end = if word {
-                self.word_right(self.cursor)
+                self.word_right(self.cursor())
             } else {
-                self.next_char(self.cursor)
+                self.next_char(self.cursor())
             };
         }
         self.remove(range, now)
@@ -377,7 +401,7 @@ impl Model {
         if !extend && !selection.is_empty() {
             self.set_cursor(selection.start, false);
         } else {
-            self.set_cursor(self.prev_char(self.cursor), extend);
+            self.set_cursor(self.prev_char(self.cursor()), extend);
         }
     }
 
@@ -387,18 +411,18 @@ impl Model {
         if !extend && !selection.is_empty() {
             self.set_cursor(selection.end, false);
         } else {
-            self.set_cursor(self.next_char(self.cursor), extend);
+            self.set_cursor(self.next_char(self.cursor()), extend);
         }
     }
 
     /// Moves the cursor to the start of this or the last word.
     pub(crate) fn move_word_left(&mut self, extend: bool) {
-        self.set_cursor(self.word_left(self.cursor), extend);
+        self.set_cursor(self.word_left(self.cursor()), extend);
     }
 
     /// Moves the cursor to the end of this or the next word.
     pub(crate) fn move_word_right(&mut self, extend: bool) {
-        self.set_cursor(self.word_right(self.cursor), extend);
+        self.set_cursor(self.word_right(self.cursor()), extend);
     }
 
     /// The offset before the spaces and then the run of one kind of chars before `offset`.
@@ -567,6 +591,57 @@ mod tests {
         let mut model = Model::new(text);
         model.set_cursor(cursor, false);
         model
+    }
+
+    fn row_caret(offset: usize) -> Caret {
+        let goal_row = GoalRow {
+            first: true,
+            extend: false,
+        };
+        Caret::at(offset)
+            .with_row_start(true)
+            .with_goal_x(40.)
+            .with_goal_row(Some(goal_row))
+    }
+
+    #[test]
+    fn a_row_move_keeps_the_row_start_and_the_goals() {
+        let mut model = Model::new("one two three");
+        model.set_caret(row_caret(4), false);
+        assert_eq!(model.caret(), row_caret(4));
+    }
+
+    #[test]
+    fn any_other_cursor_change_drops_the_row_start_and_the_goals() {
+        let mut model = Model::new("one two three");
+        model.set_caret(row_caret(4), false);
+        model.move_right(false);
+        assert_eq!(model.caret(), Caret::at(5));
+
+        model.set_caret(row_caret(4), false);
+        model.type_text("x", now());
+        assert_eq!(model.caret(), Caret::at(5));
+
+        model.set_caret(row_caret(4), false);
+        model.undo();
+        assert_eq!(model.caret(), Caret::at(4));
+    }
+
+    #[test]
+    fn a_caret_off_a_char_boundary_drops_the_row_start_and_the_goals() {
+        let mut model = Model::new("aé");
+        model.set_caret(row_caret(2), false);
+        assert_eq!(model.caret(), Caret::at(1));
+    }
+
+    #[test]
+    fn the_goal_row_goes_once_and_the_goal_x_stays() {
+        let mut model = Model::new("one two three");
+        model.set_caret(row_caret(4), false);
+        assert!(model.take_goal_row().is_some());
+        assert_eq!(model.take_goal_row(), None);
+        assert_eq!(model.caret().goal_x(), Some(40.));
+        assert!(model.caret().row_start());
     }
 
     #[test]

@@ -98,7 +98,7 @@ impl Model {
     /// It does nothing for a reference link, whose target is in its definition.
     pub(crate) fn set_link_target(&mut self, target: &Target) -> bool {
         let Some(range) = self
-            .link_at(self.cursor)
+            .link_at(self.cursor())
             .and_then(|link| link.target_range.clone())
         else {
             return false;

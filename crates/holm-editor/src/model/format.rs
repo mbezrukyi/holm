@@ -153,7 +153,7 @@ impl Model {
             .map(|(line, (_, len))| (line.start..line.start + len, prefix.clone()))
             .collect();
         let anchor = map_offset(&edits, self.anchor);
-        let cursor = map_offset(&edits, self.cursor);
+        let cursor = map_offset(&edits, self.cursor());
         self.edit(edits, (anchor, cursor), Group::Alone, None)
     }
 
@@ -233,7 +233,7 @@ impl Model {
             return None;
         }
         let anchor = map_offset(&edits, self.anchor);
-        let cursor = map_offset(&edits, self.cursor);
+        let cursor = map_offset(&edits, self.cursor());
         Some(self.edit(edits, (anchor, cursor), Group::Alone, None))
     }
 

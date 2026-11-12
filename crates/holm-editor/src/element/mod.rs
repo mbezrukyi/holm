@@ -228,7 +228,7 @@ impl gpui_kit::Element for EditorElement {
         let focus = editor.focus.clone();
         let selection = editor.model.selection();
         let cursor = editor.model.cursor();
-        let row_start = editor.row_start();
+        let row_start = editor.model.caret().row_start();
         let theme = editor.theme.clone();
         let matches = editor
             .find
