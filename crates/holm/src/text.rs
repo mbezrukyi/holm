@@ -50,6 +50,7 @@ pub(crate) const PIN_MARK: &str = "●";
 pub(crate) const PINNED: &str = "Pinned";
 pub(crate) const TAGS_LABEL: &str = "Tags";
 pub(crate) const ADD_TAG: &str = "Add tag";
+pub(crate) const ADD_TAG_CHIP: &str = "+ Tag";
 pub(crate) const ON_THIS_NOTE: &str = "On this note";
 
 /// The line in the tag popup that adds a new tag.

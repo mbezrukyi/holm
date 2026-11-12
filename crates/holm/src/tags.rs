@@ -15,7 +15,8 @@
 //!
 //! The row is one line. Chips that do not fit fold into a "+N" chip. A click on it opens the
 //! popup with the cursor on the first folded tag. The [`Backlinks`] count sits at the right
-//! end of the row. With no tags, no pin and no backlinks, the row stays hidden.
+//! end of the row. The row always shows. A note with no tags has a quiet "+ Tag" chip, and a
+//! click on it opens the popup as a click on the row does.
 
 use std::ops::Range;
 
@@ -291,6 +292,27 @@ impl TagRow {
         }
     }
 
+    /// The quiet chip of a note with no tags. The row takes its click.
+    fn add_chip(cx: &Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        div()
+            .id("tag-add")
+            .role(Role::Button)
+            .aria_label(text::ADD_TAG)
+            .px(px(10.))
+            .border_1()
+            .border_dashed()
+            .border_color(theme.border)
+            .rounded_full()
+            .text_size(px(12.))
+            .line_height(px(16.))
+            .text_color(theme.muted_foreground)
+            .cursor(CursorStyle::PointingHand)
+            .hover(|chip| chip.bg(theme.secondary))
+            .child(text::ADD_TAG_CHIP)
+            .test_support()
+    }
+
     fn row_chip(at: usize, tag: &str, cx: &Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         div()
@@ -446,7 +468,6 @@ impl Render for TagRow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let has_backlinks = !self.backlinks.read(cx).is_empty();
-        let visible = self.pinned || !self.tags.is_empty() || has_backlinks;
         let pin = self.pinned.then(|| {
             div()
                 .id("pin-mark")
@@ -457,6 +478,9 @@ impl Render for TagRow {
                 .text_color(theme.primary)
                 .child(text::PIN_MARK)
         });
+        let add = self.tags.is_empty().then(|| Self::add_chip(cx));
+        let lead = (pin.is_some() || add.is_some())
+            .then(|| h_flex().gap(px(6.)).children(pin).children(add));
         let row = h_flex()
             .id("tag-row")
             .role(Role::List)
@@ -473,7 +497,9 @@ impl Render for TagRow {
                 }),
             )
             .w_full()
-            .when(visible, |row| row.min_h(px(36.)).pt_3().pb_1())
+            .h(px(40.))
+            .pt_3()
+            .pb_1()
             .items_center()
             .child(
                 Fold::new(
@@ -484,7 +510,7 @@ impl Render for TagRow {
                         .map(|(at, tag)| Self::row_chip(at, tag, cx).into_any_element()),
                     Self::more_chip(cx),
                 )
-                .lead(pin)
+                .lead(lead)
                 .tail(has_backlinks.then(|| self.backlinks.clone())),
             );
         self.dropdown

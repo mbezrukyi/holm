@@ -809,27 +809,34 @@ fn clicks_open_and_close_the_tag_popup(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn the_first_tag_shows_the_hidden_tag_row(cx: &mut TestAppContext) {
+fn a_note_with_no_tags_shows_the_add_chip(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     let a = fixture.notes().join("A.md");
     fs::write(&a, "# A\n").unwrap();
     let handle = open(cx, fixture.startup(None));
-    let row_height = |cx: &mut TestAppContext| {
-        screen(cx, handle, |window| {
-            window.find("tag-row").bounds().size.height
-        })
-    };
-    assert_eq!(row_height(cx), gpui_kit::px(0.));
+    let row = bounds_of(cx, handle, "tag-row").unwrap();
+    assert!(row.size.height > gpui_kit::px(0.));
+    assert!(bounds_of(cx, handle, "tag-add").is_some());
+    assert_eq!(chips(cx, handle), Vec::<String>::new());
+    let popup_under_row =
+        |cx: &mut TestAppContext| bounds_of(cx, handle, "tag-popup").unwrap().top() >= row.bottom();
+
+    // A click on the chip opens the popup under the row, not over the title.
+    click(cx, handle, "tag-add");
+    assert_eq!(focus(cx, handle), "tag field");
+    assert!(popup_under_row(cx));
+    keys(cx, handle, "escape");
+    assert_eq!(focus(cx, handle), "editor");
 
     keys(cx, handle, "ctrl-shift-t");
-    assert!(popup_open(cx, handle));
     assert_eq!(focus(cx, handle), "tag field");
-    assert_eq!(row_height(cx), gpui_kit::px(0.));
+    assert!(popup_under_row(cx));
 
     cx.simulate_input(handle, "work");
     keys(cx, handle, "enter");
     assert_eq!(chips(cx, handle), ["work"]);
-    assert!(row_height(cx) > gpui_kit::px(0.));
+    assert_eq!(bounds_of(cx, handle, "tag-add"), None);
+    assert_eq!(bounds_of(cx, handle, "tag-row").unwrap(), row);
     assert_eq!(fields(&a).0, ["work"]);
 }
 
@@ -1431,14 +1438,6 @@ fn a_note_with_no_backlinks_has_no_count(cx: &mut TestAppContext) {
     set_time(&notes.join("Other.md"), 100);
     let handle = open(cx, fixture.startup(None));
     assert_eq!(backlink_count(cx, handle), None);
-    assert_eq!(
-        screen(cx, handle, |window| window
-            .find("tag-row")
-            .bounds()
-            .size
-            .height),
-        gpui_kit::px(0.)
-    );
     keys(cx, handle, "ctrl-shift-b");
     assert_eq!(backlinks(cx, handle), Vec::<String>::new());
     assert_eq!(focus(cx, handle), "editor");
