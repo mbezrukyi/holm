@@ -54,15 +54,18 @@ fn set_help(editor: &Entity<Editor>, cx: &mut VisualTestContext, help: WritingHe
     cx.update(|_, cx| editor.update(cx, |editor, _| editor.set_writing_help(help)));
 }
 
-/// The x of the cursor in the window, as the input handler gives it to the system.
-fn cursor_x(editor: &Entity<Editor>, cx: &mut VisualTestContext) -> Option<Pixels> {
+/// The bounds of the cursor in the window, as the input handler gives them to the system.
+fn cursor_bounds(editor: &Entity<Editor>, cx: &mut VisualTestContext) -> Option<Bounds<Pixels>> {
     cx.update(|window, cx| {
         editor.update(cx, |editor, cx| {
             let cursor = editor.selected_text_range(false, window, cx)?.range;
             editor.bounds_for_range(cursor, Bounds::default(), window, cx)
         })
     })
-    .map(|bounds| bounds.origin.x)
+}
+
+fn cursor_x(editor: &Entity<Editor>, cx: &mut VisualTestContext) -> Option<Pixels> {
+    cursor_bounds(editor, cx).map(|bounds| bounds.origin.x)
 }
 
 fn count_changes(editor: &Entity<Editor>, cx: &mut VisualTestContext) -> Rc<Cell<usize>> {
@@ -379,6 +382,22 @@ fn the_cursor_on_an_empty_line_after_a_nested_item_shows_where_text_goes() {
     cx.simulate_keystrokes("ctrl-end");
     assert_eq!(cursor_x(&editor, cx), item_x);
     assert_eq!(text(&editor, cx), "- a\n  - b\n");
+}
+
+#[test]
+fn tab_on_a_new_item_shows_it_as_a_nested_item() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "- a", WIDTH, HEIGHT);
+    cx.simulate_keystrokes("end left");
+    let item = cursor_bounds(&editor, cx).unwrap();
+    cx.simulate_keystrokes("end enter tab");
+    assert_eq!(text(&editor, cx), "- a\n  - ");
+    let nested = cursor_bounds(&editor, cx).unwrap();
+    assert_eq!(nested.origin.y - item.origin.y, LINE_HEIGHT);
+    assert!(nested.origin.x > item.origin.x);
+    cx.simulate_input("b");
+    cx.simulate_keystrokes("left");
+    assert_eq!(cursor_x(&editor, cx), Some(nested.origin.x));
 }
 
 #[test]

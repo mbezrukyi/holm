@@ -572,6 +572,8 @@ struct Walker<'a> {
     scratch: Scratch,
     /// The inline syntax to hide, in order. The block syntax goes in the body's list.
     inline_hidden: Vec<Range<usize>>,
+    /// The `-` line of the open heading. The walker reads this line as an empty nested item.
+    empty_item: Option<Range<usize>>,
     body: Body,
 }
 
@@ -584,6 +586,7 @@ impl<'a> Walker<'a> {
             segments: Vec::new(),
             scratch: Scratch::default(),
             inline_hidden: Vec::new(),
+            empty_item: None,
             body: Body {
                 defs,
                 len: text.len(),
@@ -596,6 +599,11 @@ impl<'a> Walker<'a> {
         match event {
             Event::Start(tag) if is_inline_tag(&tag) => self.inline(&range),
             Event::End(end) if is_inline_end(end) => self.touch(&range),
+            Event::Start(Tag::Heading {
+                level: HeadingLevel::H2,
+                ..
+            }) if self.read_as_empty_item(&range) => {}
+            Event::End(TagEnd::Heading(_)) if self.empty_item.is_some() => self.end_empty_item(),
             Event::Start(tag) => self.start(tag, range),
             Event::End(_) => self.end(),
             Event::TaskListMarker(checked) => self.task(checked, range),
@@ -769,6 +777,44 @@ impl<'a> Walker<'a> {
             self.collect(nodes);
         }
         self.body.leaves.push(leaf);
+    }
+
+    /// Whether a heading is text with an empty nested item under it, like `- a\n  - `.
+    ///
+    /// An empty item cannot interrupt a paragraph. So `CommonMark` reads the `-` line as a setext
+    /// underline. A new nested item has this form until its first char. The walker reads it as an
+    /// item now, so the line keeps its form while the user types. The heading text becomes the
+    /// text of the outer item.
+    fn read_as_empty_item(&mut self, range: &Range<usize>) -> bool {
+        let in_item = matches!(
+            self.frames.iter().rev().find(|frame| frame.kind.is_some()),
+            Some(Frame {
+                kind: Some(BlockKind::Item { .. }),
+                ..
+            })
+        );
+        let range = self.trim(range);
+        let Some(line_start) = self.text[range.clone()].rfind('\n') else {
+            return false;
+        };
+        let line = &self.text[range.start + line_start + 1..range.end];
+        let dash = line.trim_start_matches([' ', '\t', '>']);
+        if !in_item || dash.trim_end_matches([' ', '\t', '\r']) != "-" {
+            return false;
+        }
+        self.touch(&range);
+        self.empty_item = Some(range.end - dash.len()..range.end);
+        true
+    }
+
+    fn end_empty_item(&mut self) {
+        let Some(range) = self.empty_item.take() else {
+            return;
+        };
+        self.start(Tag::List(None), range.clone());
+        self.start(Tag::Item, range);
+        self.end();
+        self.end();
     }
 
     fn task(&mut self, checked: bool, range: Range<usize>) {
