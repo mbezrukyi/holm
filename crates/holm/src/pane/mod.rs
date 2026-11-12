@@ -829,6 +829,7 @@ fn empty_pane(focus: &FocusHandle, cx: &App) -> impl IntoElement {
                 .children(keys.iter().map(|key| chip(key)))
                 .into_any_element(),
             div()
+                .whitespace_nowrap()
                 .text_color(theme.muted_foreground)
                 .child(label)
                 .into_any_element(),
@@ -841,12 +842,15 @@ fn empty_pane(focus: &FocusHandle, cx: &App) -> impl IntoElement {
         .test_support()
         .track_focus(focus)
         .flex_1()
+        .min_w_0()
+        .overflow_hidden()
         .items_center()
         .justify_center()
         .gap_5()
         .text_sm()
         .child(
             div()
+                .whitespace_nowrap()
                 .text_size(theme::EMPTY_LINE)
                 .font_weight(FontWeight::MEDIUM)
                 .child(text::NO_NOTE_OPEN),
