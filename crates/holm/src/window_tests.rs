@@ -1556,3 +1556,39 @@ fn an_outside_delete_with_unsaved_text_asks_to_keep_or_close(cx: &mut TestAppCon
     assert!(!notes_dir.join("Plan.md").exists());
     assert_eq!(bars(cx, handle), Vec::<String>::new());
 }
+
+#[gpui_kit::test]
+fn the_link_keys_do_nothing_on_the_empty_pane_with_no_sidebar(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-shift-l");
+    assert_eq!(sidebar(cx, handle), "hidden");
+    assert!(empty_pane(cx, handle));
+
+    keys(cx, handle, "ctrl-k ctrl-o");
+    assert!(!cx.did_prompt_for_paths());
+    let picker = screen(cx, handle, |window| {
+        window.try_find("link-picker").is_some()
+    });
+    assert!(!picker);
+    assert!(empty_pane(cx, handle));
+}
+
+#[gpui_kit::test]
+fn close_after_an_outside_delete_writes_no_file(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    three_notes(&notes_dir);
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-end");
+    cx.simulate_input(handle, "mine");
+    let times = || ["Goals.md", "Top.md"].map(|note| modified(&notes_dir.join(note)));
+    let before = times();
+
+    fixture.delete_outside(cx, "Plan.md");
+    click(cx, handle, "close-deleted");
+    autosave(cx);
+    assert_eq!(editor_text(cx, handle), "# Goals\nread more\n");
+    assert_eq!(files(&notes_dir), ["Goals.md", "Top.md"]);
+    assert_eq!(times(), before);
+}

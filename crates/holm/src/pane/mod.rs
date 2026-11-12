@@ -55,8 +55,9 @@ pub(crate) enum PaneEvent {
     Opened(PathBuf),
     /// The pane shows no note.
     Closed,
-    /// Another tool deleted the open note, and the pane has no text to keep. The app opens
-    /// another note, or closes this one.
+    /// Another tool deleted the open note at this path, and the pane has no text to keep.
+    /// The app must open another note or call [`NotePane::close`]. The pane cannot pick the
+    /// note, because the neighbor comes from the sidebar list.
     Gone(PathBuf),
 }
 
@@ -212,12 +213,19 @@ impl NotePane {
             self.editor
                 .update(cx, |editor, cx| editor.show_heading(&heading, cx));
         }
-        self.links.update(cx, |links, cx| links.show(path, cx));
+        self.links
+            .update(cx, |links, cx| links.show(Some(path), cx));
         cx.notify();
     }
 
     /// Drops the open note and shows the empty pane.
     pub(crate) fn close(&mut self, cx: &mut Context<Self>) {
+        self.drop_note(cx);
+        cx.emit(PaneEvent::Closed);
+    }
+
+    /// Drops the open note and its text, with no save.
+    fn drop_note(&mut self, cx: &mut Context<Self>) {
         self.note = None;
         self.autosave = None;
         self.saving = None;
@@ -228,7 +236,7 @@ impl NotePane {
         self.error = None;
         self.editor.update(cx, |editor, cx| editor.set_text("", cx));
         self.saved = String::new();
-        cx.emit(PaneEvent::Closed);
+        self.links.update(cx, |links, cx| links.show(None, cx));
         cx.notify();
     }
 
@@ -247,20 +255,23 @@ impl NotePane {
 
     /// Opens the system file picker, and embeds each picked file at the cursor.
     pub(crate) fn link_files(&mut self, cx: &mut Context<Self>) {
+        if self.note.is_none() {
+            return;
+        }
         self.links.update(cx, Links::pick_files);
     }
 
     /// Ctrl+K: reads what the link picker starts with. In a note link, the field starts with
-    /// its target, and the pick changes that link.
+    /// its target, and the pick changes that link. With no open note, it gives no task.
     pub(crate) fn start_link(
         &mut self,
         cx: &mut Context<Self>,
-    ) -> Task<holm_core::Result<LinkStart>> {
+    ) -> Option<Task<holm_core::Result<LinkStart>>> {
+        let open_note = self.path()?.to_owned();
         let link = self.editor.read(cx).link_at_cursor();
         self.replace_link = link.as_ref().is_some_and(|link| !link.embedded);
         let target = link.map(|link| link.target);
-        let open_note = self.path().map(Path::to_owned).unwrap_or_default();
-        self.run(
+        Some(self.run(
             move |core| {
                 let mut notes = core.notes(Order::LastChange)?;
                 notes.sort_by_key(|note| std::cmp::Reverse(note.modified));
@@ -282,21 +293,20 @@ impl NotePane {
                 })
             },
             cx,
-        )
+        ))
     }
 
     /// Makes the link that the user picked in the link picker, and puts it at the cursor.
-    /// A new note goes in the folder of the open note.
+    /// A new note goes in the folder of the open note. With no open note, it does nothing.
     pub(crate) fn link(
         &mut self,
         choice: LinkChoice,
         cx: &mut Context<Self>,
     ) -> Task<holm_core::Result<()>> {
-        let folder = self
-            .path()
-            .and_then(Path::parent)
-            .map(Path::to_owned)
-            .unwrap_or_default();
+        let Some(path) = self.path() else {
+            return Task::ready(Ok(()));
+        };
+        let folder = path.parent().map(Path::to_owned).unwrap_or_default();
         let make = self.run(
             move |core| match choice {
                 LinkChoice::Note {
@@ -537,7 +547,8 @@ impl NotePane {
             }
             Change::Moved { from, note } if from == open.info.path => {
                 open.info.path.clone_from(&note.path);
-                self.links.update(cx, |links, cx| links.show(note.path, cx));
+                self.links
+                    .update(cx, |links, cx| links.show(Some(note.path), cx));
             }
             Change::Removed(path) if path == open.info.path => {
                 if unsaved {
@@ -589,17 +600,14 @@ impl NotePane {
         cx.notify();
     }
 
-    /// "Close" after an outside delete: drops the text, and the app opens another note.
+    /// "Close" after an outside delete: drops the note and its text, and the app opens another
+    /// note.
     fn close_deleted(&mut self, cx: &mut Context<Self>) {
         let Some(path) = self.path().map(Path::to_owned) else {
             return;
         };
-        self.deleted = false;
-        self.autosave = None;
-        self.saving = None;
-        self.saved = self.editor.read(cx).text().to_owned();
+        self.drop_note(cx);
         cx.emit(PaneEvent::Gone(path));
-        cx.notify();
     }
 
     /// The path of the open note, relative to the notes folder.

@@ -36,7 +36,7 @@ pub(super) struct Links {
     editor: Entity<Editor>,
     backlinks: Entity<Backlinks>,
     /// The path of the open note, relative to the notes folder.
-    note: PathBuf,
+    note: Option<PathBuf>,
     reading: Option<Task<()>>,
     _revisions: Task<()>,
     _subscriptions: Vec<Subscription>,
@@ -66,15 +66,15 @@ impl Links {
             core,
             editor,
             backlinks,
-            note: PathBuf::new(),
+            note: None,
             reading: None,
             _revisions: revisions,
             _subscriptions: subscriptions,
         }
     }
 
-    /// Follows the open note to `note`, and reads its links.
-    pub(super) fn show(&mut self, note: PathBuf, cx: &mut Context<Self>) {
+    /// Follows the open note to `note`, and reads its links. With no note, it reads nothing.
+    pub(super) fn show(&mut self, note: Option<PathBuf>, cx: &mut Context<Self>) {
         self.note = note;
         self.read(cx);
     }
@@ -82,6 +82,9 @@ impl Links {
     /// Opens the system file picker, and embeds each picked file at the cursor, with no copy.
     /// It shows as an image or a file card, like a pasted file.
     pub(super) fn pick_files(&mut self, cx: &mut Context<Self>) {
+        let Some(note) = self.note.clone() else {
+            return;
+        };
         let picked = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -89,7 +92,6 @@ impl Links {
             prompt: Some(text::LINK_FILE.into()),
         });
         let core = self.core.clone();
-        let note = self.note.clone();
         cx.spawn(async move |links, cx| {
             let files = match picked.await {
                 Ok(Ok(Some(files))) => files,
@@ -116,8 +118,10 @@ impl Links {
 
     /// Reads the backlinks and the broken note links of the open note, and shows them.
     fn read(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = self.note.clone() else {
+            return;
+        };
         let core = self.core.clone();
-        let path = self.note.clone();
         let job = cx.background_spawn(async move {
             let backlinks = core.backlinks(&path, Order::LastChange)?;
             let broken = core.broken_links(&path)?;
@@ -127,7 +131,7 @@ impl Links {
             let result = job.await;
             links
                 .update(cx, |links, cx| match result {
-                    Ok((path, backlinks, broken)) if path == links.note => {
+                    Ok((path, backlinks, broken)) if links.note.as_ref() == Some(&path) => {
                         links
                             .backlinks
                             .update(cx, |list, cx| list.show(backlinks, cx));
@@ -178,7 +182,7 @@ impl Links {
 
     /// Opens the note at `path` at `heading`, or at the top when the note has no such heading.
     fn open_at(&mut self, path: PathBuf, heading: Option<String>, cx: &mut Context<Self>) {
-        if path != self.note {
+        if self.note.as_ref() != Some(&path) {
             cx.emit(LinksEvent::Open { path, heading });
         } else if let Some(heading) = heading {
             self.editor
@@ -189,8 +193,10 @@ impl Links {
     /// Copies pasted or dropped files into `attachments/`, and puts a link to each copy at the
     /// cursor.
     fn paste_files(&mut self, files: Vec<PastedFile>, cx: &mut Context<Self>) {
+        let Some(note) = self.note.clone() else {
+            return;
+        };
         let core = self.core.clone();
-        let note = self.note.clone();
         let job = cx.background_spawn(async move {
             files
                 .iter()

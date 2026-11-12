@@ -127,14 +127,12 @@ impl NotesView {
                 }
             }
             PaneEvent::Gone(path) => {
+                // A read changes no file, so it does not wait for the pane to save.
                 let next = self.sidebar.read(cx).neighbor(path);
                 let order = self.config.read(cx).settings().note_order;
-                self.run(
-                    window,
-                    cx,
-                    move |core| next_note(core, next, order),
-                    Self::show_next,
-                );
+                let core = self.core.clone();
+                let job = cx.background_spawn(async move { next_note(&core, next, order) });
+                self.finish(job, Self::show_next, window, cx);
             }
         }
     }
@@ -279,8 +277,9 @@ impl NotesView {
 
     /// Ctrl+K: opens the link picker.
     fn open_link_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let job = self.pane.update(cx, NotePane::start_link);
-        self.finish(job, Self::show_link_picker, window, cx);
+        if let Some(job) = self.pane.update(cx, NotePane::start_link) {
+            self.finish(job, Self::show_link_picker, window, cx);
+        }
     }
 
     fn show_link_picker(&mut self, start: LinkStart, window: &mut Window, cx: &mut Context<Self>) {
@@ -591,15 +590,14 @@ impl NotesView {
         if !modifiers.control || modifiers.alt || modifiers.platform {
             return;
         }
-        let open = self.pane.read(cx).path().is_some();
-        let in_editor = open && self.editor_focused(window, cx);
+        let in_editor = self.editor_focused(window, cx);
         match (modifiers.shift, keystroke.key.as_str()) {
             (true, "l") => self.toggle_sidebar(window, cx),
             (true, "f") => self.focus_search(window, cx),
             (true, "o") => self.open_quick_open(window, cx),
-            (true, "p") if open => self.pane.update(cx, NotePane::toggle_pin),
-            (true, "t") if open => self.pane.update(cx, |pane, cx| pane.focus_tags(window, cx)),
-            (true, "b") if open => self
+            (true, "p") => self.pane.update(cx, NotePane::toggle_pin),
+            (true, "t") => self.pane.update(cx, |pane, cx| pane.focus_tags(window, cx)),
+            (true, "b") => self
                 .pane
                 .update(cx, |pane, cx| pane.show_backlinks(window, cx)),
             (false, "n") => self.new_note(window, cx),
