@@ -32,11 +32,11 @@ use holm_core::model::{Change, Note, NoteInfo, Order};
 use holm_editor::{Changed, Editor, UpFromStart};
 use holm_markdown::Target;
 
-use crate::backlinks::{Backlinks, BacklinksEvent};
+use crate::backlinks::{Backlinks, OpenBacklink};
 use crate::bar::{self, Bar};
 use crate::error::AppError;
 use crate::link_picker::{LinkChoice, LinkStart};
-use crate::tags::{TagRow, TagRowEvent};
+use crate::tags::{TagRow, TagsChanged};
 use crate::{changes, text, theme};
 use links::{Links, LinksEvent};
 
@@ -100,8 +100,9 @@ impl NotePane {
         cx: &mut Context<Self>,
     ) -> Self {
         let editor = cx.new(Editor::new);
-        let backlinks = cx.new(|cx| Backlinks::new(window, cx));
-        let tag_row = cx.new(|cx| TagRow::new(core.clone(), backlinks.clone(), window, cx));
+        let text = editor.focus_handle(cx);
+        let backlinks = cx.new(|cx| Backlinks::new(text.clone(), window, cx));
+        let tag_row = cx.new(|cx| TagRow::new(core.clone(), backlinks.clone(), text, window, cx));
         editor.update(cx, |editor, cx| {
             editor.set_start(Some(tag_row.clone().into()), cx);
         });
@@ -112,9 +113,18 @@ impl NotePane {
             cx.subscribe_in(&editor, window, |pane, _, _: &UpFromStart, window, cx| {
                 pane.focus_tags(window, cx);
             }),
-            cx.subscribe_in(&tag_row, window, Self::tag_row_event),
+            cx.subscribe(&tag_row, |pane, _, TagsChanged(tags), cx| {
+                pane.set_tags(tags, cx);
+            }),
             cx.subscribe(&links, Self::links_event),
-            cx.subscribe_in(&backlinks, window, Self::backlinks_event),
+            cx.subscribe_in(
+                &backlinks,
+                window,
+                |pane, _, OpenBacklink(path), window, cx| {
+                    window.focus(&pane.editor.focus_handle(cx), cx);
+                    pane.open(path.clone(), Leave::Keep, cx);
+                },
+            ),
             cx.observe_global::<Ui>(|pane, cx| {
                 let appearance = theme::appearance(cx);
                 pane.editor
@@ -310,21 +320,10 @@ impl NotePane {
             .update(cx, |row, cx| row.show(&info.tags, info.pinned, cx));
     }
 
-    fn tag_row_event(
-        &mut self,
-        _: &Entity<TagRow>,
-        event: &TagRowEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        match event {
-            TagRowEvent::Changed(tags) => {
-                self.note.info.tags.clone_from(tags);
-                let (path, tags) = (self.note.info.path.clone(), tags.clone());
-                self.write_fields(move |core| core.set_tags(&path, &tags), cx);
-            }
-            TagRowEvent::Leave => window.focus(&self.editor.focus_handle(cx), cx),
-        }
+    fn set_tags(&mut self, tags: &[String], cx: &mut Context<Self>) {
+        self.note.info.tags = tags.to_vec();
+        let (path, tags) = (self.note.info.path.clone(), tags.to_vec());
+        self.write_fields(move |core| core.set_tags(&path, &tags), cx);
     }
 
     /// Opens the tag popup. The editor scrolls to it.
@@ -336,27 +335,6 @@ impl NotePane {
     pub(crate) fn show_backlinks(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.backlinks
             .update(cx, |backlinks, cx| backlinks.enter(window, cx));
-    }
-
-    fn backlinks_event(
-        &mut self,
-        _: &Entity<Backlinks>,
-        event: &BacklinksEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        match event {
-            BacklinksEvent::Open(path) => {
-                window.focus(&self.editor.focus_handle(cx), cx);
-                self.open(path.clone(), Leave::Keep, cx);
-            }
-            // A click outside the list can give the focus to the tag popup first.
-            BacklinksEvent::Leave => {
-                if self.backlinks.focus_handle(cx).contains_focused(window, cx) {
-                    window.focus(&self.editor.focus_handle(cx), cx);
-                }
-            }
-        }
     }
 
     /// Pins or unpins the open note.

@@ -4,64 +4,51 @@
 //! on it, or Ctrl+Shift+B, opens a list under it, the last changed note first.
 //!
 //! - `↑` and `↓` move the cursor. `Enter` or a click opens the note under it.
-//! - `Esc`, or a click outside the list, closes it. The focus goes back to the text.
+//! - `Esc`, or a click outside the list, closes it. See [`Dropdown`] for the focus.
 //!
 //! With no backlinks, the tag row leaves the button out.
 
-use std::cell::Cell;
 use std::path::PathBuf;
-use std::rc::Rc;
 
 use gpui_kit::component::{ActiveTheme as _, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, Bounds, Context, CursorStyle, ElementId, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, ParentElement,
-    Pixels, Render, Role, ScrollHandle, StatefulInteractiveElement as _, Styled, Subscription,
-    TestSupportExt as _, Window, div, px,
+    Context, CursorStyle, ElementId, EventEmitter, FocusHandle, InteractiveElement as _,
+    IntoElement, KeyDownEvent, MouseButton, ParentElement, Pixels, Render, Role, ScrollHandle,
+    StatefulInteractiveElement as _, Styled, TestSupportExt as _, Window, div, px,
 };
 use holm_core::model::NoteInfo;
 
-use crate::{popup, text};
+use crate::popup::Dropdown;
+use crate::text;
 
 const LIST_WIDTH: Pixels = px(260.);
 
 /// The list scrolls when it is taller than this.
 const LIST_HEIGHT: Pixels = px(280.);
 
-/// What the backlinks tell the pane.
+/// The user picked the note at this path, to open it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum BacklinksEvent {
-    /// Open the note at this path.
-    Open(PathBuf),
-    /// The list closed. When the focus is still in it, give the focus back to the text.
-    Leave,
-}
+pub(crate) struct OpenBacklink(pub(crate) PathBuf);
 
 pub(crate) struct Backlinks {
     notes: Vec<NoteInfo>,
     /// Whether the list is open.
     open: bool,
     cursor: usize,
-    focus: FocusHandle,
     scroll: ScrollHandle,
-    /// The window bounds of the button in the last frame. A click there is not outside the list.
-    button_bounds: Rc<Cell<Bounds<Pixels>>>,
-    _subscriptions: Vec<Subscription>,
+    dropdown: Dropdown<Self>,
 }
 
 impl Backlinks {
-    pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let focus = cx.focus_handle();
-        let subscriptions = vec![cx.on_focus_out(&focus, window, |list, _, _, cx| list.close(cx))];
+    /// `text` gets the focus back when the list closes with it.
+    pub(crate) fn new(text: FocusHandle, window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self {
             notes: Vec::new(),
             open: false,
             cursor: 0,
-            focus,
             scroll: ScrollHandle::new(),
-            button_bounds: Rc::default(),
-            _subscriptions: subscriptions,
+            dropdown: Dropdown::new(text, |list, _, cx| list.close(cx), window, cx),
         }
     }
 
@@ -73,9 +60,8 @@ impl Backlinks {
         }
         self.notes = notes;
         self.cursor = self.cursor.min(self.notes.len().saturating_sub(1));
-        if self.notes.is_empty() && self.open {
+        if self.notes.is_empty() {
             self.close(cx);
-            cx.emit(BacklinksEvent::Leave);
         }
         cx.notify();
     }
@@ -92,7 +78,7 @@ impl Backlinks {
         self.open = true;
         self.cursor = 0;
         self.scroll.scroll_to_item(0);
-        window.focus(&self.focus, cx);
+        window.focus(self.dropdown.focus_handle(), cx);
         cx.notify();
     }
 
@@ -103,16 +89,11 @@ impl Backlinks {
         }
     }
 
-    fn leave(&mut self, cx: &mut Context<Self>) {
-        self.close(cx);
-        cx.emit(BacklinksEvent::Leave);
-    }
-
     fn pick(&mut self, at: usize, cx: &mut Context<Self>) {
         if let Some(note) = self.notes.get(at) {
             let path = note.path.clone();
             self.close(cx);
-            cx.emit(BacklinksEvent::Open(path));
+            cx.emit(OpenBacklink(path));
         }
     }
 
@@ -124,7 +105,7 @@ impl Backlinks {
             "up" => self.cursor = self.cursor.saturating_sub(1),
             "down" => self.cursor = (self.cursor + 1).min(self.notes.len().saturating_sub(1)),
             "enter" => self.pick(self.cursor, cx),
-            "escape" => self.leave(cx),
+            "escape" => self.close(cx),
             _ => return,
         }
         self.scroll.scroll_to_item(self.cursor);
@@ -152,7 +133,7 @@ impl Backlinks {
                 MouseButton::Left,
                 cx.listener(|list, _, window, cx| {
                     if list.open {
-                        list.leave(cx);
+                        list.close(cx);
                     } else {
                         list.enter(window, cx);
                     }
@@ -186,34 +167,14 @@ impl Backlinks {
                     cx.listener(move |list, _, _, cx| list.pick(at, cx)),
                 )
         });
-        popup::panel(LIST_WIDTH, cx)
+        self.dropdown
+            .panel(LIST_WIDTH, cx)
+            .right_0()
+            .on_key_down(cx.listener(Self::key_down))
             .id("backlinks")
             .role(Role::Dialog)
             .aria_label(text::LINKED_FROM)
             .test_support()
-            .track_focus(&self.focus)
-            .on_key_down(cx.listener(Self::key_down))
-            .absolute()
-            .top_full()
-            .right_0()
-            .mt_1()
-            .py_1()
-            .occlude()
-            .text_size(px(12.))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|_, _, window, cx| {
-                    // The editor under the list would move its cursor and take the focus.
-                    window.prevent_default();
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_down_out(cx.listener(|list, event: &MouseDownEvent, _, cx| {
-                // The button closes the list itself.
-                if !list.button_bounds.get().contains(&event.position) {
-                    list.leave(cx);
-                }
-            }))
             .child(
                 div()
                     .px_3()
@@ -235,24 +196,12 @@ impl Backlinks {
     }
 }
 
-impl EventEmitter<BacklinksEvent> for Backlinks {}
-
-impl Focusable for Backlinks {
-    fn focus_handle(&self, _cx: &App) -> FocusHandle {
-        self.focus.clone()
-    }
-}
+impl EventEmitter<OpenBacklink> for Backlinks {}
 
 impl Render for Backlinks {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let button_bounds = self.button_bounds.clone();
-        div()
-            .on_children_prepainted(move |bounds, _, _| {
-                if let Some(button) = bounds.first() {
-                    button_bounds.set(*button);
-                }
-            })
-            .relative()
+        self.dropdown
+            .root()
             .ml_auto()
             .child(self.button(cx))
             .when(self.open, |root| root.child(self.list(cx)))

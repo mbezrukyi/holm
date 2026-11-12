@@ -4,20 +4,17 @@
 //! The popup holds the field and one list. With an empty field, the list holds the tags of
 //! the note, each with a `✓`. Typing filters it and adds the other known tags without a `✓`.
 //! A typed name that no line has shows as an "Add" line. The popup changes no files itself.
-//! It sends the new tags as a [`TagRowEvent`].
+//! It sends the new tags as [`TagsChanged`].
 //!
 //! - The field keeps the focus. `↑` and `↓` move a cursor through the list.
 //! - `Enter` or `Tab` adds or removes the tag under the cursor. With no cursor, it adds the
 //!   typed tag. A click on a line does the same as `Enter` on it.
-//! - `Esc`, a click outside the popup, or `↓` with an empty list closes the popup. The focus
-//!   goes back to the text.
+//! - `Esc`, a click outside the popup, or `↓` with an empty list closes the popup. See
+//!   [`Dropdown`] for the focus.
 //! - A click on the row opens the popup. A click on a chip also puts the cursor on its tag.
 //!
 //! The [`Backlinks`] count sits at the right end of the row. With no tags, no pin and no
 //! backlinks, the row stays hidden.
-
-use std::cell::Cell;
-use std::rc::Rc;
 
 use gpui_kit::component::input::{
     Enter, Escape, IndentInline, Input, InputEvent, InputState, MoveDown, MoveUp,
@@ -25,16 +22,17 @@ use gpui_kit::component::input::{
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AppContext as _, Bounds, Context, CursorStyle, ElementId, Entity, EventEmitter, FocusHandle,
-    InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent, ParentElement, Pixels,
-    Render, Role, StatefulInteractiveElement, Styled, Subscription, Task, TestSupportExt as _,
-    Toggled, Window, div, px,
+    AppContext as _, Context, CursorStyle, ElementId, Entity, EventEmitter, FocusHandle,
+    InteractiveElement as _, IntoElement, MouseButton, ParentElement, Pixels, Render, Role,
+    StatefulInteractiveElement, Styled, Subscription, Task, TestSupportExt as _, Toggled, Window,
+    div, px,
 };
 use holm_core::Core;
 use holm_core::model::Tag;
 
 use crate::backlinks::Backlinks;
-use crate::{popup, text};
+use crate::popup::Dropdown;
+use crate::text;
 
 /// The most known tags in the list while the user types.
 const SUGGESTIONS: usize = 5;
@@ -44,14 +42,9 @@ pub(crate) const CHIP_WIDTH: Pixels = px(200.);
 
 const POPUP_WIDTH: Pixels = px(300.);
 
-/// What the tag row tells the pane.
+/// The user added or removed a tag. These are all the tags of the note now.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum TagRowEvent {
-    /// The user added or removed a tag. These are all the tags of the note now.
-    Changed(Vec<String>),
-    /// Give the focus back to the text.
-    Leave,
-}
+pub(crate) struct TagsChanged(pub(crate) Vec<String>);
 
 /// One line of the list in the popup.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -75,26 +68,24 @@ pub(crate) struct TagRow {
     cursor: Option<usize>,
     /// The text of the field that the list shows. A change of it drops the cursor.
     query: String,
-    focus: FocusHandle,
     input: Entity<InputState>,
-    /// The window bounds of the row in the last frame. A click there is not outside the popup.
-    row_bounds: Rc<Cell<Bounds<Pixels>>>,
+    dropdown: Dropdown<Self>,
     loading: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl TagRow {
+    /// `text` gets the focus back when the popup closes with it.
     pub(crate) fn new(
         core: Core,
         backlinks: Entity<Backlinks>,
+        text: FocusHandle,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let focus = cx.focus_handle();
         let input = cx.new(|cx| InputState::new(window, cx).placeholder(text::ADD_TAG));
         let subscriptions = vec![
             cx.observe(&backlinks, |_, _, cx| cx.notify()),
-            cx.on_focus_out(&focus, window, |row, _, window, cx| row.close(window, cx)),
             cx.subscribe(&input, |row, input, event, cx| {
                 if matches!(event, InputEvent::Change) {
                     let value = input.read(cx).value().to_string();
@@ -115,9 +106,8 @@ impl TagRow {
             open: false,
             cursor: None,
             query: String::new(),
-            focus,
             input,
-            row_bounds: Rc::default(),
+            dropdown: Dropdown::new(text, Self::close, window, cx),
             loading: None,
             _subscriptions: subscriptions,
         }
@@ -167,16 +157,10 @@ impl TagRow {
         cx.notify();
     }
 
-    /// Closes the popup after the focus left it.
     fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open = false;
         self.clear(window, cx);
         cx.notify();
-    }
-
-    fn leave(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.close(window, cx);
-        cx.emit(TagRowEvent::Leave);
     }
 
     /// Empties the field and drops the cursor.
@@ -259,13 +243,13 @@ impl TagRow {
         match line {
             Some(Line::Tag { name, on: true }) => {
                 self.tags.retain(|tag| *tag != name);
-                cx.emit(TagRowEvent::Changed(self.tags.clone()));
+                cx.emit(TagsChanged(self.tags.clone()));
                 self.clamp_cursor();
             }
             Some(Line::Tag { name, on: false } | Line::Add(name)) => {
                 if !self.tags.contains(&name) {
                     self.tags.push(name);
-                    cx.emit(TagRowEvent::Changed(self.tags.clone()));
+                    cx.emit(TagsChanged(self.tags.clone()));
                 }
                 self.clear(window, cx);
             }
@@ -373,34 +357,10 @@ impl TagRow {
 
     /// The popup under the row: the field and the list.
     fn popup(&self, cx: &Context<Self>) -> impl IntoElement {
-        popup::panel(POPUP_WIDTH, cx)
-            .id("tag-popup")
-            .role(Role::Dialog)
-            .aria_label(text::TAGS_LABEL)
-            .test_support()
-            .track_focus(&self.focus)
-            .key_context("TagRow")
-            .absolute()
-            .top_full()
+        self.dropdown
+            .panel(POPUP_WIDTH, cx)
             .left_0()
-            .mt_1()
-            .py_1()
-            .occlude()
-            .text_size(px(12.))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|_, _, window, cx| {
-                    // The editor under the popup would move its cursor and take the focus.
-                    window.prevent_default();
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_down_out(cx.listener(|row, event: &MouseDownEvent, window, cx| {
-                // A click on the row opens the popup again, with its own cursor.
-                if !row.row_bounds.get().contains(&event.position) {
-                    row.leave(window, cx);
-                }
-            }))
+            .key_context("TagRow")
             .capture_action(cx.listener(|row, _: &Enter, window, cx| {
                 row.choose(window, cx);
                 cx.stop_propagation();
@@ -410,12 +370,12 @@ impl TagRow {
                 cx.stop_propagation();
             }))
             .capture_action(cx.listener(|row, _: &Escape, window, cx| {
-                row.leave(window, cx);
+                row.close(window, cx);
                 cx.stop_propagation();
             }))
             .capture_action(cx.listener(|row, _: &MoveDown, window, cx| {
                 if !row.move_cursor(true, cx) {
-                    row.leave(window, cx);
+                    row.close(window, cx);
                 }
                 cx.stop_propagation();
             }))
@@ -432,6 +392,10 @@ impl TagRow {
                 ),
             )
             .children(self.list(cx))
+            .id("tag-popup")
+            .role(Role::Dialog)
+            .aria_label(text::TAGS_LABEL)
+            .test_support()
     }
 }
 
@@ -443,7 +407,7 @@ fn flatten(tags: &[Tag], names: &mut Vec<String>) {
     }
 }
 
-impl EventEmitter<TagRowEvent> for TagRow {}
+impl EventEmitter<TagsChanged> for TagRow {}
 
 impl Render for TagRow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -488,14 +452,8 @@ impl Render for TagRow {
                     .map(|(at, tag)| Self::row_chip(at, tag, cx)),
             )
             .when(has_backlinks, |row| row.child(self.backlinks.clone()));
-        let row_bounds = self.row_bounds.clone();
-        div()
-            .on_children_prepainted(move |bounds, _, _| {
-                if let Some(row) = bounds.first() {
-                    row_bounds.set(*row);
-                }
-            })
-            .relative()
+        self.dropdown
+            .root()
             .w_full()
             .cursor(CursorStyle::Arrow)
             // The row lies in the editor, which sets the note font.

@@ -82,6 +82,7 @@ impl Fixture {
     }
 }
 
+/// Opens an active window, as the user sees it. An inactive window sends no focus events.
 fn open(cx: &mut TestAppContext, startup: Startup) -> AnyWindowHandle {
     let opened = cx.update(|cx| {
         gpui_kit::init(cx);
@@ -91,6 +92,8 @@ fn open(cx: &mut TestAppContext, startup: Startup) -> AnyWindowHandle {
         })
     });
     let (handle, _) = opened.unwrap();
+    cx.update_window(handle, |_, window, _| window.activate_window())
+        .unwrap();
     cx.run_until_parked();
     handle
 }
@@ -1257,10 +1260,6 @@ fn the_tag_popup_and_the_backlinks_list_take_turns(cx: &mut TestAppContext) {
     set_time(&notes.join("Target.md"), 300);
     set_time(&notes.join("Other.md"), 100);
     let handle = open(cx, fixture.startup(None));
-    // An inactive window sends no focus events.
-    cx.update_window(handle, |_, window, _| window.activate_window())
-        .unwrap();
-    cx.run_until_parked();
 
     keys(cx, handle, "ctrl-shift-b");
     assert_eq!(backlinks(cx, handle), ["Other*"]);
@@ -1278,6 +1277,27 @@ fn the_tag_popup_and_the_backlinks_list_take_turns(cx: &mut TestAppContext) {
     assert_eq!(backlinks(cx, handle), Vec::<String>::new());
     assert!(!popup_open(cx, handle));
     assert_eq!(focus(cx, handle), "editor");
+}
+
+#[gpui_kit::test]
+fn a_click_in_the_sidebar_keeps_the_focus_after_the_tag_popup_closes(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    fs::write(
+        fixture.notes().join("A.md"),
+        "---\ntags:\n  - work\n---\n# A\n",
+    )
+    .unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    click_chip(cx, handle, 0);
+    assert_eq!(focus(cx, handle), "tag field");
+    cx.update_window(handle, |_, window, cx| {
+        window.click(gpui_kit::ElementId::NamedInteger("note-row".into(), 0), cx);
+    })
+    .unwrap();
+    settle(cx);
+    assert!(!popup_open(cx, handle));
+    assert_eq!(focus(cx, handle), "sidebar");
 }
 
 #[gpui_kit::test]

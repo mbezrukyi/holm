@@ -1,8 +1,14 @@
 //! The look of a small window over the notes: a dim layer over the whole window, and a
-//! panel in its middle.
+//! panel in its middle. Also [`Dropdown`], a popup under a part of a row.
+
+use std::cell::Cell;
+use std::rc::Rc;
 
 use gpui_kit::component::{ActiveTheme as _, v_flex};
-use gpui_kit::{App, Div, ParentElement as _, Pixels, Styled, div};
+use gpui_kit::{
+    App, Bounds, Context, Div, FocusHandle, InteractiveElement as _, MouseButton, MouseDownEvent,
+    ParentElement as _, Pixels, Styled, Subscription, Window, div, px,
+};
 
 /// A layer over the whole window that centers its child.
 pub(crate) fn layer(cx: &App) -> Div {
@@ -33,4 +39,95 @@ pub(crate) fn empty(message: &'static str, cx: &App) -> Div {
         .py_2()
         .text_color(cx.theme().muted_foreground)
         .child(message)
+}
+
+/// A popup under a part of a row, the opener. Its owner `T` decides when it is open.
+///
+/// - A mouse down in the popup keeps the focus where it is.
+/// - A mouse down outside the popup and the opener closes it.
+/// - The popup closes when the focus leaves it. When the focus goes to no other part, it goes
+///   back to the text. So a closed popup never keeps the focus, and never takes it from
+///   another part.
+pub(crate) struct Dropdown<T> {
+    focus: FocusHandle,
+    close: fn(&mut T, &mut Window, &mut Context<T>),
+    /// The window bounds of the opener in the last frame.
+    opener: Rc<Cell<Bounds<Pixels>>>,
+    _focus_out: Subscription,
+}
+
+impl<T: 'static> Dropdown<T> {
+    /// `close` closes the popup in `T`. `text` is the part that gets the focus back.
+    pub(crate) fn new(
+        text: FocusHandle,
+        close: fn(&mut T, &mut Window, &mut Context<T>),
+        window: &mut Window,
+        cx: &mut Context<T>,
+    ) -> Self {
+        let focus = cx.focus_handle();
+        let focus_out = cx.on_focus_out(&focus, window, move |owner, event, window, cx| {
+            close(owner, window, cx);
+            // The focus still names the blurred part when the frame no longer has it.
+            if window
+                .focused(cx)
+                .is_some_and(|focused| event.blurred == focused)
+            {
+                window.focus(&text, cx);
+            }
+        });
+        Self {
+            focus,
+            close,
+            opener: Rc::default(),
+            _focus_out: focus_out,
+        }
+    }
+
+    /// The handle that the popup tracks. The owner focuses it, or a part in the popup.
+    pub(crate) fn focus_handle(&self) -> &FocusHandle {
+        &self.focus
+    }
+
+    /// The root of the owner. Its first child is the opener, and the panel comes after it.
+    pub(crate) fn root(&self) -> Div {
+        let opener = self.opener.clone();
+        div()
+            .on_children_prepainted(move |bounds, _, _| {
+                if let Some(bounds) = bounds.first() {
+                    opener.set(*bounds);
+                }
+            })
+            .relative()
+    }
+
+    /// The popup panel under the opener, `width` wide. The owner places it to the left or to
+    /// the right.
+    pub(crate) fn panel(&self, width: Pixels, cx: &Context<T>) -> Div {
+        let opener = self.opener.clone();
+        let close = self.close;
+        panel(width, cx)
+            .track_focus(&self.focus)
+            .absolute()
+            .top_full()
+            .mt_1()
+            .py_1()
+            .occlude()
+            .text_size(px(12.))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|_, _, window, cx| {
+                    // The editor under the popup would move its cursor and take the focus.
+                    window.prevent_default();
+                    cx.stop_propagation();
+                }),
+            )
+            .on_mouse_down_out(
+                cx.listener(move |owner, event: &MouseDownEvent, window, cx| {
+                    // The opener handles its own clicks.
+                    if !opener.get().contains(&event.position) {
+                        close(owner, window, cx);
+                    }
+                }),
+            )
+    }
 }
