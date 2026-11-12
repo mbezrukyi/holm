@@ -97,6 +97,8 @@ pub(crate) struct Sidebar {
     list: Vec<NoteInfo>,
     /// The note in the editor. It is the selected row of a list.
     current: Option<PathBuf>,
+    /// The note in the editor after it left the list, with its neighbor in the list before.
+    left: Option<(PathBuf, PathBuf)>,
     rename: Option<Rename>,
     search: Entity<InputState>,
     /// The trimmed text of the search field. With text, the list shows `found`.
@@ -141,6 +143,7 @@ impl Sidebar {
             entries: Vec::new(),
             list: Vec::new(),
             current,
+            left: None,
             rename: None,
             search,
             query: String::new(),
@@ -302,7 +305,7 @@ impl Sidebar {
             }
             self.entries.push(Entry::Row(at));
         }
-        self.list = if self.searching() {
+        let list: Vec<NoteInfo> = if self.searching() {
             self.found.clone()
         } else {
             self.snapshot
@@ -311,11 +314,18 @@ impl Sidebar {
                 .cloned()
                 .collect()
         };
+        if let Some(current) = &self.current
+            && !list.iter().any(|note| &note.path == current)
+            && let Some(next) = self.neighbor(current)
+        {
+            self.left = Some((current.clone(), next));
+        }
+        self.list = list;
     }
 
     /// Marks the note in the editor.
-    pub(crate) fn set_current(&mut self, path: PathBuf, cx: &mut Context<Self>) {
-        self.current = Some(path);
+    pub(crate) fn set_current(&mut self, path: Option<PathBuf>, cx: &mut Context<Self>) {
+        self.current = path;
         self.scroll_to_selection();
         cx.notify();
     }
@@ -334,9 +344,16 @@ impl Sidebar {
         (item.folder().to_owned(), tag)
     }
 
-    /// The note after `path` in the list, or else the one before it.
+    /// The note after `path` in the list, or else the one before it. For the note in the editor
+    /// after another tool deleted it, it is its neighbor before the delete.
     pub(crate) fn neighbor(&self, path: &Path) -> Option<PathBuf> {
-        let at = self.list.iter().position(|note| note.path == path)?;
+        let Some(at) = self.list.iter().position(|note| note.path == path) else {
+            return self
+                .left
+                .as_ref()
+                .filter(|(gone, _)| gone == path)
+                .map(|(_, next)| next.clone());
+        };
         self.list
             .get(at + 1)
             .or_else(|| at.checked_sub(1).and_then(|before| self.list.get(before)))
@@ -571,7 +588,7 @@ impl Sidebar {
     }
 
     fn choose(&mut self, path: PathBuf, cx: &mut Context<Self>) {
-        self.set_current(path.clone(), cx);
+        self.set_current(Some(path.clone()), cx);
         cx.emit(SidebarEvent::Open(path));
     }
 

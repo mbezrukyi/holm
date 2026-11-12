@@ -36,6 +36,16 @@ impl Fixture {
     /// Writes `text` to a note, like another tool, and tells the core.
     fn write_outside(&self, cx: &mut TestAppContext, note: &str, text: &str) {
         fs::write(self.notes().join(note), text).unwrap();
+        self.tell(cx, note);
+    }
+
+    /// Deletes a note, like another tool, and tells the core.
+    fn delete_outside(&self, cx: &mut TestAppContext, note: &str) {
+        fs::remove_file(self.notes().join(note)).unwrap();
+        self.tell(cx, note);
+    }
+
+    fn tell(&self, cx: &mut TestAppContext, note: &str) {
         let feed = self.feed.lock().unwrap();
         feed.as_ref()
             .expect("the core is open")
@@ -138,6 +148,24 @@ fn folder_screen(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<Str
     })
 }
 
+fn empty_pane(cx: &mut TestAppContext, handle: AnyWindowHandle) -> bool {
+    screen(cx, handle, |window| {
+        window
+            .try_find("empty-pane")
+            .is_some_and(|pane| pane.label() == Some(text::NO_NOTE_OPEN))
+    })
+}
+
+/// The files in the notes folder, sorted.
+fn files(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
 fn editor_text(cx: &mut TestAppContext, handle: AnyWindowHandle) -> String {
     screen(cx, handle, |window| {
         window
@@ -189,9 +217,9 @@ fn the_first_start_can_make_the_default_folder(cx: &mut TestAppContext) {
     click(cx, handle, "use-default");
 
     assert_eq!(folder_screen(cx, handle), None);
-    assert_eq!(editor_text(cx, handle), "");
+    assert!(empty_pane(cx, handle));
     let default = fixture.dir.path().join("Notes");
-    assert!(default.join("Untitled.md").is_file());
+    assert_eq!(files(&default), Vec::<String>::new());
     let config = Config::load(fixture.config());
     assert_eq!(config.settings().notes_folder, Some(default));
 }
@@ -280,7 +308,7 @@ fn a_broken_config_shows_a_bar_and_stays_as_it_is(cx: &mut TestAppContext) {
     assert_eq!(bars(cx, handle), [text::CONFIG_BROKEN]);
 
     click(cx, handle, "use-default");
-    assert_eq!(editor_text(cx, handle), "");
+    assert!(empty_pane(cx, handle));
     assert_eq!(read(&fixture.config()), "version = [broken\n");
 
     click(cx, handle, "config-broken-close");
@@ -468,8 +496,10 @@ fn the_delete_dialog_counts_and_deletes(cx: &mut TestAppContext) {
         "no dialog after Do not show again"
     );
     assert!(!notes_dir.join("B.md").exists());
-    assert_eq!(editor_text(cx, handle), "");
-    assert!(notes_dir.join("Untitled.md").is_file());
+    assert!(empty_pane(cx, handle));
+    assert_eq!(files(&notes_dir), ["attachments"]);
+    assert_eq!(focus(cx, handle), "sidebar");
+    assert_eq!(Config::load(fixture.config()).settings().last_note, None);
 }
 
 #[gpui_kit::test]
@@ -1437,4 +1467,92 @@ fn ctrl_o_embeds_a_file_where_it_is(cx: &mut TestAppContext) {
         "# A\n![plan.pdf](../docs/plan.pdf)\n"
     );
     assert_eq!(fs::read_dir(notes.join("work")).unwrap().count(), 1);
+}
+
+#[gpui_kit::test]
+fn an_empty_folder_shows_the_empty_pane_and_makes_no_note(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let handle = open(cx, fixture.startup(None));
+
+    assert!(empty_pane(cx, handle));
+    assert_eq!(files(&fixture.notes()), Vec::<String>::new());
+    assert_eq!(focus(cx, handle), "sidebar");
+    assert_eq!(chips(cx, handle), Vec::<String>::new());
+
+    // The keys that need a note do nothing.
+    keys(cx, handle, "ctrl-shift-p ctrl-shift-t ctrl-shift-b ctrl-k");
+    assert_eq!(files(&fixture.notes()), Vec::<String>::new());
+    assert!(empty_pane(cx, handle));
+
+    // With no sidebar, the window keys still work.
+    keys(cx, handle, "ctrl-shift-l");
+    assert_eq!(sidebar(cx, handle), "hidden");
+    keys(cx, handle, "ctrl-shift-l");
+    assert_eq!(focus(cx, handle), "sidebar");
+
+    keys(cx, handle, "ctrl-n");
+    assert!(!empty_pane(cx, handle));
+    assert_eq!(editor_text(cx, handle), "");
+    assert_eq!(focus(cx, handle), "editor");
+    assert_eq!(files(&fixture.notes()), ["Untitled.md"]);
+    let settings = Config::load(fixture.config()).settings().clone();
+    assert_eq!(settings.last_note, Some(PathBuf::from("Untitled.md")));
+}
+
+#[gpui_kit::test]
+fn an_outside_add_on_the_empty_pane_only_lists_the_note(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let handle = open(cx, fixture.startup(None));
+
+    fixture.write_outside(cx, "Plans.md", "# Plans\n");
+
+    assert!(empty_pane(cx, handle));
+    keys(cx, handle, "enter");
+    assert_eq!(notes_list(cx, handle), ["Plans"]);
+    assert!(empty_pane(cx, handle));
+}
+
+#[gpui_kit::test]
+fn an_outside_delete_opens_the_neighbor_or_the_empty_pane(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    three_notes(&notes_dir);
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(editor_text(cx, handle), "# Plan\nbuy milk\n");
+
+    fixture.delete_outside(cx, "Plan.md");
+    assert_eq!(editor_text(cx, handle), "# Goals\nread more\n");
+
+    fixture.delete_outside(cx, "Goals.md");
+    fixture.delete_outside(cx, "Top.md");
+    assert!(empty_pane(cx, handle));
+    assert_eq!(files(&notes_dir), Vec::<String>::new());
+    assert_eq!(bars(cx, handle), Vec::<String>::new());
+}
+
+#[gpui_kit::test]
+fn an_outside_delete_with_unsaved_text_asks_to_keep_or_close(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    three_notes(&notes_dir);
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-end");
+    cx.simulate_input(handle, "mine");
+
+    fixture.delete_outside(cx, "Plan.md");
+    assert_eq!(bars(cx, handle), [text::DELETED_ON_DISK]);
+    autosave(cx);
+    assert!(!notes_dir.join("Plan.md").exists(), "no autosave");
+
+    click(cx, handle, "keep-deleted");
+    assert_eq!(bars(cx, handle), Vec::<String>::new());
+    assert!(read(&notes_dir.join("Plan.md")).ends_with("# Plan\nbuy milk\nmine\n"));
+
+    cx.simulate_input(handle, "!");
+    fixture.delete_outside(cx, "Plan.md");
+    assert_eq!(bars(cx, handle), [text::DELETED_ON_DISK]);
+    click(cx, handle, "close-deleted");
+    assert_eq!(editor_text(cx, handle), "# Goals\nread more\n");
+    assert!(!notes_dir.join("Plan.md").exists());
+    assert_eq!(bars(cx, handle), Vec::<String>::new());
 }

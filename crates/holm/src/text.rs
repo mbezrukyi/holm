@@ -28,6 +28,9 @@ pub(crate) const OPENING: &str = "Holm opens the notes folder.";
 pub(crate) const CHANGED_ON_DISK: &str = "Changed on disk. Reload or keep mine?";
 pub(crate) const RELOAD: &str = "Reload";
 pub(crate) const KEEP_MINE: &str = "Keep mine";
+pub(crate) const DELETED_ON_DISK: &str = "Deleted on disk. Keep mine or close?";
+pub(crate) const NO_NOTE_OPEN: &str = "No note is open.";
+pub(crate) const NEW_NOTE: &str = "New note";
 pub(crate) const CLOSE: &str = "Close";
 
 pub(crate) fn folder_missing(folder: &Path) -> String {

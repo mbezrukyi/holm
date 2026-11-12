@@ -24,6 +24,8 @@ const UI_FONT_FILES: [&[u8]; 4] = [
 pub(crate) const NOTE_FONT: &str = "DejaVu Serif";
 pub(crate) const NOTE_SIZE: Pixels = px(15.);
 pub(crate) const NOTE_LINE: Pixels = px(25.);
+/// The size of the line on the empty pane.
+pub(crate) const EMPTY_LINE: Pixels = px(15.);
 
 /// Adds the UI font and the Holm themes. Call it once, after `gpui_kit::init`.
 pub(crate) fn init(cx: &mut App) {

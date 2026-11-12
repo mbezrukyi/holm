@@ -2,6 +2,9 @@
 //!
 //! Each file action runs through the pane, which saves the open note first. The sidebar
 //! reads the notes again by itself after each change.
+//!
+//! Holm makes no note by itself. When the open note is gone, the pane opens its neighbor in
+//! the sidebar list. With no note left, it shows the empty pane.
 
 use std::path::{Path, PathBuf};
 
@@ -54,34 +57,27 @@ impl NotesView {
     pub(crate) fn new(
         core: Core,
         notes_folder: PathBuf,
-        note: Note,
+        note: Option<Note>,
         config: Entity<Config>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let settings = config.read(cx).settings().clone();
-        let current = note.info.path.clone();
+        let current = note.as_ref().map(|note| note.info.path.clone());
         let pane = cx.new(|cx| NotePane::new(core.clone(), notes_folder, note, window, cx));
         let sidebar = cx.new(|cx| {
             Sidebar::new(
                 core.clone(),
                 settings.note_order,
                 settings.sidebar.view.clone(),
-                Some(current),
+                current,
                 window,
                 cx,
             )
         });
         let subscriptions = vec![
             cx.subscribe_in(&sidebar, window, Self::sidebar_event),
-            cx.subscribe(&pane, |this, _, event: &PaneEvent, cx| match event {
-                PaneEvent::Opened(path) => {
-                    let path = path.clone();
-                    this.sidebar
-                        .update(cx, |sidebar, cx| sidebar.set_current(path, cx));
-                    this.keep_state(cx);
-                }
-            }),
+            cx.subscribe_in(&pane, window, Self::pane_event),
         ];
         let mut this = Self {
             core,
@@ -101,7 +97,54 @@ impl NotesView {
             subscriptions,
         };
         this.keep_state(cx);
+        this.focus_home(window, cx);
         this
+    }
+
+    fn pane_event(
+        &mut self,
+        _: &Entity<NotePane>,
+        event: &PaneEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            PaneEvent::Opened(path) => {
+                let path = path.clone();
+                self.sidebar
+                    .update(cx, |sidebar, cx| sidebar.set_current(Some(path), cx));
+                self.keep_state(cx);
+            }
+            PaneEvent::Closed => {
+                self.sidebar
+                    .update(cx, |sidebar, cx| sidebar.set_current(None, cx));
+                self.keep_state(cx);
+                // A popup that closes later must not give the focus back to the editor.
+                self.before_popup = None;
+                let in_pane = self.pane.focus_handle(cx).contains_focused(window, cx);
+                if in_pane || window.focused(cx).is_none() {
+                    self.focus_home(window, cx);
+                }
+            }
+            PaneEvent::Gone(path) => {
+                let next = self.sidebar.read(cx).neighbor(path);
+                let order = self.config.read(cx).settings().note_order;
+                self.run(
+                    window,
+                    cx,
+                    move |core| next_note(core, next, order),
+                    Self::show_next,
+                );
+            }
+        }
+    }
+
+    /// Opens `next`, or shows the empty pane.
+    fn show_next(&mut self, next: Option<PathBuf>, _: &mut Window, cx: &mut Context<Self>) {
+        self.pane.update(cx, |pane, cx| match next {
+            Some(next) => pane.open(next, Leave::Drop, cx),
+            None => pane.close(cx),
+        });
     }
 
     fn sidebar_event(
@@ -117,7 +160,7 @@ impl NotesView {
                 self.pane
                     .update(cx, |pane, cx| pane.open(path, Leave::Keep, cx));
             }
-            SidebarEvent::FocusEditor => self.focus_editor(window, cx),
+            SidebarEvent::FocusEditor => self.focus_home(window, cx),
             SidebarEvent::EditTitle => self
                 .pane
                 .update(cx, |pane, cx| pane.select_title(window, cx)),
@@ -306,7 +349,7 @@ impl NotesView {
     ) {
         match before {
             Some(before) => window.focus(&before, cx),
-            None => self.focus_editor(window, cx),
+            None => self.focus_home(window, cx),
         }
     }
 
@@ -382,12 +425,12 @@ impl NotesView {
     }
 
     fn delete(&mut self, target: Target, window: &mut Window, cx: &mut Context<Self>) {
-        let open = self.pane.read(cx).path().to_owned();
-        let open_gone = match &target {
-            Target::Note(path) => path == &open,
+        let open = self.pane.read(cx).path().map(Path::to_owned);
+        let open_gone = open.as_ref().is_some_and(|open| match &target {
+            Target::Note(path) => path == open,
             Target::Folder(folder) => open.starts_with(folder),
-        };
-        let next = self.sidebar.read(cx).neighbor(&open);
+        });
+        let next = open.and_then(|open| self.sidebar.read(cx).neighbor(&open));
         let order = self.config.read(cx).settings().note_order;
         self.run(
             window,
@@ -400,20 +443,11 @@ impl NotesView {
                 if !open_gone {
                     return Ok(None);
                 }
-                let next = next.filter(|next| core.read(next).is_ok());
-                let next = match next {
-                    Some(next) => next,
-                    None => match core.notes(order)?.into_iter().next() {
-                        Some(note) => note.path,
-                        None => core.create("")?.info.path,
-                    },
-                };
-                Ok(Some(next))
+                next_note(core, next, order).map(Some)
             },
-            |this, next, _, cx| {
+            |this, next, window, cx| {
                 if let Some(next) = next {
-                    this.pane
-                        .update(cx, |pane, cx| pane.open(next, Leave::Drop, cx));
+                    this.show_next(next, window, cx);
                 }
             },
         );
@@ -504,6 +538,15 @@ impl NotesView {
         self.pane.focus_handle(cx).is_focused(window)
     }
 
+    /// Gives the focus to the editor. On the empty pane, the sidebar gets it when it shows.
+    fn focus_home(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.pane.read(cx).path().is_none() && !self.hidden {
+            self.focus_sidebar(window, cx);
+        } else {
+            self.focus_editor(window, cx);
+        }
+    }
+
     fn focus_sidebar(&self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.hidden {
             window.focus(&self.sidebar.focus_handle(cx), cx);
@@ -548,19 +591,21 @@ impl NotesView {
         if !modifiers.control || modifiers.alt || modifiers.platform {
             return;
         }
+        let open = self.pane.read(cx).path().is_some();
+        let in_editor = open && self.editor_focused(window, cx);
         match (modifiers.shift, keystroke.key.as_str()) {
             (true, "l") => self.toggle_sidebar(window, cx),
             (true, "f") => self.focus_search(window, cx),
             (true, "o") => self.open_quick_open(window, cx),
-            (true, "p") => self.pane.update(cx, NotePane::toggle_pin),
-            (true, "t") => self.pane.update(cx, |pane, cx| pane.focus_tags(window, cx)),
-            (true, "b") => self
+            (true, "p") if open => self.pane.update(cx, NotePane::toggle_pin),
+            (true, "t") if open => self.pane.update(cx, |pane, cx| pane.focus_tags(window, cx)),
+            (true, "b") if open => self
                 .pane
                 .update(cx, |pane, cx| pane.show_backlinks(window, cx)),
             (false, "n") => self.new_note(window, cx),
             (true, "n") => self.new_folder(window, cx),
-            (false, "k") if self.editor_focused(window, cx) => self.open_link_picker(window, cx),
-            (false, "o") if self.editor_focused(window, cx) => {
+            (false, "k") if in_editor => self.open_link_picker(window, cx),
+            (false, "o") if in_editor => {
                 self.pane.update(cx, NotePane::link_files);
             }
             _ => return,
@@ -592,7 +637,7 @@ impl NotesView {
             hidden: self.hidden,
             view: self.sidebar.read(cx).view().clone(),
         };
-        settings.last_note = Some(self.pane.read(cx).path().to_owned());
+        settings.last_note = self.pane.read(cx).path().map(Path::to_owned);
         if &settings != self.config.read(cx).settings() {
             self.save_settings(settings, cx);
         }
@@ -681,13 +726,26 @@ fn whole(width: Pixels) -> u16 {
 }
 
 /// The note to open first: the last open note when it still exists, else the last changed
-/// note. With no notes, it makes one.
-pub(crate) fn first_note(core: &Core, last: Option<&Path>) -> holm_core::Result<Note> {
+/// note. With no notes, it is `None`.
+pub(crate) fn first_note(core: &Core, last: Option<&Path>) -> holm_core::Result<Option<Note>> {
     if let Some(note) = last.and_then(|last| core.read(last).ok()) {
-        return Ok(note);
+        return Ok(Some(note));
     }
     match core.notes(Order::LastChange)?.first() {
-        Some(info) => core.read(&info.path),
-        None => core.create(""),
+        Some(info) => core.read(&info.path).map(Some),
+        None => Ok(None),
     }
+}
+
+/// The note to open after the open one is gone: `neighbor` when it still exists, else the
+/// first note in `order`. With no notes, it is `None`.
+fn next_note(
+    core: &Core,
+    neighbor: Option<PathBuf>,
+    order: Order,
+) -> holm_core::Result<Option<PathBuf>> {
+    if let Some(next) = neighbor.filter(|next| core.read(next).is_ok()) {
+        return Ok(Some(next));
+    }
+    Ok(core.notes(order)?.into_iter().next().map(|note| note.path))
 }

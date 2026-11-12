@@ -287,14 +287,14 @@ impl HolmWindow {
     }
 }
 
-/// Opens the core and gives the note to show first. `create` makes the folder first.
+/// Opens the core and gives the note to show first, if any. `create` makes the folder first.
 fn open_notes(
     open: &dyn Fn(&Path, &Path) -> holm_core::Result<Core>,
     folder: &Path,
     index_dir: &Path,
     create: bool,
     last: Option<&Path>,
-) -> Result<(Core, Note), AppError> {
+) -> Result<(Core, Option<Note>), AppError> {
     if create && let Err(error) = std::fs::create_dir_all(folder) {
         tracing::warn!(path = %folder.display(), %error, "cannot make the notes folder");
     }
