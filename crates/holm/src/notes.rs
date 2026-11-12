@@ -12,16 +12,16 @@ use gpui_kit::{
     ParentElement, Pixels, Render, Styled, Subscription, Task, Window, div, px,
 };
 use holm_core::Core;
-use holm_core::model::{Note, NoteInfo, Order};
-use holm_markdown::Target as LinkTarget;
+use holm_core::model::{Note, Order};
 
 use crate::bar::{self, Bar};
 use crate::config::{Config, SidebarSettings};
 use crate::dialog::{Ask, Dialog, DialogEvent};
 use crate::error::AppError;
+use crate::link_picker::{LinkPicker, LinkPickerEvent, LinkStart};
 use crate::pane::{Leave, NotePane, PaneEvent};
 use crate::picker::{FolderPicker, PickerEvent};
-use crate::quick_open::{LinkChoice, QuickOpen, QuickOpenEvent};
+use crate::quick_open::{QuickOpen, QuickOpenEvent};
 use crate::sidebar::{Item, Sidebar, SidebarEvent, Target};
 use crate::text;
 
@@ -41,10 +41,10 @@ pub(crate) struct NotesView {
     dialog: Option<Entity<Dialog>>,
     picker: Option<Entity<FolderPicker>>,
     quick_open: Option<Entity<QuickOpen>>,
-    /// The part that had the focus before quick open. It gets the focus back on `Esc`.
-    before_quick_open: Option<FocusHandle>,
-    /// Whether the link picker changes the link at the cursor, not inserts a new one.
-    replace_link: bool,
+    link_picker: Option<Entity<LinkPicker>>,
+    /// The part that had the focus before quick open or the link picker. It gets the focus
+    /// back on `Esc`.
+    before_popup: Option<FocusHandle>,
     error: Option<&'static str>,
     action: Option<Task<()>>,
     subscriptions: Vec<Subscription>,
@@ -94,8 +94,8 @@ impl NotesView {
             dialog: None,
             picker: None,
             quick_open: None,
-            before_quick_open: None,
-            replace_link: false,
+            link_picker: None,
+            before_popup: None,
             error: None,
             action: None,
             subscriptions,
@@ -226,7 +226,7 @@ impl NotesView {
 
     fn open_quick_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let notes = self.sidebar.read(cx).notes().to_vec();
-        self.before_quick_open = window.focused(cx);
+        self.before_popup = window.focused(cx);
         let quick_open = cx.new(|cx| QuickOpen::new(notes, window, cx));
         self.subscriptions
             .push(cx.subscribe_in(&quick_open, window, Self::quick_open_event));
@@ -234,95 +234,46 @@ impl NotesView {
         cx.notify();
     }
 
-    /// Ctrl+K: opens the link picker. In a note link, the field starts with its target.
+    /// Ctrl+K: opens the link picker.
     fn open_link_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let link = self.pane.read(cx).cursor_link(cx);
-        self.replace_link = link.as_ref().is_some_and(|link| !link.embedded);
-        let target = link.map(|link| link.target);
-        let open_note = self.pane.read(cx).path().to_owned();
-        self.run(
-            window,
-            cx,
-            move |core| {
-                let mut notes = core.notes(Order::LastChange)?;
-                notes.sort_by_key(|note| std::cmp::Reverse(note.modified));
-                let query = match target {
-                    Some(LinkTarget::Note { id, heading }) => match core.note_with_id(&id)? {
-                        Some(note) => match heading {
-                            Some(heading) => format!("{}#{heading}", note.title),
-                            None => note.title,
-                        },
-                        None => String::new(),
-                    },
-                    Some(LinkTarget::Heading(heading)) => format!("#{heading}"),
-                    _ => String::new(),
-                };
-                Ok((notes, query))
-            },
-            move |this, (notes, query), window, cx| {
-                this.show_link_picker(notes, open_note, &query, window, cx);
-            },
-        );
+        let job = self.pane.update(cx, NotePane::start_link);
+        self.finish(job, Self::show_link_picker, window, cx);
     }
 
-    fn show_link_picker(
-        &mut self,
-        notes: Vec<NoteInfo>,
-        open_note: PathBuf,
-        query: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn show_link_picker(&mut self, start: LinkStart, window: &mut Window, cx: &mut Context<Self>) {
         let core = self.core.clone();
-        self.before_quick_open = window.focused(cx);
-        let picker = cx.new(|cx| QuickOpen::link(core, notes, open_note, query, window, cx));
+        self.before_popup = window.focused(cx);
+        let picker = cx.new(|cx| LinkPicker::new(core, start, window, cx));
         self.subscriptions
-            .push(cx.subscribe_in(&picker, window, Self::quick_open_event));
-        self.quick_open = Some(picker);
+            .push(cx.subscribe_in(&picker, window, Self::link_picker_event));
+        self.link_picker = Some(picker);
         cx.notify();
     }
 
-    /// Makes the link that the user picked, and puts it at the cursor.
-    fn link(&mut self, choice: LinkChoice, window: &mut Window, cx: &mut Context<Self>) {
-        let folder = self
-            .pane
-            .read(cx)
-            .path()
-            .parent()
-            .map(Path::to_owned)
-            .unwrap_or_default();
-        let replace = self.replace_link;
-        self.run(
-            window,
-            cx,
-            move |core| match choice {
-                LinkChoice::Note {
-                    path,
-                    title,
-                    heading,
-                } => {
-                    let id = core.link_id(&path)?.to_string();
-                    let text = heading.clone().unwrap_or(title);
-                    Ok((LinkTarget::Note { id, heading }, text))
-                }
-                LinkChoice::SameNote(heading) => {
-                    Ok((LinkTarget::Heading(heading.clone()), heading))
-                }
-                LinkChoice::Create(title) => {
-                    let mut note = core.create(&folder)?;
-                    note.body = format!("# {title}\n");
-                    let note = core.save(&note)?;
-                    let info = core.rename_to_title(&note.info.path)?;
-                    let id = core.link_id(&info.path)?.to_string();
-                    Ok((LinkTarget::Note { id, heading: None }, title))
-                }
-            },
-            move |this, (target, text), window, cx| {
-                this.pane
-                    .update(cx, |pane, cx| pane.put_link(&target, &text, replace, cx));
-                this.focus_editor(window, cx);
-            },
-        );
+    fn link_picker_event(
+        &mut self,
+        _: &Entity<LinkPicker>,
+        event: &LinkPickerEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.link_picker = None;
+        let before = self.before_popup.take();
+        match event {
+            LinkPickerEvent::Pick(choice) => {
+                self.focus_editor(window, cx);
+                let choice = choice.clone();
+                let job = self.pane.update(cx, |pane, cx| pane.link(choice, cx));
+                self.finish(
+                    job,
+                    |this, (), window, cx| this.focus_editor(window, cx),
+                    window,
+                    cx,
+                );
+            }
+            LinkPickerEvent::Close => self.focus_before(before, window, cx),
+        }
+        cx.notify();
     }
 
     fn quick_open_event(
@@ -333,7 +284,7 @@ impl NotesView {
         cx: &mut Context<Self>,
     ) {
         self.quick_open = None;
-        let before = self.before_quick_open.take();
+        let before = self.before_popup.take();
         match event {
             QuickOpenEvent::Open(path) => {
                 let path = path.clone();
@@ -341,16 +292,22 @@ impl NotesView {
                     .update(cx, |pane, cx| pane.open(path, Leave::Keep, cx));
                 self.focus_editor(window, cx);
             }
-            QuickOpenEvent::Link(choice) => {
-                self.focus_editor(window, cx);
-                self.link(choice.clone(), window, cx);
-            }
-            QuickOpenEvent::Close => match before {
-                Some(before) => window.focus(&before, cx),
-                None => self.focus_editor(window, cx),
-            },
+            QuickOpenEvent::Close => self.focus_before(before, window, cx),
         }
         cx.notify();
+    }
+
+    /// Gives the focus back to `before`, or to the editor.
+    fn focus_before(
+        &self,
+        before: Option<FocusHandle>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match before {
+            Some(before) => window.focus(&before, cx),
+            None => self.focus_editor(window, cx),
+        }
     }
 
     fn show_folder(&mut self, folder: PathBuf, _: &mut Window, cx: &mut Context<Self>) {
@@ -579,7 +536,11 @@ impl NotesView {
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if self.dialog.is_some() || self.picker.is_some() || self.quick_open.is_some() {
+        if self.dialog.is_some()
+            || self.picker.is_some()
+            || self.quick_open.is_some()
+            || self.link_picker.is_some()
+        {
             return;
         }
         let keystroke = &event.keystroke;
@@ -703,6 +664,7 @@ impl Render for NotesView {
             .children(self.dialog.clone())
             .children(self.picker.clone())
             .children(self.quick_open.clone())
+            .children(self.link_picker.clone())
     }
 }
 

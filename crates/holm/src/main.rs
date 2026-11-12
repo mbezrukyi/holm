@@ -10,6 +10,7 @@ mod crash;
 mod dialog;
 mod error;
 mod icons;
+mod link_picker;
 mod link_rows;
 mod log;
 mod notes;

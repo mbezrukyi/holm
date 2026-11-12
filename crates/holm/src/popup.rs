@@ -2,7 +2,7 @@
 //! panel in its middle.
 
 use gpui_kit::component::{ActiveTheme as _, v_flex};
-use gpui_kit::{App, Div, Pixels, Styled, div};
+use gpui_kit::{App, Div, ParentElement as _, Pixels, Styled, div};
 
 /// A layer over the whole window that centers its child.
 pub(crate) fn layer(cx: &App) -> Div {
@@ -24,4 +24,13 @@ pub(crate) fn panel(width: Pixels, cx: &App) -> Div {
         .border_1()
         .border_color(theme.border)
         .rounded(theme.radius)
+}
+
+/// The row that a list in the panel shows when it has no rows.
+pub(crate) fn empty(message: &'static str, cx: &App) -> Div {
+    div()
+        .px_3()
+        .py_2()
+        .text_color(cx.theme().muted_foreground)
+        .child(message)
 }

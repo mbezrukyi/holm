@@ -1076,7 +1076,7 @@ fn the_link_picker_links_notes_headings_and_new_notes(cx: &mut TestAppContext) {
     set_time(&notes.join("Alpha.md"), 300);
     set_time(&notes.join("work/Beta.md"), 200);
     let handle = open(cx, fixture.startup(None));
-    let options = |cx: &mut TestAppContext| labels(cx, handle, "quick-open", Role::ListBoxOption);
+    let options = |cx: &mut TestAppContext| labels(cx, handle, "link-picker", Role::ListBoxOption);
     assert_eq!(editor_text(cx, handle), "# Alpha\n");
     keys(cx, handle, "ctrl-end");
 

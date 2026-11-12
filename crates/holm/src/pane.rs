@@ -29,14 +29,13 @@ use gpui_kit::{
 };
 use holm_core::Core;
 use holm_core::model::{Change, LinkTarget, Note, NoteInfo, Order};
-use holm_editor::{
-    Changed, CursorLink, Editor, OpenFile, OpenLink, PasteFiles, PastedFile, UpFromStart,
-};
+use holm_editor::{Changed, Editor, OpenFile, OpenLink, PasteFiles, PastedFile, UpFromStart};
 use holm_markdown::Target;
 
 use crate::backlinks::{Backlinks, OpenBacklink};
 use crate::bar::{self, Bar};
 use crate::error::AppError;
+use crate::link_picker::{LinkChoice, LinkStart};
 use crate::tags::{TagRow, TagRowEvent};
 use crate::{changes, text, theme};
 
@@ -84,6 +83,8 @@ pub(crate) struct NotePane {
     opening: Option<Task<()>>,
     /// The heading to show when the note that opens is ready.
     open_heading: Option<String>,
+    /// Whether the link picker changes the link at the cursor, not inserts a new one.
+    replace_link: bool,
     links: Option<Task<()>>,
     _changes: Task<()>,
     _revisions: Task<()>,
@@ -165,6 +166,7 @@ impl NotePane {
             error: None,
             opening: None,
             open_heading: None,
+            replace_link: false,
             links: None,
             _changes: changes,
             _revisions: revisions,
@@ -368,20 +370,90 @@ impl NotePane {
         }
     }
 
-    /// The link at the cursor of the editor.
-    pub(crate) fn cursor_link(&self, cx: &gpui_kit::App) -> Option<CursorLink> {
-        self.editor.read(cx).link_at_cursor()
+    /// Ctrl+K: reads what the link picker starts with. In a note link, the field starts with
+    /// its target, and the pick changes that link.
+    pub(crate) fn start_link(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Task<holm_core::Result<LinkStart>> {
+        let link = self.editor.read(cx).link_at_cursor();
+        self.replace_link = link.as_ref().is_some_and(|link| !link.embedded);
+        let target = link.map(|link| link.target);
+        let open_note = self.note.info.path.clone();
+        self.run(
+            move |core| {
+                let mut notes = core.notes(Order::LastChange)?;
+                notes.sort_by_key(|note| std::cmp::Reverse(note.modified));
+                let query = match target {
+                    Some(Target::Note { id, heading }) => match core.note_with_id(&id)? {
+                        Some(note) => match heading {
+                            Some(heading) => format!("{}#{heading}", note.title),
+                            None => note.title,
+                        },
+                        None => String::new(),
+                    },
+                    Some(Target::Heading(heading)) => format!("#{heading}"),
+                    _ => String::new(),
+                };
+                Ok(LinkStart {
+                    notes,
+                    open_note,
+                    query,
+                })
+            },
+            cx,
+        )
+    }
+
+    /// Makes the link that the user picked in the link picker, and puts it at the cursor.
+    /// A new note goes in the folder of the open note.
+    pub(crate) fn link(
+        &mut self,
+        choice: LinkChoice,
+        cx: &mut Context<Self>,
+    ) -> Task<holm_core::Result<()>> {
+        let folder = self
+            .note
+            .info
+            .path
+            .parent()
+            .map(Path::to_owned)
+            .unwrap_or_default();
+        let make = self.run(
+            move |core| match choice {
+                LinkChoice::Note {
+                    path,
+                    title,
+                    heading,
+                } => {
+                    let id = core.link_id(&path)?.to_string();
+                    let text = heading.clone().unwrap_or(title);
+                    Ok((Target::Note { id, heading }, text))
+                }
+                LinkChoice::SameNote(heading) => Ok((Target::Heading(heading.clone()), heading)),
+                LinkChoice::Create(title) => {
+                    let mut note = core.create(&folder)?;
+                    note.body = format!("# {title}\n");
+                    let note = core.save(&note)?;
+                    let info = core.rename_to_title(&note.info.path)?;
+                    let id = core.link_id(&info.path)?.to_string();
+                    Ok((Target::Note { id, heading: None }, title))
+                }
+            },
+            cx,
+        );
+        cx.spawn(async move |pane, cx| {
+            let (target, text) = make.await?;
+            pane.update(cx, |pane, cx| pane.put_link(&target, &text, cx))
+                .ok();
+            Ok(())
+        })
     }
 
     /// Puts a link to `target` at the cursor, with the selection or `text` as its text.
-    /// With `replace`, it points the link at the cursor to `target` and keeps its text.
-    pub(crate) fn put_link(
-        &mut self,
-        target: &Target,
-        text: &str,
-        replace: bool,
-        cx: &mut Context<Self>,
-    ) {
+    /// When the picker started in a link, it points that link to `target` and keeps its text.
+    fn put_link(&mut self, target: &Target, text: &str, cx: &mut Context<Self>) {
+        let replace = self.replace_link;
         self.editor.update(cx, |editor, cx| {
             if !(replace && editor.set_link_target(target, cx)) {
                 editor.insert_link(text, target, false, cx);
