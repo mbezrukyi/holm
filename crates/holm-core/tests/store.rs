@@ -276,6 +276,33 @@ fn save_fails_on_a_missing_note() {
 }
 
 #[test]
+fn restore_writes_a_deleted_note_again_with_its_id() {
+    let folder = Folder::new(&[("a.md", "---\nid: X1\ntags: [work]\n---\n# A\n")]);
+    let mut note = folder.core.read("a.md").unwrap();
+    fs::remove_file(folder.path("a.md")).unwrap();
+    note.body = "# A\n\nMine.\n".to_owned();
+
+    let restored = folder.core.restore(&note).unwrap();
+
+    assert_eq!(restored.info.id, note.info.id);
+    assert_eq!(restored.info.tags, ["work"]);
+    assert_eq!(restored.body, "# A\n\nMine.\n");
+    assert_eq!(folder.files(), ["a.md"]);
+}
+
+#[test]
+fn restore_saves_over_a_file_that_is_back() {
+    let folder = Folder::new(&[("a.md", "---\nid: X1\n---\n# A\n")]);
+    let mut note = folder.core.read("a.md").unwrap();
+    folder.write("a.md", "---\nid: X1\n---\n# Theirs\n");
+    note.body = "# Mine\n".to_owned();
+
+    folder.core.restore(&note).unwrap();
+
+    assert_eq!(folder.text("a.md"), "---\nid: X1\n---\n# Mine\n");
+}
+
+#[test]
 fn create_makes_untitled_notes_with_a_number_on_a_clash() {
     let folder = Folder::new(&[("Untitled 2.md", "taken\n"), ("work/x.md", "")]);
 

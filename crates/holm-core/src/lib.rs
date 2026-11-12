@@ -355,6 +355,21 @@ impl Core {
         self.inner.index.update(&self.inner.store, &note, stamp)
     }
 
+    /// Writes `note` again at its path after another tool deleted its file, and returns it.
+    /// The note keeps its id, so links to it still work. When a file is at the path again,
+    /// it saves over it like [`Core::save`].
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::BadPath`] as in [`Core::read`].
+    /// - [`Error::Write`] when the file can't be written, for example when the folder is missing.
+    /// - [`Error::Index`] as in [`Core::notes`]. The file is saved all the same.
+    pub fn restore(&self, note: &Note) -> Result<Note> {
+        let _writing = self.inner.write();
+        let (note, stamp) = self.inner.store.restore(note)?;
+        self.inner.index.update(&self.inner.store, &note, stamp)
+    }
+
     /// Creates an empty note with a new id in `folder`, and returns it.
     ///
     /// The file is `Untitled.md`, or `Untitled 2.md`, `Untitled 3.md` and so on when the name is taken.

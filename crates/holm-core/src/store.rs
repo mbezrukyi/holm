@@ -190,6 +190,24 @@ impl Store {
         self.read(rel)
     }
 
+    /// Writes `note` again at its path after another tool deleted the file. It keeps the id.
+    /// When a file is at the path again, it saves over it like [`Self::save`].
+    pub(crate) fn restore(&self, note: &Note) -> Result<(Note, Stamp)> {
+        let path = self.note_path(&note.info.path)?;
+        let dir = path.parent().unwrap_or(&self.root);
+        let mut text = Text::parse("");
+        let id = note.info.id.clone().unwrap_or_else(NoteId::generate);
+        text.set_id(Some(id.as_str()));
+        let file = temp_file(dir, text.to_string().as_bytes(), None, None)
+            .map_err(|source| write_error(&path, source))?;
+        match file.persist_noclobber(&path) {
+            Ok(_) => sync_dir(dir).map_err(|source| write_error(&path, source))?,
+            Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(write_error(&path, e.error)),
+        }
+        self.save(note)
+    }
+
     /// Creates an empty note with a new id as `Untitled.md` in `folder`.
     /// On a clash, the name gets a number: `Untitled 2.md`.
     pub(crate) fn create(&self, folder: &Path) -> Result<(Note, Stamp)> {
