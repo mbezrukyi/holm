@@ -869,6 +869,22 @@ fn the_tag_row_stays_on_one_line_and_folds_the_rest_into_a_chip(cx: &mut TestApp
         one_tag
     );
 
+    // In a window too narrow for any chip, the count still does not cover the "+N" chip.
+    cx.simulate_window_resize(
+        handle,
+        gpui_kit::size(gpui_kit::px(100.), gpui_kit::px(600.)),
+    );
+    cx.run_until_parked();
+    assert_eq!(chips(cx, handle), Vec::<String>::new());
+    let more = bounds_of(cx, handle, "tag-more").unwrap();
+    let count = bounds_of(cx, handle, "backlinks-button").unwrap();
+    assert!(more.right() <= count.left(), "{more:?} {count:?}");
+    cx.simulate_window_resize(
+        handle,
+        gpui_kit::size(gpui_kit::px(560.), gpui_kit::px(600.)),
+    );
+    cx.run_until_parked();
+
     // A click on the "+N" chip puts the cursor on the first folded tag.
     click(cx, handle, "tag-more");
     assert_eq!(focus(cx, handle), "tag field");

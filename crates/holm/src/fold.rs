@@ -1,8 +1,8 @@
 //! A row of items on one line. The items that do not fit fold into one "more" item.
 //!
 //! The row draws a lead, the items, the "more" item and a tail, from left to right. The tail
-//! sits at the right end. An item that does not fit whole folds, and so do all items after
-//! it. The fold follows the width of the row in each frame.
+//! sits at the right end, and never over another part. An item that does not fit whole
+//! folds, and so do all items after it. The fold follows the width of the row in each frame.
 
 use std::ops::Range;
 
@@ -187,9 +187,11 @@ impl Element for Fold {
             let y = bounds.top() + (bounds.size.height - more.height) / 2.;
             element.prepaint_at(point(x, y), window, cx);
             drawn.push(element);
+            x += more.width + gap;
         }
         if let Some(part) = parts.tail.take() {
-            let x = bounds.right() - tail.unwrap_or_default();
+            // In a row too narrow for it, the tail goes past the right end, not over a part.
+            let x = x.max(bounds.right() - tail.unwrap_or_default());
             drawn.push(place(part, x, window, cx));
         }
         drawn
