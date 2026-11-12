@@ -97,7 +97,8 @@ pub(crate) struct Sidebar {
     list: Vec<NoteInfo>,
     /// The note in the editor. It is the selected row of a list.
     current: Option<PathBuf>,
-    /// The note in the editor after it left the list, with its neighbor in the list before.
+    /// The note in the editor after it is gone from the notes folder, with its neighbor in the
+    /// list before.
     left: Option<(PathBuf, PathBuf)>,
     rename: Option<Rename>,
     search: Entity<InputState>,
@@ -315,7 +316,7 @@ impl Sidebar {
                 .collect()
         };
         if let Some(current) = &self.current
-            && !list.iter().any(|note| &note.path == current)
+            && !self.snapshot.notes.iter().any(|note| &note.path == current)
             && let Some(next) = self.neighbor(current)
         {
             self.left = Some((current.clone(), next));
@@ -326,6 +327,7 @@ impl Sidebar {
     /// Marks the note in the editor.
     pub(crate) fn set_current(&mut self, path: Option<PathBuf>, cx: &mut Context<Self>) {
         self.current = path;
+        self.left = None;
         self.scroll_to_selection();
         cx.notify();
     }

@@ -1575,6 +1575,22 @@ fn the_link_keys_do_nothing_on_the_empty_pane_with_no_sidebar(cx: &mut TestAppCo
 }
 
 #[gpui_kit::test]
+fn an_outside_delete_after_a_view_change_opens_the_first_note(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    three_notes(&fixture.notes());
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-shift-l down down");
+    assert_eq!(editor_text(cx, handle), "# Top\n");
+
+    // The tag work holds only Goals.
+    keys(cx, handle, "escape down");
+    assert_eq!(sidebar(cx, handle), "tree #work");
+
+    fixture.delete_outside(cx, "Top.md");
+    assert_eq!(editor_text(cx, handle), "# Plan\nbuy milk\n");
+}
+
+#[gpui_kit::test]
 fn close_after_an_outside_delete_writes_no_file(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     let notes_dir = fixture.notes();
