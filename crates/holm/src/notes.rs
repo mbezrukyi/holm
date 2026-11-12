@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::{
-    AppContext as _, Context, CursorStyle, Entity, FocusHandle, Focusable as _,
+    App, AppContext as _, Context, CursorStyle, Entity, FocusHandle, Focusable as _,
     InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseMoveEvent, MouseUpEvent,
     ParentElement, Pixels, Render, Styled, Subscription, Task, Window, div, px,
 };
@@ -78,6 +78,7 @@ impl NotesView {
         let subscriptions = vec![
             cx.subscribe_in(&sidebar, window, Self::sidebar_event),
             cx.subscribe_in(&pane, window, Self::pane_event),
+            cx.on_release(Self::released),
         ];
         let mut this = Self {
             core,
@@ -99,6 +100,11 @@ impl NotesView {
         this.keep_state(cx);
         this.focus_home(window, cx);
         this
+    }
+
+    /// When the window closes or the app quits: saves the open note.
+    fn released(&mut self, cx: &mut App) {
+        self.pane.update(cx, NotePane::leave);
     }
 
     fn pane_event(

@@ -143,16 +143,6 @@ impl NotePane {
                 pane.editor
                     .update(cx, |editor, cx| editor.set_appearance(appearance, cx));
             }),
-            cx.on_app_quit(|pane, cx| {
-                pane.autosave = None;
-                // Unsaved text wins over an outside change at quit.
-                let save = pane.write_now(cx);
-                async move {
-                    if let Some(save) = save {
-                        save.await;
-                    }
-                }
-            }),
         ];
         let appearance = theme::appearance(cx);
         editor.update(cx, |editor, cx| editor.set_appearance(appearance, cx));
@@ -608,6 +598,31 @@ impl NotePane {
         };
         self.drop_note(cx);
         cx.emit(PaneEvent::Gone(path));
+    }
+
+    /// When the window closes: writes unsaved text. Unsaved text wins over an outside change.
+    /// It works on the UI thread, because no task runs after the window is gone.
+    pub(crate) fn leave(&mut self, cx: &mut Context<Self>) {
+        self.autosave = None;
+        if !self.is_dirty(cx) {
+            return;
+        }
+        let Some(mut note) = self.note.clone() else {
+            return;
+        };
+        let write = if self.deleted {
+            Core::restore
+        } else {
+            Core::save
+        };
+        note.body = self
+            .ending
+            .to_disk(self.editor.read(cx).text())
+            .into_owned();
+        if let Err(error) = write(&self.core, &note) {
+            let error = AppError::from(error);
+            tracing::warn!(error = %crate::chain(&error), "cannot save the note");
+        }
     }
 
     /// The path of the open note, relative to the notes folder.

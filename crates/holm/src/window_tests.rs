@@ -1623,3 +1623,16 @@ fn the_delete_dialog_names_the_note_by_its_title(cx: &mut TestAppContext) {
         Some("Delete “Plans”? This deletes 1 note forever.")
     );
 }
+
+#[gpui_kit::test]
+fn a_window_close_saves_the_open_note(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-n");
+    cx.simulate_input(handle, "# Plans");
+
+    cx.update_window(handle, |_, window, _| window.remove_window())
+        .unwrap();
+    cx.run_until_parked();
+    assert!(read(&fixture.notes().join("Untitled.md")).ends_with("\n# Plans\n"));
+}
