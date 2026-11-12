@@ -58,7 +58,8 @@ fn set_help(editor: &Entity<Editor>, cx: &mut VisualTestContext, help: WritingHe
 fn cursor_x(editor: &Entity<Editor>, cx: &mut VisualTestContext) -> Option<Pixels> {
     cx.update(|window, cx| {
         editor.update(cx, |editor, cx| {
-            editor.bounds_for_range(0..0, Bounds::default(), window, cx)
+            let cursor = editor.selected_text_range(false, window, cx)?.range;
+            editor.bounds_for_range(cursor, Bounds::default(), window, cx)
         })
     })
     .map(|bounds| bounds.origin.x)
