@@ -83,7 +83,6 @@ pub struct Editor {
     pub(crate) start: Option<AnyView>,
     /// Whether the start view had the focus in the last frame.
     start_focused: bool,
-    pub(crate) end: Option<AnyView>,
 }
 
 /// A mouse drag after a click. The selection grows by `unit` from `origin`.
@@ -238,7 +237,6 @@ impl Editor {
             custom_colors: Vec::new(),
             start: None,
             start_focused: false,
-            end: None,
         }
     }
 
@@ -384,13 +382,6 @@ impl Editor {
         } else if focused {
             self.autoscroll = true;
         }
-    }
-
-    /// Sets a view that shows after the last line of the text, in the text column, or none.
-    /// It scrolls with the text. A click in it does not move the cursor.
-    pub fn set_end(&mut self, end: Option<AnyView>, cx: &mut Context<Self>) {
-        self.end = end;
-        cx.notify();
     }
 
     /// Selects the text of the title, so typing replaces it. The title is a `# heading` that is

@@ -72,8 +72,8 @@ pub(crate) struct Layout {
     /// The bounds of the text column.
     pub(crate) bounds: Bounds<Pixels>,
     pub(crate) lines: Vec<LaidLine>,
-    /// The window bounds of the views before and after the text that are in sight.
-    pub(crate) views: Vec<Bounds<Pixels>>,
+    /// The window bounds of the view before the text, when it is in sight.
+    pub(crate) start: Option<Bounds<Pixels>>,
 }
 
 /// What a line shows in its text row.
@@ -871,9 +871,9 @@ impl LaidLine {
 }
 
 impl Layout {
-    /// Whether a window point lies in a view before or after the text.
+    /// Whether a window point lies in the view before the text.
     pub(crate) fn in_view(&self, position: Point<Pixels>) -> bool {
-        self.views.iter().any(|view| view.contains(&position))
+        self.start.is_some_and(|start| start.contains(&position))
     }
 
     /// The source offset under a window point. Image space maps to the last text row above it.

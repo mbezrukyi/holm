@@ -54,12 +54,10 @@ fn column(bounds: Bounds<Pixels>) -> Bounds<Pixels> {
     )
 }
 
-/// The layout of a frame, the views before and after the text when they are in sight, and the
-/// "Open" buttons of the file cards.
+/// The layout of a frame, the view before the text, and the "Open" buttons of the file cards.
 pub(crate) struct Prepainted {
     layout: Rc<Layout>,
     start: Option<AnyElement>,
-    end: Option<AnyElement>,
     buttons: Vec<Hitbox>,
 }
 
@@ -106,16 +104,13 @@ impl gpui_kit::Element for EditorElement {
         let editor = self.editor.read(cx);
         let focus = editor.focus.clone();
         let mut start_view = editor.start.clone().map(IntoElement::into_any_element);
-        let mut end_view = editor.end.clone().map(IntoElement::into_any_element);
-        let mut height = |view: Option<&mut AnyElement>| {
-            view.map_or(px(0.), |view| view.layout_as_root(width, window, cx).height)
-        };
-        let start_height = height(start_view.as_mut());
-        let end_height = height(end_view.as_mut());
+        let start_height = start_view
+            .as_mut()
+            .map_or(px(0.), |view| view.layout_as_root(width, window, cx).height);
         // Nothing else in the editor takes the focus, so it can only be in the start view.
         let focused = focus.is_focused(window);
         let in_start = start_view.is_some() && !focused && focus.contains_focused(window, cx);
-        let (layout, start_origin, end_origin) = self.editor.update(cx, |editor, _| {
+        let (layout, start_origin) = self.editor.update(cx, |editor, _| {
             editor.follow_focus(in_start, focused);
             let mut shaper = Shaper::new(
                 style,
@@ -143,30 +138,17 @@ impl gpui_kit::Element for EditorElement {
             } else {
                 column.origin - point(px(0.), start_height + column.size.height)
             };
-            let shows_end = editor.scroll.line + lines.len() == editor.model.line_count();
-            let end_origin = shows_end.then(|| {
-                let top = lines.last().map_or(px(0.), |line| line.top + line.height);
-                column.origin + point(px(0.), top)
-            });
-            let mut views = Vec::new();
-            if shows_start && start_view.is_some() {
-                views.push(Bounds::new(
-                    start_origin,
-                    size(column.size.width, start_height),
-                ));
-            }
-            if let Some(origin) = end_origin.filter(|_| end_view.is_some()) {
-                views.push(Bounds::new(origin, size(column.size.width, end_height)));
-            }
+            let start = (shows_start && start_view.is_some())
+                .then(|| Bounds::new(start_origin, size(column.size.width, start_height)));
             let layout = Rc::new(Layout {
                 version: editor.version,
                 bounds: column,
                 lines,
-                views,
+                start,
             });
             editor.reach_goal_row(&layout);
             editor.layout = Some(layout.clone());
-            (layout, start_origin, end_origin)
+            (layout, start_origin)
         });
         let start = start_view.map(|mut start| {
             window.with_content_mask(Some(ContentMask { bounds }), |window| {
@@ -174,15 +156,10 @@ impl gpui_kit::Element for EditorElement {
             });
             start
         });
-        let end = end_view.zip(end_origin).map(|(mut end, origin)| {
-            end.prepaint_at(origin, window, cx);
-            end
-        });
         let buttons = card_buttons(&layout, bounds, window);
         Some(Prepainted {
             layout,
             start,
-            end,
             buttons,
         })
     }
@@ -200,7 +177,6 @@ impl gpui_kit::Element for EditorElement {
         let Some(Prepainted {
             layout,
             mut start,
-            mut end,
             buttons,
         }) = layout.take()
         else {
@@ -258,9 +234,6 @@ impl gpui_kit::Element for EditorElement {
                 && let Some(rect) = layout.cursor_bounds(cursor, row_start)
             {
                 window.paint_quad(fill(rect, theme.cursor));
-            }
-            if let Some(end) = &mut end {
-                end.paint(window, cx);
             }
             // Last, so a popup of the start view shows over the text.
             if let Some(start) = &mut start {
