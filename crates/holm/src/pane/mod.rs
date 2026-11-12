@@ -48,6 +48,9 @@ use links::{Links, LinksEvent};
 /// How long the pane waits after the last change before it saves.
 const AUTOSAVE: Duration = Duration::from_millis(500);
 
+/// A write of the open note to disk.
+type Write = fn(&Core, &Note) -> holm_core::Result<Note>;
+
 /// What the pane tells the app.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PaneEvent {
@@ -465,7 +468,7 @@ impl NotePane {
         if !overwrite && (self.conflict || self.deleted || !self.is_dirty(cx)) {
             return None;
         }
-        self.write_task(Core::save, cx)
+        self.write_task(cx)
     }
 
     /// Writes unsaved text at once. It wins over an outside change, and writes the note again
@@ -474,22 +477,29 @@ impl NotePane {
         if !self.is_dirty(cx) {
             return None;
         }
-        if self.deleted {
-            self.write_task(Core::restore, cx)
-        } else {
-            self.write_task(Core::save, cx)
-        }
+        self.write_task(cx)
     }
 
-    /// Writes the editor text to the open note with `write`.
-    fn write_task(
-        &mut self,
-        write: fn(&Core, &Note) -> holm_core::Result<Note>,
-        cx: &mut Context<Self>,
-    ) -> Option<Task<()>> {
+    /// The open note with the editor text, and the write it needs: a restore after an
+    /// outside delete, else a save.
+    fn pending_write(&self, cx: &App) -> Option<(Note, Write)> {
         let mut note = self.note.clone()?;
+        note.body = self
+            .ending
+            .to_disk(self.editor.read(cx).text())
+            .into_owned();
+        let write: Write = if self.deleted {
+            Core::restore
+        } else {
+            Core::save
+        };
+        Some((note, write))
+    }
+
+    /// Writes the editor text to the open note.
+    fn write_task(&mut self, cx: &mut Context<Self>) -> Option<Task<()>> {
+        let (note, write) = self.pending_write(cx)?;
         let text = self.editor.read(cx).text().to_owned();
-        note.body = self.ending.to_disk(&text).into_owned();
         let core = self.core.clone();
         let job = cx.background_spawn(async move { write(&core, &note) });
         Some(cx.spawn(async move |pane, cx| {
@@ -587,7 +597,7 @@ impl NotePane {
     /// "Keep mine" after an outside delete: writes the note again at its path.
     fn keep_deleted(&mut self, cx: &mut Context<Self>) {
         self.autosave = None;
-        self.saving = self.write_task(Core::restore, cx);
+        self.saving = self.write_task(cx);
         cx.notify();
     }
 
@@ -608,18 +618,9 @@ impl NotePane {
         if !self.is_dirty(cx) {
             return;
         }
-        let Some(mut note) = self.note.clone() else {
+        let Some((note, write)) = self.pending_write(cx) else {
             return;
         };
-        let write = if self.deleted {
-            Core::restore
-        } else {
-            Core::save
-        };
-        note.body = self
-            .ending
-            .to_disk(self.editor.read(cx).text())
-            .into_owned();
         if let Err(error) = write(&self.core, &note) {
             let error = AppError::from(error);
             tracing::warn!(error = %crate::chain(&error), "cannot save the note");
