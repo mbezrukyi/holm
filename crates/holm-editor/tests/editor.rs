@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use common::{LINE_HEIGHT, MARGIN, advance, app, column_x, data_folder, open};
 use gpui_kit::{
-    ClipboardItem, Entity, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels,
-    VisualTestContext, point, px,
+    Bounds, ClipboardItem, Entity, EntityInputHandler, Modifiers, MouseButton, MouseDownEvent,
+    MouseUpEvent, Pixels, VisualTestContext, point, px,
 };
 use holm_editor::{Changed, Editor, UpFromStart, WritingHelp};
 
@@ -52,6 +52,16 @@ fn clipboard(cx: &VisualTestContext) -> Option<String> {
 
 fn set_help(editor: &Entity<Editor>, cx: &mut VisualTestContext, help: WritingHelp) {
     cx.update(|_, cx| editor.update(cx, |editor, _| editor.set_writing_help(help)));
+}
+
+/// The x of the cursor in the window, as the input handler gives it to the system.
+fn cursor_x(editor: &Entity<Editor>, cx: &mut VisualTestContext) -> Option<Pixels> {
+    cx.update(|window, cx| {
+        editor.update(cx, |editor, cx| {
+            editor.bounds_for_range(0..0, Bounds::default(), window, cx)
+        })
+    })
+    .map(|bounds| bounds.origin.x)
 }
 
 fn count_changes(editor: &Entity<Editor>, cx: &mut VisualTestContext) -> Rc<Cell<usize>> {
@@ -332,7 +342,51 @@ fn enter_continues_a_list_and_tab_indents_it() {
     cx.simulate_keystrokes("shift-tab");
     assert_eq!(text(&editor, cx), "- one\n- two");
     cx.simulate_keystrokes("enter enter");
-    assert_eq!(text(&editor, cx), "- one\n- two\n");
+    assert_eq!(text(&editor, cx), "- one\n- two\n\n");
+}
+
+#[test]
+fn enter_twice_ends_the_list() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "- a", WIDTH, HEIGHT);
+    cx.simulate_keystrokes("end enter enter");
+    assert_eq!(text(&editor, cx), "- a\n\n");
+    assert_eq!(cursor_x(&editor, cx), Some(MARGIN));
+}
+
+#[test]
+fn the_cursor_on_an_empty_line_after_an_item_shows_where_text_goes() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "- a\n", WIDTH, HEIGHT);
+    cx.simulate_keystrokes("end left");
+    let item_x = cursor_x(&editor, cx);
+    assert!(item_x > Some(MARGIN));
+    cx.simulate_keystrokes("ctrl-end");
+    assert_eq!(cursor_x(&editor, cx), item_x);
+    cx.simulate_input("b");
+    cx.simulate_keystrokes("left");
+    assert_eq!(cursor_x(&editor, cx), item_x);
+}
+
+#[test]
+fn the_cursor_on_an_empty_line_after_a_nested_item_shows_where_text_goes() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "- a\n  - b\n", WIDTH, HEIGHT);
+    cx.simulate_keystrokes("down end left");
+    let item_x = cursor_x(&editor, cx);
+    assert!(item_x > Some(MARGIN));
+    cx.simulate_keystrokes("ctrl-end");
+    assert_eq!(cursor_x(&editor, cx), item_x);
+    assert_eq!(text(&editor, cx), "- a\n  - b\n");
+}
+
+#[test]
+fn a_click_on_the_empty_line_after_an_item_places_the_cursor_there() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "- a\n", WIDTH, HEIGHT);
+    click(cx, 0., LINE_HEIGHT * 1.5);
+    cx.simulate_input("b");
+    assert_eq!(text(&editor, cx), "- a\nb");
 }
 
 #[test]

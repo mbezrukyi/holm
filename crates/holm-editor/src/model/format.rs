@@ -183,10 +183,13 @@ impl Model {
         };
         let range = self.line_range(line);
         if item.content == range.end && selection.end == range.end {
-            let start = item.indent.start;
+            // A blank line ends the list. Without it, typed text joins the item above.
+            let quote = &self.text[item.quote.clone()];
+            let lines = format!("{}\n{quote}", quote.trim_end());
+            let cursor = range.start + lines.len();
             return self.edit(
-                vec![(start..range.end, String::new())],
-                (start, start),
+                vec![(range.start..range.end, lines)],
+                (cursor, cursor),
                 Group::Alone,
                 None,
             );
@@ -405,7 +408,9 @@ mod tests {
 
     #[test]
     fn enter_on_an_empty_item_ends_the_list() {
-        assert_eq!(enter("- one\n- ", 8), ("- one\n".into(), 6));
+        assert_eq!(enter("- one\n- ", 8), ("- one\n\n".into(), 7));
+        assert_eq!(enter("> - a\n> - ", 10), ("> - a\n>\n> ".into(), 10));
+        assert_eq!(enter("- a\n  - b\n  - ", 14), ("- a\n  - b\n\n".into(), 11));
     }
 
     #[test]

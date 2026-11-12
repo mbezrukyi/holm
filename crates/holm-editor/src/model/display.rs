@@ -161,11 +161,14 @@ impl Model {
                 _ => None,
             })
             .collect();
-        let items: Vec<&Block> = chain
+        let mut items: Vec<&Block> = chain
             .iter()
             .copied()
             .filter(|b| matches!(b.kind, BlockKind::Item { .. }))
             .collect();
+        if items.is_empty() && source.is_empty() {
+            items = self.lazy_items(line);
+        }
 
         let kind = self.line_kind(line, &source, &chain, raw);
         let mut mark = None;
@@ -205,6 +208,28 @@ impl Model {
             prefix: list_prefix.filter(|prefix| !prefix.is_empty()),
             source,
         }
+    }
+
+    /// The list items of the line above the empty line `line`, when that line is item text.
+    /// Text typed on `line` joins these items, by lazy continuation.
+    fn lazy_items(&self, line: usize) -> Vec<&Block> {
+        let Some(above) = line.checked_sub(1).map(|above| self.line_range(above)) else {
+            return Vec::new();
+        };
+        if self.text[above.clone()].trim().is_empty() {
+            return Vec::new();
+        }
+        let chain = self.blocks_of_line(&above);
+        if !chain
+            .last()
+            .is_some_and(|b| matches!(b.kind, BlockKind::Item { .. } | BlockKind::Paragraph))
+        {
+            return Vec::new();
+        }
+        chain
+            .into_iter()
+            .filter(|b| matches!(b.kind, BlockKind::Item { .. }))
+            .collect()
     }
 
     /// The blocks that hold the source line `line`, from the top level block inward.
