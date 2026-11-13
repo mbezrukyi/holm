@@ -242,9 +242,10 @@ impl FlowLine {
         };
         let mut wrapper = text_system.line_wrapper(font.clone(), font_size);
         let cuts = flow.wrap(&segs, &mut wrapper, wrap_width);
+        let mut cutter = Cutter::new(segs.len());
         flow.rows = cuts
             .windows(2)
-            .map(|cut| flow.row(&segs, cut[0]..cut[1]))
+            .map(|cut| flow.row(&segs, cut[0]..cut[1], &mut cutter))
             .collect();
         flow
     }
@@ -410,12 +411,12 @@ impl FlowLine {
     }
 
     /// The row of the wrapper text in `range`.
-    fn row(&self, segs: &[Seg], range: Range<usize>) -> Row {
+    fn row(&self, segs: &[Seg], range: Range<usize>, cutter: &mut Cutter) -> Row {
         let mut pieces = Vec::new();
         let mut open: Option<ChipPiece> = None;
         let mut x = px(0.);
         let mut start = 0;
-        for seg in segs {
+        for (ix, seg) in segs.iter().enumerate() {
             let end = start + self.seg_len(seg);
             let (low, high) = (range.start.max(start), range.end.min(end));
             if low < high {
@@ -428,7 +429,7 @@ impl FlowLine {
                 }
                 match seg {
                     Seg::Text { display, line } => {
-                        let line = sub_line(line, low - start..high - start);
+                        let line = cutter.cut(ix, line, low - start..high - start);
                         let width = line.width();
                         pieces.push(Piece::Text {
                             start: display.start + low - start,
@@ -450,8 +451,11 @@ impl FlowLine {
                             Seg::Lead(_) => piece.first = true,
                             Seg::Tail(_) => piece.last = true,
                             _ => {
-                                piece.name =
-                                    sub_line(&self.chips[*chip].name, low - start..high - start);
+                                piece.name = cutter.cut(
+                                    ix,
+                                    &self.chips[*chip].name,
+                                    low - start..high - start,
+                                );
                             }
                         }
                     }
@@ -681,13 +685,44 @@ fn slice_runs(runs: &[TextRun], range: &Range<usize>) -> Vec<TextRun> {
     sliced
 }
 
-/// The part of `line` in `range`, from x zero.
-fn sub_line(line: &ShapedLine, range: Range<usize>) -> ShapedLine {
-    if range.start == 0 && range.end == line.len() {
-        return line.clone();
+/// Cuts the rows out of the shaped pieces of a line. It keeps the rest of each piece after
+/// its last cut. So rows in order split each piece once per row.
+struct Cutter {
+    /// For each piece, the start of its rest and the rest, from x zero.
+    rests: Vec<Option<(usize, ShapedLine)>>,
+}
+
+impl Cutter {
+    fn new(pieces: usize) -> Self {
+        Self {
+            rests: std::iter::repeat_with(|| None).take(pieces).collect(),
+        }
     }
-    let (head, _) = line.split_at(range.end);
-    head.split_at(range.start).1
+
+    /// The part of `line`, the piece `ix`, in `range`, from x zero.
+    fn cut(&mut self, ix: usize, line: &ShapedLine, range: Range<usize>) -> ShapedLine {
+        let kept = self.rests[ix]
+            .take()
+            .filter(|(start, _)| *start == range.start);
+        let (start, from) = match &kept {
+            Some((start, rest)) => (*start, rest),
+            None => (0, line),
+        };
+        if range.end == line.len() {
+            return match kept {
+                Some((_, rest)) => rest,
+                None if range.start == 0 => line.clone(),
+                None => line.split_at(range.start).1,
+            };
+        }
+        let (head, tail) = from.split_at(range.end - start);
+        self.rests[ix] = Some((range.end, tail));
+        if range.start == start {
+            head
+        } else {
+            head.split_at(range.start - start).1
+        }
+    }
 }
 
 /// The end of the row that starts at `start`, for a budget of `wrap_width`.
@@ -808,6 +843,33 @@ mod tests {
 
     fn close(a: Pixels, b: Pixels) -> bool {
         (a - b).abs() < px(0.01)
+    }
+
+    #[test]
+    fn a_cutter_gives_the_parts_of_a_split() {
+        in_window(|window| {
+            let line = shape("one two three four five", SIZE, window);
+            let same = |part: &ShapedLine, range: Range<usize>| {
+                let (head, _) = line.split_at(range.end);
+                let split = head.split_at(range.start).1;
+                assert_eq!(part.len(), split.len());
+                assert!(close(part.width(), split.width()));
+                for at in 0..=part.len() {
+                    assert!(close(part.x_for_index(at), split.x_for_index(at)));
+                }
+            };
+            let mut cutter = Cutter::new(1);
+            for range in [0..4, 4..8, 8..14, 14..line.len()] {
+                same(&cutter.cut(0, &line, range.clone()), range);
+            }
+            for range in [4..8, 0..4, 14..line.len(), 8..19] {
+                same(&cutter.cut(0, &line, range.clone()), range);
+            }
+            assert!(close(
+                cutter.cut(0, &line, 0..line.len()).width(),
+                line.width()
+            ));
+        });
     }
 
     #[test]
