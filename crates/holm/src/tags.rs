@@ -30,14 +30,14 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Action, AnyElement, AppContext as _, Context, CursorStyle, ElementId, Entity, EventEmitter,
     FocusHandle, InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, ParentElement,
-    Pixels, Render, Role, StatefulInteractiveElement, Styled, Subscription, Task,
-    TestSupportExt as _, Toggled, Window, div, px,
+    Pixels, Render, Role, StatefulInteractiveElement, Styled, Subscription, TestSupportExt as _,
+    Toggled, Window, div, px,
 };
-use holm_core::Core;
 use holm_core::model::Tag;
 
 use crate::backlinks::Backlinks;
 use crate::fold::Fold;
+use crate::notes_folder::NotesFolder;
 use crate::popup::Dropdown;
 use crate::text;
 
@@ -69,7 +69,7 @@ enum Line {
 }
 
 pub(crate) struct TagRow {
-    core: Core,
+    notes_folder: Entity<NotesFolder>,
     tags: Vec<String>,
     pinned: bool,
     backlinks: Entity<Backlinks>,
@@ -83,14 +83,13 @@ pub(crate) struct TagRow {
     query: String,
     input: Entity<InputState>,
     dropdown: Dropdown<Self>,
-    loading: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl TagRow {
     /// `text` gets the focus back when the popup closes with it.
     pub(crate) fn new(
-        core: Core,
+        notes_folder: Entity<NotesFolder>,
         backlinks: Entity<Backlinks>,
         text: FocusHandle,
         window: &mut Window,
@@ -111,7 +110,7 @@ impl TagRow {
             }),
         ];
         Self {
-            core,
+            notes_folder,
             tags: Vec::new(),
             pinned: false,
             backlinks,
@@ -121,7 +120,6 @@ impl TagRow {
             query: String::new(),
             input,
             dropdown: Dropdown::new(text, Self::close, window, cx),
-            loading: None,
             _subscriptions: subscriptions,
         }
     }
@@ -141,25 +139,23 @@ impl TagRow {
         self.open_at(None, window, cx);
     }
 
-    /// Opens the popup with an empty field and the cursor on `cursor`. It reads the known
-    /// tags for the list.
+    /// Pins or unpins the note in the row, and gives the new pin.
+    pub(crate) fn toggle_pin(&mut self, cx: &mut Context<Self>) -> bool {
+        self.pinned = !self.pinned;
+        cx.notify();
+        self.pinned
+    }
+
+    /// Opens the popup with an empty field and the cursor on `cursor`. It takes the known
+    /// tags for the list from the snapshot.
     fn open_at(&mut self, cursor: Option<usize>, window: &mut Window, cx: &mut Context<Self>) {
         self.open = true;
         self.clear(window, cx);
         self.cursor = cursor.filter(|at| *at < self.tags.len());
         self.input.update(cx, |input, cx| input.focus(window, cx));
-        let core = self.core.clone();
-        let job = cx.background_spawn(async move { core.snapshot().tags() });
-        self.loading = Some(cx.spawn(async move |row, cx| {
-            let tags = job.await;
-            row.update(cx, |row, cx| {
-                row.loading = None;
-                row.known.clear();
-                flatten(&tags, &mut row.known);
-                cx.notify();
-            })
-            .ok();
-        }));
+        let tags = self.notes_folder.read(cx).snapshot().tags();
+        self.known.clear();
+        flatten(&tags, &mut self.known);
         cx.notify();
     }
 

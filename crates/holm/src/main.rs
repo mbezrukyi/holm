@@ -4,7 +4,6 @@
 
 mod backlinks;
 mod bar;
-mod changes;
 mod config;
 mod crash;
 mod dialog;
@@ -15,6 +14,7 @@ mod link_picker;
 mod link_rows;
 mod log;
 mod notes;
+mod notes_folder;
 mod pane;
 mod picker;
 mod popup;

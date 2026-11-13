@@ -15,13 +15,12 @@ use gpui_kit::{
     Window, WindowBounds, WindowDecorations, WindowOptions, div, px, size,
 };
 use holm_core::Core;
-use holm_core::model::Note;
 
 use crate::bar::{self, Bar};
 use crate::config::{Config, Settings, Theme};
 use crate::error::AppError;
-use crate::notes::{self, NotesView};
-use crate::{text, theme};
+use crate::notes::NotesView;
+use crate::{notes_folder, text, theme};
 
 pub(crate) const APP_ID: &str = "io.github.mbezrukyi.Holm";
 
@@ -147,7 +146,7 @@ impl HolmWindow {
         let last = self.config.read(cx).settings().last_note.clone();
         let job = cx.background_spawn({
             let folder = folder.clone();
-            async move { open_notes(&*open, &folder, &index_dir, create, last.as_deref()) }
+            async move { notes_folder::open(&*open, &folder, &index_dir, create, last.as_deref()) }
         });
         cx.spawn_in(window, async move |this, cx| {
             let result = job.await;
@@ -285,22 +284,6 @@ impl HolmWindow {
             .child(div().max_w(px(480.)).child(content))
             .into_any_element()
     }
-}
-
-/// Opens the core and gives the note to show first, if any. `create` makes the folder first.
-fn open_notes(
-    open: &dyn Fn(&Path, &Path) -> holm_core::Result<Core>,
-    folder: &Path,
-    index_dir: &Path,
-    create: bool,
-    last: Option<&Path>,
-) -> Result<(Core, Option<Note>), AppError> {
-    if create && let Err(error) = std::fs::create_dir_all(folder) {
-        tracing::warn!(path = %folder.display(), %error, "cannot make the notes folder");
-    }
-    let core = open(folder, index_dir)?;
-    let note = notes::first_note(&core, last)?;
-    Ok((core, note))
 }
 
 impl Render for HolmWindow {

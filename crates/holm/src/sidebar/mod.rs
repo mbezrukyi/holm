@@ -24,15 +24,15 @@ use gpui_kit::{
     Styled, Subscription, Task, TestSupportExt as _, UniformListScrollHandle, Window, div, px,
     uniform_list,
 };
-use holm_core::Core;
 use holm_core::model::{NoteInfo, Order};
 
 use crate::error::AppError;
 use crate::icons::Icon;
-use crate::{changes, text};
+use crate::notes_folder::{FolderEvent, NotesFolder};
+use crate::text;
 
 pub(crate) use tree::{Item, View};
-use tree::{Row, Snapshot};
+use tree::{Row, Tree};
 
 const TREE_ROW: f32 = 28.;
 const NOTE_ROW: f32 = 52.;
@@ -94,10 +94,10 @@ struct Renamed {
 }
 
 pub(crate) struct Sidebar {
-    core: Core,
+    notes_folder: Entity<NotesFolder>,
     order: Order,
-    snapshot: Snapshot,
-    /// The core revision of `snapshot`.
+    tree: Tree,
+    /// The revision of the snapshot of `tree`.
     revision: u64,
     renamed: Option<Renamed>,
     view: View,
@@ -120,21 +120,23 @@ pub(crate) struct Sidebar {
     focus: FocusHandle,
     scroll: UniformListScrollHandle,
     error: Option<&'static str>,
-    loading: Option<Task<()>>,
-    _changes: Task<()>,
-    _search: Subscription,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl Sidebar {
     pub(crate) fn new(
-        core: Core,
+        notes_folder: Entity<NotesFolder>,
         order: Order,
         view: View,
         current: Option<PathBuf>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let changes = changes::watch_revision(&core, cx, Self::refresh);
+        let changed = cx.subscribe(&notes_folder, |sidebar, _, event, cx| {
+            if *event == FolderEvent::Changed {
+                sidebar.refresh(cx);
+            }
+        });
         let search = cx.new(|cx| InputState::new(window, cx).placeholder(text::SEARCH));
         let search_changed = cx.subscribe(&search, |sidebar, input, event, cx| {
             if matches!(event, InputEvent::Change) {
@@ -146,9 +148,9 @@ impl Sidebar {
             }
         });
         let mut sidebar = Self {
-            core,
+            notes_folder,
             order,
-            snapshot: Snapshot::default(),
+            tree: Tree::default(),
             revision: 0,
             renamed: None,
             view,
@@ -166,9 +168,7 @@ impl Sidebar {
             focus: cx.focus_handle(),
             scroll: UniformListScrollHandle::new(),
             error: None,
-            loading: None,
-            _changes: changes,
-            _search: search_changed,
+            _subscriptions: vec![changed, search_changed],
         };
         sidebar.refresh(cx);
         sidebar
@@ -178,27 +178,29 @@ impl Sidebar {
         &self.view
     }
 
-    /// Reads the notes, folders and tags again. The sidebar calls it itself when the core
-    /// revision grows.
+    /// Builds the tree from the snapshot of the notes folder. The sidebar calls it itself for
+    /// each new snapshot.
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        let core = self.core.clone();
-        let order = self.order;
-        let job = cx.background_spawn(async move {
-            let facts = core.snapshot();
-            let revision = facts.revision();
-            let snapshot = Snapshot {
-                notes: facts.notes(order),
-                folders: facts.folders().map(Path::to_path_buf).collect(),
-                tags: facts.tags(),
-            };
-            Ok::<_, holm_core::Error>((revision, snapshot))
-        });
-        self.loading = Some(cx.spawn(async move |sidebar, cx| {
-            let result = job.await;
-            sidebar
-                .update(cx, |sidebar, cx| sidebar.loaded(result, cx))
-                .ok();
-        }));
+        let snapshot = self.notes_folder.read(cx).snapshot();
+        self.tree = Tree::new(snapshot, self.order);
+        self.revision = snapshot.revision();
+        self.error = None;
+        if self
+            .renamed
+            .as_ref()
+            .is_some_and(|renamed| renamed.done_at.is_some_and(|at| self.revision >= at))
+        {
+            self.renamed = None;
+        }
+        if self.renamed.is_none() {
+            let item = self.tree.nearest(self.view.item());
+            if &item != self.view.item() {
+                self.show_in_tree(item, cx);
+            }
+        }
+        self.open.retain(|item| self.tree.has(item));
+        self.rebuild();
+        cx.notify();
         if self.searching() {
             self.find(cx);
         }
@@ -222,13 +224,12 @@ impl Sidebar {
             cx.notify();
             return;
         }
-        let core = self.core.clone();
-        let order = self.order;
         let query = self.query.clone();
-        let job = cx.background_spawn(async move {
-            let found = core.search(&query, order);
-            (query, found)
-        });
+        let search = self
+            .notes_folder
+            .read(cx)
+            .search(query.clone(), self.order, cx);
+        let job = cx.background_spawn(async move { (query, search.await) });
         self.finding = Some(cx.spawn(async move |sidebar, cx| {
             let (query, found) = job.await;
             sidebar
@@ -280,48 +281,15 @@ impl Sidebar {
         }
     }
 
-    fn loaded(&mut self, result: holm_core::Result<(u64, Snapshot)>, cx: &mut Context<Self>) {
-        self.loading = None;
-        match result {
-            Ok((revision, snapshot)) => {
-                self.snapshot = snapshot;
-                self.revision = revision;
-                self.error = None;
-                if self
-                    .renamed
-                    .as_ref()
-                    .is_some_and(|renamed| renamed.done_at.is_some_and(|at| revision >= at))
-                {
-                    self.renamed = None;
-                }
-                // An old copy may miss an item that a later write made. The next copy decides.
-                if self.renamed.is_none() && revision == self.core.snapshot().revision() {
-                    let item = self.snapshot.nearest(self.view.item());
-                    if &item != self.view.item() {
-                        self.show_in_tree(item, cx);
-                    }
-                }
-                self.open.retain(|item| self.snapshot.has(item));
-            }
-            Err(error) => {
-                let error = AppError::from(error);
-                tracing::warn!(error = %crate::chain(&error), "cannot read the notes for the sidebar");
-                self.error = Some(error.message());
-            }
-        }
-        self.rebuild();
-        cx.notify();
-    }
-
     fn rebuild(&mut self) {
-        self.rows = self.snapshot.rows(&self.open);
+        self.rows = self.tree.rows(&self.open);
         if let Some(renamed) = &self.renamed {
             // A rename onto an item that the tree has merges into its row.
             self.rows.retain_mut(|row| {
                 let Some(item) = row.item.moved(&renamed.from, &renamed.to) else {
                     return true;
                 };
-                if item != row.item && self.snapshot.has(&item) {
+                if item != row.item && self.tree.has(&item) {
                     return false;
                 }
                 row.name = item.name();
@@ -345,14 +313,14 @@ impl Sidebar {
         let list: Vec<NoteInfo> = if self.searching() {
             self.found.clone()
         } else {
-            self.snapshot
+            self.tree
                 .list(self.view.item())
                 .into_iter()
                 .cloned()
                 .collect()
         };
         if let Some(current) = &self.current
-            && !self.snapshot.notes.iter().any(|note| &note.path == current)
+            && !self.tree.notes.iter().any(|note| &note.path == current)
             && let Some(next) = self.neighbor(current)
         {
             self.left = Some((current.clone(), next));
@@ -400,12 +368,12 @@ impl Sidebar {
 
     /// Every note, in the order of the lists.
     pub(crate) fn notes(&self) -> &[NoteInfo] {
-        &self.snapshot.notes
+        &self.tree.notes
     }
 
     /// Every folder, sorted by path, for the folder picker.
     pub(crate) fn folders(&self) -> &[PathBuf] {
-        &self.snapshot.folders
+        &self.tree.folders
     }
 
     /// Shows the tree with `item` selected, and opens its parents.
@@ -440,7 +408,7 @@ impl Sidebar {
             return;
         };
         self.open_moved(&renamed.from, &to);
-        let done_at = self.core.snapshot().revision();
+        let done_at = self.notes_folder.read(cx).snapshot().revision();
         if self.revision < done_at {
             self.renamed = Some(Renamed {
                 from: renamed.from,
@@ -505,7 +473,7 @@ impl Sidebar {
             Item::Folder(_) => item.name(),
             Item::Tag(tag) => tag.clone(),
         };
-        let in_tree = self.snapshot.has(&item) || self.rows.iter().any(|row| row.item == item);
+        let in_tree = self.tree.has(&item) || self.rows.iter().any(|row| row.item == item);
         if matches!(item, Item::Tag(_)) && !in_tree {
             return false;
         }

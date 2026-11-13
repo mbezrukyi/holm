@@ -15,10 +15,10 @@ use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _, IntoElement,
     ParentElement, Render, Role, StatefulInteractiveElement as _, TestSupportExt as _, Window, px,
 };
-use holm_core::Core;
 use holm_core::model::NoteInfo;
 
 use crate::link_rows::{self, Query, Row};
+use crate::notes_folder::NotesFolder;
 use crate::{popup, text};
 
 /// What the link picker starts with.
@@ -54,7 +54,7 @@ pub(crate) enum LinkChoice {
 }
 
 pub(crate) struct LinkPicker {
-    core: Core,
+    notes_folder: Entity<NotesFolder>,
     notes: Vec<NoteInfo>,
     open_note: PathBuf,
     state: Entity<CommandState>,
@@ -69,7 +69,7 @@ pub(crate) struct LinkPicker {
 impl LinkPicker {
     /// The field gets the focus.
     pub(crate) fn new(
-        core: Core,
+        notes_folder: Entity<NotesFolder>,
         start: LinkStart,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -80,7 +80,7 @@ impl LinkPicker {
             state.set_query(start.query, window, cx);
         });
         let mut this = Self {
-            core,
+            notes_folder,
             notes: start.notes,
             open_note: start.open_note,
             state,
@@ -142,7 +142,7 @@ impl LinkPicker {
         let shown = match &headings {
             Some(path) => {
                 if !self.headings.contains_key(path) && self.loading.insert(path.clone()) {
-                    load_headings(self.core.clone(), path.clone(), cx);
+                    self.load_headings(path.clone(), cx);
                 }
                 self.headings.get(path).map_or(&[][..], Vec::as_slice)
             }
@@ -186,21 +186,20 @@ impl LinkPicker {
             })
             .collect()
     }
-}
 
-fn load_headings(core: Core, path: PathBuf, cx: &mut Context<LinkPicker>) {
-    let read = path.clone();
-    let job = cx.background_spawn(async move { core.headings(read) });
-    cx.spawn(async move |this, cx| {
-        let headings = job.await.unwrap_or_else(|error| {
-            let error = crate::error::AppError::from(error);
-            tracing::warn!(error = %crate::chain(&error), "cannot read the headings of a note");
-            Vec::new()
-        });
-        this.update(cx, |this, cx| this.headings_loaded(path, headings, cx))
-            .ok();
-    })
-    .detach();
+    fn load_headings(&self, path: PathBuf, cx: &mut Context<Self>) {
+        let job = self.notes_folder.read(cx).headings(path.clone(), cx);
+        cx.spawn(async move |this, cx| {
+            let headings = job.await.unwrap_or_else(|error| {
+                let error = crate::error::AppError::from(error);
+                tracing::warn!(error = %crate::chain(&error), "cannot read the headings of a note");
+                Vec::new()
+            });
+            this.update(cx, |this, cx| this.headings_loaded(path, headings, cx))
+                .ok();
+        })
+        .detach();
+    }
 }
 
 impl EventEmitter<LinkPickerEvent> for LinkPicker {}

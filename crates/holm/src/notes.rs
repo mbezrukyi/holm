@@ -1,7 +1,7 @@
 //! The open notes folder: the sidebar, the editor pane, and the file actions between them.
 //!
-//! Each file action runs through the pane, which saves the open note first. The sidebar
-//! reads the notes again by itself after each change.
+//! Each file action goes in the write line of the notes folder, after the unsaved text of the
+//! pane. The sidebar shows each new snapshot by itself.
 //!
 //! Holm makes no note by itself. When the open note is gone, the pane opens its neighbor in
 //! the sidebar list. With no note left, it shows the empty pane.
@@ -14,14 +14,15 @@ use gpui_kit::{
     InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseMoveEvent, MouseUpEvent,
     ParentElement, Pixels, Render, Styled, Subscription, Task, Window, div, px,
 };
-use holm_core::Core;
 use holm_core::model::{Note, Order};
+use holm_core::{Core, Snapshot};
 
 use crate::bar::{self, Bar};
 use crate::config::{Config, SidebarSettings};
 use crate::dialog::{Ask, Dialog, DialogEvent};
 use crate::error::AppError;
 use crate::link_picker::{LinkPicker, LinkPickerEvent, LinkStart};
+use crate::notes_folder::NotesFolder;
 use crate::pane::{Leave, NotePane, PaneEvent};
 use crate::picker::{FolderPicker, PickerEvent};
 use crate::quick_open::{QuickOpen, QuickOpenEvent};
@@ -35,7 +36,7 @@ const MAX_WIDTH: f32 = 600.;
 const MIN_EDITOR: f32 = 360.;
 
 pub(crate) struct NotesView {
-    core: Core,
+    notes_folder: Entity<NotesFolder>,
     config: Entity<Config>,
     sidebar: Entity<Sidebar>,
     pane: Entity<NotePane>,
@@ -57,7 +58,7 @@ pub(crate) struct NotesView {
 impl NotesView {
     pub(crate) fn new(
         core: Core,
-        notes_folder: PathBuf,
+        root: PathBuf,
         note: Option<Note>,
         config: Entity<Config>,
         window: &mut Window,
@@ -65,10 +66,11 @@ impl NotesView {
     ) -> Self {
         let settings = config.read(cx).settings().clone();
         let current = note.as_ref().map(|note| note.info.path.clone());
-        let pane = cx.new(|cx| NotePane::new(core.clone(), notes_folder, note, window, cx));
+        let notes_folder = cx.new(|cx| NotesFolder::new(core, cx));
+        let pane = cx.new(|cx| NotePane::new(notes_folder.clone(), root, note, window, cx));
         let sidebar = cx.new(|cx| {
             Sidebar::new(
-                core.clone(),
+                notes_folder.clone(),
                 settings.note_order,
                 settings.sidebar.view.clone(),
                 current,
@@ -81,7 +83,7 @@ impl NotesView {
             cx.subscribe_in(&pane, window, Self::pane_event),
         ];
         let mut this = Self {
-            core,
+            notes_folder,
             config,
             sidebar,
             pane,
@@ -128,14 +130,10 @@ impl NotesView {
                 }
             }
             PaneEvent::Gone(path) => {
-                // A read changes no file, so it does not wait for the pane to save.
-                let next = self.sidebar.read(cx).neighbor(path);
+                let neighbor = self.sidebar.read(cx).neighbor(path);
                 let order = self.config.read(cx).settings().note_order;
-                let core = self.core.clone();
-                let job = cx.background_spawn(async move {
-                    Ok::<_, holm_core::Error>(next_note(&core, next, order))
-                });
-                self.finish(job, Self::show_next, window, cx);
+                let next = next_note(self.notes_folder.read(cx).snapshot(), neighbor, order);
+                self.show_next(next, window, cx);
             }
         }
     }
@@ -198,23 +196,24 @@ impl NotesView {
                 let (folder, name) = (folder.clone(), name.clone());
                 let from = Item::Folder(folder.clone());
                 let to = Item::Folder(folder.with_file_name(&name));
-                let job = self.pane.update(cx, |pane, cx| {
-                    pane.run_move(
-                        folder.clone(),
-                        move |core| core.rename_folder(&folder, &name).result,
-                        cx,
-                    )
-                });
+                let job = self.start(
+                    {
+                        let folder = folder.clone();
+                        |notes_folder, cx| notes_folder.rename_folder(folder, name, cx)
+                    },
+                    cx,
+                );
+                let job = self.follow(folder, job, cx);
                 self.finish_rename(from, to, job, |to| Item::Folder(to.clone()), window, cx);
             }
             SidebarEvent::RenameTag { from, to } => {
                 let (from, to) = (from.clone(), to.clone());
-                self.run(
+                self.write(
                     window,
                     cx,
                     {
                         let (from, to) = (from.clone(), to.clone());
-                        move |core| core.tag_rename_count(&from, &to)
+                        |notes_folder, cx| notes_folder.tag_rename_count(from, to, cx)
                     },
                     move |this, notes, window, cx| {
                         this.ask(Ask::RenameTag { from, to, notes }, window, cx);
@@ -223,12 +222,12 @@ impl NotesView {
             }
             SidebarEvent::DeleteTag(tag) => {
                 let tag = tag.clone();
-                self.run(
+                self.write(
                     window,
                     cx,
                     {
                         let tag = tag.clone();
-                        move |core| core.tag_delete_count(&tag)
+                        |notes_folder, cx| notes_folder.tag_delete_count(tag, cx)
                     },
                     move |this, notes, window, cx| {
                         this.ask(Ask::DeleteTag { tag, notes }, window, cx);
@@ -267,23 +266,25 @@ impl NotesView {
         };
         match target {
             Target::Note(path) => {
-                let job = self.pane.update(cx, |pane, cx| {
-                    pane.run_move(
-                        path.clone(),
-                        move |core| core.move_note(&path, &folder).result.map(|info| info.path),
-                        cx,
-                    )
-                });
+                let job = self.start(
+                    {
+                        let path = path.clone();
+                        |notes_folder, cx| notes_folder.move_note(path, folder, cx)
+                    },
+                    cx,
+                );
+                let job = self.follow(path, job, cx);
                 self.finish(job, |_, _, _, _| {}, window, cx);
             }
             Target::Folder(path) => {
-                let job = self.pane.update(cx, |pane, cx| {
-                    pane.run_move(
-                        path.clone(),
-                        move |core| core.move_folder(&path, &folder).result,
-                        cx,
-                    )
-                });
+                let job = self.start(
+                    {
+                        let path = path.clone();
+                        |notes_folder, cx| notes_folder.move_folder(path, folder, cx)
+                    },
+                    cx,
+                );
+                let job = self.follow(path, job, cx);
                 self.finish(job, Self::show_folder, window, cx);
             }
         }
@@ -307,9 +308,9 @@ impl NotesView {
     }
 
     fn show_link_picker(&mut self, start: LinkStart, window: &mut Window, cx: &mut Context<Self>) {
-        let core = self.core.clone();
+        let notes_folder = self.notes_folder.clone();
         self.before_popup = window.focused(cx);
-        let picker = cx.new(|cx| LinkPicker::new(core, start, window, cx));
+        let picker = cx.new(|cx| LinkPicker::new(notes_folder, start, window, cx));
         self.subscriptions
             .push(cx.subscribe_in(&picker, window, Self::link_picker_event));
         self.link_picker = Some(picker);
@@ -383,26 +384,39 @@ impl NotesView {
     }
 
     fn ask_delete(&mut self, target: Target, window: &mut Window, cx: &mut Context<Self>) {
-        self.run(
-            window,
-            cx,
-            {
-                let target = target.clone();
-                move |core| match &target {
-                    Target::Note(path) => {
-                        let title = core.read(path)?.info.title;
-                        Ok((title, core.note_delete_count(path)?))
-                    }
-                    Target::Folder(path) => {
-                        let name = path.file_name().unwrap_or_default();
-                        Ok((
-                            name.to_string_lossy().into_owned(),
-                            core.folder_delete_count(path)?,
-                        ))
-                    }
-                }
-            },
-            move |this, (name, count), window, cx| {
+        let count = match &target {
+            Target::Note(path) => {
+                let path = path.clone();
+                self.start(
+                    |notes_folder, cx| notes_folder.note_delete_count(path, cx),
+                    cx,
+                )
+            }
+            Target::Folder(path) => {
+                let path = path.clone();
+                self.start(
+                    |notes_folder, cx| notes_folder.folder_delete_count(path, cx),
+                    cx,
+                )
+            }
+        };
+        self.finish(
+            count,
+            move |this, count, window, cx| {
+                let name = match &target {
+                    Target::Note(path) => this
+                        .notes_folder
+                        .read(cx)
+                        .snapshot()
+                        .note(path)
+                        .map(|note| note.title.clone())
+                        .unwrap_or_default(),
+                    Target::Folder(path) => path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned(),
+                };
                 this.ask(
                     Ask::Delete {
                         target,
@@ -413,6 +427,8 @@ impl NotesView {
                     cx,
                 );
             },
+            window,
+            cx,
         );
     }
 
@@ -443,9 +459,7 @@ impl NotesView {
             Ask::RenameTag { from, to, .. } => {
                 let shown = holm_markdown::normalize_tag(&to);
                 let item = Item::Tag(from.clone());
-                let job = self.pane.update(cx, |pane, cx| {
-                    pane.run(move |core| core.rename_tag(&from, &to).result, cx)
-                });
+                let job = self.start(|notes_folder, cx| notes_folder.rename_tag(from, to, cx), cx);
                 match shown {
                     Some(tag) => {
                         let tag = Item::Tag(tag);
@@ -455,10 +469,10 @@ impl NotesView {
                 }
             }
             Ask::DeleteTag { tag, .. } => {
-                self.run(
+                self.write(
                     window,
                     cx,
-                    move |core| core.delete_tag(&tag).result,
+                    |notes_folder, cx| notes_folder.delete_tag(tag, cx),
                     |_, _, _, _| {},
                 );
             }
@@ -471,23 +485,18 @@ impl NotesView {
             Target::Note(path) => path == open,
             Target::Folder(folder) => open.starts_with(folder),
         });
-        let next = open.and_then(|open| self.sidebar.read(cx).neighbor(&open));
+        let neighbor = open.and_then(|open| self.sidebar.read(cx).neighbor(&open));
         let order = self.config.read(cx).settings().note_order;
-        self.run(
+        self.write(
             window,
             cx,
-            move |core| {
-                match &target {
-                    Target::Note(path) => core.delete_note(path).result?,
-                    Target::Folder(path) => core.delete_folder(path).result?,
-                }
-                if !open_gone {
-                    return Ok(None);
-                }
-                Ok(Some(next_note(core, next, order)))
+            |notes_folder, cx| match target {
+                Target::Note(path) => notes_folder.delete_note(path, cx),
+                Target::Folder(path) => notes_folder.delete_folder(path, cx),
             },
-            |this, next, window, cx| {
-                if let Some(next) = next {
+            move |this, (), window, cx| {
+                if open_gone {
+                    let next = next_note(this.notes_folder.read(cx).snapshot(), neighbor, order);
                     this.show_next(next, window, cx);
                 }
             },
@@ -496,19 +505,10 @@ impl NotesView {
 
     fn new_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (folder, tag) = self.sidebar.read(cx).new_note_place();
-        self.run(
+        self.write(
             window,
             cx,
-            move |core| {
-                let note = core.create(&folder).result?;
-                match tag {
-                    Some(tag) => core
-                        .set_tags(&note.info.path, &[tag])
-                        .result
-                        .map(|info| info.path),
-                    None => Ok(note.info.path),
-                }
-            },
+            |notes_folder, cx| notes_folder.create_note(folder, tag, cx),
             |this, path, window, cx| {
                 this.pane
                     .update(cx, |pane, cx| pane.open(path, Leave::Keep, cx));
@@ -522,10 +522,10 @@ impl NotesView {
             Item::Folder(folder) => folder.clone(),
             Item::All | Item::Tag(_) => PathBuf::new(),
         };
-        self.run(
+        self.write(
             window,
             cx,
-            move |core| core.create_folder(&parent, text::NEW_FOLDER).result,
+            |notes_folder, cx| notes_folder.create_folder(parent, text::NEW_FOLDER, cx),
             |this, folder, window, cx| {
                 this.hidden = false;
                 this.sidebar.update(cx, |sidebar, cx| {
@@ -535,17 +535,44 @@ impl NotesView {
         );
     }
 
-    /// Runs `job` through the pane, which saves the open note first, and gives its result to
-    /// `done`.
-    fn run<T: Send + 'static>(
+    /// Puts the unsaved text of the pane in the write line, and then the action of `start`.
+    fn start<T>(
+        &mut self,
+        start: impl FnOnce(&mut NotesFolder, &mut Context<NotesFolder>) -> Task<holm_core::Result<T>>,
+        cx: &mut Context<Self>,
+    ) -> Task<holm_core::Result<T>> {
+        self.pane.update(cx, |pane, cx| pane.save_now(cx).detach());
+        self.notes_folder.update(cx, start)
+    }
+
+    /// Like [`Self::start`], and gives the result of the action to `done`.
+    fn write<T: 'static>(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-        job: impl FnOnce(&Core) -> holm_core::Result<T> + Send + 'static,
+        start: impl FnOnce(&mut NotesFolder, &mut Context<NotesFolder>) -> Task<holm_core::Result<T>>,
         done: impl FnOnce(&mut Self, T, &mut Window, &mut Context<Self>) + 'static,
     ) {
-        let job = self.pane.update(cx, |pane, cx| pane.run(job, cx));
+        let job = self.start(start, cx);
         self.finish(job, done, window, cx);
+    }
+
+    /// Waits for `job`, which moves the note or folder at `from` and gives its new path.
+    /// When that holds the open note, the pane follows it.
+    fn follow(
+        &self,
+        from: PathBuf,
+        job: Task<holm_core::Result<PathBuf>>,
+        cx: &mut Context<Self>,
+    ) -> Task<holm_core::Result<PathBuf>> {
+        let pane = self.pane.downgrade();
+        cx.spawn(async move |_, cx| {
+            let result = job.await;
+            if let Ok(to) = &result {
+                pane.update(cx, |pane, cx| pane.moved(&from, to, cx)).ok();
+            }
+            result
+        })
     }
 
     /// Shows the rename of `from` to `to` in the tree at once, and waits for `job`. `item`
@@ -794,25 +821,13 @@ fn whole(width: Pixels) -> u16 {
     f32::from(width).round() as u16
 }
 
-/// The note to open first: the last open note when it still exists, else the last changed
-/// note. With no notes, it is `None`.
-pub(crate) fn first_note(core: &Core, last: Option<&Path>) -> holm_core::Result<Option<Note>> {
-    if let Some(note) = last.and_then(|last| core.read(last).ok()) {
-        return Ok(Some(note));
-    }
-    match core.snapshot().notes(Order::LastChange).first() {
-        Some(info) => core.read(&info.path).map(Some),
-        None => Ok(None),
-    }
-}
-
 /// The note to open after the open one is gone: `neighbor` when it still exists, else the
 /// first note in `order`. With no notes, it is `None`.
-fn next_note(core: &Core, neighbor: Option<PathBuf>, order: Order) -> Option<PathBuf> {
-    if let Some(next) = neighbor.filter(|next| core.read(next).is_ok()) {
+fn next_note(snapshot: &Snapshot, neighbor: Option<PathBuf>, order: Order) -> Option<PathBuf> {
+    if let Some(next) = neighbor.filter(|next| snapshot.note(next).is_some()) {
         return Some(next);
     }
-    core.snapshot()
+    snapshot
         .notes(order)
         .into_iter()
         .next()

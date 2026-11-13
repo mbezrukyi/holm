@@ -10,14 +10,14 @@ use std::path::PathBuf;
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, PathPromptOptions, Subscription, Task,
 };
-use holm_core::Core;
 use holm_core::model::{LinkTarget, Order};
 use holm_editor::{Editor, OpenFile, OpenLink, PasteFiles, PastedFile};
 use holm_markdown::Target;
 
 use crate::backlinks::Backlinks;
 use crate::error::AppError;
-use crate::{changes, text};
+use crate::notes_folder::{FolderEvent, NotesFolder};
+use crate::text;
 
 /// What the links tell the pane.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -32,25 +32,29 @@ pub(super) enum LinksEvent {
 }
 
 pub(super) struct Links {
-    core: Core,
+    notes_folder: Entity<NotesFolder>,
     editor: Entity<Editor>,
     backlinks: Entity<Backlinks>,
     /// The path of the open note, relative to the notes folder.
     note: Option<PathBuf>,
     reading: Option<Task<()>>,
-    _revisions: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl Links {
     /// [`Self::show`] reads the links, and puts the backlinks in `backlinks`.
     pub(super) fn new(
-        core: Core,
+        notes_folder: Entity<NotesFolder>,
         editor: Entity<Editor>,
         backlinks: Entity<Backlinks>,
         cx: &mut Context<Self>,
     ) -> Self {
         let subscriptions = vec![
+            cx.subscribe(&notes_folder, |links, _, event, cx| {
+                if *event == FolderEvent::Changed {
+                    links.read(cx);
+                }
+            }),
             cx.subscribe(&editor, |links, _, event: &OpenLink, cx| {
                 links.open_link(event.target.clone(), cx);
             }),
@@ -61,14 +65,12 @@ impl Links {
                 links.paste_files(event.files.clone(), cx);
             }),
         ];
-        let revisions = changes::watch_revision(&core, cx, Self::read);
         Self {
-            core,
+            notes_folder,
             editor,
             backlinks,
             note: None,
             reading: None,
-            _revisions: revisions,
             _subscriptions: subscriptions,
         }
     }
@@ -91,7 +93,6 @@ impl Links {
             multiple: true,
             prompt: Some(text::LINK_FILE.into()),
         });
-        let core = self.core.clone();
         cx.spawn(async move |links, cx| {
             let files = match picked.await {
                 Ok(Ok(Some(files))) => files,
@@ -101,14 +102,12 @@ impl Links {
                 }
                 _ => return,
             };
-            let paths = cx
-                .background_spawn(async move {
-                    files
-                        .iter()
-                        .map(|file| core.file_link(&note, file))
-                        .collect::<Vec<_>>()
-                })
-                .await;
+            let Ok(paths) = links.update(cx, |links, cx| {
+                links.notes_folder.read(cx).file_links(note, files, cx)
+            }) else {
+                return;
+            };
+            let paths = paths.await;
             links
                 .update(cx, |links, cx| links.insert_file_links(paths, cx))
                 .ok();
@@ -121,11 +120,11 @@ impl Links {
         let Some(path) = self.note.clone() else {
             return;
         };
-        let core = self.core.clone();
+        let notes_folder = self.notes_folder.read(cx);
+        let backlinks = notes_folder.snapshot().backlinks(&path, Order::LastChange);
+        let broken = notes_folder.broken_links(path.clone(), cx);
         let job = cx.background_spawn(async move {
-            let backlinks = core.snapshot().backlinks(&path, Order::LastChange);
-            let broken = core.broken_links(&path)?;
-            Ok::<_, holm_core::Error>((path, backlinks, broken))
+            Ok::<_, holm_core::Error>((path, backlinks, broken.await?))
         });
         self.reading = Some(cx.spawn(async move |links, cx| {
             let result = job.await;
@@ -161,7 +160,7 @@ impl Links {
             }
             Target::Heading(_) | Target::File(_) => return,
         };
-        match self.core.snapshot().note_with_id(&id) {
+        match self.notes_folder.read(cx).snapshot().note_with_id(&id) {
             Some(note) => self.open_at(note.path.clone(), heading, cx),
             None => cx.emit(LinksEvent::Error(text::NOTE_GONE)),
         }
@@ -183,18 +182,9 @@ impl Links {
         let Some(note) = self.note.clone() else {
             return;
         };
-        let core = self.core.clone();
-        let job = cx.background_spawn(async move {
-            files
-                .iter()
-                .map(|file| match file {
-                    PastedFile::Path(path) => core.attach_file(&note, path),
-                    PastedFile::Image { extension, bytes } => {
-                        core.paste_image(&note, extension, bytes)
-                    }
-                })
-                .collect::<Vec<_>>()
-        });
+        let job = self
+            .notes_folder
+            .update(cx, |notes_folder, cx| notes_folder.attach(note, files, cx));
         cx.spawn(async move |links, cx| {
             let copies = job.await;
             links

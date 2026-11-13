@@ -15,7 +15,7 @@ use tempfile::TempDir;
 use super::{HolmWindow, Startup};
 use crate::config::Config;
 use crate::sidebar::{Item, View};
-use crate::{changes, text, theme};
+use crate::{notes_folder, text, theme};
 
 struct Fixture {
     dir: TempDir,
@@ -110,7 +110,7 @@ fn open(cx: &mut TestAppContext, startup: Startup) -> AnyWindowHandle {
 
 /// Lets the UI see the outside changes, and runs all tasks. The autosave does not run yet.
 fn settle(cx: &mut TestAppContext) {
-    cx.executor().advance_clock(changes::POLL);
+    cx.executor().advance_clock(notes_folder::POLL);
     cx.run_until_parked();
 }
 
@@ -1214,6 +1214,32 @@ fn f2_in_the_tag_popup_renames_the_tag_in_the_sidebar(cx: &mut TestAppContext) {
     assert_eq!(chips(cx, handle), ["home", "job"]);
 }
 
+#[gpui_kit::test]
+fn a_new_tag_renames_in_all_notes_with_no_wait(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let a = fixture.notes().join("A.md");
+    fs::write(&a, "# A\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    keys_now(cx, handle, "ctrl-shift-t");
+    cx.simulate_input(handle, "fresh");
+    keys_now(cx, handle, "enter");
+    keys_now(cx, handle, "down f2");
+    assert_eq!(name_field(cx, handle).as_deref(), Some("fresh"));
+    cx.update_window(handle, |_, window, cx| {
+        window.dispatch_action(Box::new(gpui_kit::component::input::SelectAll), cx);
+    })
+    .unwrap();
+    cx.simulate_input(handle, "job");
+    keys_now(cx, handle, "enter");
+    assert_eq!(
+        question(cx, handle).as_deref(),
+        Some("Rename “#fresh” to “#job”? This changes 1 note.")
+    );
+    keys_now(cx, handle, "enter");
+    assert_eq!(fields(&a).0, ["job"]);
+}
+
 /// Whether the last drawn frame shows `id`. It draws no new frame, so it shows a frame that
 /// the window still owes.
 fn drawn(cx: &mut TestAppContext, handle: AnyWindowHandle, id: &'static str) -> bool {
@@ -1306,15 +1332,6 @@ fn f2_in_the_tag_popup_needs_a_tag_line(cx: &mut TestAppContext) {
     assert_eq!(focus(cx, handle), "tag field");
     assert_eq!(sidebar(cx, handle), "hidden");
     assert_eq!(fields(&a).0, ["home", "work/holm"]);
-
-    // The tree gets a new tag at the next read of the notes. Before it, F2 does nothing.
-    keys_now(cx, handle, "enter");
-    assert_eq!(chips(cx, handle), ["home", "work/holm", "new"]);
-    keys_now(cx, handle, "down down down f2");
-    assert_eq!(options(cx, handle), ["#home ✓", "#work/holm ✓", "#new ✓*"]);
-    assert_eq!(focus(cx, handle), "tag field");
-    assert_eq!(sidebar(cx, handle), "hidden");
-    assert_eq!(name_field(cx, handle), None);
 }
 
 #[gpui_kit::test]

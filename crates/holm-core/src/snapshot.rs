@@ -107,6 +107,11 @@ impl Snapshot {
         )
     }
 
+    /// The note at `path`, or `None` when no note is there.
+    pub fn note(&self, path: impl AsRef<Path>) -> Option<&NoteInfo> {
+        self.notes.get(path.as_ref()).map(|entry| &entry.info)
+    }
+
     /// The note with `id`, or `None` when no note has it.
     pub fn note_with_id(&self, id: &str) -> Option<&NoteInfo> {
         let path = self.ids.get(id)?;

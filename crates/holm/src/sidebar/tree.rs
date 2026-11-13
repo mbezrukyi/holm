@@ -1,10 +1,11 @@
-//! The data of the sidebar: the folder tree rows and the note lists, from one copy of the
-//! notes, folders and tags of the core.
+//! The data of the sidebar: the folder tree rows and the note lists, from one snapshot of the
+//! notes folder.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use holm_core::model::{NoteInfo, Tag};
+use holm_core::Snapshot;
+use holm_core::model::{NoteInfo, Order, Tag};
 
 /// An item of the folder tree. Each item has a note list.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -108,16 +109,25 @@ pub(crate) struct Row {
     pub(crate) open: bool,
 }
 
-/// What the sidebar knows about the notes folder. The notes keep the order of the core.
+/// The facts of one snapshot in the form the sidebar needs. The notes are in the order of the
+/// sidebar.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Snapshot {
+pub(crate) struct Tree {
     pub(crate) notes: Vec<NoteInfo>,
     /// Every folder, sorted by path, so a folder comes before its children.
     pub(crate) folders: Vec<PathBuf>,
     pub(crate) tags: Vec<Tag>,
 }
 
-impl Snapshot {
+impl Tree {
+    pub(crate) fn new(snapshot: &Snapshot, order: Order) -> Self {
+        Self {
+            notes: snapshot.notes(order),
+            folders: snapshot.folders().map(Path::to_path_buf).collect(),
+            tags: snapshot.tags(),
+        }
+    }
+
     /// The notes of the list of `item`. A folder list has only the notes right in it.
     /// A tag list also has the notes of its child tags.
     pub(crate) fn list(&self, item: &Item) -> Vec<&NoteInfo> {
@@ -258,8 +268,8 @@ mod tests {
         }
     }
 
-    fn snapshot() -> Snapshot {
-        Snapshot {
+    fn tree() -> Tree {
+        Tree {
             notes: vec![
                 note("a.md", &["work"]),
                 note("work/b.md", &["work/holm"]),
@@ -288,7 +298,7 @@ mod tests {
 
     #[test]
     fn closed_items_hide_their_children() {
-        let rows = snapshot().rows(&HashSet::new());
+        let rows = tree().rows(&HashSet::new());
         assert_eq!(
             names(&rows),
             owned(&[
@@ -306,7 +316,7 @@ mod tests {
     #[test]
     fn open_items_show_their_children() {
         let open = HashSet::from([Item::Folder("work".into()), Item::Tag("work".into())]);
-        let rows = snapshot().rows(&open);
+        let rows = tree().rows(&open);
         assert_eq!(
             names(&rows),
             owned(&[
@@ -324,10 +334,9 @@ mod tests {
 
     #[test]
     fn lists_hold_their_notes() {
-        let snapshot = snapshot();
+        let tree = tree();
         let paths = |item: Item| -> Vec<String> {
-            snapshot
-                .list(&item)
+            tree.list(&item)
                 .iter()
                 .map(|note| note.path.display().to_string())
                 .collect()
@@ -353,8 +362,8 @@ mod tests {
             Some(Item::Tag("work".into()))
         );
         assert_eq!(Item::Tag("work/holm".into()).folder(), Path::new(""));
-        assert!(snapshot().has(&Item::Tag("work/holm".into())));
-        assert!(!snapshot().has(&Item::Folder("gone".into())));
+        assert!(tree().has(&Item::Tag("work/holm".into())));
+        assert!(!tree().has(&Item::Folder("gone".into())));
     }
 
     #[test]
@@ -380,8 +389,8 @@ mod tests {
 
     #[test]
     fn a_gone_item_falls_back_to_its_nearest_parent() {
-        let snapshot = snapshot();
-        let nearest = |item: Item| snapshot.nearest(&item);
+        let tree = tree();
+        let nearest = |item: Item| tree.nearest(&item);
         assert_eq!(
             nearest(Item::Folder("work/deep".into())),
             Item::Folder("work/deep".into())
