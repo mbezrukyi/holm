@@ -73,7 +73,7 @@ fn sidebar_notes(bencher: divan::Bencher<'_, '_>) {
     let notes = notes_folder();
     let index = tempfile::tempdir().unwrap();
     let core = open(notes.path(), index.path());
-    bencher.bench_local(|| core.notes(Order::LastChange).unwrap());
+    bencher.bench_local(|| core.snapshot().notes(Order::LastChange));
 }
 
 #[divan::bench(sample_count = 50)]
@@ -81,7 +81,12 @@ fn sidebar_folders(bencher: divan::Bencher<'_, '_>) {
     let notes = notes_folder();
     let index = tempfile::tempdir().unwrap();
     let core = open(notes.path(), index.path());
-    bencher.bench_local(|| core.folders().unwrap());
+    bencher.bench_local(|| {
+        core.snapshot()
+            .folders()
+            .map(Path::to_path_buf)
+            .collect::<Vec<_>>()
+    });
 }
 
 #[divan::bench(sample_count = 50)]
@@ -89,7 +94,7 @@ fn sidebar_tags(bencher: divan::Bencher<'_, '_>) {
     let notes = notes_folder();
     let index = tempfile::tempdir().unwrap();
     let core = open(notes.path(), index.path());
-    bencher.bench_local(|| core.tags().unwrap());
+    bencher.bench_local(|| core.snapshot().tags());
 }
 
 #[divan::bench(sample_count = 50)]
@@ -109,6 +114,24 @@ fn save(bencher: divan::Bencher<'_, '_>) {
     let mut note = core.read("folder 1/Note 1.md").unwrap();
     bencher.bench_local(|| {
         note.body.push_str("word ");
-        note = core.save(&note).unwrap();
+        note = core.save(&note).result.unwrap();
+    });
+}
+
+/// A tag change from the tag row: the frontmatter and the index row. The body stays.
+#[divan::bench(sample_count = 50)]
+fn set_tags(bencher: divan::Bencher<'_, '_>) {
+    let notes = notes_folder();
+    let index = tempfile::tempdir().unwrap();
+    let core = open(notes.path(), index.path());
+    let mut flip = false;
+    bencher.bench_local(|| {
+        flip = !flip;
+        let tags: &[&str] = if flip {
+            &["new"]
+        } else {
+            &["tag1", "area/tag0"]
+        };
+        core.set_tags("folder 1/Note 1.md", tags).result.unwrap()
     });
 }

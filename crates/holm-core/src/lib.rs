@@ -7,6 +7,7 @@ mod index;
 pub mod model;
 mod relink;
 mod retag;
+mod snapshot;
 mod store;
 mod watch;
 
@@ -14,18 +15,19 @@ use std::collections::{HashMap, hash_map};
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 pub use error::{Error, Result};
+pub use snapshot::Snapshot;
 pub use watch::Feed;
 
-use index::{Filter, Index};
-use model::{Change, DeleteCount, Link, LinkTarget, Note, NoteId, NoteInfo, Order, Tag};
+use index::Index;
+use model::{Change, DeleteCount, LinkTarget, Note, NoteId, NoteInfo, Order};
 use retag::TagEdit;
-use store::{ATTACHMENTS, Entry, Store, folder_of};
+use snapshot::Delta;
+use store::{Store, folder_of};
 use watch::{Apply, Batch};
 
 /// The handle to one notes folder.
@@ -44,10 +46,11 @@ pub struct Core {
 struct Inner {
     store: Store,
     index: Index,
-    /// Held while a write and its index update run, so a watch batch never sees half of it.
+    /// Held while a write, its index update and its snapshot update run,
+    /// so a watch batch never sees half of it.
     writing: Mutex<()>,
-    /// The count of writes, from Holm or from outside. See [`Core::revision`].
-    revision: AtomicU64,
+    /// Changes only under `writing`.
+    snapshot: Mutex<Snapshot>,
     listeners: Mutex<Vec<Sender<Change>>>,
     _watcher: Option<watch::Watcher>,
 }
@@ -58,6 +61,8 @@ impl Core {
     /// Then it watches the notes folder. Changes from other tools update the index
     /// and go to each [`Changes`]. When the watch can't start, the core works without it,
     /// with a log line.
+    ///
+    /// Then it keeps the facts of the notes folder in memory, as a [`Snapshot`].
     ///
     /// Holm can delete the index and rebuild it from the files at any time.
     /// It does so when the index is broken, or when it comes from a Holm with another index shape.
@@ -106,13 +111,11 @@ impl Core {
         Ok((core, feed))
     }
 
-    /// A number that grows after each change to the notes folder that the core knows of:
-    /// its own writes and the changes from outside. A view that shows lists of notes reads
-    /// them again when this number changes.
+    /// The facts of the notes folder now.
     ///
-    /// It can also grow when nothing changed, for example after a write that failed.
-    pub fn revision(&self) -> u64 {
-        self.inner.revision.load(Ordering::Acquire)
+    /// It is never older than a write or a batch of outside changes that the core finished.
+    pub fn snapshot(&self) -> Snapshot {
+        self.inner.snapshot()
     }
 
     /// A new stream of the changes that come from outside Holm.
@@ -126,50 +129,6 @@ impl Core {
         Changes { receive }
     }
 
-    /// Every note in the notes folder and its subfolders, in `order`. Pinned notes are on top.
-    ///
-    /// Only `*.md` files are notes. Hidden files and folders, and symlinks, are skipped.
-    /// A note that can't be read is left out, with a log line.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Index`] when the index can't be read, also after a rebuild.
-    pub fn notes(&self, order: Order) -> Result<Vec<NoteInfo>> {
-        self.list(&Filter::All, order)
-    }
-
-    /// The notes right in `folder`, without the notes of its subfolders.
-    ///
-    /// # Errors
-    ///
-    /// - [`Error::BadPath`] when `folder` is not a plain folder path inside the notes folder.
-    /// - [`Error::Index`] as in [`Core::notes`].
-    pub fn notes_in(&self, folder: impl AsRef<Path>, order: Order) -> Result<Vec<NoteInfo>> {
-        let folder = folder.as_ref();
-        Store::check_folder(folder)?;
-        self.list(&Filter::Folder(folder), order)
-    }
-
-    /// Every tag as a tree. `work` holds `work/holm`.
-    ///
-    /// A parent tag shows even when no note has it, only its children.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Index`] as in [`Core::notes`].
-    pub fn tags(&self) -> Result<Vec<Tag>> {
-        self.inner.index.tags(&self.inner.store)
-    }
-
-    /// The notes with `tag` or one of its child tags. Tags match exactly, also in capital letters.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Index`] as in [`Core::notes`].
-    pub fn notes_with_tag(&self, tag: &str, order: Order) -> Result<Vec<NoteInfo>> {
-        self.list(&Filter::Tag(tag), order)
-    }
-
     /// The notes whose title, text or tags hold every word of `text`.
     ///
     /// A word also matches longer words that start with it, so `pla` finds "plans".
@@ -177,43 +136,9 @@ impl Core {
     ///
     /// # Errors
     ///
-    /// [`Error::Index`] as in [`Core::notes`].
+    /// [`Error::Index`] when the index can't be read, also after a rebuild.
     pub fn search(&self, text: &str, order: Order) -> Result<Vec<NoteInfo>> {
-        self.list(&Filter::Search(text), order)
-    }
-
-    /// The links and embedded files in the note at `path`, in the order of its text.
-    ///
-    /// A note that the index does not know has no links.
-    ///
-    /// # Errors
-    ///
-    /// - [`Error::BadPath`] when `path` is not a `.md` file inside the notes folder.
-    /// - [`Error::Index`] as in [`Core::notes`].
-    pub fn links(&self, path: impl AsRef<Path>) -> Result<Vec<Link>> {
-        let path = path.as_ref();
-        Store::check_note(path)?;
-        self.inner.index.links(&self.inner.store, path)
-    }
-
-    /// The other notes that link to the note at `path`, by its id or by its file path.
-    ///
-    /// # Errors
-    ///
-    /// As in [`Core::links`].
-    pub fn backlinks(&self, path: impl AsRef<Path>, order: Order) -> Result<Vec<NoteInfo>> {
-        let path = path.as_ref();
-        Store::check_note(path)?;
-        self.list(&Filter::Backlinks(path), order)
-    }
-
-    /// The note with `id`, or `None` when no note has it.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Index`] as in [`Core::notes`].
-    pub fn note_with_id(&self, id: &str) -> Result<Option<NoteInfo>> {
-        Ok(self.list(&Filter::Id(id), Order::Title)?.into_iter().next())
+        self.inner.index.search(&self.inner.store, text, order)
     }
 
     /// The text of each heading in the note at `path`, in order, without the title.
@@ -242,18 +167,21 @@ impl Core {
     ///
     /// # Errors
     ///
-    /// - As in [`Core::links`].
+    /// - [`Error::BadPath`] when `path` is not a `.md` file inside the notes folder.
     /// - As in [`Core::read`], when a linked note can't be read.
     pub fn broken_links(&self, path: impl AsRef<Path>) -> Result<Vec<LinkTarget>> {
+        let path = path.as_ref();
+        Store::check_note(path)?;
+        let snapshot = self.snapshot();
         let mut known: HashMap<NoteId, Option<Vec<String>>> = HashMap::new();
         let mut broken = Vec::new();
-        for link in self.links(path)? {
+        for link in snapshot.links(path) {
             let LinkTarget::Note { id, heading } = &link.target else {
                 continue;
             };
             let headings = match known.entry(id.clone()) {
                 hash_map::Entry::Occupied(entry) => entry.into_mut(),
-                hash_map::Entry::Vacant(entry) => entry.insert(self.all_headings(id)?),
+                hash_map::Entry::Vacant(entry) => entry.insert(self.all_headings(&snapshot, id)?),
             };
             let found = match (headings, heading) {
                 (None, _) => false,
@@ -261,15 +189,15 @@ impl Core {
                 (Some(headings), Some(heading)) => headings.contains(heading),
             };
             if !found && !broken.contains(&link.target) {
-                broken.push(link.target);
+                broken.push(link.target.clone());
             }
         }
         Ok(broken)
     }
 
     /// Every heading of the note with `id`, the title too, or `None` with no such note.
-    fn all_headings(&self, id: &NoteId) -> Result<Option<Vec<String>>> {
-        let Some(info) = self.note_with_id(id.as_str())? else {
+    fn all_headings(&self, snapshot: &Snapshot, id: &NoteId) -> Result<Option<Vec<String>>> {
+        let Some(info) = snapshot.note_with_id(id.as_str()) else {
             return Ok(None);
         };
         let body = self.read(&info.path)?.body;
@@ -308,17 +236,6 @@ impl Core {
         }
     }
 
-    /// Every subfolder of the notes folder, sorted by path.
-    ///
-    /// Hidden folders, symlinks and the `attachments/` folder at the root are skipped.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Read`] when the notes folder itself can't be read.
-    pub fn folders(&self) -> Result<Vec<PathBuf>> {
-        self.inner.store.folders()
-    }
-
     /// Reads one note.
     ///
     /// # Errors
@@ -348,11 +265,12 @@ impl Core {
     /// - [`Error::BadPath`] as in [`Core::read`].
     /// - [`Error::Read`] or [`Error::NotUtf8`] when the file on disk can't be read.
     /// - [`Error::Write`] when the new file can't be written. The old file then stays.
-    /// - [`Error::Index`] as in [`Core::notes`]. The file is saved all the same.
-    pub fn save(&self, note: &Note) -> Result<Note> {
-        let _writing = self.inner.write();
-        let (note, stamp) = self.inner.store.save(note)?;
-        self.inner.index.update(&self.inner.store, &note, stamp)
+    /// - [`Error::Index`] as in [`Core::search`]. The file is saved all the same.
+    pub fn save(&self, note: &Note) -> Written<Note> {
+        self.inner.write(|draft| {
+            let (note, stamp) = self.inner.store.save(note)?;
+            self.inner.update(draft, &note, stamp)
+        })
     }
 
     /// Writes `note` again at its path after another tool deleted its file, and returns it.
@@ -363,11 +281,12 @@ impl Core {
     ///
     /// - [`Error::BadPath`] as in [`Core::read`].
     /// - [`Error::Write`] when the file can't be written, for example when the folder is missing.
-    /// - [`Error::Index`] as in [`Core::notes`]. The file is saved all the same.
-    pub fn restore(&self, note: &Note) -> Result<Note> {
-        let _writing = self.inner.write();
-        let (note, stamp) = self.inner.store.restore(note)?;
-        self.inner.index.update(&self.inner.store, &note, stamp)
+    /// - [`Error::Index`] as in [`Core::search`]. The file is saved all the same.
+    pub fn restore(&self, note: &Note) -> Written<Note> {
+        self.inner.write(|draft| {
+            let (note, stamp) = self.inner.store.restore(note)?;
+            self.inner.update(draft, &note, stamp)
+        })
     }
 
     /// Creates an empty note with a new id in `folder`, and returns it.
@@ -379,10 +298,11 @@ impl Core {
     /// - [`Error::BadPath`] when `folder` is not a plain folder path inside the notes folder.
     /// - [`Error::Write`] when the file can't be written, for example when the folder is missing.
     /// - [`Error::Index`] as in [`Core::save`].
-    pub fn create(&self, folder: impl AsRef<Path>) -> Result<Note> {
-        let _writing = self.inner.write();
-        let (note, stamp) = self.inner.store.create(folder.as_ref())?;
-        self.inner.index.update(&self.inner.store, &note, stamp)
+    pub fn create(&self, folder: impl AsRef<Path>) -> Written<Note> {
+        self.inner.write(|draft| {
+            let (note, stamp) = self.inner.store.create(folder.as_ref())?;
+            self.inner.update(draft, &note, stamp)
+        })
     }
 
     /// Renames the note file to match its title, and returns the note at its new path.
@@ -399,16 +319,17 @@ impl Core {
     /// - [`Error::Read`] or [`Error::NotUtf8`] when the file can't be read as text.
     /// - [`Error::Write`] when the file can't be moved. The note then stays where it was.
     /// - [`Error::Index`] as in [`Core::save`].
-    pub fn rename_to_title(&self, path: impl AsRef<Path>) -> Result<NoteInfo> {
+    pub fn rename_to_title(&self, path: impl AsRef<Path>) -> Written<NoteInfo> {
         let path = path.as_ref();
-        let _writing = self.inner.write();
-        let (note, _) = self.inner.store.read(path)?;
-        let stem = holm_markdown::file_stem(&note.info.title);
-        let new = self
-            .inner
-            .store
-            .move_note(path, folder_of(path), OsStr::new(&stem))?;
-        self.settle(path, &new)
+        self.inner.write(|draft| {
+            let (note, _) = self.inner.store.read(path)?;
+            let stem = holm_markdown::file_stem(&note.info.title);
+            let new = self
+                .inner
+                .store
+                .move_note(path, folder_of(path), OsStr::new(&stem))?;
+            self.inner.settle(draft, path, &new)
+        })
     }
 
     /// Moves the note to `folder` and returns it at its new path.
@@ -421,13 +342,14 @@ impl Core {
     ///
     /// - [`Error::BadPath`] when `path` is not a note path, or `folder` is not a folder path.
     /// - Else as in [`Core::rename_to_title`].
-    pub fn move_note(&self, path: impl AsRef<Path>, folder: impl AsRef<Path>) -> Result<NoteInfo> {
+    pub fn move_note(&self, path: impl AsRef<Path>, folder: impl AsRef<Path>) -> Written<NoteInfo> {
         let path = path.as_ref();
-        let _writing = self.inner.write();
-        Store::check_note(path)?;
-        let stem = path.file_stem().unwrap_or_default();
-        let new = self.inner.store.move_note(path, folder.as_ref(), stem)?;
-        self.settle(path, &new)
+        self.inner.write(|draft| {
+            Store::check_note(path)?;
+            let stem = path.file_stem().unwrap_or_default();
+            let new = self.inner.store.move_note(path, folder.as_ref(), stem)?;
+            self.inner.settle(draft, path, &new)
+        })
     }
 
     /// Creates the folder `name` in `parent`, and returns its path.
@@ -439,9 +361,13 @@ impl Core {
     ///
     /// - [`Error::BadPath`] when `parent` is not a folder path, or `name` is empty.
     /// - [`Error::Write`] when the folder can't be made, for example when `parent` is missing.
-    pub fn create_folder(&self, parent: impl AsRef<Path>, name: &str) -> Result<PathBuf> {
-        let _writing = self.inner.write();
-        self.inner.store.create_folder(parent.as_ref(), name)
+    /// - [`Error::Read`] when the new folder can't be read.
+    pub fn create_folder(&self, parent: impl AsRef<Path>, name: &str) -> Written<PathBuf> {
+        self.inner.write(|draft| {
+            let new = self.inner.store.create_folder(parent.as_ref(), name)?;
+            draft.folders(&new)?;
+            Ok(new)
+        })
     }
 
     /// Renames the folder to `name`, and returns its new path.
@@ -457,7 +383,7 @@ impl Core {
     /// - [`Error::Read`] when `folder` is missing or is not a folder.
     /// - [`Error::Write`] when the folder can't be moved. It then stays where it was.
     /// - [`Error::Index`] as in [`Core::save`].
-    pub fn rename_folder(&self, folder: impl AsRef<Path>, name: &str) -> Result<PathBuf> {
+    pub fn rename_folder(&self, folder: impl AsRef<Path>, name: &str) -> Written<PathBuf> {
         let folder = folder.as_ref();
         self.move_folder_to(folder, folder_of(folder), name)
     }
@@ -474,15 +400,16 @@ impl Core {
         &self,
         folder: impl AsRef<Path>,
         parent: impl AsRef<Path>,
-    ) -> Result<PathBuf> {
+    ) -> Written<PathBuf> {
         let folder = folder.as_ref();
-        let name = folder
-            .file_name()
-            .ok_or_else(|| Error::BadPath {
-                path: folder.to_owned(),
-            })?
-            .to_string_lossy();
-        self.move_folder_to(folder, parent.as_ref(), &name)
+        match folder.file_name() {
+            Some(name) => self.move_folder_to(folder, parent.as_ref(), &name.to_string_lossy()),
+            None => self.inner.write(|_| {
+                Err(Error::BadPath {
+                    path: folder.to_owned(),
+                })
+            }),
+        }
     }
 
     /// What [`Core::delete_note`] removes: the note and its attachment files.
@@ -490,11 +417,11 @@ impl Core {
     /// # Errors
     ///
     /// - [`Error::BadPath`] as in [`Core::read`].
-    /// - [`Error::Index`] as in [`Core::notes`].
+    /// - [`Error::Index`] as in [`Core::search`].
     pub fn note_delete_count(&self, path: impl AsRef<Path>) -> Result<DeleteCount> {
         let path = path.as_ref();
         Store::check_note(path)?;
-        self.removal(path).map(|(count, _)| count)
+        self.inner.removal(path).map(|(count, _)| count)
     }
 
     /// What [`Core::delete_folder`] removes: the notes in the folder and below it,
@@ -502,12 +429,12 @@ impl Core {
     ///
     /// # Errors
     ///
-    /// - [`Error::BadPath`] as in [`Core::notes_in`].
-    /// - [`Error::Index`] as in [`Core::notes`].
+    /// - [`Error::BadPath`] when `folder` is not a plain folder path inside the notes folder.
+    /// - [`Error::Index`] as in [`Core::search`].
     pub fn folder_delete_count(&self, folder: impl AsRef<Path>) -> Result<DeleteCount> {
         let folder = folder.as_ref();
         Store::check_folder(folder)?;
-        self.removal(folder).map(|(count, _)| count)
+        self.inner.removal(folder).map(|(count, _)| count)
     }
 
     /// Deletes the note forever. Holm has no trash.
@@ -522,10 +449,13 @@ impl Core {
     /// - [`Error::Write`] when the note can't be deleted.
     ///   An attachment that can't be deleted stays, with a log line.
     /// - [`Error::Index`] as in [`Core::save`].
-    pub fn delete_note(&self, path: impl AsRef<Path>) -> Result<()> {
+    pub fn delete_note(&self, path: impl AsRef<Path>) -> Written<()> {
         let path = path.as_ref();
-        Store::check_note(path)?;
-        self.delete(path, |store| store.delete_note(path))
+        self.inner.write(|draft| {
+            Store::check_note(path)?;
+            self.inner
+                .delete(draft, path, |store| store.delete_note(path))
+        })
     }
 
     /// Deletes the folder forever, with every note and file in it.
@@ -538,10 +468,13 @@ impl Core {
     /// - [`Error::Read`] when `folder` is not a folder.
     /// - [`Error::Write`] when the folder can't be deleted. Some files in it may be gone.
     /// - [`Error::Index`] as in [`Core::save`].
-    pub fn delete_folder(&self, folder: impl AsRef<Path>) -> Result<()> {
+    pub fn delete_folder(&self, folder: impl AsRef<Path>) -> Written<()> {
         let folder = folder.as_ref();
-        Store::check_folder(folder)?;
-        self.delete(folder, |store| store.delete_folder(folder))
+        self.inner.write(|draft| {
+            Store::check_folder(folder)?;
+            self.inner
+                .delete(draft, folder, |store| store.delete_folder(folder))
+        })
     }
 
     /// The id of the note, for a link to it.
@@ -555,15 +488,17 @@ impl Core {
     /// - [`Error::Read`] or [`Error::NotUtf8`] when the file can't be read as text.
     /// - [`Error::Write`] when the id can't be written.
     /// - [`Error::Index`] as in [`Core::save`].
-    pub fn link_id(&self, path: impl AsRef<Path>) -> Result<NoteId> {
-        let note = self.edit_fields(path.as_ref(), |text| {
-            if text.id().is_none() {
-                text.set_id(Some(NoteId::generate().as_str()));
-            }
-        })?;
-        note.info.id.ok_or_else(|| Error::Write {
-            path: self.inner.store.root().join(&note.info.path),
-            source: std::io::ErrorKind::InvalidData.into(),
+    pub fn link_id(&self, path: impl AsRef<Path>) -> Written<NoteId> {
+        self.inner.write(|draft| {
+            let note = self.inner.edit_fields(draft, path.as_ref(), |text| {
+                if text.id().is_none() {
+                    text.set_id(Some(NoteId::generate().as_str()));
+                }
+            })?;
+            note.info.id.ok_or_else(|| Error::Write {
+                path: self.inner.store.root().join(&note.info.path),
+                source: std::io::ErrorKind::InvalidData.into(),
+            })
         })
     }
 
@@ -577,17 +512,20 @@ impl Core {
     /// - [`Error::Read`] or [`Error::NotUtf8`] when the file can't be read as text.
     /// - [`Error::Write`] when the file can't be written. The old file then stays.
     /// - [`Error::Index`] as in [`Core::save`].
-    pub fn set_tags<S: AsRef<str>>(&self, path: impl AsRef<Path>, tags: &[S]) -> Result<NoteInfo> {
+    pub fn set_tags<S: AsRef<str>>(&self, path: impl AsRef<Path>, tags: &[S]) -> Written<NoteInfo> {
         let tags = retag::unique(
             tags.iter()
                 .filter_map(|tag| holm_markdown::normalize_tag(tag.as_ref())),
         );
-        self.edit_fields(path.as_ref(), |text| {
-            if text.tags() != tags {
-                text.set_tags(&tags);
-            }
+        self.inner.write(|draft| {
+            self.inner
+                .edit_fields(draft, path.as_ref(), |text| {
+                    if text.tags() != tags {
+                        text.set_tags(&tags);
+                    }
+                })
+                .map(|note| note.info)
         })
-        .map(|note| note.info)
     }
 
     /// Pins or unpins the note and returns it. Its body and modification time stay.
@@ -595,23 +533,25 @@ impl Core {
     /// # Errors
     ///
     /// As in [`Core::set_tags`].
-    pub fn set_pinned(&self, path: impl AsRef<Path>, pinned: bool) -> Result<NoteInfo> {
-        self.edit_fields(path.as_ref(), |text| {
-            if text.pinned() != pinned {
-                text.set_pinned(pinned);
-            }
+    pub fn set_pinned(&self, path: impl AsRef<Path>, pinned: bool) -> Written<NoteInfo> {
+        self.inner.write(|draft| {
+            self.inner
+                .edit_fields(draft, path.as_ref(), |text| {
+                    if text.pinned() != pinned {
+                        text.set_pinned(pinned);
+                    }
+                })
+                .map(|note| note.info)
         })
-        .map(|note| note.info)
     }
 
     /// How many notes [`Core::rename_tag`] changes.
     ///
     /// # Errors
     ///
-    /// - [`Error::BadTag`] as in [`Core::rename_tag`].
-    /// - [`Error::Index`] as in [`Core::notes`].
+    /// [`Error::BadTag`] as in [`Core::rename_tag`].
     pub fn tag_rename_count(&self, from: &str, to: &str) -> Result<usize> {
-        self.tag_edit_count(&TagEdit::rename(from, to)?)
+        Ok(self.tag_edit_count(&TagEdit::rename(from, to)?))
     }
 
     /// Renames the tag `from` to `to` in every note, and returns how many notes changed.
@@ -626,18 +566,18 @@ impl Core {
     ///
     /// - [`Error::BadTag`] when `from` is not a tag name, or nothing is left of `to`.
     /// - The first error of a note, as in [`Core::set_tags`].
-    pub fn rename_tag(&self, from: &str, to: &str) -> Result<usize> {
-        self.edit_tag(&TagEdit::rename(from, to)?)
+    pub fn rename_tag(&self, from: &str, to: &str) -> Written<usize> {
+        self.inner
+            .write(|draft| self.inner.edit_tag(draft, &TagEdit::rename(from, to)?))
     }
 
     /// How many notes [`Core::delete_tag`] changes.
     ///
     /// # Errors
     ///
-    /// - [`Error::BadTag`] when `tag` is not a tag name.
-    /// - [`Error::Index`] as in [`Core::notes`].
+    /// [`Error::BadTag`] when `tag` is not a tag name.
     pub fn tag_delete_count(&self, tag: &str) -> Result<usize> {
-        self.tag_edit_count(&TagEdit::delete(tag)?)
+        Ok(self.tag_edit_count(&TagEdit::delete(tag)?))
     }
 
     /// Removes the tag and its child tags from every note, and returns how many notes changed.
@@ -648,8 +588,9 @@ impl Core {
     ///
     /// - [`Error::BadTag`] when `tag` is not a tag name.
     /// - The first error of a note, as in [`Core::set_tags`].
-    pub fn delete_tag(&self, tag: &str) -> Result<usize> {
-        self.edit_tag(&TagEdit::delete(tag)?)
+    pub fn delete_tag(&self, tag: &str) -> Written<usize> {
+        self.inner
+            .write(|draft| self.inner.edit_tag(draft, &TagEdit::delete(tag)?))
     }
 
     /// Copies the file into `attachments/` at the root of the notes folder,
@@ -657,7 +598,7 @@ impl Core {
     ///
     /// The copy keeps the file name. When it is taken, it gets a number: `photo 2.png`.
     /// A leading `.` becomes `-`. Holm makes `attachments/` when it is missing.
-    /// The note itself does not change.
+    /// The note itself does not change, and neither does the snapshot.
     ///
     /// # Errors
     ///
@@ -722,32 +663,133 @@ impl Core {
         ))
     }
 
+    fn tag_edit_count(&self, edit: &TagEdit<'_>) -> usize {
+        self.snapshot()
+            .notes_with_tag(edit.tag(), Order::Title)
+            .iter()
+            .filter(|note| edit.apply(&note.tags) != note.tags)
+            .count()
+    }
+
+    fn move_folder_to(&self, folder: &Path, parent: &Path, name: &str) -> Written<PathBuf> {
+        self.inner.write(|draft| {
+            let new = self.inner.store.move_folder(folder, parent, name)?;
+            if new != folder {
+                self.inner
+                    .refresh(draft, vec![folder.to_owned(), new.clone()])?;
+                draft.folders(folder)?;
+                draft.folders(&new)?;
+            }
+            Ok(new)
+        })
+    }
+
+    fn build(store: Store, index_dir: &Path, watcher: Option<watch::Watcher>) -> Result<Self> {
+        let index = Index::open(index_dir, &store)?;
+        let snapshot = Snapshot::new(index.entries(&store)?, store.folders(Path::new(""))?);
+        let inner = Inner {
+            store,
+            index,
+            writing: Mutex::new(()),
+            snapshot: Mutex::new(snapshot),
+            listeners: Mutex::new(Vec::new()),
+            _watcher: watcher,
+        };
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    /// The target of the watch seam. It holds the core weakly, so the watch thread
+    /// does not keep the core alive.
+    fn apply(&self) -> Apply {
+        let inner = Arc::downgrade(&self.inner);
+        Arc::new(move |batch| inner.upgrade().map(|inner| inner.apply(batch)))
+    }
+}
+
+/// What a write gives back: its result, and the snapshot right after it.
+///
+/// The snapshot comes also after a failed write. A part of that write may be done,
+/// like the first notes of [`Core::rename_tag`].
+#[derive(Debug)]
+#[must_use]
+pub struct Written<T> {
+    /// What the write gives, or why it failed.
+    pub result: Result<T>,
+    /// The facts of the notes folder right after the write.
+    pub snapshot: Snapshot,
+}
+
+/// The next snapshot, while one write runs.
+struct Draft<'a> {
+    store: &'a Store,
+    next: Snapshot,
+    changed: bool,
+}
+
+impl Draft<'_> {
+    fn notes(&mut self, delta: Delta) {
+        self.changed |= self.next.apply(delta);
+    }
+
+    /// Reads the folders at or below `scope` from the disk again. It returns whether they changed.
+    fn folders(&mut self, scope: &Path) -> Result<bool> {
+        let found = self.store.folders(scope)?;
+        let changed = self.next.set_folders(scope, found);
+        self.changed |= changed;
+        Ok(changed)
+    }
+}
+
+impl Inner {
+    fn snapshot(&self) -> Snapshot {
+        lock(&self.snapshot).clone()
+    }
+
+    /// Runs `op` under the write lock, with a draft of the next snapshot.
+    /// When a fact changed, the draft gets the next revision and replaces the snapshot.
+    fn write<T>(&self, op: impl FnOnce(&mut Draft<'_>) -> Result<T>) -> Written<T> {
+        let _writing = lock(&self.writing);
+        let mut draft = Draft {
+            store: &self.store,
+            next: self.snapshot(),
+            changed: false,
+        };
+        let result = op(&mut draft);
+        let mut snapshot = draft.next;
+        if draft.changed {
+            snapshot = snapshot.next_revision();
+            *lock(&self.snapshot) = snapshot.clone();
+        }
+        Written { result, snapshot }
+    }
+
+    /// Puts a note that Holm just wrote into the index and the draft, and returns it.
+    fn update(&self, draft: &mut Draft<'_>, note: &Note, stamp: store::Stamp) -> Result<Note> {
+        let (note, delta) = self.index.update(&self.store, note, stamp)?;
+        draft.notes(delta);
+        Ok(note)
+    }
+
     /// Changes the frontmatter of the note with `edit`, keeps its modification time,
-    /// and updates the index.
+    /// and updates the index and the draft.
     fn edit_fields(
         &self,
+        draft: &mut Draft<'_>,
         path: &Path,
         edit: impl FnOnce(&mut holm_markdown::Note),
     ) -> Result<Note> {
-        let _writing = self.inner.write();
-        let (note, stamp) = self.inner.store.edit_fields(path, edit)?;
-        self.inner.index.update(&self.inner.store, &note, stamp)
+        let (note, stamp) = self.store.edit_fields(path, edit)?;
+        self.update(draft, &note, stamp)
     }
 
-    fn tag_edit_count(&self, edit: &TagEdit<'_>) -> Result<usize> {
-        let notes = self.list(&Filter::Tag(edit.tag()), Order::Title)?;
-        Ok(notes
-            .iter()
-            .filter(|note| edit.apply(&note.tags) != note.tags)
-            .count())
-    }
-
-    fn edit_tag(&self, edit: &TagEdit<'_>) -> Result<usize> {
+    fn edit_tag(&self, draft: &mut Draft<'_>, edit: &TagEdit<'_>) -> Result<usize> {
         let mut changed = 0;
         let mut first_error = None;
-        for info in self.list(&Filter::Tag(edit.tag()), Order::Title)? {
+        for info in draft.next.notes_with_tag(edit.tag(), Order::Title) {
             let mut hit = false;
-            let result = self.edit_fields(&info.path, |text| {
+            let result = self.edit_fields(draft, &info.path, |text| {
                 let old = text.tags();
                 let new = edit.apply(&old);
                 if new != old {
@@ -767,22 +809,13 @@ impl Core {
         first_error.map_or(Ok(changed), Err)
     }
 
-    fn move_folder_to(&self, folder: &Path, parent: &Path, name: &str) -> Result<PathBuf> {
-        let _writing = self.inner.write();
-        let new = self.inner.store.move_folder(folder, parent, name)?;
-        if new != folder {
-            self.refresh(vec![folder.to_owned(), new.clone()])?;
-        }
-        Ok(new)
-    }
-
     /// The count of a delete of `scope`, and the attachment files it removes.
     fn removal(&self, scope: &Path) -> Result<(DeleteCount, Vec<PathBuf>)> {
-        let removal = self.inner.index.removal(&self.inner.store, scope)?;
+        let removal = self.index.removal(&self.store, scope)?;
         let files: Vec<PathBuf> = removal
             .files
             .into_iter()
-            .filter(|file| self.inner.store.is_attachment(file))
+            .filter(|file| self.store.is_attachment(file))
             .collect();
         let count = DeleteCount {
             notes: removal.notes,
@@ -791,73 +824,47 @@ impl Core {
         Ok((count, files))
     }
 
-    /// Runs `delete` on `scope`, then deletes its attachment files and updates the index.
-    fn delete(&self, scope: &Path, delete: impl FnOnce(&Store) -> Result<()>) -> Result<()> {
-        let _writing = self.inner.write();
+    /// Runs `delete` on `scope`, then deletes its attachment files.
+    /// It updates the index and the draft also when `delete` fails, since a part may be gone.
+    fn delete(
+        &self,
+        draft: &mut Draft<'_>,
+        scope: &Path,
+        delete: impl FnOnce(&Store) -> Result<()>,
+    ) -> Result<()> {
         let (_, files) = self.removal(scope)?;
-        delete(&self.inner.store)?;
-        for file in files {
-            if let Err(error) = self.inner.store.delete_attachment(&file) {
-                tracing::warn!(%error, "kept an attachment");
+        let deleted = delete(&self.store);
+        if deleted.is_ok() {
+            for file in files {
+                if let Err(error) = self.store.delete_attachment(&file) {
+                    tracing::warn!(%error, "kept an attachment");
+                }
             }
         }
-        self.refresh(vec![scope.to_owned()])
+        self.refresh(draft, vec![scope.to_owned()])?;
+        draft.folders(scope)?;
+        deleted
     }
 
-    /// Updates the index after a note moved from `from` to `to`, and returns the note.
-    fn settle(&self, from: &Path, to: &Path) -> Result<NoteInfo> {
+    /// Updates the index and the draft after a note moved from `from` to `to`, and returns the note.
+    fn settle(&self, draft: &mut Draft<'_>, from: &Path, to: &Path) -> Result<NoteInfo> {
         if from != to {
-            self.refresh(vec![from.to_owned(), to.to_owned()])?;
+            self.refresh(draft, vec![from.to_owned(), to.to_owned()])?;
         }
-        self.inner.store.read(to).map(|(note, _)| note.info)
+        self.store.read(to).map(|(note, _)| note.info)
     }
 
-    /// Updates the index at each path after Holm's own change. No change goes to [`Changes`].
-    fn refresh(&self, mut paths: Vec<PathBuf>) -> Result<()> {
+    /// Updates the index and the draft at each path after Holm's own change.
+    /// No change goes to [`Changes`].
+    fn refresh(&self, draft: &mut Draft<'_>, mut paths: Vec<PathBuf>) -> Result<()> {
         paths.sort();
-        self.inner
-            .index
-            .refresh(&self.inner.store, &outer(paths))
-            .map(drop)
+        let refresh = self.index.refresh(&self.store, &outer(paths))?;
+        draft.notes(refresh.delta);
+        Ok(())
     }
 
-    fn list(&self, filter: &Filter<'_>, order: Order) -> Result<Vec<NoteInfo>> {
-        self.inner.index.notes(&self.inner.store, filter, order)
-    }
-
-    fn build(store: Store, index_dir: &Path, watcher: Option<watch::Watcher>) -> Result<Self> {
-        let index = Index::open(index_dir, &store)?;
-        let inner = Inner {
-            store,
-            index,
-            writing: Mutex::new(()),
-            revision: AtomicU64::new(0),
-            listeners: Mutex::new(Vec::new()),
-            _watcher: watcher,
-        };
-        Ok(Self {
-            inner: Arc::new(inner),
-        })
-    }
-
-    /// The target of the watch seam. It holds the core weakly, so the watch thread
-    /// does not keep the core alive.
-    fn apply(&self) -> Apply {
-        let inner = Arc::downgrade(&self.inner);
-        Arc::new(move |batch| inner.upgrade().map(|inner| inner.apply(batch)))
-    }
-}
-
-impl Inner {
-    /// Takes the write lock. The revision grows when the write ends.
-    fn write(&self) -> Writing<'_> {
-        Writing {
-            revision: &self.revision,
-            _lock: lock(&self.writing),
-        }
-    }
-
-    /// Checks the disk at each path of `batch`, updates the index and sends the changes.
+    /// Checks the disk at each path of `batch`, updates the index and the snapshot,
+    /// and sends the changes.
     fn apply(&self, batch: Batch) -> Result<()> {
         // The batch is sorted.
         let scopes = outer(
@@ -868,44 +875,30 @@ impl Inner {
         if scopes.is_empty() {
             return Ok(());
         }
-        let _writing = self.write();
-        let refresh = self.index.refresh(&self.store, &scopes)?;
-        // A missing path may have been a folder. The index knows only notes, so it can't tell.
-        // A missing `.md` path is taken as a note.
-        let folders = scopes.iter().any(|scope| match self.store.entry(scope) {
-            // The folder list never holds `attachments/`.
-            _ if scope == Path::new(ATTACHMENTS) => false,
-            Entry::Folder => true,
-            Entry::Missing => Store::check_note(scope).is_err(),
-            Entry::Note(_) | Entry::Other => false,
-        });
-        let mut changes = refresh.notes;
-        if folders {
-            changes.push(Change::Folders);
-        }
-        if refresh.tags {
-            changes.push(Change::Tags);
-        }
-        if !changes.is_empty() {
-            lock(&self.listeners).retain(|listener| {
-                changes
-                    .iter()
-                    .all(|change| listener.send(change.clone()).is_ok())
-            });
-        }
-        Ok(())
-    }
-}
-
-/// The write lock of the core. It counts the write when it ends.
-struct Writing<'a> {
-    revision: &'a AtomicU64,
-    _lock: MutexGuard<'a, ()>,
-}
-
-impl Drop for Writing<'_> {
-    fn drop(&mut self) {
-        self.revision.fetch_add(1, Ordering::Release);
+        self.write(|draft| {
+            let refresh = self.index.refresh(&self.store, &scopes)?;
+            draft.notes(refresh.delta);
+            let mut folders = false;
+            for scope in &scopes {
+                folders |= draft.folders(scope)?;
+            }
+            let mut changes = refresh.notes;
+            if folders {
+                changes.push(Change::Folders);
+            }
+            if refresh.tags {
+                changes.push(Change::Tags);
+            }
+            if !changes.is_empty() {
+                lock(&self.listeners).retain(|listener| {
+                    changes
+                        .iter()
+                        .all(|change| listener.send(change.clone()).is_ok())
+                });
+            }
+            Ok(())
+        })
+        .result
     }
 }
 

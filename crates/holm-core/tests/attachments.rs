@@ -124,14 +124,19 @@ fn attachments_do_not_show_as_folders_or_notes() {
     folder.core.paste_image("a.md", "png", b"png").unwrap();
 
     assert_eq!(
-        folder.core.folders().unwrap(),
+        folder
+            .core
+            .snapshot()
+            .folders()
+            .map(Path::to_path_buf)
+            .collect::<Vec<_>>(),
         [] as [std::path::PathBuf; 0]
     );
     assert_eq!(
         folder
             .core
+            .snapshot()
             .notes(holm_core::model::Order::Title)
-            .unwrap()
             .len(),
         1
     );

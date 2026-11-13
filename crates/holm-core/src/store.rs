@@ -125,11 +125,23 @@ impl Store {
         plain_path(rel).map(drop)
     }
 
-    /// Every subfolder, sorted by path. It skips `attachments/` at the root.
-    pub(crate) fn folders(&self) -> Result<Vec<PathBuf>> {
+    /// Every subfolder at or below `scope`, sorted by path. It skips `attachments/` at the root.
+    ///
+    /// The empty path is the whole notes folder. `scope` can be a note, a folder,
+    /// or a path with nothing there.
+    pub(crate) fn folders(&self, scope: &Path) -> Result<Vec<PathBuf>> {
+        let listed = |rel: &Path| rel != Path::new(ATTACHMENTS);
         let mut folders = Vec::new();
-        self.walk(Path::new(""), &mut |rel, kind| {
-            if kind == Kind::Folder && rel != Path::new(ATTACHMENTS) {
+        if !scope.as_os_str().is_empty() {
+            if plain_path(scope).is_err() || self.entry(scope) != Entry::Folder {
+                return Ok(folders);
+            }
+            if listed(scope) {
+                folders.push(scope.to_owned());
+            }
+        }
+        self.walk(scope, &mut |rel, kind| {
+            if kind == Kind::Folder && listed(rel) {
                 folders.push(rel.to_owned());
             }
         })?;

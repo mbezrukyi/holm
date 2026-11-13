@@ -18,6 +18,7 @@ holm-editor = { path = "crates/holm-editor" }
 gpui-kit = { version = "=0.9.0", default-features = false }
 fontdb = "0.23"
 imagesize = "0.14"
+imbl = "7"
 jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 notify = { version = "8.2", default-features = false }
 pulldown-cmark = { version = "0.13", default-features = false }

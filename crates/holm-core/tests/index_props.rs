@@ -6,7 +6,7 @@ mod common;
 
 use std::fmt::Write as _;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use common::Folder;
 use holm_core::Core;
@@ -70,10 +70,11 @@ fn edit() -> impl Strategy<Value = Edit> {
     ]
 }
 
-/// Everything the index answers about the notes folder.
+/// Everything the snapshot and the search answer about the notes folder.
 #[derive(Debug, PartialEq)]
 struct Answers {
     notes: Vec<NoteInfo>,
+    folders: Vec<PathBuf>,
     by_title: Vec<NoteInfo>,
     in_folders: Vec<Vec<NoteInfo>>,
     tags: Vec<Tag>,
@@ -84,28 +85,32 @@ struct Answers {
 }
 
 fn answers(core: &Core) -> Answers {
-    let notes = core.notes(Order::LastChange).unwrap();
+    let notes = core.snapshot().notes(Order::LastChange);
     let paths: Vec<PathBuf> = notes.iter().map(|n| n.path.clone()).collect();
     Answers {
-        by_title: core.notes(Order::Title).unwrap(),
+        folders: core.snapshot().folders().map(Path::to_path_buf).collect(),
+        by_title: core.snapshot().notes(Order::Title),
         in_folders: ["", "work"]
             .iter()
-            .map(|f| core.notes_in(f, Order::LastChange).unwrap())
+            .map(|f| core.snapshot().notes_in(f, Order::LastChange))
             .collect(),
-        tags: core.tags().unwrap(),
+        tags: core.snapshot().tags(),
         with_tag: ["work", "work/holm", "home", "Work"]
             .iter()
-            .map(|t| core.notes_with_tag(t, Order::LastChange).unwrap())
+            .map(|t| core.snapshot().notes_with_tag(t, Order::LastChange))
             .collect(),
         search: WORDS
             .iter()
             .chain(&["berr", "CAFE"])
             .map(|w| core.search(w, Order::LastChange).unwrap())
             .collect(),
-        links: paths.iter().map(|p| core.links(p).unwrap()).collect(),
+        links: paths
+            .iter()
+            .map(|p| core.snapshot().links(p).to_vec())
+            .collect(),
         backlinks: paths
             .iter()
-            .map(|p| core.backlinks(p, Order::LastChange).unwrap())
+            .map(|p| core.snapshot().backlinks(p, Order::LastChange))
             .collect(),
         notes,
     }
@@ -117,7 +122,7 @@ fn body(folder: &Folder, words: &[usize], link: usize) -> String {
         body.push_str(WORDS[w]);
         body.push(' ');
     }
-    let notes = folder.core.notes(Order::Title).unwrap();
+    let notes = folder.core.snapshot().notes(Order::Title);
     if !notes.is_empty() {
         let target = &notes[link % notes.len()];
         if let Some(id) = &target.id {
@@ -139,7 +144,7 @@ fn tags(picks: &[usize]) -> Vec<String> {
 }
 
 fn pick(folder: &Folder, note: usize) -> Option<PathBuf> {
-    let notes = folder.core.notes(Order::Title).unwrap();
+    let notes = folder.core.snapshot().notes(Order::Title);
     (!notes.is_empty()).then(|| notes[note % notes.len()].path.clone())
 }
 
@@ -149,6 +154,7 @@ fn apply(folder: &mut Folder, edit: &Edit, copies: &mut usize) {
             folder
                 .core
                 .create(if *in_work { "work" } else { "" })
+                .result
                 .unwrap();
         }
         Edit::Save {
@@ -163,7 +169,7 @@ fn apply(folder: &mut Folder, edit: &Edit, copies: &mut usize) {
                 note.body = body(folder, words, *link);
                 note.info.tags = tags(picks);
                 note.info.pinned = *pinned;
-                folder.core.save(&note).unwrap();
+                folder.core.save(&note).result.unwrap();
             }
         }
         Edit::Outside {
@@ -175,22 +181,22 @@ fn apply(folder: &mut Folder, edit: &Edit, copies: &mut usize) {
                 let tags = tags(picks).join(", ");
                 let words: Vec<&str> = words.iter().map(|&w| WORDS[w]).collect();
                 let text = format!("---\ntags: [{tags}]\n---\n{}\n", words.join(" "));
-                fs::write(folder.dir.path().join(path), text).unwrap();
-                folder.reopen();
+                fs::write(folder.dir.path().join(&path), text).unwrap();
+                folder.feed([path]);
             }
         }
         Edit::Delete { note } => {
             if let Some(path) = pick(folder, *note) {
-                fs::remove_file(folder.dir.path().join(path)).unwrap();
-                folder.reopen();
+                fs::remove_file(folder.dir.path().join(&path)).unwrap();
+                folder.feed([path]);
             }
         }
         Edit::Copy { note } => {
             if let Some(path) = pick(folder, *note) {
                 *copies += 1;
                 let copy = path.with_file_name(format!("copy {copies}.md"));
-                fs::copy(folder.dir.path().join(&path), folder.dir.path().join(copy)).unwrap();
-                folder.reopen();
+                fs::copy(folder.dir.path().join(&path), folder.dir.path().join(&copy)).unwrap();
+                folder.feed([copy]);
             }
         }
     }
@@ -201,7 +207,7 @@ proptest! {
 
     #[test]
     fn a_full_rebuild_equals_the_index_after_edits(edits in prop::collection::vec(edit(), 1..16)) {
-        let mut folder = Folder::new(&[("work/start.md", "# Start\napple\n")]);
+        let mut folder = Folder::with_feed(&[("work/start.md", "# Start\napple\n")]);
         let mut copies = 0;
         for edit in &edits {
             apply(&mut folder, edit, &mut copies);

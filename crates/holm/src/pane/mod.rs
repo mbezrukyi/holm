@@ -32,8 +32,8 @@ use gpui_kit::{
     StatefulInteractiveElement as _, Styled, Subscription, Task, TestSupportExt as _, Window, div,
     px,
 };
-use holm_core::Core;
 use holm_core::model::{Change, Note, NoteInfo, Order};
+use holm_core::{Core, Written};
 use holm_editor::{Changed, Editor, UpFromStart};
 use holm_markdown::Target;
 
@@ -49,7 +49,7 @@ use links::{Links, LinksEvent};
 const AUTOSAVE: Duration = Duration::from_millis(500);
 
 /// A write of the open note to disk.
-type Write = fn(&Core, &Note) -> holm_core::Result<Note>;
+type Write = fn(&Core, &Note) -> Written<Note>;
 
 /// What the pane tells the app.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -267,13 +267,14 @@ impl NotePane {
         let target = link.map(|link| link.target);
         Some(self.run(
             move |core| {
-                let mut notes = core.notes(Order::LastChange)?;
+                let snapshot = core.snapshot();
+                let mut notes = snapshot.notes(Order::LastChange);
                 notes.sort_by_key(|note| std::cmp::Reverse(note.modified));
                 let query = match target {
-                    Some(Target::Note { id, heading }) => match core.note_with_id(&id)? {
+                    Some(Target::Note { id, heading }) => match snapshot.note_with_id(&id) {
                         Some(note) => match heading {
                             Some(heading) => format!("{}#{heading}", note.title),
-                            None => note.title,
+                            None => note.title.clone(),
                         },
                         None => String::new(),
                     },
@@ -308,17 +309,17 @@ impl NotePane {
                     title,
                     heading,
                 } => {
-                    let id = core.link_id(&path)?.to_string();
+                    let id = core.link_id(&path).result?.to_string();
                     let text = heading.clone().unwrap_or(title);
                     Ok((Target::Note { id, heading }, text))
                 }
                 LinkChoice::SameNote(heading) => Ok((Target::Heading(heading.clone()), heading)),
                 LinkChoice::Create(title) => {
-                    let mut note = core.create(&folder)?;
+                    let mut note = core.create(&folder).result?;
                     note.body = format!("# {title}\n");
-                    let note = core.save(&note)?;
-                    let info = core.rename_to_title(&note.info.path)?;
-                    let id = core.link_id(&info.path)?.to_string();
+                    let note = core.save(&note).result?;
+                    let info = core.rename_to_title(&note.info.path).result?;
+                    let id = core.link_id(&info.path).result?.to_string();
                     Ok((Target::Note { id, heading: None }, title))
                 }
             },
@@ -361,7 +362,7 @@ impl NotePane {
         };
         note.info.tags = tags.to_vec();
         let (path, tags) = (note.info.path.clone(), tags.to_vec());
-        self.write_fields(move |core| core.set_tags(&path, &tags), cx);
+        self.write_fields(move |core| core.set_tags(&path, &tags).result, cx);
     }
 
     /// Opens the tag popup. The editor scrolls to it.
@@ -390,7 +391,7 @@ impl NotePane {
         note.info.pinned = pinned;
         let path = note.info.path.clone();
         self.show_fields(cx);
-        self.write_fields(move |core| core.set_pinned(&path, pinned), cx);
+        self.write_fields(move |core| core.set_pinned(&path, pinned).result, cx);
     }
 
     /// Writes a change of the tags or the pin, after the writes before it.
@@ -501,7 +502,7 @@ impl NotePane {
         let (note, write) = self.pending_write(cx)?;
         let text = self.editor.read(cx).text().to_owned();
         let core = self.core.clone();
-        let job = cx.background_spawn(async move { write(&core, &note) });
+        let job = cx.background_spawn(async move { write(&core, &note).result });
         Some(cx.spawn(async move |pane, cx| {
             let result = job.await;
             pane.update(cx, |pane, cx| pane.saved(text, result, cx))
@@ -621,7 +622,7 @@ impl NotePane {
         let Some((note, write)) = self.pending_write(cx) else {
             return;
         };
-        if let Err(error) = write(&self.core, &note) {
+        if let Err(error) = write(&self.core, &note).result {
             let error = AppError::from(error);
             tracing::warn!(error = %crate::chain(&error), "cannot save the note");
         }
@@ -671,7 +672,7 @@ impl NotePane {
                 return;
             };
             let job = cx.background_spawn(async move {
-                let renamed = old.map(|old| core.rename_to_title(&old));
+                let renamed = old.map(|old| core.rename_to_title(&old).result);
                 (renamed, core.read(&path))
             });
             let (renamed, read) = job.await;

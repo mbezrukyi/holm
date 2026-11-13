@@ -184,11 +184,12 @@ impl Sidebar {
         let core = self.core.clone();
         let order = self.order;
         let job = cx.background_spawn(async move {
-            let revision = core.revision();
+            let facts = core.snapshot();
+            let revision = facts.revision();
             let snapshot = Snapshot {
-                notes: core.notes(order)?,
-                folders: core.folders()?,
-                tags: core.tags()?,
+                notes: facts.notes(order),
+                folders: facts.folders().map(Path::to_path_buf).collect(),
+                tags: facts.tags(),
             };
             Ok::<_, holm_core::Error>((revision, snapshot))
         });
@@ -294,7 +295,7 @@ impl Sidebar {
                     self.renamed = None;
                 }
                 // An old copy may miss an item that a later write made. The next copy decides.
-                if self.renamed.is_none() && revision == self.core.revision() {
+                if self.renamed.is_none() && revision == self.core.snapshot().revision() {
                     let item = self.snapshot.nearest(self.view.item());
                     if &item != self.view.item() {
                         self.show_in_tree(item, cx);
@@ -439,7 +440,7 @@ impl Sidebar {
             return;
         };
         self.open_moved(&renamed.from, &to);
-        let done_at = self.core.revision();
+        let done_at = self.core.snapshot().revision();
         if self.revision < done_at {
             self.renamed = Some(Renamed {
                 from: renamed.from,

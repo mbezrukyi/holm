@@ -7,13 +7,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use holm_core::Core;
+use holm_core::{Core, Feed};
 use tempfile::TempDir;
 
 pub(crate) struct Folder {
     pub(crate) dir: TempDir,
     pub(crate) cache: TempDir,
     pub(crate) core: Core,
+    /// Only for a folder from [`Folder::with_feed`].
+    pub(crate) feed: Option<Feed>,
 }
 
 impl Folder {
@@ -24,7 +26,33 @@ impl Folder {
         }
         let cache = tempfile::tempdir().unwrap();
         let core = Core::open(dir.path(), cache.path()).unwrap();
-        Self { dir, cache, core }
+        Self {
+            dir,
+            cache,
+            core,
+            feed: None,
+        }
+    }
+
+    /// A folder whose core sees outside changes only through [`Folder::feed`].
+    pub(crate) fn with_feed(files: &[(&str, &str)]) -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        for (path, text) in files {
+            write(dir.path(), path, text);
+        }
+        let cache = tempfile::tempdir().unwrap();
+        let (core, feed) = Core::open_with_feed(dir.path(), cache.path()).unwrap();
+        Self {
+            dir,
+            cache,
+            core,
+            feed: Some(feed),
+        }
+    }
+
+    /// Tells the core of a [`Folder::with_feed`] that `paths` changed.
+    pub(crate) fn feed<P: AsRef<Path>>(&self, paths: impl IntoIterator<Item = P>) {
+        self.feed.as_ref().unwrap().changed(paths).unwrap();
     }
 
     pub(crate) fn path(&self, path: &str) -> PathBuf {

@@ -43,11 +43,11 @@ fn notes_come_last_change_first_with_pinned_notes_on_top() {
     folder.reopen();
 
     assert_eq!(
-        paths(folder.core.notes(Order::LastChange).unwrap()),
+        paths(folder.core.snapshot().notes(Order::LastChange)),
         ["pinned.md", "new.md", "work/mid.md", "old.md"]
     );
     assert_eq!(
-        paths(folder.core.notes(Order::Title).unwrap()),
+        paths(folder.core.snapshot().notes(Order::Title)),
         ["pinned.md", "work/mid.md", "new.md", "old.md"]
     );
 }
@@ -62,8 +62,8 @@ fn title_order_ignores_capital_letters() {
 
     let titles: Vec<String> = folder
         .core
+        .snapshot()
         .notes(Order::Title)
-        .unwrap()
         .into_iter()
         .map(|n| n.title)
         .collect();
@@ -80,22 +80,22 @@ fn a_folder_lists_only_its_own_notes() {
         ("work/holm/c.md", ""),
     ]);
 
-    let mut work = paths(folder.core.notes_in("work", Order::Title).unwrap());
+    let mut work = paths(folder.core.snapshot().notes_in("work", Order::Title));
     work.sort();
 
     assert_eq!(work, ["work/a.md", "work/b.md"]);
     assert_eq!(
-        paths(folder.core.notes_in("", Order::Title).unwrap()),
+        paths(folder.core.snapshot().notes_in("", Order::Title)),
         ["root.md"]
     );
     assert_eq!(
-        folder.core.notes_in("missing", Order::Title).unwrap(),
+        folder.core.snapshot().notes_in("missing", Order::Title),
         Vec::<NoteInfo>::new()
     );
-    assert!(matches!(
-        folder.core.notes_in("../x", Order::Title),
-        Err(Error::BadPath { .. })
-    ));
+    assert_eq!(
+        folder.core.snapshot().notes_in("../x", Order::Title),
+        Vec::<NoteInfo>::new()
+    );
 }
 
 #[test]
@@ -104,7 +104,7 @@ fn notes_keep_their_fields_in_the_index() {
         "---\nid: 01A\ntags: [work/holm, home]\npinned: true\n---\n# Plans\n\n- Buy *milk*\n";
     let folder = Folder::new(&[("a.md", text)]);
 
-    let listed = folder.core.notes(Order::LastChange).unwrap();
+    let listed = folder.core.snapshot().notes(Order::LastChange);
 
     assert_eq!(listed, [folder.core.read("a.md").unwrap().info]);
     assert_eq!(listed[0].tags, ["work/holm", "home"]);
@@ -122,7 +122,7 @@ fn tags_form_a_tree_and_parents_count_the_notes_of_children() {
     ]);
 
     assert_eq!(
-        folder.core.tags().unwrap(),
+        folder.core.snapshot().tags(),
         [
             tag("art", 1, vec![tag("art/paint", 1, vec![])]),
             tag("Home", 1, vec![]),
@@ -147,7 +147,7 @@ fn a_tag_lists_the_notes_of_its_child_tags_too() {
         ("d.md", "---\ntags: [Work]\n---\n"),
     ]);
 
-    let mut work = paths(folder.core.notes_with_tag("work", Order::Title).unwrap());
+    let mut work = paths(folder.core.snapshot().notes_with_tag("work", Order::Title));
     work.sort();
 
     assert_eq!(work, ["a.md", "b.md"]);
@@ -155,13 +155,13 @@ fn a_tag_lists_the_notes_of_its_child_tags_too() {
         paths(
             folder
                 .core
+                .snapshot()
                 .notes_with_tag("work/holm", Order::Title)
-                .unwrap()
         ),
         ["a.md"]
     );
     assert_eq!(
-        folder.core.notes_with_tag("wor", Order::Title).unwrap(),
+        folder.core.snapshot().notes_with_tag("wor", Order::Title),
         Vec::<NoteInfo>::new()
     );
 }
@@ -201,7 +201,7 @@ fn links_give_every_link_of_a_note_in_order() {
     let link = |target, embedded| Link { target, embedded };
     let file = |path: &str| LinkTarget::File(PathBuf::from(path));
 
-    let links = folder.core.links("work/a.md").unwrap();
+    let links = folder.core.snapshot().links("work/a.md").to_vec();
 
     let notes: Vec<(&str, Option<&str>)> = links[..2]
         .iter()
@@ -221,11 +221,11 @@ fn links_give_every_link_of_a_note_in_order() {
             link(LinkTarget::Web("https://example.com".to_owned()), false),
         ]
     );
-    assert_eq!(folder.core.links("missing.md").unwrap(), Vec::<Link>::new());
-    assert!(matches!(
-        folder.core.links("a.txt"),
-        Err(Error::BadPath { .. })
-    ));
+    assert_eq!(
+        folder.core.snapshot().links("missing.md").to_vec(),
+        Vec::<Link>::new()
+    );
+    assert_eq!(folder.core.snapshot().links("a.txt"), []);
 }
 
 #[test]
@@ -238,12 +238,12 @@ fn backlinks_come_from_id_links_and_file_links() {
         ("other.md", "[x](holm:01X) [y](target.pdf)\n"),
     ]);
 
-    let mut back = paths(folder.core.backlinks("target.md", Order::Title).unwrap());
+    let mut back = paths(folder.core.snapshot().backlinks("target.md", Order::Title));
     back.sort();
 
     assert_eq!(back, ["by-heading.md", "by-id.md", "work/by-path.md"]);
     assert_eq!(
-        folder.core.backlinks("other.md", Order::Title).unwrap(),
+        folder.core.snapshot().backlinks("other.md", Order::Title),
         Vec::<NoteInfo>::new()
     );
 }
@@ -255,15 +255,15 @@ fn save_and_create_update_the_index() {
     a.body = "# A\nPotatoes\n".to_owned();
     a.info.tags = vec!["food".to_owned()];
 
-    let saved = folder.core.save(&a).unwrap();
-    let created = folder.core.create("").unwrap();
+    let saved = folder.core.save(&a).result.unwrap();
+    let created = folder.core.create("").result.unwrap();
 
     assert_eq!(
         paths(folder.core.search("potato", Order::Title).unwrap()),
         ["a.md"]
     );
-    assert_eq!(folder.core.tags().unwrap(), [tag("food", 1, vec![])]);
-    let listed = folder.core.notes(Order::Title).unwrap();
+    assert_eq!(folder.core.snapshot().tags(), [tag("food", 1, vec![])]);
+    let listed = folder.core.snapshot().notes(Order::Title);
     assert_eq!(listed, [saved.info, created.info]);
 }
 
@@ -280,7 +280,7 @@ fn open_picks_up_changes_made_while_holm_was_closed() {
 
     folder.reopen();
 
-    let mut all = paths(folder.core.notes(Order::Title).unwrap());
+    let mut all = paths(folder.core.snapshot().notes(Order::Title));
     all.sort();
     assert_eq!(all, ["edited.md", "kept.md", "work/added.md"]);
     assert_eq!(
@@ -288,7 +288,7 @@ fn open_picks_up_changes_made_while_holm_was_closed() {
         ["edited.md"]
     );
     assert_eq!(folder.core.read("edited.md").unwrap().info.title, "After");
-    assert_eq!(folder.core.tags().unwrap(), [tag("new", 1, vec![])]);
+    assert_eq!(folder.core.snapshot().tags(), [tag("new", 1, vec![])]);
 }
 
 #[test]
@@ -301,7 +301,7 @@ fn open_sees_a_change_that_keeps_the_size_and_the_time() {
 
     folder.reopen();
 
-    let listed = folder.core.notes(Order::Title).unwrap();
+    let listed = folder.core.snapshot().notes(Order::Title);
     assert_eq!(listed[0].title, "Bbbb");
     assert_eq!(listed[0].modified, time);
 }
@@ -324,7 +324,7 @@ fn a_copied_note_gets_a_new_id_and_the_known_note_keeps_its_id() {
         note(new.as_str(), "author: me\n", "# Copy\n")
     );
     assert_eq!(a.info.modified, time, "the copy keeps its time");
-    assert_eq!(folder.core.notes(Order::Title).unwrap().len(), 2);
+    assert_eq!(folder.core.snapshot().notes(Order::Title).len(), 2);
 }
 
 #[test]
@@ -354,7 +354,7 @@ fn a_note_moved_while_holm_was_closed_keeps_its_id() {
 
     assert_eq!(folder.text("work/a.md"), note("01MOVE", "", "# A\n"));
     assert_eq!(
-        paths(folder.core.backlinks("work/a.md", Order::Title).unwrap()),
+        paths(folder.core.snapshot().backlinks("work/a.md", Order::Title)),
         ["link.md"]
     );
 }
@@ -367,10 +367,10 @@ fn saving_a_note_with_the_id_of_a_deleted_note_keeps_the_id() {
     let mut b = folder.core.read("b.md").unwrap();
     b.body = "Text\n".to_owned();
 
-    let saved = folder.core.save(&b).unwrap();
+    let saved = folder.core.save(&b).result.unwrap();
 
     assert_eq!(saved.info.id.unwrap().as_str(), "01GONE");
-    assert_eq!(paths(folder.core.notes(Order::Title).unwrap()), ["b.md"]);
+    assert_eq!(paths(folder.core.snapshot().notes(Order::Title)), ["b.md"]);
 }
 
 #[test]
@@ -381,7 +381,7 @@ fn a_broken_index_is_rebuilt() {
 
     let core = Core::open(folder.dir.path(), cache.path()).unwrap();
 
-    assert_eq!(paths(core.notes(Order::Title).unwrap()), ["a.md"]);
+    assert_eq!(paths(core.snapshot().notes(Order::Title)), ["a.md"]);
 }
 
 #[test]
@@ -397,7 +397,7 @@ fn an_index_with_another_shape_is_rebuilt() {
 
     let core = Core::open(folder.dir.path(), cache.path()).unwrap();
 
-    assert_eq!(paths(core.notes(Order::Title).unwrap()), ["a.md"]);
+    assert_eq!(paths(core.snapshot().notes(Order::Title)), ["a.md"]);
 }
 
 #[test]
@@ -419,8 +419,8 @@ fn notes_in_attachments_and_odd_names_round_trip() {
 
     let mut all: Vec<PathBuf> = folder
         .core
+        .snapshot()
         .notes(Order::Title)
-        .unwrap()
         .into_iter()
         .map(|n| n.path)
         .collect();

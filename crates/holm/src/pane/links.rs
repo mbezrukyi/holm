@@ -123,7 +123,7 @@ impl Links {
         };
         let core = self.core.clone();
         let job = cx.background_spawn(async move {
-            let backlinks = core.backlinks(&path, Order::LastChange)?;
+            let backlinks = core.snapshot().backlinks(&path, Order::LastChange);
             let broken = core.broken_links(&path)?;
             Ok::<_, holm_core::Error>((path, backlinks, broken))
         });
@@ -161,23 +161,10 @@ impl Links {
             }
             Target::Heading(_) | Target::File(_) => return,
         };
-        let core = self.core.clone();
-        let job = cx.background_spawn(async move { core.note_with_id(&id) });
-        cx.spawn(async move |links, cx| {
-            let found = job.await;
-            links
-                .update(cx, |links, cx| match found {
-                    Ok(Some(note)) => links.open_at(note.path, heading, cx),
-                    Ok(None) => cx.emit(LinksEvent::Error(text::NOTE_GONE)),
-                    Err(error) => {
-                        let error = AppError::from(error);
-                        tracing::warn!(error = %crate::chain(&error), "cannot find the note of a link");
-                        cx.emit(LinksEvent::Error(error.message()));
-                    }
-                })
-                .ok();
-        })
-        .detach();
+        match self.core.snapshot().note_with_id(&id) {
+            Some(note) => self.open_at(note.path.clone(), heading, cx),
+            None => cx.emit(LinksEvent::Error(text::NOTE_GONE)),
+        }
     }
 
     /// Opens the note at `path` at `heading`, or at the top when the note has no such heading.

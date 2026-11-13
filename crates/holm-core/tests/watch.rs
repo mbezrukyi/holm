@@ -6,7 +6,7 @@
 mod common;
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use holm_core::model::{Change, NoteId, NoteInfo, Order};
@@ -69,8 +69,8 @@ fn note(id: &str, extra: &str, body: &str) -> String {
 
 fn titles(core: &Core) -> Vec<String> {
     let mut titles: Vec<String> = core
+        .snapshot()
         .notes(Order::Title)
-        .unwrap()
         .into_iter()
         .map(|n| n.title)
         .collect();
@@ -149,7 +149,7 @@ fn a_moved_note_keeps_its_id_and_its_backlinks() {
         }
     );
     assert_eq!(changes[1..], [Change::Folders]);
-    let backlinks = fed.core.backlinks("work/a.md", Order::Title).unwrap();
+    let backlinks = fed.core.snapshot().backlinks("work/a.md", Order::Title);
     assert_eq!(backlinks[0].path, PathBuf::from("b.md"));
 }
 
@@ -178,8 +178,8 @@ fn holm_s_own_saves_and_new_notes_do_not_come_back() {
     let mut note = fed.core.read("a.md").unwrap();
     note.body = "# A\n\nMore.\n".to_owned();
     note.info.tags = vec!["work".to_owned()];
-    fed.core.save(&note).unwrap();
-    let new = fed.core.create("").unwrap();
+    fed.core.save(&note).result.unwrap();
+    let new = fed.core.create("").result.unwrap();
     fed.feed
         .changed([PathBuf::from("a.md"), new.info.path])
         .unwrap();
@@ -191,8 +191,8 @@ fn holm_s_own_saves_and_new_notes_do_not_come_back() {
 fn holm_s_own_tag_pin_and_attachment_changes_do_not_come_back() {
     let fed = Fed::new(&[("a.md", "---\ntags: [work]\n---\n# A\n")]);
 
-    fed.core.set_pinned("a.md", true).unwrap();
-    fed.core.rename_tag("work", "job").unwrap();
+    fed.core.set_pinned("a.md", true).result.unwrap();
+    fed.core.rename_tag("work", "job").result.unwrap();
     let image = fed.core.paste_image("a.md", "png", b"png").unwrap();
     fed.feed
         .changed([PathBuf::from("a.md"), PathBuf::from("attachments"), image])
@@ -218,7 +218,11 @@ fn a_new_folder_adds_its_notes_and_changes_the_folder_list() {
         ]
     );
     assert_eq!(
-        fed.core.folders().unwrap(),
+        fed.core
+            .snapshot()
+            .folders()
+            .map(Path::to_path_buf)
+            .collect::<Vec<_>>(),
         [PathBuf::from("work"), PathBuf::from("work/deep")]
     );
 }
@@ -267,7 +271,7 @@ fn a_tag_change_sends_a_tags_change() {
     fs::remove_file(fed.path("a.md")).unwrap();
     fed.feed.changed(["a.md"]).unwrap();
     assert_eq!(fed.take(), [Change::Removed("a.md".into()), Change::Tags]);
-    assert_eq!(fed.core.tags().unwrap(), []);
+    assert_eq!(fed.core.snapshot().tags(), []);
 }
 
 #[test]
@@ -397,7 +401,7 @@ mod real_events {
 
         let mut note = core.read("a.md").unwrap();
         note.body = "# A\n\nMore.\n".to_owned();
-        core.save(&note).unwrap();
+        core.save(&note).result.unwrap();
         fs::write(dir.path().join("b.md"), "# B\n").unwrap();
 
         assert_eq!(
@@ -429,31 +433,35 @@ mod real_events {
         fs::rename(cache.path().join("work"), dir.path().join("work")).unwrap();
         while next(&changes) != Change::Folders {}
         std::thread::sleep(Duration::from_millis(300));
-        let start = core.revision();
+        let start = core.snapshot().revision();
 
         core.read("work/b.md").unwrap();
-        core.notes(Order::Title).unwrap();
+        core.snapshot().notes(Order::Title);
         fs::read(dir.path().join("a.md")).unwrap();
         std::thread::sleep(Duration::from_secs(1));
 
-        assert_eq!(core.revision(), start);
+        assert_eq!(core.snapshot().revision(), start);
     }
 }
 
 #[test]
 fn the_revision_grows_with_own_writes_and_outside_changes() {
     let fed = Fed::new(&[("a.md", "# A\n")]);
-    let start = fed.core.revision();
+    let start = fed.core.snapshot().revision();
 
     fed.core.read("a.md").unwrap();
-    fed.core.notes(Order::Title).unwrap();
-    assert_eq!(fed.core.revision(), start, "reads change nothing");
+    fed.core.snapshot().notes(Order::Title);
+    assert_eq!(
+        fed.core.snapshot().revision(),
+        start,
+        "reads change nothing"
+    );
 
-    fed.core.create("").unwrap();
-    let created = fed.core.revision();
+    fed.core.create("").result.unwrap();
+    let created = fed.core.snapshot().revision();
     assert!(created > start);
 
     fed.write("a.md", "# A again\n");
     fed.feed.changed(["a.md"]).unwrap();
-    assert!(fed.core.revision() > created);
+    assert!(fed.core.snapshot().revision() > created);
 }

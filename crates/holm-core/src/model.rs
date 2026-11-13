@@ -137,8 +137,8 @@ pub enum Change {
         /// The note at its new path.
         note: NoteInfo,
     },
-    /// The list from [`Core::folders`](crate::Core::folders) may have changed.
+    /// The list from [`Snapshot::folders`](crate::Snapshot::folders) changed.
     Folders,
-    /// The tag tree from [`Core::tags`](crate::Core::tags) changed.
+    /// The tag tree from [`Snapshot::tags`](crate::Snapshot::tags) changed.
     Tags,
 }

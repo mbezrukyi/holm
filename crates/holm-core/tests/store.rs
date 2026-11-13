@@ -52,7 +52,7 @@ fn notes_lists_only_md_files_and_skips_hidden_ones() {
         ("work/.trash/e.md", ""),
     ]);
 
-    let notes = folder.core.notes(Order::LastChange).unwrap();
+    let notes = folder.core.snapshot().notes(Order::LastChange);
 
     assert_eq!(
         paths(notes.into_iter().map(|n| n.path)),
@@ -65,7 +65,7 @@ fn notes_skips_a_note_that_is_not_text() {
     let folder = Folder::new(&[("a.md", "")]);
     fs::write(folder.dir.path().join("b.md"), [0xff, 0xfe]).unwrap();
 
-    let notes = folder.core.notes(Order::LastChange).unwrap();
+    let notes = folder.core.snapshot().notes(Order::LastChange);
 
     assert_eq!(paths(notes.into_iter().map(|n| n.path)), ["a.md"]);
 }
@@ -80,7 +80,12 @@ fn folders_lists_nested_folders_without_attachments() {
         (".git/e", ""),
     ]);
 
-    let folders = folder.core.folders().unwrap();
+    let folders = folder
+        .core
+        .snapshot()
+        .folders()
+        .map(Path::to_path_buf)
+        .collect::<Vec<_>>();
 
     assert_eq!(
         paths(folders),
@@ -151,7 +156,7 @@ fn save_adds_an_id_on_the_first_write_and_keeps_it() {
     let mut note = folder.core.read("a.md").unwrap();
     note.body = "# A\n\nMore.\n".to_owned();
 
-    let saved = folder.core.save(&note).unwrap();
+    let saved = folder.core.save(&note).result.unwrap();
 
     let id = saved.info.id.clone().unwrap();
     assert_eq!(id.as_str().len(), 26, "a ULID");
@@ -162,7 +167,7 @@ fn save_adds_an_id_on_the_first_write_and_keeps_it() {
 
     let mut again = saved.clone();
     again.body = "# A\n".to_owned();
-    assert_eq!(folder.core.save(&again).unwrap().info.id, Some(id));
+    assert_eq!(folder.core.save(&again).result.unwrap().info.id, Some(id));
 }
 
 #[test]
@@ -172,7 +177,7 @@ fn save_keeps_unknown_fields_and_writes_tags_and_pin() {
     note.info.tags = vec!["work/holm".to_owned(), "my home".to_owned()];
     note.info.pinned = true;
 
-    let saved = folder.core.save(&note).unwrap();
+    let saved = folder.core.save(&note).result.unwrap();
 
     assert_eq!(
         folder.text("a.md"),
@@ -189,12 +194,12 @@ fn save_keeps_the_old_time_when_only_tags_or_the_pin_change() {
     let mut note = folder.core.read("a.md").unwrap();
     note.info.tags = vec!["work".to_owned()];
 
-    let saved = folder.core.save(&note).unwrap();
+    let saved = folder.core.save(&note).result.unwrap();
     assert_eq!(saved.info.modified, time);
 
     let mut note = saved;
     note.info.pinned = true;
-    assert_eq!(folder.core.save(&note).unwrap().info.modified, time);
+    assert_eq!(folder.core.save(&note).result.unwrap().info.modified, time);
 }
 
 #[test]
@@ -203,7 +208,7 @@ fn save_keeps_the_old_time_when_it_only_adds_the_id() {
     let time = folder.set_time("a.md", 1_000_000);
     let note = folder.core.read("a.md").unwrap();
 
-    let saved = folder.core.save(&note).unwrap();
+    let saved = folder.core.save(&note).result.unwrap();
 
     assert!(saved.info.id.is_some());
     assert_eq!(saved.info.modified, time);
@@ -216,7 +221,7 @@ fn save_gives_a_new_time_when_the_body_changes() {
     let mut note = folder.core.read("a.md").unwrap();
     note.body = "New body\n".to_owned();
 
-    let saved = folder.core.save(&note).unwrap();
+    let saved = folder.core.save(&note).result.unwrap();
 
     assert!(saved.info.modified > time);
 }
@@ -228,7 +233,7 @@ fn save_with_no_change_does_not_write() {
     let time = folder.set_time("a.md", 1_000_000);
     let note = folder.core.read("a.md").unwrap();
 
-    folder.core.save(&note).unwrap();
+    folder.core.save(&note).result.unwrap();
 
     assert_eq!(folder.text("a.md"), text, "the flow list stays");
     assert_eq!(folder.core.read("a.md").unwrap().info.modified, time);
@@ -240,7 +245,7 @@ fn save_adds_a_final_line_break_with_the_line_ending_of_the_file() {
     let mut note = folder.core.read("a.md").unwrap();
     note.body = "Body\r\nMore".to_owned();
 
-    folder.core.save(&note).unwrap();
+    folder.core.save(&note).result.unwrap();
 
     assert_eq!(
         folder.text("a.md"),
@@ -258,7 +263,7 @@ fn save_keeps_the_permissions_and_leaves_no_temp_file() {
     let mut note = folder.core.read("a.md").unwrap();
     note.body = "New\n".to_owned();
 
-    folder.core.save(&note).unwrap();
+    folder.core.save(&note).result.unwrap();
 
     let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o640);
@@ -271,7 +276,10 @@ fn save_fails_on_a_missing_note() {
     let note = folder.core.read("a.md").unwrap();
     fs::remove_file(folder.dir.path().join("a.md")).unwrap();
 
-    assert!(matches!(folder.core.save(&note), Err(Error::Read { .. })));
+    assert!(matches!(
+        folder.core.save(&note).result,
+        Err(Error::Read { .. })
+    ));
     assert_eq!(folder.files(), Vec::<String>::new());
 }
 
@@ -282,7 +290,7 @@ fn restore_writes_a_deleted_note_again_with_its_id() {
     fs::remove_file(folder.path("a.md")).unwrap();
     note.body = "# A\n\nMine.\n".to_owned();
 
-    let restored = folder.core.restore(&note).unwrap();
+    let restored = folder.core.restore(&note).result.unwrap();
 
     assert_eq!(restored.info.id, note.info.id);
     assert_eq!(restored.info.tags, ["work"]);
@@ -297,7 +305,7 @@ fn restore_saves_over_a_file_that_is_back() {
     folder.write("a.md", "---\nid: X1\n---\n# Theirs\n");
     note.body = "# Mine\n".to_owned();
 
-    folder.core.restore(&note).unwrap();
+    folder.core.restore(&note).result.unwrap();
 
     assert_eq!(folder.text("a.md"), "---\nid: X1\n---\n# Mine\n");
 }
@@ -306,9 +314,9 @@ fn restore_saves_over_a_file_that_is_back() {
 fn create_makes_untitled_notes_with_a_number_on_a_clash() {
     let folder = Folder::new(&[("Untitled 2.md", "taken\n"), ("work/x.md", "")]);
 
-    let first = folder.core.create("").unwrap();
-    let second = folder.core.create("").unwrap();
-    let nested = folder.core.create("work").unwrap();
+    let first = folder.core.create("").result.unwrap();
+    let second = folder.core.create("").result.unwrap();
+    let nested = folder.core.create("work").result.unwrap();
 
     assert_eq!(first.info.path, Path::new("Untitled.md"));
     assert_eq!(second.info.path, Path::new("Untitled 3.md"));
@@ -327,15 +335,15 @@ fn create_fails_in_a_missing_or_hidden_folder() {
     let folder = Folder::new(&[]);
 
     assert!(matches!(
-        folder.core.create("missing"),
+        folder.core.create("missing").result,
         Err(Error::Write { .. })
     ));
     assert!(matches!(
-        folder.core.create(".git"),
+        folder.core.create(".git").result,
         Err(Error::BadPath { .. })
     ));
     assert!(matches!(
-        folder.core.create("../x"),
+        folder.core.create("../x").result,
         Err(Error::BadPath { .. })
     ));
 }
@@ -347,7 +355,7 @@ fn the_handle_works_from_many_threads() {
     let handles: Vec<_> = (0..8)
         .map(|_| {
             let core = folder.core.clone();
-            std::thread::spawn(move || core.create("").unwrap().info.path)
+            std::thread::spawn(move || core.create("").result.unwrap().info.path)
         })
         .collect();
     let mut created: Vec<PathBuf> = handles.into_iter().map(|h| h.join().unwrap()).collect();
@@ -355,5 +363,5 @@ fn the_handle_works_from_many_threads() {
     created.dedup();
 
     assert_eq!(created.len(), 8);
-    assert_eq!(folder.core.notes(Order::LastChange).unwrap().len(), 8);
+    assert_eq!(folder.core.snapshot().notes(Order::LastChange).len(), 8);
 }

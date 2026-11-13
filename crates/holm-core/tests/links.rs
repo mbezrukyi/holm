@@ -19,11 +19,11 @@ fn note(id: &str, body: &str) -> String {
 fn note_with_id_finds_the_note_or_none() {
     let folder = Folder::new(&[("work/a.md", &note("01A", "# A\n")), ("b.md", "# B\n")]);
 
-    let found = folder.core.note_with_id("01A").unwrap().unwrap();
+    let found = folder.core.snapshot().note_with_id("01A").cloned().unwrap();
 
     assert_eq!(found.path, Path::new("work/a.md"));
-    assert_eq!(folder.core.note_with_id("01X").unwrap(), None);
-    assert_eq!(folder.core.note_with_id("").unwrap(), None);
+    assert_eq!(folder.core.snapshot().note_with_id("01X").cloned(), None);
+    assert_eq!(folder.core.snapshot().note_with_id("").cloned(), None);
 }
 
 #[test]

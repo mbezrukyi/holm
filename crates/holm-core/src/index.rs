@@ -3,7 +3,7 @@
 //! The index is a copy of the files. Holm deletes it and rebuilds it when its shape
 //! is old or when SQLite finds it broken.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::fs;
 use std::io;
@@ -13,11 +13,12 @@ use std::sync::{Mutex, PoisonError};
 
 use holm_markdown::{Body, Target};
 use rusqlite::types::Value;
-use rusqlite::{Connection, ErrorCode, OptionalExtension as _, params, params_from_iter};
+use rusqlite::{Connection, ErrorCode, OptionalExtension as _, params};
 
 use crate::error::{Error, Result};
-use crate::model::{Change, Link, LinkTarget, Note, NoteId, NoteInfo, Order, Tag};
+use crate::model::{Change, Link, LinkTarget, Note, NoteId, NoteInfo, Order};
 use crate::relink::resolve;
+use crate::snapshot::{Delta, sort};
 use crate::store::{ATTACHMENTS, Stamp, Store, folder_of, time};
 
 const FILE: &str = "index.sqlite";
@@ -66,21 +67,6 @@ SELECT path, id, title, pinned, modified, preview,
     (SELECT group_concat(tag, char(10) ORDER BY pos) FROM tags WHERE note = notes.key)
 FROM notes";
 
-/// Which notes a list shows.
-pub(crate) enum Filter<'a> {
-    All,
-    /// Only the notes right in this folder.
-    Folder(&'a Path),
-    /// The notes with this tag or one of its child tags.
-    Tag(&'a str),
-    /// The words the user typed.
-    Search(&'a str),
-    /// The notes that link to this note, by id or by path.
-    Backlinks(&'a Path),
-    /// The note with this id.
-    Id(&'a str),
-}
-
 /// What a [`Index::refresh`] found.
 #[derive(Debug, Default)]
 pub(crate) struct Refresh {
@@ -88,6 +74,8 @@ pub(crate) struct Refresh {
     pub(crate) notes: Vec<Change>,
     /// Whether the tag tree changed.
     pub(crate) tags: bool,
+    /// The notes that left and joined the index.
+    pub(crate) delta: Delta,
 }
 
 /// What [`Index::removal`] found.
@@ -129,81 +117,62 @@ impl Index {
         })
     }
 
-    /// The notes that `filter` picks, in `order`.
-    pub(crate) fn notes(
-        &self,
-        store: &Store,
-        filter: &Filter<'_>,
-        order: Order,
-    ) -> Result<Vec<NoteInfo>> {
-        let (filter, args): (&str, Vec<Value>) = match filter {
-            Filter::All => ("", Vec::new()),
-            Filter::Folder(folder) => ("WHERE folder = ?1", vec![bytes(folder)]),
-            Filter::Tag(tag) => (
-                "WHERE key IN (SELECT note FROM tags
-                    WHERE tag = ?1 OR substr(tag, 1, length(?2)) = ?2)",
-                vec![
-                    Value::Text((*tag).to_owned()),
-                    Value::Text(format!("{tag}/")),
-                ],
-            ),
-            Filter::Search(text) => match match_query(text) {
-                Some(query) => (
-                    "WHERE key IN (SELECT rowid FROM search WHERE search MATCH ?1)",
-                    vec![Value::Text(query)],
-                ),
-                None => return Ok(Vec::new()),
-            },
-            Filter::Backlinks(rel) => (
-                "WHERE key IN (SELECT links.note FROM links, notes AS target
-                    WHERE target.path = ?1 AND links.note != target.key
-                    AND ((links.kind = 'note' AND links.target = target.id)
-                        OR (links.kind = 'file' AND links.target = target.path)))",
-                vec![bytes(rel)],
-            ),
-            Filter::Id(id) => ("WHERE id = ?1", vec![Value::Text((*id).to_owned())]),
+    /// The notes whose title, text or tags hold every word of `text`, in `order`.
+    pub(crate) fn search(&self, store: &Store, text: &str, order: Order) -> Result<Vec<NoteInfo>> {
+        let Some(query) = match_query(text) else {
+            return Ok(Vec::new());
         };
-        let sql = format!("{NOTE_INFO} {filter}");
+        let sql =
+            format!("{NOTE_INFO} WHERE key IN (SELECT rowid FROM search WHERE search MATCH ?1)");
         let mut notes = self.run(store, |conn| {
             let mut statement = conn.prepare_cached(&sql)?;
-            let rows = statement.query_map(params_from_iter(&args), note_info)?;
+            let rows = statement.query_map([&query], note_info)?;
             Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
         })?;
         sort(&mut notes, order);
         Ok(notes)
     }
 
-    /// Every tag as a tree, sorted by name.
-    pub(crate) fn tags(&self, store: &Store) -> Result<Vec<Tag>> {
-        let pairs = self.run(store, |conn| {
-            let mut statement = conn.prepare_cached("SELECT tag, note FROM tags")?;
-            let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
-            Ok(rows.collect::<rusqlite::Result<Vec<(String, i64)>>>()?)
-        })?;
-        Ok(tag_tree(&pairs))
-    }
-
-    /// The links of one note, in the order of the text.
-    pub(crate) fn links(&self, store: &Store, rel: &Path) -> Result<Vec<Link>> {
+    /// Every note with its links, in no order.
+    pub(crate) fn entries(&self, store: &Store) -> Result<Vec<(NoteInfo, Vec<Link>)>> {
         self.run(store, |conn| {
+            let mut statement = conn.prepare_cached(&format!("{NOTE_INFO} ORDER BY key"))?;
+            let notes = statement
+                .query_map([], note_info)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
             let mut statement = conn.prepare_cached(
-                "SELECT kind, target, heading, embedded FROM links
-                JOIN notes ON notes.key = links.note WHERE notes.path = ?1 ORDER BY pos",
+                "SELECT kind, target, heading, embedded, notes.path FROM links
+                JOIN notes ON notes.key = links.note ORDER BY links.note, pos",
             )?;
-            let rows = statement.query_map([bytes(rel)], link)?;
-            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+            let mut links: HashMap<PathBuf, Vec<Link>> = HashMap::new();
+            for row in statement.query_map([], |row| Ok((path(row.get(4)?), link(row)?)))? {
+                let (note, link) = row?;
+                links.entry(note).or_default().push(link);
+            }
+            Ok(notes
+                .into_iter()
+                .map(|info| {
+                    let links = links.remove(&info.path).unwrap_or_default();
+                    (info, links)
+                })
+                .collect())
         })
     }
 
     /// Puts a note that Holm just read or wrote into the index, and returns it.
     ///
     /// When another note file has the same id, this note gets a new id.
-    pub(crate) fn update(&self, store: &Store, note: &Note, stamp: Stamp) -> Result<Note> {
+    pub(crate) fn update(&self, store: &Store, note: &Note, stamp: Stamp) -> Result<(Note, Delta)> {
         self.run(store, |conn| {
             let tx = conn.transaction()?;
-            let note = put(&tx, store, note.clone(), stamp, &mut Vec::new())?;
+            let mut gone = Vec::new();
+            let (note, links) = put(&tx, store, note.clone(), stamp, &mut gone)?;
             tx.commit()?;
-            Ok(note)
+            let delta = Delta {
+                removed: gone.into_iter().map(|gone| gone.path).collect(),
+                put: vec![(note.info.clone(), links)],
+            };
+            Ok((note, delta))
         })
     }
 
@@ -367,11 +336,13 @@ fn sync(conn: &mut Connection, store: &Store, scopes: &[PathBuf]) -> Result<Refr
         .collect();
     todo.sort_unstable();
     let mut written = Vec::new();
+    let mut put_in = Vec::new();
     for (new, rel) in todo {
         let old_tags = if new { None } else { Some(tags_of(&tx, rel)?) };
         match store.read(rel) {
             Ok((note, stamp)) => {
-                let note = put(&tx, store, note, stamp, &mut gone)?;
+                let (note, links) = put(&tx, store, note, stamp, &mut gone)?;
+                put_in.push((note.info.clone(), links));
                 written.push((note.info, old_tags));
             }
             Err(error) => {
@@ -381,7 +352,14 @@ fn sync(conn: &mut Connection, store: &Store, scopes: &[PathBuf]) -> Result<Refr
         }
     }
     tx.commit()?;
-    Ok(refresh(written, gone))
+    let delta = Delta {
+        removed: gone.iter().map(|gone| gone.path.clone()).collect(),
+        put: put_in,
+    };
+    Ok(Refresh {
+        delta,
+        ..refresh(written, gone)
+    })
 }
 
 /// The stamps of the known notes at or below `scope`.
@@ -469,6 +447,7 @@ fn change_path(change: &Change) -> Option<&Path> {
 }
 
 /// Writes one note into the index, after a check that no other file has its id.
+/// It returns the note and its links.
 ///
 /// When the other file is gone, its note leaves the index and goes into `gone`.
 fn put(
@@ -477,7 +456,7 @@ fn put(
     mut note: Note,
     mut stamp: Stamp,
     gone: &mut Vec<Gone>,
-) -> Result<Note, Fail> {
+) -> Result<(Note, Vec<Link>), Fail> {
     if let Some(id) = &note.info.id
         && let Some(owner) = owner(conn, id)?
         && owner != note.info.path
@@ -496,8 +475,30 @@ fn put(
             gone.extend(delete(conn, &owner)?);
         }
     }
-    write(conn, store.root(), &note, stamp)?;
-    Ok(note)
+    let links = links_of(store.root(), &note);
+    write(conn, &note, &links, stamp)?;
+    Ok((note, links))
+}
+
+/// The links of the note, with file paths from the notes folder.
+fn links_of(root: &Path, note: &Note) -> Vec<Link> {
+    let folder = folder_of(&note.info.path);
+    Body::parse(&note.body)
+        .links()
+        .iter()
+        .map(|link| Link {
+            target: match &link.target {
+                Target::Note { id, heading } => LinkTarget::Note {
+                    id: NoteId::from_field(id.clone()),
+                    heading: heading.clone(),
+                },
+                Target::Heading(heading) => LinkTarget::Heading(heading.clone()),
+                Target::File(file) => LinkTarget::File(resolve(root, folder, file)),
+                Target::Web(address) => LinkTarget::Web(address.clone()),
+            },
+            embedded: link.embedded,
+        })
+        .collect()
 }
 
 fn tags_of(conn: &Connection, rel: &Path) -> Result<Vec<String>, Fail> {
@@ -516,7 +517,7 @@ fn owner(conn: &Connection, id: &NoteId) -> Result<Option<PathBuf>, Fail> {
     Ok(owner.map(path))
 }
 
-fn write(conn: &Connection, root: &Path, note: &Note, stamp: Stamp) -> Result<(), Fail> {
+fn write(conn: &Connection, note: &Note, links: &[Link], stamp: Stamp) -> Result<(), Fail> {
     let info = &note.info;
     let folder = folder_of(&info.path);
     let key: i64 = conn
@@ -558,12 +559,16 @@ fn write(conn: &Connection, root: &Path, note: &Note, stamp: Stamp) -> Result<()
         "INSERT INTO links (note, pos, kind, target, heading, embedded)
         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
     )?;
-    for (pos, link) in (0_i64..).zip(Body::parse(&note.body).links()) {
+    for (pos, link) in (0_i64..).zip(links) {
         let (kind, target, heading) = match &link.target {
-            Target::Note { id, heading } => ("note", Value::Text(id.clone()), heading.as_deref()),
-            Target::Heading(heading) => ("heading", Value::Text(heading.clone()), None),
-            Target::File(file) => ("file", bytes(&resolve(root, folder, file)), None),
-            Target::Web(address) => ("web", Value::Text(address.clone()), None),
+            LinkTarget::Note { id, heading } => (
+                "note",
+                Value::Text(id.as_str().to_owned()),
+                heading.as_deref(),
+            ),
+            LinkTarget::Heading(heading) => ("heading", Value::Text(heading.clone()), None),
+            LinkTarget::File(file) => ("file", bytes(file), None),
+            LinkTarget::Web(address) => ("web", Value::Text(address.clone()), None),
         };
         add_link.execute(params![key, pos, kind, target, heading, link.embedded])?;
     }
@@ -601,59 +606,6 @@ fn match_query(text: &str) -> Option<String> {
         .map(|word| format!("\"{}\"*", word.replace('"', "\"\"")))
         .collect();
     (!words.is_empty()).then(|| words.join(" "))
-}
-
-/// Pinned notes first, then `order`. The path breaks ties, so the order never changes at random.
-fn sort(notes: &mut [NoteInfo], order: Order) {
-    match order {
-        Order::LastChange => notes.sort_by(|a, b| {
-            (b.pinned, b.modified)
-                .cmp(&(a.pinned, a.modified))
-                .then_with(|| a.path.cmp(&b.path))
-        }),
-        Order::Title => {
-            notes.sort_by_cached_key(|note| {
-                (!note.pinned, note.title.to_lowercase(), note.path.clone())
-            });
-        }
-    }
-}
-
-/// Builds the tag tree from `(tag, note)` pairs. A parent tag counts the notes of its children.
-fn tag_tree(pairs: &[(String, i64)]) -> Vec<Tag> {
-    let mut notes: BTreeMap<&str, HashSet<i64>> = BTreeMap::new();
-    for (tag, note) in pairs {
-        let ends = tag.match_indices('/').map(|(i, _)| i).chain([tag.len()]);
-        for end in ends {
-            notes.entry(&tag[..end]).or_default().insert(*note);
-        }
-    }
-    let mut children: HashMap<Option<&str>, Vec<&str>> = HashMap::new();
-    for name in notes.keys() {
-        let parent = name.rsplit_once('/').map(|(parent, _)| parent);
-        children.entry(parent).or_default().push(name);
-    }
-    tag_children(None, &notes, &children)
-}
-
-/// The tags under `parent`, with their children.
-fn tag_children(
-    parent: Option<&str>,
-    notes: &BTreeMap<&str, HashSet<i64>>,
-    children: &HashMap<Option<&str>, Vec<&str>>,
-) -> Vec<Tag> {
-    let mut tags: Vec<Tag> = children
-        .get(&parent)
-        .into_iter()
-        .flatten()
-        .map(|name| Tag {
-            name: (*name).to_owned(),
-            notes: notes.get(name).map_or(0, HashSet::len),
-            children: tag_children(Some(name), notes, children),
-        })
-        .collect();
-    tags.sort_by_cached_key(|tag| (tag.name.to_lowercase(), tag.name.clone()));
-    tags
 }
 
 fn note_info(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteInfo> {

@@ -149,20 +149,13 @@ impl TagRow {
         self.cursor = cursor.filter(|at| *at < self.tags.len());
         self.input.update(cx, |input, cx| input.focus(window, cx));
         let core = self.core.clone();
-        let job = cx.background_spawn(async move { core.tags() });
+        let job = cx.background_spawn(async move { core.snapshot().tags() });
         self.loading = Some(cx.spawn(async move |row, cx| {
-            let result = job.await;
+            let tags = job.await;
             row.update(cx, |row, cx| {
                 row.loading = None;
-                match result {
-                    Ok(tags) => {
-                        row.known.clear();
-                        flatten(&tags, &mut row.known);
-                    }
-                    Err(error) => {
-                        tracing::warn!(error = %crate::chain(&error), "cannot read the tags");
-                    }
-                }
+                row.known.clear();
+                flatten(&tags, &mut row.known);
                 cx.notify();
             })
             .ok();
