@@ -1370,6 +1370,52 @@ fn quick_open_shows_the_folder_of_each_note(cx: &mut TestAppContext) {
     );
 }
 
+/// Clicks near the bottom left of the editor, where no popup panel lies.
+fn click_below(cx: &mut TestAppContext, handle: AnyWindowHandle) {
+    let bottom = screen(cx, handle, |window| {
+        window.find("editor").bounds().size.height
+    });
+    cx.update_window(handle, |_, window, cx| {
+        window.click_at(
+            "editor",
+            gpui_kit::point(gpui_kit::px(20.), bottom - gpui_kit::px(20.)),
+            cx,
+        );
+    })
+    .unwrap();
+    settle(cx);
+}
+
+#[gpui_kit::test]
+fn a_click_outside_a_popup_never_reaches_the_parts_under_it(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    three_notes(&fixture.notes());
+    let handle = open(cx, fixture.startup(None));
+
+    // Quick open and the link picker close, as Esc does.
+    keys(cx, handle, "ctrl-shift-l ctrl-shift-o");
+    click_below(cx, handle);
+    assert_eq!(question(cx, handle), None);
+    assert_eq!(focus(cx, handle), "sidebar");
+    keys(cx, handle, "ctrl-shift-o");
+    assert_eq!(question(cx, handle).as_deref(), Some(text::QUICK_OPEN));
+
+    keys(cx, handle, "escape ctrl-shift-l ctrl-k");
+    assert_eq!(question(cx, handle).as_deref(), Some(text::LINK_TO_NOTE));
+    click_below(cx, handle);
+    assert_eq!(question(cx, handle), None);
+    assert_eq!(focus(cx, handle), "editor");
+    assert_eq!(editor_text(cx, handle), "# Plan\nbuy milk\n");
+
+    // A dialog stays open and keeps the focus.
+    keys(cx, handle, "ctrl-shift-l delete");
+    let delete = question(cx, handle);
+    assert!(delete.is_some());
+    click_below(cx, handle);
+    assert_eq!(question(cx, handle), delete);
+    assert_eq!(focus(cx, handle), "other");
+}
+
 /// The id in the frontmatter of a note file.
 fn id_of(path: &Path) -> String {
     holm_markdown::Note::parse(&read(path))

@@ -236,6 +236,10 @@ impl Render for LinkPicker {
             .capture_action(cx.listener(|this, _: &IndentInline, window, cx| {
                 this.fill_title(window, cx);
             }))
-            .child(popup::panel(px(480.), cx).child(command))
+            .child(
+                popup::panel(px(480.), cx)
+                    .on_mouse_down_out(cx.listener(|_, _, _, cx| cx.emit(LinkPickerEvent::Close)))
+                    .child(command),
+            )
     }
 }

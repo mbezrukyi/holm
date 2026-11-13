@@ -105,7 +105,11 @@ impl Render for QuickOpen {
                 cx.emit(QuickOpenEvent::Close);
                 cx.stop_propagation();
             }))
-            .child(popup::panel(px(480.), cx).child(command))
+            .child(
+                popup::panel(px(480.), cx)
+                    .on_mouse_down_out(cx.listener(|_, _, _, cx| cx.emit(QuickOpenEvent::Close)))
+                    .child(command),
+            )
     }
 }
 

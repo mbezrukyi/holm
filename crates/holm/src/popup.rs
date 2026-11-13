@@ -15,9 +15,11 @@ use gpui_kit::{
 };
 use holm_core::model::NoteInfo;
 
-/// A layer over the whole window that centers its child.
+/// A layer over the whole window that centers its child. The parts under it get no mouse
+/// input.
 pub(crate) fn layer(cx: &App) -> Div {
     div()
+        .occlude()
         .absolute()
         .inset_0()
         .flex()
