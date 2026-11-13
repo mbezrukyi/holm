@@ -153,10 +153,8 @@ fn read_fails_on_a_missing_note_and_on_bytes_that_are_not_text() {
 #[test]
 fn save_adds_an_id_on_the_first_write_and_keeps_it() {
     let folder = Folder::new(&[("a.md", "# A\n")]);
-    let mut note = folder.core.read("a.md").unwrap();
-    note.body = "# A\n\nMore.\n".to_owned();
 
-    let saved = folder.core.save(&note).result.unwrap();
+    let saved = folder.core.save("a.md", "# A\n\nMore.\n").result.unwrap();
 
     let id = saved.info.id.clone().unwrap();
     assert_eq!(id.as_str().len(), 26, "a ULID");
@@ -164,51 +162,40 @@ fn save_adds_an_id_on_the_first_write_and_keeps_it() {
         folder.text("a.md"),
         format!("---\nid: {id}\n---\n# A\n\nMore.\n")
     );
-
-    let mut again = saved.clone();
-    again.body = "# A\n".to_owned();
-    assert_eq!(folder.core.save(&again).result.unwrap().info.id, Some(id));
+    assert_eq!(
+        folder.core.save("a.md", "# A\n").result.unwrap().info.id,
+        Some(id)
+    );
 }
 
 #[test]
-fn save_keeps_unknown_fields_and_writes_tags_and_pin() {
-    let folder = Folder::new(&[("a.md", "---\nauthor: me\nid: X1\n# a comment\n---\nBody\n")]);
-    let mut note = folder.core.read("a.md").unwrap();
-    note.info.tags = vec!["work/holm".to_owned(), "my home".to_owned()];
-    note.info.pinned = true;
+fn save_writes_the_body_and_keeps_the_frontmatter_of_the_file() {
+    let folder = Folder::new(&[(
+        "a.md",
+        "---\nauthor: me\nid: X1\ntags: [work]\n# a comment\n---\nBody\n",
+    )]);
+    folder.core.read("a.md").unwrap();
+    folder.write(
+        "a.md",
+        "---\nauthor: me\nid: X1\ntags: [work, home]\npinned: true\n# a comment\n---\nBody\n",
+    );
 
-    let saved = folder.core.save(&note).result.unwrap();
+    let saved = folder.core.save("a.md", "New body\n").result.unwrap();
 
     assert_eq!(
         folder.text("a.md"),
-        "---\nauthor: me\nid: X1\ntags:\n  - work/holm\n  - my-home\npinned: true\n# a comment\n---\nBody\n"
+        "---\nauthor: me\nid: X1\ntags: [work, home]\npinned: true\n# a comment\n---\nNew body\n"
     );
-    assert_eq!(saved.info.tags, ["work/holm", "my-home"]);
+    assert_eq!(saved.info.tags, ["work", "home"]);
     assert!(saved.info.pinned);
-}
-
-#[test]
-fn save_keeps_the_old_time_when_only_tags_or_the_pin_change() {
-    let folder = Folder::new(&[("a.md", "---\nid: X1\n---\nBody\n")]);
-    let time = folder.set_time("a.md", 1_000_000);
-    let mut note = folder.core.read("a.md").unwrap();
-    note.info.tags = vec!["work".to_owned()];
-
-    let saved = folder.core.save(&note).result.unwrap();
-    assert_eq!(saved.info.modified, time);
-
-    let mut note = saved;
-    note.info.pinned = true;
-    assert_eq!(folder.core.save(&note).result.unwrap().info.modified, time);
 }
 
 #[test]
 fn save_keeps_the_old_time_when_it_only_adds_the_id() {
     let folder = Folder::new(&[("a.md", "Body\n")]);
     let time = folder.set_time("a.md", 1_000_000);
-    let note = folder.core.read("a.md").unwrap();
 
-    let saved = folder.core.save(&note).result.unwrap();
+    let saved = folder.core.save("a.md", "Body\n").result.unwrap();
 
     assert!(saved.info.id.is_some());
     assert_eq!(saved.info.modified, time);
@@ -218,10 +205,8 @@ fn save_keeps_the_old_time_when_it_only_adds_the_id() {
 fn save_gives_a_new_time_when_the_body_changes() {
     let folder = Folder::new(&[("a.md", "---\nid: X1\n---\nBody\n")]);
     let time = folder.set_time("a.md", 1_000_000);
-    let mut note = folder.core.read("a.md").unwrap();
-    note.body = "New body\n".to_owned();
 
-    let saved = folder.core.save(&note).result.unwrap();
+    let saved = folder.core.save("a.md", "New body\n").result.unwrap();
 
     assert!(saved.info.modified > time);
 }
@@ -231,9 +216,8 @@ fn save_with_no_change_does_not_write() {
     let text = "---\nid: X1\ntags: [a, b]\n---\nBody\n";
     let folder = Folder::new(&[("a.md", text)]);
     let time = folder.set_time("a.md", 1_000_000);
-    let note = folder.core.read("a.md").unwrap();
 
-    folder.core.save(&note).result.unwrap();
+    folder.core.save("a.md", "Body\n").result.unwrap();
 
     assert_eq!(folder.text("a.md"), text, "the flow list stays");
     assert_eq!(folder.core.read("a.md").unwrap().info.modified, time);
@@ -242,10 +226,8 @@ fn save_with_no_change_does_not_write() {
 #[test]
 fn save_adds_a_final_line_break_with_the_line_ending_of_the_file() {
     let folder = Folder::new(&[("a.md", "---\r\nid: X1\r\n---\r\nBody\r\n")]);
-    let mut note = folder.core.read("a.md").unwrap();
-    note.body = "Body\r\nMore".to_owned();
 
-    folder.core.save(&note).result.unwrap();
+    folder.core.save("a.md", "Body\r\nMore").result.unwrap();
 
     assert_eq!(
         folder.text("a.md"),
@@ -260,10 +242,8 @@ fn save_keeps_the_permissions_and_leaves_no_temp_file() {
     let folder = Folder::new(&[("a.md", "Body\n")]);
     let path = folder.dir.path().join("a.md");
     fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
-    let mut note = folder.core.read("a.md").unwrap();
-    note.body = "New\n".to_owned();
 
-    folder.core.save(&note).result.unwrap();
+    folder.core.save("a.md", "New\n").result.unwrap();
 
     let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o640);
@@ -273,19 +253,21 @@ fn save_keeps_the_permissions_and_leaves_no_temp_file() {
 #[test]
 fn save_fails_on_a_missing_note() {
     let folder = Folder::new(&[("a.md", "Body\n")]);
-    let note = folder.core.read("a.md").unwrap();
     fs::remove_file(folder.dir.path().join("a.md")).unwrap();
 
     assert!(matches!(
-        folder.core.save(&note).result,
+        folder.core.save("a.md", "New\n").result,
         Err(Error::Read { .. })
     ));
     assert_eq!(folder.files(), Vec::<String>::new());
 }
 
 #[test]
-fn restore_writes_a_deleted_note_again_with_its_id() {
-    let folder = Folder::new(&[("a.md", "---\nid: X1\ntags: [work]\n---\n# A\n")]);
+fn restore_writes_a_deleted_note_again_with_its_id_tags_and_pin() {
+    let folder = Folder::new(&[(
+        "a.md",
+        "---\nid: X1\ntags: [work]\npinned: true\n---\n# A\n",
+    )]);
     let mut note = folder.core.read("a.md").unwrap();
     fs::remove_file(folder.path("a.md")).unwrap();
     note.body = "# A\n\nMine.\n".to_owned();
@@ -294,20 +276,24 @@ fn restore_writes_a_deleted_note_again_with_its_id() {
 
     assert_eq!(restored.info.id, note.info.id);
     assert_eq!(restored.info.tags, ["work"]);
+    assert!(restored.info.pinned);
     assert_eq!(restored.body, "# A\n\nMine.\n");
     assert_eq!(folder.files(), ["a.md"]);
 }
 
 #[test]
-fn restore_saves_over_a_file_that_is_back() {
-    let folder = Folder::new(&[("a.md", "---\nid: X1\n---\n# A\n")]);
+fn restore_saves_the_body_over_a_file_that_is_back() {
+    let folder = Folder::new(&[("a.md", "---\nid: X1\ntags: [mine]\n---\n# A\n")]);
     let mut note = folder.core.read("a.md").unwrap();
-    folder.write("a.md", "---\nid: X1\n---\n# Theirs\n");
+    folder.write("a.md", "---\nid: X1\ntags: [theirs]\n---\n# Theirs\n");
     note.body = "# Mine\n".to_owned();
 
     folder.core.restore(&note).result.unwrap();
 
-    assert_eq!(folder.text("a.md"), "---\nid: X1\n---\n# Mine\n");
+    assert_eq!(
+        folder.text("a.md"),
+        "---\nid: X1\ntags: [theirs]\n---\n# Mine\n"
+    );
 }
 
 #[test]

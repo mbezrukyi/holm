@@ -15,7 +15,7 @@ pub(crate) enum TagEdit<'a> {
 impl<'a> TagEdit<'a> {
     /// A rename of `from` to `to`. It cleans `to` like a typed tag.
     pub(crate) fn rename(from: &'a str, to: &str) -> Result<Self> {
-        let to = normalize_tag(to).ok_or_else(|| bad_tag(to))?;
+        let to = clean(to)?;
         Ok(Self::Rename {
             from: check(from)?,
             to,
@@ -67,7 +67,13 @@ fn child_part<'t>(tag: &'t str, parent: &str) -> Option<&'t str> {
 }
 
 /// Checks that `tag` is a tag name as Holm writes it.
-fn check(tag: &str) -> Result<&str> {
+/// The tag cleaned like a typed tag. It fails when nothing is left.
+pub(crate) fn clean(tag: &str) -> Result<String> {
+    normalize_tag(tag).ok_or_else(|| bad_tag(tag))
+}
+
+/// The tag when it is written as Holm writes tags.
+pub(crate) fn check(tag: &str) -> Result<&str> {
     if normalize_tag(tag).as_deref() == Some(tag) {
         Ok(tag)
     } else {

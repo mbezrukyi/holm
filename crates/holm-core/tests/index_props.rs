@@ -165,11 +165,19 @@ fn apply(folder: &mut Folder, edit: &Edit, copies: &mut usize) {
             pinned,
         } => {
             if let Some(path) = pick(folder, *note) {
-                let mut note = folder.core.read(&path).unwrap();
-                note.body = body(folder, words, *link);
-                note.info.tags = tags(picks);
-                note.info.pinned = *pinned;
-                folder.core.save(&note).result.unwrap();
+                let body = body(folder, words, *link);
+                folder.core.save(&path, &body).result.unwrap();
+                for tag in tags(picks) {
+                    let tag = holm_markdown::normalize_tag(&tag).unwrap();
+                    let has = folder.core.read(&path).unwrap().info.tags.contains(&tag);
+                    let info = if has {
+                        folder.core.remove_tag(&path, &tag)
+                    } else {
+                        folder.core.add_tag(&path, &tag)
+                    };
+                    info.result.unwrap();
+                }
+                folder.core.set_pinned(&path, *pinned).result.unwrap();
             }
         }
         Edit::Outside {

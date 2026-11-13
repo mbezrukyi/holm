@@ -111,27 +111,27 @@ fn save(bencher: divan::Bencher<'_, '_>) {
     let notes = notes_folder();
     let index = tempfile::tempdir().unwrap();
     let core = open(notes.path(), index.path());
-    let mut note = core.read("folder 1/Note 1.md").unwrap();
+    let mut body = core.read("folder 1/Note 1.md").unwrap().body;
     bencher.bench_local(|| {
-        note.body.push_str("word ");
-        note = core.save(&note).result.unwrap();
+        body.push_str("word ");
+        core.save("folder 1/Note 1.md", &body).result.unwrap()
     });
 }
 
 /// A tag change from the tag row: the frontmatter and the index row. The body stays.
 #[divan::bench(sample_count = 50)]
-fn set_tags(bencher: divan::Bencher<'_, '_>) {
+fn add_or_remove_tag(bencher: divan::Bencher<'_, '_>) {
     let notes = notes_folder();
     let index = tempfile::tempdir().unwrap();
     let core = open(notes.path(), index.path());
     let mut flip = false;
     bencher.bench_local(|| {
         flip = !flip;
-        let tags: &[&str] = if flip {
-            &["new"]
+        let path = "folder 1/Note 1.md";
+        if flip {
+            core.add_tag(path, "new").result.unwrap()
         } else {
-            &["tag1", "area/tag0"]
-        };
-        core.set_tags("folder 1/Note 1.md", tags).result.unwrap()
+            core.remove_tag(path, "new").result.unwrap()
+        }
     });
 }

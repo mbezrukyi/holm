@@ -64,9 +64,9 @@ fn note_writes_show_in_the_snapshot_after_them() {
         ["work/Untitled.md"]
     );
 
-    let mut text = note.clone();
-    text.body = "# Ideas\n[plans](holm:P)\n".to_owned();
-    let (_, snapshot) = one_step(core, |core| core.save(&text));
+    let (_, snapshot) = one_step(core, |core| {
+        core.save(&note.info.path, "# Ideas\n[plans](holm:P)\n")
+    });
     assert_eq!(titles(&snapshot), ["Ideas", "Plans"]);
     assert_eq!(
         paths(snapshot.backlinks("Plans.md", Order::Title)),
@@ -90,7 +90,7 @@ fn note_writes_show_in_the_snapshot_after_them() {
         ["Ideas.md"]
     );
 
-    let (_, snapshot) = one_step(core, |core| core.set_tags("Ideas.md", &["work/holm"]));
+    let (_, snapshot) = one_step(core, |core| core.add_tag("Ideas.md", "work/holm"));
     assert_eq!(tag_names(&snapshot), ["work"]);
     assert_eq!(
         paths(snapshot.notes_with_tag("work", Order::Title)),
@@ -186,10 +186,13 @@ fn a_save_with_the_same_text_keeps_the_revision() {
     let folder = Folder::new(&[("A.md", "---\nid: A\ntags: [x]\n---\n# A\n")]);
     let note = folder.core.read("A.md").unwrap();
 
-    let written = no_step(&folder.core, |core| core.save(&note));
+    let written = no_step(&folder.core, |core| core.save("A.md", &note.body));
 
     assert_eq!(written.result.unwrap(), note);
-    no_step(&folder.core, |core| core.set_tags("A.md", &["x"]))
+    no_step(&folder.core, |core| core.add_tag("A.md", "x"))
+        .result
+        .unwrap();
+    no_step(&folder.core, |core| core.remove_tag("A.md", "y"))
         .result
         .unwrap();
     no_step(&folder.core, |core| core.rename_to_title("A.md"))
@@ -201,7 +204,7 @@ fn a_save_with_the_same_text_keeps_the_revision() {
 fn a_failed_write_keeps_the_revision() {
     let folder = Folder::new(&[("a.md", "# A\n")]);
 
-    let written = no_step(&folder.core, |core| core.set_tags("missing.md", &["x"]));
+    let written = no_step(&folder.core, |core| core.add_tag("missing.md", "x"));
     assert!(written.result.is_err());
     let written = no_step(&folder.core, |core| core.create_folder("missing", "x"));
     assert!(written.result.is_err());

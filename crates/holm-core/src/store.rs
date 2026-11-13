@@ -169,27 +169,20 @@ impl Store {
         self.read(rel)
     }
 
-    /// Writes the body, tags and pin of `note` over its file.
+    /// Writes `body` over the body of the note at `rel`. The frontmatter stays.
     ///
     /// It adds an id when the file has none. When the body stays the same,
     /// the file keeps its old modification time.
-    pub(crate) fn save(&self, note: &Note) -> Result<(Note, Stamp)> {
-        let rel = &note.info.path;
+    pub(crate) fn save(&self, rel: &Path, body: &str) -> Result<(Note, Stamp)> {
         let path = self.note_path(rel)?;
         let (old, stamp) = read_text(&path)?;
         let mut text = Text::parse(&old);
-        let mut body = note.body.clone();
+        let mut body = body.to_owned();
         if !body.is_empty() && !body.ends_with('\n') {
             body.push_str(text.line_ending().as_str());
         }
         let body_changed = text.body() != body;
         text.set_body(&body);
-        if text.tags() != note.info.tags {
-            text.set_tags(&note.info.tags);
-        }
-        if text.pinned() != note.info.pinned {
-            text.set_pinned(note.info.pinned);
-        }
         if text.id().is_none() {
             text.set_id(Some(NoteId::generate().as_str()));
         }
@@ -202,14 +195,17 @@ impl Store {
         self.read(rel)
     }
 
-    /// Writes `note` again at its path after another tool deleted the file. It keeps the id.
-    /// When a file is at the path again, it saves over it like [`Self::save`].
+    /// Writes `note` again at its path after another tool deleted the file.
+    /// It keeps the id, the tags and the pin. When a file is at the path again,
+    /// it saves the body over it like [`Self::save`].
     pub(crate) fn restore(&self, note: &Note) -> Result<(Note, Stamp)> {
         let path = self.note_path(&note.info.path)?;
         let dir = path.parent().unwrap_or(&self.root);
         let mut text = Text::parse("");
         let id = note.info.id.clone().unwrap_or_else(NoteId::generate);
         text.set_id(Some(id.as_str()));
+        text.set_tags(&note.info.tags);
+        text.set_pinned(note.info.pinned);
         let file = temp_file(dir, text.to_string().as_bytes(), None, None)
             .map_err(|source| write_error(&path, source))?;
         match file.persist_noclobber(&path) {
@@ -217,7 +213,7 @@ impl Store {
             Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => {}
             Err(e) => return Err(write_error(&path, e.error)),
         }
-        self.save(note)
+        self.save(&note.info.path, &note.body)
     }
 
     /// Creates an empty note with a new id as `Untitled.md` in `folder`.

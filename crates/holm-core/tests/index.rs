@@ -251,11 +251,9 @@ fn backlinks_come_from_id_links_and_file_links() {
 #[test]
 fn save_and_create_update_the_index() {
     let folder = Folder::new(&[("a.md", "# A\n")]);
-    let mut a = folder.core.read("a.md").unwrap();
-    a.body = "# A\nPotatoes\n".to_owned();
-    a.info.tags = vec!["food".to_owned()];
+    folder.core.add_tag("a.md", "food").result.unwrap();
 
-    let saved = folder.core.save(&a).result.unwrap();
+    let saved = folder.core.save("a.md", "# A\nPotatoes\n").result.unwrap();
     let created = folder.core.create("").result.unwrap();
 
     assert_eq!(
@@ -364,10 +362,7 @@ fn saving_a_note_with_the_id_of_a_deleted_note_keeps_the_id() {
     let folder = Folder::new(&[("a.md", &note("01GONE", "", ""))]);
     fs::remove_file(folder.path("a.md")).unwrap();
     folder.write("b.md", &note("01GONE", "", ""));
-    let mut b = folder.core.read("b.md").unwrap();
-    b.body = "Text\n".to_owned();
-
-    let saved = folder.core.save(&b).result.unwrap();
+    let saved = folder.core.save("b.md", "Text\n").result.unwrap();
 
     assert_eq!(saved.info.id.unwrap().as_str(), "01GONE");
     assert_eq!(paths(folder.core.snapshot().notes(Order::Title)), ["b.md"]);

@@ -41,7 +41,7 @@ use crate::bar::{self, Bar};
 use crate::error::AppError;
 use crate::link_picker::{LinkChoice, LinkStart};
 use crate::notes_folder::{FolderEvent, NoteText, NotesFolder};
-use crate::tags::{TagRow, TagsChanged};
+use crate::tags::{TagChange, TagRow};
 use crate::{text, theme};
 use links::{Links, LinksEvent};
 
@@ -130,8 +130,8 @@ impl NotePane {
             cx.subscribe_in(&editor, window, |pane, _, _: &UpFromStart, window, cx| {
                 pane.focus_tags(window, cx);
             }),
-            cx.subscribe(&tag_row, |pane, _, TagsChanged(tags), cx| {
-                pane.set_tags(tags, cx);
+            cx.subscribe(&tag_row, |pane, _, change: &TagChange, cx| {
+                pane.change_tag(change.clone(), cx);
             }),
             cx.subscribe(&links, Self::links_event),
             cx.subscribe_in(
@@ -380,14 +380,13 @@ impl NotePane {
         }
     }
 
-    fn set_tags(&mut self, tags: &[String], cx: &mut Context<Self>) {
+    fn change_tag(&mut self, change: TagChange, cx: &mut Context<Self>) {
         let Some(path) = self.path.clone() else {
             return;
         };
-        let tags = tags.to_vec();
-        let write = self
-            .notes_folder
-            .update(cx, |notes_folder, cx| notes_folder.set_tags(path, tags, cx));
+        let write = self.notes_folder.update(cx, |notes_folder, cx| {
+            notes_folder.change_tag(path, change, cx)
+        });
         self.write_fields(write, cx);
     }
 

@@ -175,10 +175,8 @@ fn a_move_with_the_new_path_first_is_one_change() {
 fn holm_s_own_saves_and_new_notes_do_not_come_back() {
     let fed = Fed::new(&[("a.md", "# A\n")]);
 
-    let mut note = fed.core.read("a.md").unwrap();
-    note.body = "# A\n\nMore.\n".to_owned();
-    note.info.tags = vec!["work".to_owned()];
-    fed.core.save(&note).result.unwrap();
+    fed.core.save("a.md", "# A\n\nMore.\n").result.unwrap();
+    fed.core.add_tag("a.md", "work").result.unwrap();
     let new = fed.core.create("").result.unwrap();
     fed.feed
         .changed([PathBuf::from("a.md"), new.info.path])
@@ -399,9 +397,7 @@ mod real_events {
     fn a_save_does_not_come_back_but_the_next_outside_change_does() {
         let (dir, _cache, core, changes) = open(&[("a.md", "# A\n")]);
 
-        let mut note = core.read("a.md").unwrap();
-        note.body = "# A\n\nMore.\n".to_owned();
-        core.save(&note).result.unwrap();
+        core.save("a.md", "# A\n\nMore.\n").result.unwrap();
         fs::write(dir.path().join("b.md"), "# B\n").unwrap();
 
         assert_eq!(

@@ -246,16 +246,14 @@ impl Core {
         self.inner.store.read(path.as_ref()).map(|(note, _)| note)
     }
 
-    /// Saves the body, tags and pin of `note` to the file at `note.info.path`,
-    /// and returns the note as it is now on disk.
+    /// Saves `body` as the body of the note at `path`, and returns the note as it is now on disk.
     ///
-    /// The id, the title and the modification time come from the file, not from `note`.
+    /// The frontmatter comes from the file, so a change from another tool stays.
     /// Every frontmatter field that Holm does not know stays as it is.
     ///
     /// - A note with no `id:` gets one.
     /// - A body with no final line break gets one.
     /// - When the body stays the same, the file keeps its old modification time.
-    ///   So a change of only the tags or the pin does not move the note in the "last change" order.
     /// - With no change at all, Holm does not write the file.
     ///
     /// The write goes to a temp file first, which then replaces the note in one step.
@@ -266,16 +264,16 @@ impl Core {
     /// - [`Error::Read`] or [`Error::NotUtf8`] when the file on disk can't be read.
     /// - [`Error::Write`] when the new file can't be written. The old file then stays.
     /// - [`Error::Index`] as in [`Core::search`]. The file is saved all the same.
-    pub fn save(&self, note: &Note) -> Written<Note> {
+    pub fn save(&self, path: impl AsRef<Path>, body: &str) -> Written<Note> {
         self.inner.write(|draft| {
-            let (note, stamp) = self.inner.store.save(note)?;
+            let (note, stamp) = self.inner.store.save(path.as_ref(), body)?;
             self.inner.update(draft, &note, stamp)
         })
     }
 
     /// Writes `note` again at its path after another tool deleted its file, and returns it.
-    /// The note keeps its id, so links to it still work. When a file is at the path again,
-    /// it saves over it like [`Core::save`].
+    /// The note keeps its id, so links to it still work. It also keeps its tags and its pin.
+    /// When a file is at the path again, it saves the body over it like [`Core::save`].
     ///
     /// # Errors
     ///
@@ -502,25 +500,48 @@ impl Core {
         })
     }
 
-    /// Sets the tags of the note and returns it. Its body and modification time stay.
+    /// Adds the tag to the note and returns it. Its body, other tags and modification time stay.
     ///
-    /// Each tag is cleaned like a typed tag, and repeats go. With no tags, the `tags:` field goes.
+    /// The tag is cleaned like a typed tag. A note that has it already does not change.
     ///
     /// # Errors
     ///
+    /// - [`Error::BadTag`] when nothing is left of `tag`.
     /// - [`Error::BadPath`] as in [`Core::read`].
     /// - [`Error::Read`] or [`Error::NotUtf8`] when the file can't be read as text.
     /// - [`Error::Write`] when the file can't be written. The old file then stays.
     /// - [`Error::Index`] as in [`Core::save`].
-    pub fn set_tags<S: AsRef<str>>(&self, path: impl AsRef<Path>, tags: &[S]) -> Written<NoteInfo> {
-        let tags = retag::unique(
-            tags.iter()
-                .filter_map(|tag| holm_markdown::normalize_tag(tag.as_ref())),
-        );
+    pub fn add_tag(&self, path: impl AsRef<Path>, tag: &str) -> Written<NoteInfo> {
         self.inner.write(|draft| {
+            let tag = retag::clean(tag)?;
             self.inner
                 .edit_fields(draft, path.as_ref(), |text| {
-                    if text.tags() != tags {
+                    let mut tags = text.tags();
+                    if !tags.contains(&tag) {
+                        tags.push(tag);
+                        text.set_tags(&tags);
+                    }
+                })
+                .map(|note| note.info)
+        })
+    }
+
+    /// Removes the tag from the note and returns it. Its child tags, its body, other tags and
+    /// modification time stay. A note without the tag does not change.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::BadTag`] when `tag` is not a tag name.
+    /// - The errors of [`Core::add_tag`] for the file.
+    pub fn remove_tag(&self, path: impl AsRef<Path>, tag: &str) -> Written<NoteInfo> {
+        self.inner.write(|draft| {
+            let tag = retag::check(tag)?;
+            self.inner
+                .edit_fields(draft, path.as_ref(), |text| {
+                    let mut tags = text.tags();
+                    let count = tags.len();
+                    tags.retain(|other| other != tag);
+                    if tags.len() != count {
                         text.set_tags(&tags);
                     }
                 })
@@ -532,7 +553,7 @@ impl Core {
     ///
     /// # Errors
     ///
-    /// As in [`Core::set_tags`].
+    /// As in [`Core::add_tag`].
     pub fn set_pinned(&self, path: impl AsRef<Path>, pinned: bool) -> Written<NoteInfo> {
         self.inner.write(|draft| {
             self.inner
@@ -565,7 +586,7 @@ impl Core {
     /// # Errors
     ///
     /// - [`Error::BadTag`] when `from` is not a tag name, or nothing is left of `to`.
-    /// - The first error of a note, as in [`Core::set_tags`].
+    /// - The first error of a note, as in [`Core::add_tag`].
     pub fn rename_tag(&self, from: &str, to: &str) -> Written<usize> {
         self.inner
             .write(|draft| self.inner.edit_tag(draft, &TagEdit::rename(from, to)?))
@@ -587,7 +608,7 @@ impl Core {
     /// # Errors
     ///
     /// - [`Error::BadTag`] when `tag` is not a tag name.
-    /// - The first error of a note, as in [`Core::set_tags`].
+    /// - The first error of a note, as in [`Core::add_tag`].
     pub fn delete_tag(&self, tag: &str) -> Written<usize> {
         self.inner
             .write(|draft| self.inner.edit_tag(draft, &TagEdit::delete(tag)?))

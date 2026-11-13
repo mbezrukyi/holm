@@ -4,7 +4,7 @@
 //! The popup holds the field and one list. With an empty field, the list holds the tags of
 //! the note, each with a `✓`. Typing filters it and adds the other known tags without a `✓`.
 //! A typed name that no line has shows as an "Add" line. The popup changes no files itself.
-//! It sends the new tags as [`TagsChanged`].
+//! It sends each added or removed tag as a [`TagChange`].
 //!
 //! - The field keeps the focus. `↑` and `↓` move a cursor through the list.
 //! - `Enter` or `Tab` adds or removes the tag under the cursor. With no cursor, it adds the
@@ -49,9 +49,12 @@ pub(crate) const CHIP_WIDTH: Pixels = px(200.);
 
 const POPUP_WIDTH: Pixels = px(300.);
 
-/// The user added or removed a tag. These are all the tags of the note now.
+/// The user added or removed one tag of the note.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct TagsChanged(pub(crate) Vec<String>);
+pub(crate) enum TagChange {
+    Add(String),
+    Remove(String),
+}
 
 /// The user pressed `F2` on the line of this tag. As an action, it goes up the element
 /// tree to the app.
@@ -245,13 +248,13 @@ impl TagRow {
         match line {
             Some(Line::Tag { name, on: true }) => {
                 self.tags.retain(|tag| *tag != name);
-                cx.emit(TagsChanged(self.tags.clone()));
+                cx.emit(TagChange::Remove(name));
                 self.clamp_cursor();
             }
             Some(Line::Tag { name, on: false } | Line::Add(name)) => {
                 if !self.tags.contains(&name) {
-                    self.tags.push(name);
-                    cx.emit(TagsChanged(self.tags.clone()));
+                    self.tags.push(name.clone());
+                    cx.emit(TagChange::Add(name));
                 }
                 self.clear(window, cx);
             }
@@ -473,7 +476,7 @@ fn flatten(tags: &[Tag], names: &mut Vec<String>) {
     }
 }
 
-impl EventEmitter<TagsChanged> for TagRow {}
+impl EventEmitter<TagChange> for TagRow {}
 
 impl Render for TagRow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

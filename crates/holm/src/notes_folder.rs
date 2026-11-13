@@ -21,6 +21,7 @@ use holm_core::{Changes, Core, Snapshot};
 use holm_editor::PastedFile;
 
 use crate::error::AppError;
+use crate::tags::TagChange;
 
 /// How often it looks for changes from outside Holm. The core already waits up to 500 ms to
 /// batch them.
@@ -143,14 +144,23 @@ impl NotesFolder {
         self.write(move |core| core.rename_to_title(&path).result, cx)
     }
 
-    /// Sets the tags of the note at `path`.
-    pub(crate) fn set_tags(
+    /// Adds or removes one tag of the note at `path`.
+    pub(crate) fn change_tag(
         &mut self,
         path: PathBuf,
-        tags: Vec<String>,
+        change: TagChange,
         cx: &mut Context<Self>,
     ) -> Task<holm_core::Result<()>> {
-        self.write(move |core| core.set_tags(&path, &tags).result.map(drop), cx)
+        self.write(
+            move |core| {
+                let written = match change {
+                    TagChange::Add(tag) => core.add_tag(&path, &tag),
+                    TagChange::Remove(tag) => core.remove_tag(&path, &tag),
+                };
+                written.result.map(drop)
+            },
+            cx,
+        )
     }
 
     /// Pins or unpins the note at `path`.
@@ -178,7 +188,7 @@ impl NotesFolder {
                 let note = core.create(&folder).result?;
                 match tag {
                     Some(tag) => core
-                        .set_tags(&note.info.path, &[tag])
+                        .add_tag(&note.info.path, &tag)
                         .result
                         .map(|info| info.path),
                     None => Ok(note.info.path),
@@ -197,9 +207,8 @@ impl NotesFolder {
     ) -> Task<holm_core::Result<String>> {
         self.write(
             move |core| {
-                let mut note = core.create(&folder).result?;
-                note.body = format!("# {title}\n");
-                let note = core.save(&note).result?;
+                let note = core.create(&folder).result?;
+                let note = core.save(&note.info.path, &format!("# {title}\n")).result?;
                 let info = core.rename_to_title(&note.info.path).result?;
                 Ok(core.link_id(&info.path).result?.to_string())
             },
@@ -532,13 +541,7 @@ fn first_note(core: &Core, last: Option<&Path>) -> holm_core::Result<Option<Note
 /// Saves the body of `text`. A save keeps the other facts that the core has for the note.
 fn write_text(core: &Core, text: NoteText) -> holm_core::Result<()> {
     match text {
-        NoteText::Save { path, body } => {
-            let info = match core.snapshot().note(&path) {
-                Some(info) => info.clone(),
-                None => core.read(&path)?.info,
-            };
-            core.save(&Note { info, body }).result.map(drop)
-        }
+        NoteText::Save { path, body } => core.save(&path, &body).result.map(drop),
         NoteText::Restore { info, body } => core.restore(&Note { info, body }).result.map(drop),
     }
 }
@@ -617,7 +620,7 @@ mod tests {
         notes_folder.update(cx, |notes_folder, cx| {
             notes_folder.save_text(text("# A\n\nfirst\n"), cx).detach();
             notes_folder
-                .set_tags(path.clone(), vec!["work".into()], cx)
+                .change_tag(path.clone(), TagChange::Add("work".into()), cx)
                 .detach();
             notes_folder.create_folder(PathBuf::new(), "B", cx).detach();
             notes_folder.quit(Some(text("# A\n\nlast\n")));
@@ -627,5 +630,44 @@ mod tests {
         assert!(file.contains("  - work\n"), "{file}");
         assert!(file.ends_with("# A\n\nlast\n"), "{file}");
         assert!(dir.path().join("notes/B").is_dir());
+    }
+
+    #[gpui_kit::test]
+    fn a_save_keeps_a_tag_from_another_tool(cx: &mut TestAppContext) {
+        let (dir, notes_folder) = notes_folder(cx);
+        let file = dir.path().join("notes/A.md");
+        fs::write(&file, "---\ntags: [theirs]\n---\n# A\n").unwrap();
+
+        notes_folder.update(cx, |notes_folder, cx| {
+            let text = NoteText::Save {
+                path: "A.md".into(),
+                body: "# A\n\nmine\n".into(),
+            };
+            notes_folder.save_text(text, cx).detach();
+        });
+        cx.run_until_parked();
+
+        let text = fs::read_to_string(&file).unwrap();
+        assert!(text.contains("tags: [theirs]\n"), "{text}");
+        assert!(text.ends_with("# A\n\nmine\n"), "{text}");
+    }
+
+    #[gpui_kit::test]
+    fn a_tag_removal_keeps_a_tag_from_another_tool(cx: &mut TestAppContext) {
+        let (dir, notes_folder) = notes_folder(cx);
+        let file = dir.path().join("notes/A.md");
+        let change = |change: TagChange, cx: &mut TestAppContext| {
+            notes_folder.update(cx, |notes_folder, cx| {
+                notes_folder.change_tag("A.md".into(), change, cx).detach();
+            });
+            cx.run_until_parked();
+        };
+
+        change(TagChange::Add("a".into()), cx);
+        fs::write(&file, "---\ntags: [a, b]\n---\n# A\n").unwrap();
+        change(TagChange::Remove("a".into()), cx);
+
+        let tags = holm_markdown::Note::parse(&fs::read_to_string(&file).unwrap()).tags();
+        assert_eq!(tags, ["b"]);
     }
 }
