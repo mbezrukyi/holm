@@ -4,16 +4,20 @@
 
 Use `perf` for profiles. Call chains need `kernel.perf_event_paranoid` at 1 or lower.
 
-1. Build the bench with debug info. The last line names the binary:
+1. Build the bench with frame pointers and line tables, in its own target folder. The last line names the binary:
 
    ```sh
-   CARGO_PROFILE_BENCH_DEBUG=true cargo bench -p holm-markdown --bench parse --no-run
+   CARGO_TARGET_DIR=target/fp RUSTFLAGS="-C force-frame-pointers=yes" \
+     CARGO_PROFILE_BENCH_DEBUG=line-tables-only \
+     cargo bench -p holm-editor --bench edit --no-run
    ```
 
-2. Record one bench, with its name as a filter:
+   For a test like `window_speed`, use `cargo test --release -p holm --no-run` and `CARGO_PROFILE_RELEASE_DEBUG`.
+
+2. Record one bench. The binary needs `--bench`, or it runs each case only once:
 
    ```sh
-   perf record -o target/perf.data --call-graph dwarf target/release/deps/parse-<hash> parse_1_mb
+   perf record -o target/perf.data --call-graph fp target/fp/release/deps/edit-<hash> --bench key_press_in_chip_lines
    ```
 
 3. Read the report as text:
@@ -22,6 +26,9 @@ Use `perf` for profiles. Call chains need `kernel.perf_event_paranoid` at 1 or l
    perf report -i target/perf.data --stdio --children -g none
    ```
 
+- Use `--call-graph fp`, not `dwarf`. GPUI stacks are deeper than the stack copy of `dwarf`, so most of its chains stop inside GPUI.
+- The own target folder keeps the normal build cache. Other `RUSTFLAGS` rebuild everything.
+- Write `perf.data` to `target/`. The temp folder has a small quota.
 - A profile without call chains hides the caller of inlined code, like `ptr::write`.
 - Kernel frames like `asm_exc_page_fault` show time spent on new memory.
 - The workspace forbids `unsafe`. A counting allocator goes in a scratch crate outside it.
