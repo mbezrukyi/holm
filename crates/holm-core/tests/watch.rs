@@ -420,6 +420,24 @@ mod real_events {
             }
         );
     }
+
+    #[test]
+    fn walks_and_reads_do_not_raise_the_revision() {
+        let (dir, cache, core, changes) = open(&[("a.md", &note("A", "", "# A\n"))]);
+        // A folder that moves in comes as one event, so the core walks it in one batch.
+        write(&cache.path().join("work/b.md"), &note("B", "", "# B\n"));
+        fs::rename(cache.path().join("work"), dir.path().join("work")).unwrap();
+        while next(&changes) != Change::Folders {}
+        std::thread::sleep(Duration::from_millis(300));
+        let start = core.revision();
+
+        core.read("work/b.md").unwrap();
+        core.notes(Order::Title).unwrap();
+        fs::read(dir.path().join("a.md")).unwrap();
+        std::thread::sleep(Duration::from_secs(1));
+
+        assert_eq!(core.revision(), start);
+    }
 }
 
 #[test]

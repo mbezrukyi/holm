@@ -10,7 +10,8 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use notify::{RecommendedWatcher, RecursiveMode, Watcher as _};
+use notify::event::{AccessKind, AccessMode};
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher as _};
 
 use crate::error::{Error, Result};
 
@@ -87,6 +88,11 @@ impl Events {
 
     fn add(&self, batch: &mut Batch, event: notify::Result<notify::Event>) {
         let event = match event {
+            // The core opens files too, so these events would start a new batch after each batch.
+            Ok(notify::Event {
+                kind: EventKind::Access(AccessKind::Open(_) | AccessKind::Close(AccessMode::Read)),
+                ..
+            }) => return,
             Ok(event) if !event.need_rescan() => event,
             Ok(_) => {
                 batch.insert(PathBuf::new());
