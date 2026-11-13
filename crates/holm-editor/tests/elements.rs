@@ -128,7 +128,7 @@ fn ctrl_click_on_a_file_chip_sends_open_file() {
     let mut app = app();
     let (editor, cx) = open(&mut app, "a\n\nSee ![f](report.pdf) now", WIDTH, HEIGHT);
     let opened = opened_files(&editor, cx);
-    // "See ", then the icon room of six chars, then the name.
+    // "See ", then the chip, with its name after the icon.
     let name = point(column_x(cx, 12.5), LINE_HEIGHT * 2.5);
     cx.simulate_click(name, Modifiers::control());
     assert_eq!(*opened.borrow(), [PathBuf::from("report.pdf")]);

@@ -20,7 +20,7 @@ use ropey::{LineType, Rope};
 
 pub(crate) use caret::{Caret, GoalRow};
 pub(crate) use display::{
-    Cell, Chip, Detail, DisplayLine, Embed, Highlight, LineKind, Look, Mark, Quote, Run,
+    Cell, Chip, DisplayLine, Embed, Highlight, LineKind, Look, Mark, Quote, Run,
 };
 pub(crate) use format::Format;
 pub(crate) use history::Group;
@@ -874,34 +874,17 @@ mod tests {
     fn an_embedded_file_shows_as_a_chip_in_its_line() {
         let text = "top\n\nSee ![f](docs/report.pdf) now\n";
         let model = model_at(text, 0);
-        let detail = Detail {
-            text: "48 KB".to_owned(),
-            wide: 1,
-            narrow: 2,
-        };
-        let line = model.display_line(2, &mut |_| Embed::Chip {
-            name: "report.pdf".to_owned(),
-            detail: Some(detail.clone()),
-        });
+        let line = model.display_line(2, &mut |_| Embed::Chip);
         assert_eq!(line.images, [] as [String; 0]);
         let [chip] = line.shown.chips.as_slice() else {
             panic!("one chip");
         };
         assert_eq!(chip.target, "docs/report.pdf");
-        assert_eq!(
-            &line.shown.text[chip.range.clone()],
-            "\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}report.pdf\u{a0}\u{a0}\u{202f}\u{202f}\u{a0}\u{a0}"
-        );
-        assert_eq!(line.shown.text[chip.icon()].chars().count(), 6);
-        let Some((room, detail_text)) = &chip.detail else {
-            panic!("a detail");
-        };
-        assert_eq!(detail_text, &detail.text);
-        assert_eq!(line.shown.text[room.clone()].chars().count(), 3);
+        assert_eq!(line.shown.text, "See \u{fffc} now");
         assert_eq!(&line.shown.text[..chip.range.start], "See ");
         assert_eq!(&line.shown.text[chip.range.end..], " now");
         let bang = text.find('!').unwrap_or_default();
-        assert_eq!(line.to_source(chip.range.start + 6), bang);
+        assert_eq!(line.to_source(chip.range.start), bang);
         assert_eq!(line.to_display(bang + 3), chip.range.start);
         assert_eq!(
             line.to_source(chip.range.end),

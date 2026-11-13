@@ -1,5 +1,6 @@
 //! Draws the editor: the text column, its blocks, the selection and the cursor.
 
+mod flow;
 mod layout;
 mod theme;
 
@@ -10,7 +11,7 @@ use gpui_kit::{
     AnyElement, App, AvailableSpace, BorderStyle, Bounds, ContentMask, Corners, ElementId,
     ElementInputHandler, Entity, FontStyle, FontWeight, GlobalElementId, Hsla, ImgResourceLoader,
     InspectorElementId, IntoElement, LayoutId, PathBuilder, Pixels, Point, Resource, Style,
-    TextAlign, Window, WrappedLine, fill, outline, point, px, relative, size,
+    TextAlign, Window, fill, outline, point, px, relative, size,
 };
 
 pub(crate) use layout::{FileKind, FileKinds, Layout, Scroll};
@@ -20,11 +21,9 @@ pub(crate) use theme::Theme;
 use crate::Editor;
 use crate::ink;
 use crate::model::{LineKind, Mark, Quote, Run};
+use flow::{ChipPaint, FlowLine, Icon};
 use layout::{COLUMN_WIDTH, SIDE_MARGIN};
-use layout::{Content, Icon, LaidChip, LaidLine, Shaper, lay_out, run_font};
-
-/// How far below the baseline the underline of a chip detail lies, as a part of its size.
-const CHIP_UNDERLINE: f32 = 0.2;
+use layout::{Content, LaidLine, Shaper, lay_out, run_font};
 
 /// The width of a quote bar.
 const BAR: Pixels = px(3.);
@@ -299,7 +298,7 @@ fn paint_line(
         Content::Text(text) => {
             let runs = &line.display.shown.runs;
             paint_text(
-                (text, runs, line.place, &line.chips),
+                (text, runs, line.place),
                 text_origin,
                 line,
                 theme,
@@ -309,7 +308,7 @@ fn paint_line(
         }
         Content::Label(text) => {
             paint_text(
-                (text, &[], line.place, &[]),
+                (text, &[], line.place),
                 text_origin,
                 line,
                 theme,
@@ -321,12 +320,7 @@ fn paint_line(
             let top = (line.height - line.text_height.max(line.line_height)) / 2.;
             for cell in cells {
                 let cell_origin = text_origin + point(cell.x + cell.inset, top.max(px(0.)));
-                let piece = (
-                    &cell.text,
-                    cell.shown.shown.runs.as_slice(),
-                    cell.place,
-                    cell.chips.as_slice(),
-                );
+                let piece = (&cell.text, cell.shown.shown.runs.as_slice(), cell.place);
                 paint_text(piece, cell_origin, line, theme, window, cx);
             }
         }
@@ -367,9 +361,8 @@ fn paint_line(
 
 /// Paints a text of `line`, with its runs, its place and its file chips, and the highlights,
 /// code backgrounds and underlines of its runs.
-/// A failed paint only loses glyphs in this frame.
 fn paint_text(
-    (text, runs, place, chips): (&WrappedLine, &[Run], Place, &[LaidChip]),
+    (text, runs, place): (&FlowLine, &[Run], Place),
     origin: Point<Pixels>,
     line: &LaidLine,
     theme: &Theme,
@@ -395,61 +388,47 @@ fn paint_text(
         }
         start = end;
     }
-    // A chip is as tall as the row allows, so chips on two rows do not touch.
-    let chip_height = (line.font_size * 1.8).min(line_height - px(2.));
-    for chip in chips {
-        // A chip that wraps gets a piece of background on each row. A piece gets padding at
-        // the end where the chip goes on, because no padding chars are there.
-        let spans = row_spans(text, chip.range.clone(), line_height, line.font_size);
-        let last = spans.len().saturating_sub(1);
-        let pad = line.font_size * 0.4;
-        for (ix, (x, y, right)) in spans.into_iter().enumerate() {
-            let left = if ix > 0 { x - pad } else { x };
-            let right = if ix < last { right + pad } else { right };
-            let bounds = Bounds::from_corners(
-                origin + point(left, y + (line_height - chip_height) / 2.),
-                origin + point(right, y + (line_height + chip_height) / 2.),
-            );
-            window.paint_quad(
-                fill(bounds, theme.panel)
-                    .corner_radii(chip_height / 2.)
-                    .border_widths(px(1.))
-                    .border_color(theme.line),
-            );
-        }
+    for chip in text.chip_paints(line_height) {
+        paint_chip(&chip, origin, line_height, theme, window, cx);
     }
-    let _ = text.paint(origin, line_height, TextAlign::Left, None, window, cx);
+    text.paint(origin, line_height, window, cx);
     paint_underlines(text, runs, place, origin, line, theme, window);
-    for chip in chips {
-        if let Some((range, detail)) = &chip.detail
-            && let Some((x, y, _)) =
-                row_spans(text, range.clone(), line_height, line.font_size).first()
-        {
-            // In the middle of the row, like the name, so it sits a bit above the baseline of
-            // the name.
-            let height = detail.ascent + detail.descent;
-            let at = origin + point(*x, *y + (line_height - height) / 2.);
-            let _ = detail.paint(at, height, TextAlign::Left, None, window, cx);
-            let under = at.y + detail.ascent + detail.font_size * CHIP_UNDERLINE;
-            window.paint_quad(fill(
-                Bounds::new(point(at.x, under), size(detail.width, px(1.))),
-                theme.line,
-            ));
-        }
-        let room = row_spans(text, chip.icon_range.clone(), line_height, line.font_size);
-        if let Some((x, y, right)) = room.first() {
-            let pad = line.font_size * 0.4;
-            let side = (*right - *x - pad * 2.)
-                .min(line.font_size * 1.07)
-                .max(px(0.));
-            let at = origin + point(*x + pad, *y + (line_height - side) / 2.);
-            paint_icon(
-                chip.icon,
-                Bounds::new(at, size(side, side)),
-                theme.link,
-                window,
-            );
-        }
+}
+
+/// Paints one piece of a file chip: its box, its icon, its name and its detail.
+/// A failed paint only loses glyphs in this frame.
+fn paint_chip(
+    chip: &ChipPaint<'_>,
+    origin: Point<Pixels>,
+    line_height: Pixels,
+    theme: &Theme,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let bounds = Bounds::new(origin + chip.bounds.origin, chip.bounds.size);
+    window.paint_quad(
+        fill(bounds, theme.panel)
+            .corner_radii(bounds.size.height / 2.)
+            .border_widths(px(1.))
+            .border_color(theme.line),
+    );
+    if let Some((icon, at)) = chip.icon {
+        paint_icon(
+            icon,
+            Bounds::new(origin + at.origin, at.size),
+            theme.link,
+            window,
+        );
+    }
+    let (name, at) = chip.name;
+    let _ = name.paint(origin + at, line_height, TextAlign::Left, None, window, cx);
+    if let Some((detail, at, underline)) = chip.detail {
+        let height = detail.ascent + detail.descent;
+        let _ = detail.paint(origin + at, height, TextAlign::Left, None, window, cx);
+        window.paint_quad(fill(
+            Bounds::new(origin + underline.origin, underline.size),
+            theme.line,
+        ));
     }
 }
 
@@ -508,7 +487,7 @@ fn paint_icon(icon: Icon, bounds: Bounds<Pixels>, color: Hsla, window: &mut Wind
 /// Paints the underlines of underlined text and links: thin, a bit light, close below the text
 /// line, with a gap where the ink of a letter crosses it, like a browser does.
 fn paint_underlines(
-    text: &WrappedLine,
+    text: &FlowLine,
     runs: &[Run],
     place: Place,
     origin: Point<Pixels>,
@@ -517,8 +496,7 @@ fn paint_underlines(
     window: &mut Window,
 ) {
     let line_height = line.line_height;
-    let layout = &text.unwrapped_layout;
-    let baseline = (line_height - layout.ascent - layout.descent) / 2. + layout.ascent;
+    let baseline = (line_height - text.ascent() - text.descent()) / 2. + text.ascent();
     // The room between the line and the ink on each side of a gap.
     let room = (line.font_size * 0.07).max(px(1.));
     let content = text.text.as_ref();
@@ -532,7 +510,7 @@ fn paint_underlines(
         let offset = (line.font_size * 0.1).max(px(1.5));
         // Only ink at the height of the line itself makes a gap, as in a browser.
         let band = ink::Band {
-            font_size: f32::from(layout.font_size),
+            font_size: f32::from(text.font_size()),
             top: f32::from(offset),
             bottom: f32::from(offset) + 1.,
         };
@@ -590,7 +568,7 @@ fn paint_underlines(
 
 /// The left x, the top y and the right x of each screen row that the text in `range` takes.
 fn row_spans(
-    text: &WrappedLine,
+    text: &FlowLine,
     range: std::ops::Range<usize>,
     line_height: Pixels,
     font_size: Pixels,

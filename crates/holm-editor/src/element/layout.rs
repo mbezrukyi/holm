@@ -8,13 +8,14 @@ use std::rc::Rc;
 
 use gpui_kit::{
     Bounds, Font, FontStyle, FontWeight, Pixels, Point, ShapedLine, Size, StrikethroughStyle,
-    TextRun, TextStyle, Window, WrappedLine, point, px, size,
+    TextRun, TextStyle, Window, point, px, size,
 };
 use holm_markdown::{Alignment, CalloutKind};
 
+use super::flow::{ChipBox, FlowLine, Icon};
 use super::theme::{Place, Theme};
 use crate::highlight::{Highlighter, Tokens};
-use crate::model::{Cell, Chip, Detail, DisplayLine, Embed, LineKind, Look, Mark, Model, Run};
+use crate::model::{Cell, Chip, DisplayLine, Embed, LineKind, Look, Mark, Model, Run};
 
 /// Space above and below an image.
 pub(crate) const IMAGE_MARGIN: Pixels = px(4.);
@@ -83,9 +84,9 @@ pub(crate) struct Layout {
 /// What a line shows in its text row.
 pub(crate) enum Content {
     /// The screen text of the line, which maps to its source.
-    Text(WrappedLine),
+    Text(FlowLine),
     /// A name in place of the line, like the name of a callout. It maps to the line end.
-    Label(WrappedLine),
+    Label(FlowLine),
     /// The cells of a table row.
     Cells(Vec<LaidCell>),
     /// No text row, like a line with only embedded files on it.
@@ -117,20 +118,17 @@ pub(crate) struct LaidLine {
     pub(crate) height: Pixels,
     pub(crate) mark: Option<LaidMark>,
     pub(crate) images: Vec<LaidImage>,
-    /// The file chips in the text row.
-    pub(crate) chips: Vec<LaidChip>,
 }
 
 pub(crate) struct LaidCell {
     pub(crate) shown: Cell,
-    pub(crate) text: WrappedLine,
+    pub(crate) text: FlowLine,
     /// The left edge of the cell.
     pub(crate) x: Pixels,
     pub(crate) width: Pixels,
     /// Where the text starts in the cell: the padding plus the move for the alignment.
     pub(crate) inset: Pixels,
     pub(crate) place: Place,
-    pub(crate) chips: Vec<LaidChip>,
 }
 
 pub(crate) struct LaidMark {
@@ -143,24 +141,6 @@ pub(crate) struct LaidMark {
 pub(crate) struct LaidImage {
     pub(crate) path: PathBuf,
     pub(crate) bounds: Bounds<Pixels>,
-}
-
-/// A file chip in a text, from [`Chip`].
-pub(crate) struct LaidChip {
-    /// The screen text of the whole chip.
-    pub(crate) range: Range<usize>,
-    /// The screen text that the icon covers.
-    pub(crate) icon_range: Range<usize>,
-    pub(crate) icon: Icon,
-    /// The room for the detail, and its text in a smaller size.
-    pub(crate) detail: Option<(Range<usize>, ShapedLine)>,
-}
-
-/// The icon of a file chip.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Icon {
-    File,
-    Folder,
 }
 
 /// What a linked path is on the disk.
@@ -219,25 +199,6 @@ fn shorten(name: &str, fits: impl Fn(&str) -> bool) -> String {
         }
     }
     cut(low)
-}
-
-/// The counts of spaces of two widths that cover `width` with the least room to spare.
-fn room(width: f32, wide: f32, narrow: f32) -> (usize, usize) {
-    #[allow(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        clippy::cast_precision_loss,
-        reason = "a few spaces"
-    )]
-    (0..=(width / wide).ceil() as usize)
-        .map(|count| {
-            let rest = (width - count as f32 * wide).max(0.);
-            let narrow_count = (rest / narrow).ceil() as usize;
-            let spare = count as f32 * wide + narrow_count as f32 * narrow - width;
-            (spare, count, narrow_count)
-        })
-        .min_by(|a, b| a.0.total_cmp(&b.0))
-        .map_or((0, 0), |(_, count, narrow_count)| (count, narrow_count))
 }
 
 /// A file size like `48 KB` or `2.1 MB`, with a no-break space.
@@ -301,7 +262,7 @@ impl Shaper<'_> {
     }
 
     pub(crate) fn line(&mut self, model: &Model, line: usize, window: &Window) -> LaidLine {
-        let display = model.display_line(line, &mut |target| self.embed(target, window));
+        let display = model.display_line(line, &mut |target| self.embed(target));
         let base = self.font_size(window);
         let base_height = window.line_height();
         let scale = match display.heading {
@@ -358,10 +319,6 @@ impl Shaper<'_> {
             height = bounds.bottom() + IMAGE_MARGIN;
             images.push(LaidImage { path, bounds });
         }
-        let chips = match &content {
-            Content::Text(_) => self.chips(&display.shown.chips, font_size, window),
-            _ => Vec::new(),
-        };
         if let LineKind::Code { fence: true, .. } = display.kind
             && !display.raw
         {
@@ -385,7 +342,6 @@ impl Shaper<'_> {
             height,
             mark,
             images,
-            chips,
         }
     }
 
@@ -414,13 +370,8 @@ impl Shaper<'_> {
         width: Pixels,
         window: &Window,
     ) -> (Content, Pixels) {
-        let shape = |text: &str, runs: &[TextRun], wrap: Pixels, font_size: Pixels| {
-            window
-                .text_system()
-                .shape_text(text.to_owned().into(), font_size, runs, Some(wrap), None)
-                .ok()
-                .and_then(|lines| lines.into_iter().next())
-        };
+        let mut code_font = self.style.font();
+        code_font.family = CODE_FONT.into();
         let content = match &display.kind {
             LineKind::Code { fence: true, .. } if !display.raw => Content::Empty,
             LineKind::TableRule => Content::Empty,
@@ -437,7 +388,15 @@ impl Shaper<'_> {
                     underline: None,
                     strikethrough: None,
                 };
-                shape(name, &[run], width, font_size).map_or(Content::Empty, Content::Label)
+                Content::Label(FlowLine::new(
+                    name.into(),
+                    &[run],
+                    Vec::new(),
+                    &self.style.font(),
+                    font_size,
+                    width,
+                    window,
+                ))
             }
             LineKind::Row { head, table, cells } => {
                 let columns = self.columns(model, table, width, font_size, window);
@@ -449,14 +408,29 @@ impl Shaper<'_> {
                 fence: false,
             } => {
                 let runs = self.code_runs(model, display, language, code);
-                shape(&display.shown.text, &runs, width, font_size * CODE_SCALE)
-                    .map_or(Content::Empty, Content::Text)
+                Content::Text(FlowLine::new(
+                    display.shown.text.clone().into(),
+                    &runs,
+                    Vec::new(),
+                    &code_font,
+                    font_size * CODE_SCALE,
+                    width,
+                    window,
+                ))
             }
             _ if display.shown.text.is_empty() && !display.images.is_empty() => Content::Empty,
             _ => {
                 let runs = self.runs(&display.shown.runs, display);
-                shape(&display.shown.text, &runs, width, font_size)
-                    .map_or(Content::Empty, Content::Text)
+                let chips = self.chip_boxes(&display.shown.chips, &runs, font_size, window);
+                Content::Text(FlowLine::new(
+                    display.shown.text.clone().into(),
+                    &runs,
+                    chips,
+                    &self.style.font(),
+                    font_size,
+                    width,
+                    window,
+                ))
             }
         };
         let height = match &content {
@@ -559,19 +533,24 @@ impl Shaper<'_> {
         let pad = font_size;
         let mut natural: Vec<Pixels> = Vec::new();
         for line in model.line_of(table.start)..=model.line_of(table.end) {
-            let display = model.display_line(line, &mut |target| self.embed(target, window));
+            let display = model.display_line(line, &mut |target| self.embed(target));
             let LineKind::Row { cells, head, .. } = &display.kind else {
                 continue;
             };
             for (ix, cell) in cells.iter().enumerate() {
                 let runs = self.cell_runs(&cell.shown.runs, *head);
+                let chips = self.chip_boxes(&cell.shown.chips, &runs, font_size, window);
+                let text = FlowLine::new(
+                    cell.shown.text.clone().into(),
+                    &runs,
+                    chips,
+                    &self.style.font(),
+                    font_size,
+                    Pixels::MAX,
+                    window,
+                );
                 // A little more room, so a rounding error does not wrap the text.
-                let width = window
-                    .text_system()
-                    .shape_line(cell.shown.text.clone().into(), font_size, &runs, None)
-                    .width()
-                    + pad
-                    + px(2.);
+                let width = text.width() + pad + px(2.);
                 if ix < natural.len() {
                     natural[ix] = natural[ix].max(width);
                 } else {
@@ -607,21 +586,16 @@ impl Shaper<'_> {
             let width = columns.get(ix).copied().unwrap_or(pad * 4.);
             let inner = (width - pad * 2.).max(px(1.));
             let display_runs = self.cell_runs(&cell.shown.runs, head);
-            let text = window
-                .text_system()
-                .shape_text(
-                    cell.shown.text.clone().into(),
-                    font_size,
-                    &display_runs,
-                    Some(inner),
-                    None,
-                )
-                .ok()
-                .and_then(|lines| lines.into_iter().next());
-            let Some(text) = text else {
-                x += width;
-                continue;
-            };
+            let chips = self.chip_boxes(&cell.shown.chips, &display_runs, font_size, window);
+            let text = FlowLine::new(
+                cell.shown.text.clone().into(),
+                &display_runs,
+                chips,
+                &self.style.font(),
+                font_size,
+                inner,
+                window,
+            );
             let size = text.size(line_height);
             height = height.max(size.height);
             let free = (inner - text.width()).max(px(0.));
@@ -641,7 +615,6 @@ impl Shaper<'_> {
                 width,
                 inset: pad + shift,
                 place: cell_place(head),
-                chips: self.chips(&cell.shown.chips, font_size, window),
             });
             x += width;
         }
@@ -735,65 +708,76 @@ impl Shaper<'_> {
             .or_insert_with(|| FileKind::of(path))
     }
 
-    /// How a link to `target` shows. A file chip keeps room for the file size.
-    fn embed(&mut self, target: &str, window: &Window) -> Embed {
+    /// How a link to `target` shows.
+    fn embed(&mut self, target: &str) -> Embed {
         let path = self.path_of(target);
-        let kind = self.kind(&path);
-        if let FileKind::Image(_) = kind {
-            return Embed::Image;
-        }
-        // All widths grow with the text size, so they fit in a heading too.
-        let base = self.font_size(window);
-        let full = Path::new(target)
-            .file_name()
-            .map_or_else(|| target.into(), |name| name.to_string_lossy());
-        let name = shorten(&full, |name| {
-            self.width_of(name, base, window) <= base * CHIP_NAME_WIDTH
-        });
-        let FileKind::File(bytes) = kind else {
-            return Embed::Chip { name, detail: None };
-        };
-        let text = file_size(bytes);
-        let width = f32::from(self.width_of(&text, base * DETAIL_SCALE, window));
-        let wide = f32::from(self.width_of("\u{a0}", base, window)).max(1.);
-        let narrow = f32::from(self.width_of("\u{202f}", base, window)).max(1.);
-        let (wide, narrow) = room(width, wide, narrow);
-        Embed::Chip {
-            name,
-            detail: Some(Detail { text, wide, narrow }),
+        match self.kind(&path) {
+            FileKind::Image(_) => Embed::Image,
+            _ => Embed::Chip,
         }
     }
 
-    fn chips(&mut self, chips: &[Chip], font_size: Pixels, window: &Window) -> Vec<LaidChip> {
+    /// The boxes of `chips` in a text with `runs`. A chip name has the look of its screen text.
+    fn chip_boxes(
+        &mut self,
+        chips: &[Chip],
+        runs: &[TextRun],
+        font_size: Pixels,
+        window: &Window,
+    ) -> Vec<ChipBox> {
+        let text_system = window.text_system();
+        let shape = |text: String, run: &TextRun, font_size: Pixels| {
+            let run = TextRun {
+                len: text.len(),
+                ..run.clone()
+            };
+            text_system.shape_line(text.into(), font_size, &[run], None)
+        };
+        let detail_run = TextRun {
+            len: 0,
+            font: self.style.font(),
+            color: self.theme.text.opacity(0.7),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
         chips
             .iter()
             .map(|chip| {
+                let mut at = 0;
+                let run = runs
+                    .iter()
+                    .find(|run| {
+                        at += run.len;
+                        at > chip.range.start
+                    })
+                    .unwrap_or(&detail_run);
                 let path = self.path_of(&chip.target);
-                let icon = match self.kind(&path) {
-                    FileKind::Folder => Icon::Folder,
-                    _ => Icon::File,
-                };
-                let detail = chip.detail.as_ref().map(|(room, text)| {
-                    let run = TextRun {
-                        len: text.len(),
-                        font: self.style.font(),
-                        color: self.theme.text.opacity(0.7),
-                        background_color: None,
-                        underline: None,
-                        strikethrough: None,
-                    };
-                    let shaped = window.text_system().shape_line(
-                        text.clone().into(),
-                        font_size * DETAIL_SCALE,
-                        &[run],
-                        None,
-                    );
-                    (room.clone(), shaped)
+                let kind = self.kind(&path);
+                let full = Path::new(&chip.target).file_name().map_or_else(
+                    || chip.target.as_str().into(),
+                    |name| name.to_string_lossy(),
+                );
+                // All widths grow with the text size, so a chip fits in a heading too.
+                let name = shorten(&full, |name| {
+                    shape(name.to_owned(), run, font_size).width() <= font_size * CHIP_NAME_WIDTH
                 });
-                LaidChip {
+                let detail = match kind {
+                    FileKind::File(bytes) => Some(shape(
+                        file_size(bytes),
+                        &detail_run,
+                        font_size * DETAIL_SCALE,
+                    )),
+                    _ => None,
+                };
+                ChipBox {
                     range: chip.range.clone(),
-                    icon_range: chip.icon(),
-                    icon,
+                    icon: if kind == FileKind::Folder {
+                        Icon::Folder
+                    } else {
+                        Icon::File
+                    },
+                    name: shape(name, run, font_size),
                     detail,
                 }
             })
@@ -937,7 +921,7 @@ fn fill_view(
 
 impl LaidLine {
     /// The text row that maps to the source, if the line shows one.
-    pub(crate) fn text(&self) -> Option<&WrappedLine> {
+    pub(crate) fn text(&self) -> Option<&FlowLine> {
         match &self.content {
             Content::Text(text) => Some(text),
             _ => None,
@@ -1264,13 +1248,6 @@ mod tests {
             FileKind::of(&data("data/cat.png")),
             FileKind::Image(_)
         ));
-    }
-
-    #[test]
-    fn the_room_of_a_detail_covers_it_with_little_to_spare() {
-        assert_eq!(room(10., 5., 3.), (2, 0));
-        assert_eq!(room(11., 5., 3.), (1, 2));
-        assert_eq!(room(1., 5., 3.), (0, 1));
     }
 
     #[test]

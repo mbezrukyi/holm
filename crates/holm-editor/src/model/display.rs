@@ -16,7 +16,7 @@ pub(crate) struct Look {
     pub(crate) underline: bool,
     pub(crate) code: bool,
     pub(crate) link: bool,
-    /// The text of a file chip. It has no underline.
+    /// The screen text of a file chip. The layout puts a box in its place.
     pub(crate) chip: bool,
     /// The text of a link whose target is missing.
     pub(crate) broken: bool,
@@ -55,60 +55,38 @@ pub(crate) struct Shown {
     segments: Vec<Segment>,
 }
 
-/// An embedded file that is not an image. It shows in the line as a chip: an icon and the
-/// file name. Its screen text is not in the source, and it all maps to the start of the link.
+/// An embedded file that is not an image. It shows in the line as a chip. Its screen text is one
+/// [`CHIP_ATOM`], which is not in the source and maps to the start of the link.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Chip {
-    /// The screen text of the whole chip.
+    /// The screen text of the chip.
     pub(crate) range: Range<usize>,
     /// The link target.
     pub(crate) target: String,
-    /// The room for the detail, and its text.
-    pub(crate) detail: Option<(Range<usize>, String)>,
 }
 
-/// The padding of a chip before the name, with the room for the icon, and after the text.
-/// It is no-break spaces, because a wrap never breaks the text before one.
-const CHIP_START: &str = "\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}";
-const CHIP_END: &str = "\u{a0}\u{a0}";
+/// The screen text of a chip. The layout puts a box in its place.
+const CHIP_ATOM: &str = "\u{fffc}";
 
 /// How an embedded file shows.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Embed {
     /// An image under the line.
     Image,
-    /// A chip in the line: a name, and a detail after it, like the file size.
-    Chip {
-        name: String,
-        detail: Option<Detail>,
-    },
+    /// A chip in the line.
+    Chip,
 }
 
-/// A chip with the whole target as its name and no detail, for tests.
+/// Shows each embedded file as a chip, for tests.
 #[cfg(test)]
-pub(crate) fn plain_chip(target: &str) -> Embed {
-    Embed::Chip {
-        name: target.to_owned(),
-        detail: None,
-    }
-}
-
-/// A small text after the name of a chip. A line of text has one font size, so the chip only
-/// keeps room for the detail: `wide` no-break spaces and `narrow` narrow no-break spaces. The
-/// two widths together can match the text closely. The editor paints the text there.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Detail {
-    pub(crate) text: String,
-    pub(crate) wide: usize,
-    pub(crate) narrow: usize,
+pub(crate) fn plain_chip(_target: &str) -> Embed {
+    Embed::Chip
 }
 
 /// An embedded file link on a line that shows as a chip.
 struct ChipLink<'a> {
     start: usize,
     target: &'a str,
-    name: String,
-    detail: Option<Detail>,
 }
 
 /// A part of the source that the screen shows.
@@ -211,12 +189,7 @@ impl Model {
         for (start, target) in self.files_in(&source) {
             match embed(target) {
                 Embed::Image => images.push(target.to_owned()),
-                Embed::Chip { name, detail } => chips.push(ChipLink {
-                    start,
-                    target,
-                    name,
-                    detail,
-                }),
+                Embed::Chip => chips.push(ChipLink { start, target }),
             }
         }
         let chain = self.blocks_of_line(&source);
@@ -625,32 +598,18 @@ impl Shown {
             source: chip.start,
             len: 0,
         });
-        let room = Look {
-            chip: true,
-            ..Look::default()
-        };
-        let label = Look { link: true, ..room };
-        let push = |shown: &mut Self, text: &str, look| {
-            shown.text.push_str(text);
-            shown.runs.push(Run {
-                len: text.len(),
-                look,
-            });
-        };
-        push(self, CHIP_START, room);
-        push(self, &chip.name, label);
-        let detail = chip.detail.as_ref().map(|detail| {
-            push(self, "\u{a0}", room);
-            let from = self.text.len();
-            let space = "\u{a0}".repeat(detail.wide) + &"\u{202f}".repeat(detail.narrow);
-            push(self, &space, room);
-            (from..self.text.len(), detail.text.clone())
+        self.text.push_str(CHIP_ATOM);
+        self.runs.push(Run {
+            len: CHIP_ATOM.len(),
+            look: Look {
+                link: true,
+                chip: true,
+                ..Look::default()
+            },
         });
-        push(self, CHIP_END, room);
         self.chips.push(Chip {
             range: start..self.text.len(),
             target: chip.target.to_owned(),
-            detail,
         });
     }
 
@@ -678,13 +637,6 @@ impl Shown {
         };
         let segment = self.segments[ix];
         segment.display + (source - segment.source).min(segment.len)
-    }
-}
-
-impl Chip {
-    /// The screen text that holds the icon, with the padding on its left and right.
-    pub(crate) fn icon(&self) -> Range<usize> {
-        self.range.start..self.range.start + CHIP_START.len()
     }
 }
 
