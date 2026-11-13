@@ -1214,6 +1214,62 @@ fn f2_in_the_tag_popup_renames_the_tag_in_the_sidebar(cx: &mut TestAppContext) {
     assert_eq!(chips(cx, handle), ["home", "job"]);
 }
 
+/// Whether the last drawn frame shows `id`. It draws no new frame, so it shows a frame that
+/// the window still owes.
+fn drawn(cx: &mut TestAppContext, handle: AnyWindowHandle, id: &'static str) -> bool {
+    cx.update_window(handle, |_, window, _| shows(window, id))
+        .unwrap()
+}
+
+fn shows(window: &Window, id: &'static str) -> bool {
+    window.try_find(id).is_some_and(|element| element.visible())
+}
+
+/// Presses `key` and draws one frame. Work that waits for the end of the draw has not run yet.
+fn first_frame_has(
+    cx: &mut TestAppContext,
+    handle: AnyWindowHandle,
+    key: &'static str,
+    id: &'static str,
+) -> bool {
+    cx.update_window(handle, |_, window, cx| {
+        window.dispatch_keystroke(gpui_kit::Keystroke::parse(key).unwrap(), cx);
+        window.render_frame(cx);
+        shows(window, id)
+    })
+    .unwrap()
+}
+
+#[gpui_kit::test]
+fn a_popup_closes_in_the_frame_of_the_focus_move(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes = fixture.notes();
+    let target = "---\nid: 01T\ntags:\n  - work\n---\n# Target\n";
+    fs::write(notes.join("Target.md"), target).unwrap();
+    fs::write(notes.join("Other.md"), "# Other\n[t](holm:01T)\n").unwrap();
+    set_time(&notes.join("Target.md"), 300);
+    set_time(&notes.join("Other.md"), 100);
+    let handle = open(cx, fixture.startup(None));
+
+    keys(cx, handle, "ctrl-shift-l ctrl-shift-l ctrl-shift-t");
+    assert_eq!(sidebar(cx, handle), "hidden");
+    assert!(!first_frame_has(cx, handle, "ctrl-shift-l", "tag-popup"));
+    settle(cx);
+    assert!(!drawn(cx, handle, "tag-popup"));
+    assert_eq!(focus(cx, handle), "sidebar");
+
+    keys(cx, handle, "escape ctrl-shift-b");
+    assert!(drawn(cx, handle, "backlinks"));
+    assert!(!first_frame_has(cx, handle, "ctrl-shift-l", "backlinks"));
+    settle(cx);
+    assert!(!drawn(cx, handle, "backlinks"));
+
+    // F2 moves the focus in an event after the key, so `first_frame_has` cannot see it.
+    keys(cx, handle, "escape ctrl-shift-t down f2");
+    assert!(!drawn(cx, handle, "tag-popup"));
+    assert_eq!(name_field(cx, handle).as_deref(), Some("work"));
+}
+
 #[gpui_kit::test]
 fn f2_in_the_tag_popup_shows_a_hidden_sidebar(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();

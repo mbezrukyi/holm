@@ -145,7 +145,7 @@ impl Backlinks {
     }
 
     /// The list under the button.
-    fn list(&self, cx: &Context<Self>) -> impl IntoElement {
+    fn list(&self, window: &Window, cx: &Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let rows = self.notes.iter().enumerate().map(|(at, note)| {
             let current = self.cursor == at;
@@ -168,7 +168,7 @@ impl Backlinks {
                 )
         });
         self.dropdown
-            .panel(LIST_WIDTH, cx)
+            .panel(LIST_WIDTH, window, cx)
             .right_0()
             .on_key_down(cx.listener(Self::key_down))
             .id("backlinks")
@@ -199,11 +199,11 @@ impl Backlinks {
 impl EventEmitter<OpenBacklink> for Backlinks {}
 
 impl Render for Backlinks {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.dropdown
             .root()
             .ml_auto()
             .child(self.button(cx))
-            .when(self.open, |root| root.child(self.list(cx)))
+            .when(self.open, |root| root.child(self.list(window, cx)))
     }
 }

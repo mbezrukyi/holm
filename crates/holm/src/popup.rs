@@ -8,6 +8,7 @@ use std::rc::Rc;
 
 use gpui_kit::component::command::CommandItem;
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, Bounds, Context, Div, FocusHandle, InteractiveElement as _, MouseButton, MouseDownEvent,
     ParentElement as _, Pixels, Role, SharedString, StatefulInteractiveElement as _, Styled,
@@ -92,15 +93,19 @@ fn folder(note: &Path) -> Option<SharedString> {
 ///
 /// - A mouse down in the popup keeps the focus where it is.
 /// - A mouse down outside the popup and the opener closes it.
-/// - The popup closes when the focus leaves it. When the focus goes to no other part, it goes
-///   back to the text. So a closed popup never keeps the focus, and never takes it from
-///   another part.
+/// - The popup closes when the focus leaves it, in the same frame. When the focus goes to no
+///   other part, it goes back to the text. So a closed popup never keeps the focus, and never
+///   takes it from another part.
+/// - The focus may move only to parts that the open popup already showed in the last frame.
+///   A new part takes the panel away until the next frame.
 pub(crate) struct Dropdown<T> {
     focus: FocusHandle,
     close: fn(&mut T, &mut Window, &mut Context<T>),
     /// The window bounds of the opener in the last frame.
     opener: Rc<Cell<Bounds<Pixels>>>,
-    _focus_out: Subscription,
+    /// Whether the popup had the focus in the last frame.
+    held: Rc<Cell<bool>>,
+    _focus: [Subscription; 2],
 }
 
 impl<T: 'static> Dropdown<T> {
@@ -112,21 +117,32 @@ impl<T: 'static> Dropdown<T> {
         cx: &mut Context<T>,
     ) -> Self {
         let focus = cx.focus_handle();
-        let focus_out = cx.on_focus_out(&focus, window, move |owner, event, window, cx| {
-            close(owner, window, cx);
-            // The focus still names the blurred part when the frame no longer has it.
-            if window
-                .focused(cx)
-                .is_some_and(|focused| event.blurred == focused)
-            {
-                window.focus(&text, cx);
+        let held = Rc::new(Cell::new(false));
+        let focus_in = cx.on_focus_in(&focus, window, {
+            let held = held.clone();
+            move |_, _, _| held.set(true)
+        });
+        let focus_out = cx.on_focus_out(&focus, window, {
+            let held = held.clone();
+            move |_, event, window, cx| {
+                held.set(false);
+                // GPUI calls this during a draw. A notify there asks for no new frame.
+                cx.defer_in(window, close);
+                // The focus still names the blurred part when the frame no longer has it.
+                if window
+                    .focused(cx)
+                    .is_some_and(|focused| event.blurred == focused)
+                {
+                    window.focus(&text, cx);
+                }
             }
         });
         Self {
             focus,
             close,
             opener: Rc::default(),
-            _focus_out: focus_out,
+            held,
+            _focus: [focus_in, focus_out],
         }
     }
 
@@ -149,7 +165,10 @@ impl<T: 'static> Dropdown<T> {
 
     /// The popup panel under the opener, `width` wide. The owner places it to the left or to
     /// the right.
-    pub(crate) fn panel(&self, width: Pixels, cx: &Context<T>) -> Div {
+    pub(crate) fn panel(&self, width: Pixels, window: &Window, cx: &Context<T>) -> Div {
+        // GPUI tells about a focus move only after the next frame. This hides the panel in
+        // that frame already.
+        let left = self.held.get() && !self.focus.contains_focused(window, cx);
         let opener = self.opener.clone();
         let close = self.close;
         panel(width, cx)
@@ -160,6 +179,7 @@ impl<T: 'static> Dropdown<T> {
             .py_1()
             .occlude()
             .text_size(px(12.))
+            .when(left, Styled::hidden)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|_, _, window, cx| {

@@ -141,7 +141,6 @@ impl NotesView {
                     .sidebar
                     .update(cx, |sidebar, cx| sidebar.rename(item, window, cx))
                 {
-                    self.pane.update(cx, |pane, cx| pane.close_tags(window, cx));
                     self.hidden = false;
                     self.keep_state(cx);
                     cx.notify();

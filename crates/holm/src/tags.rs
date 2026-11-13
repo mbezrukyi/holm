@@ -12,7 +12,7 @@
 //! - `Esc`, a click outside the popup, or `↓` with an empty list closes the popup. See
 //!   [`Dropdown`] for the focus.
 //! - `F2` on a tag line sends [`RenameTag`]. The app starts the rename of the tag in the
-//!   sidebar, for all notes, and closes the popup.
+//!   sidebar, for all notes. The focus moves to the sidebar, so the popup closes.
 //! - A click on the row opens the popup. A click on a chip also puts the cursor on its tag.
 //!
 //! The row is one line. Chips that do not fit fold into a "+N" chip. A click on it opens the
@@ -168,7 +168,7 @@ impl TagRow {
         cx.notify();
     }
 
-    pub(crate) fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open = false;
         self.clear(window, cx);
         cx.notify();
@@ -430,9 +430,9 @@ impl TagRow {
     }
 
     /// The popup under the row: the field and the list.
-    fn popup(&self, cx: &Context<Self>) -> impl IntoElement {
+    fn popup(&self, window: &Window, cx: &Context<Self>) -> impl IntoElement {
         self.dropdown
-            .panel(POPUP_WIDTH, cx)
+            .panel(POPUP_WIDTH, window, cx)
             .left_0()
             .key_context("TagRow")
             .on_key_down(cx.listener(Self::key_down))
@@ -486,7 +486,7 @@ impl EventEmitter<TagsChanged> for TagRow {}
 impl EventEmitter<RenameTag> for TagRow {}
 
 impl Render for TagRow {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let has_backlinks = !self.backlinks.read(cx).is_empty();
         let pin = self.pinned.then(|| {
@@ -541,6 +541,6 @@ impl Render for TagRow {
             // The row lies in the editor, which sets the note font.
             .font_family(theme.font_family.clone())
             .child(row)
-            .when(self.open, |head| head.child(self.popup(cx)))
+            .when(self.open, |head| head.child(self.popup(window, cx)))
     }
 }

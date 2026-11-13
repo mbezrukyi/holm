@@ -377,10 +377,6 @@ impl NotePane {
         self.tag_row.update(cx, |row, cx| row.enter(window, cx));
     }
 
-    pub(crate) fn close_tags(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.tag_row.update(cx, |row, cx| row.close(window, cx));
-    }
-
     /// Ctrl+Shift+B: opens the backlinks list. The editor scrolls to it.
     pub(crate) fn show_backlinks(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.note.is_none() {
