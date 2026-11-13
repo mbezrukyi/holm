@@ -36,6 +36,10 @@ impl<'a> Query<'a> {
     }
 }
 
+/// The most note rows the picker shows. The list lays out each row it has, so more rows cost
+/// time with each key.
+const MAX_NOTES: usize = 50;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Row {
     /// The note at this place in the note list.
@@ -48,13 +52,15 @@ pub(crate) enum Row {
 /// The rows for `query`. `headings` are those of the note that the query names.
 ///
 /// Titles keep the order of `notes` with an empty query. Else the best match comes first.
-/// When no title is the query itself, the last row creates a note.
+/// Only the first [`MAX_NOTES`] titles show. When no title is the query itself, the last row
+/// creates a note.
 pub(crate) fn rows(query: Query<'_>, notes: &[NoteInfo], headings: &[String]) -> Vec<Row> {
     match query {
         Query::Titles(text) => {
             let text = text.trim();
             let mut rows: Vec<Row> = ranked(text, notes.iter().map(|note| note.title.as_str()))
                 .into_iter()
+                .take(MAX_NOTES)
                 .map(Row::Note)
                 .collect();
             if !text.is_empty() && !notes.iter().any(|note| same(&note.title, text)) {
@@ -173,6 +179,17 @@ mod tests {
         assert_eq!(titles("PLANS", &list), ["Plans"]);
         assert_eq!(titles("zz", &list), ["+zz"]);
         assert_eq!(titles("pa", &list)[0], "Pasta");
+    }
+
+    #[test]
+    fn only_the_best_titles_show_and_the_create_row_stays() {
+        let many: Vec<String> = (0..MAX_NOTES + 10).map(|n| format!("Note {n}")).collect();
+        let list = notes(&many.iter().map(String::as_str).collect::<Vec<_>>());
+        assert_eq!(titles("", &list).len(), MAX_NOTES);
+        let shown = titles("note", &list);
+        assert_eq!(shown.len(), MAX_NOTES + 1);
+        assert_eq!(shown[0], "Note 0");
+        assert_eq!(shown[MAX_NOTES], "+note");
     }
 
     #[test]
