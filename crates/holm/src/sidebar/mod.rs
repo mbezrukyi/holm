@@ -85,10 +85,21 @@ struct Rename {
     _subscription: Subscription,
 }
 
+/// A rename in the tree that the snapshot does not show yet. The rows of `from` show `to`.
+struct Renamed {
+    from: Item,
+    to: Item,
+    /// The core revision after the rename. A snapshot from it on shows the rename.
+    done_at: Option<u64>,
+}
+
 pub(crate) struct Sidebar {
     core: Core,
     order: Order,
     snapshot: Snapshot,
+    /// The core revision of `snapshot`.
+    revision: u64,
+    renamed: Option<Renamed>,
     view: View,
     open: HashSet<Item>,
     rows: Vec<Row>,
@@ -138,6 +149,8 @@ impl Sidebar {
             core,
             order,
             snapshot: Snapshot::default(),
+            revision: 0,
+            renamed: None,
             view,
             open: HashSet::new(),
             rows: Vec::new(),
@@ -271,9 +284,17 @@ impl Sidebar {
         match result {
             Ok((revision, snapshot)) => {
                 self.snapshot = snapshot;
+                self.revision = revision;
                 self.error = None;
+                if self
+                    .renamed
+                    .as_ref()
+                    .is_some_and(|renamed| renamed.done_at.is_some_and(|at| revision >= at))
+                {
+                    self.renamed = None;
+                }
                 // An old copy may miss an item that a later write made. The next copy decides.
-                if revision == self.core.revision() {
+                if self.renamed.is_none() && revision == self.core.revision() {
                     let item = self.snapshot.nearest(self.view.item());
                     if &item != self.view.item() {
                         self.show_in_tree(item, cx);
@@ -293,6 +314,20 @@ impl Sidebar {
 
     fn rebuild(&mut self) {
         self.rows = self.snapshot.rows(&self.open);
+        if let Some(renamed) = &self.renamed {
+            // A rename onto an item that the tree has merges into its row.
+            self.rows.retain_mut(|row| {
+                let Some(item) = row.item.moved(&renamed.from, &renamed.to) else {
+                    return true;
+                };
+                if item != row.item && self.snapshot.has(&item) {
+                    return false;
+                }
+                row.name = item.name();
+                row.item = item;
+                true
+            });
+        }
         self.entries.clear();
         for (at, row) in self.rows.iter().enumerate() {
             let first = |kind: fn(&Item) -> bool| {
@@ -382,6 +417,49 @@ impl Sidebar {
         self.set_view(View::Tree(item), cx);
     }
 
+    /// Shows the row of `from` with the name of `to` and selects it, while the rename runs.
+    pub(crate) fn show_rename(&mut self, from: Item, to: Item, cx: &mut Context<Self>) {
+        self.open_moved(&from, &to);
+        self.renamed = Some(Renamed {
+            from,
+            to: to.clone(),
+            done_at: None,
+        });
+        self.show_in_tree(to, cx);
+    }
+
+    /// Ends the rename of [`Self::show_rename`] with the item on disk, or with `None` after a
+    /// fail. The row keeps the new name until the next read of the notes.
+    pub(crate) fn end_rename(&mut self, to: Option<Item>, cx: &mut Context<Self>) {
+        let Some(renamed) = self.renamed.take() else {
+            return;
+        };
+        let Some(to) = to else {
+            self.show_in_tree(renamed.from, cx);
+            return;
+        };
+        self.open_moved(&renamed.from, &to);
+        let done_at = self.core.revision();
+        if self.revision < done_at {
+            self.renamed = Some(Renamed {
+                from: renamed.from,
+                to: to.clone(),
+                done_at: Some(done_at),
+            });
+        }
+        self.show_in_tree(to, cx);
+    }
+
+    /// Opens the items below `to` that are open below `from`.
+    fn open_moved(&mut self, from: &Item, to: &Item) {
+        let moved: Vec<Item> = self
+            .open
+            .iter()
+            .filter_map(|item| item.moved(from, to))
+            .collect();
+        self.open.extend(moved);
+    }
+
     fn set_view(&mut self, view: View, cx: &mut Context<Self>) {
         if self.view != view {
             self.view = view;
@@ -416,10 +494,7 @@ impl Sidebar {
     pub(crate) fn rename(&mut self, item: Item, window: &mut Window, cx: &mut Context<Self>) {
         let name = match &item {
             Item::All => return,
-            Item::Folder(folder) => folder
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_default(),
+            Item::Folder(_) => item.name(),
             Item::Tag(tag) => tag.clone(),
         };
         self.show_in_tree(item.clone(), cx);
@@ -900,10 +975,7 @@ impl Render for Sidebar {
             View::List(item) => {
                 let name = match item {
                     Item::All => text::ALL_NOTES.to_owned(),
-                    Item::Folder(path) => path
-                        .file_name()
-                        .map(|name| name.to_string_lossy().into_owned())
-                        .unwrap_or_default(),
+                    Item::Folder(_) => item.name(),
                     Item::Tag(name) => format!("#{name}"),
                 };
                 let label = item_label(item);

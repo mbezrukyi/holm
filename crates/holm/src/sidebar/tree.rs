@@ -36,6 +36,43 @@ impl Item {
             Self::All | Self::Tag(_) => Path::new(""),
         }
     }
+
+    /// The last part of the folder path or the tag name. "All notes" has none.
+    pub(crate) fn name(&self) -> String {
+        match self {
+            Self::All => String::new(),
+            Self::Folder(path) => path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            Self::Tag(name) => name
+                .rsplit_once('/')
+                .map_or(name.as_str(), |(_, name)| name)
+                .to_owned(),
+        }
+    }
+
+    /// This item after a rename of `from` to `to`, when it is `from` or below it.
+    pub(crate) fn moved(&self, from: &Self, to: &Self) -> Option<Self> {
+        match (self, from, to) {
+            (Self::Folder(path), Self::Folder(from), Self::Folder(to)) => {
+                let rest = path.strip_prefix(from).ok()?;
+                Some(Self::Folder(if rest.as_os_str().is_empty() {
+                    to.clone()
+                } else {
+                    to.join(rest)
+                }))
+            }
+            (Self::Tag(name), Self::Tag(from), Self::Tag(to)) => {
+                if name == from {
+                    return Some(Self::Tag(to.clone()));
+                }
+                let rest = name.strip_prefix(from.as_str())?.strip_prefix('/')?;
+                Some(Self::Tag(format!("{to}/{rest}")))
+            }
+            _ => None,
+        }
+    }
 }
 
 /// What the sidebar shows: the folder tree with a selected item, or the note list of an item.
@@ -131,10 +168,7 @@ impl Snapshot {
             }
             let item = Item::Folder(folder.clone());
             rows.push(Row {
-                name: folder
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_default(),
+                name: item.name(),
                 depth: folder.components().count() - 1,
                 count: counts.get(folder.as_path()).copied().unwrap_or(0),
                 has_children: self
@@ -155,11 +189,7 @@ fn tag_rows(tags: &[Tag], depth: usize, open: &HashSet<Item>, rows: &mut Vec<Row
         let item = Item::Tag(tag.name.clone());
         let is_open = open.contains(&item);
         rows.push(Row {
-            name: tag
-                .name
-                .rsplit_once('/')
-                .map_or(tag.name.as_str(), |(_, name)| name)
-                .to_owned(),
+            name: item.name(),
             depth,
             count: tag.notes,
             has_children: !tag.children.is_empty(),
@@ -325,6 +355,27 @@ mod tests {
         assert_eq!(Item::Tag("work/holm".into()).folder(), Path::new(""));
         assert!(snapshot().has(&Item::Tag("work/holm".into())));
         assert!(!snapshot().has(&Item::Folder("gone".into())));
+    }
+
+    #[test]
+    fn a_rename_moves_the_item_and_its_children() {
+        let folder = |path: &str| Item::Folder(path.into());
+        let tag = |name: &str| Item::Tag(name.into());
+        let (work, job) = (folder("work"), folder("job"));
+        assert_eq!(work.moved(&work, &job), Some(job.clone()));
+        assert_eq!(
+            folder("work/deep").moved(&work, &job),
+            Some(folder("job/deep"))
+        );
+        assert_eq!(folder("workshop").moved(&work, &job), None);
+        assert_eq!(tag("work").moved(&work, &job), None);
+        let (work, job) = (tag("work"), tag("home/job"));
+        assert_eq!(
+            tag("work/holm").moved(&work, &job),
+            Some(tag("home/job/holm"))
+        );
+        assert_eq!(tag("workshop").moved(&work, &job), None);
+        assert_eq!(tag("home/job/holm").name(), "holm");
     }
 
     #[test]

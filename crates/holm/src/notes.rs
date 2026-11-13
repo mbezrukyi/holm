@@ -174,6 +174,8 @@ impl NotesView {
             }
             SidebarEvent::RenameFolder { folder, name } => {
                 let (folder, name) = (folder.clone(), name.clone());
+                let from = Item::Folder(folder.clone());
+                let to = Item::Folder(folder.with_file_name(&name));
                 let job = self.pane.update(cx, |pane, cx| {
                     pane.run_move(
                         folder.clone(),
@@ -181,7 +183,7 @@ impl NotesView {
                         cx,
                     )
                 });
-                self.finish(job, Self::show_folder, window, cx);
+                self.finish_rename(from, to, job, |to| Item::Folder(to.clone()), window, cx);
             }
             SidebarEvent::RenameTag { from, to } => {
                 let (from, to) = (from.clone(), to.clone());
@@ -418,18 +420,17 @@ impl NotesView {
             Ask::Delete { target, .. } => self.delete(target, window, cx),
             Ask::RenameTag { from, to, .. } => {
                 let shown = holm_markdown::normalize_tag(&to);
-                self.run(
-                    window,
-                    cx,
-                    move |core| core.rename_tag(&from, &to),
-                    move |this, _, _, cx| {
-                        if let Some(tag) = shown {
-                            this.sidebar.update(cx, |sidebar, cx| {
-                                sidebar.show_in_tree(Item::Tag(tag), cx);
-                            });
-                        }
-                    },
-                );
+                let item = Item::Tag(from.clone());
+                let job = self.pane.update(cx, |pane, cx| {
+                    pane.run(move |core| core.rename_tag(&from, &to), cx)
+                });
+                match shown {
+                    Some(tag) => {
+                        let tag = Item::Tag(tag);
+                        self.finish_rename(item, tag.clone(), job, move |_| tag, window, cx);
+                    }
+                    None => self.finish(job, |_, _, _, _| {}, window, cx),
+                }
             }
             Ask::DeleteTag { tag, .. } => {
                 self.run(
@@ -520,6 +521,31 @@ impl NotesView {
     ) {
         let job = self.pane.update(cx, |pane, cx| pane.run(job, cx));
         self.finish(job, done, window, cx);
+    }
+
+    /// Shows the rename of `from` to `to` in the tree at once, and waits for `job`. `item`
+    /// gives the item on disk from the result of `job`.
+    fn finish_rename<T: 'static>(
+        &mut self,
+        from: Item,
+        to: Item,
+        job: Task<holm_core::Result<T>>,
+        item: impl FnOnce(&T) -> Item + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.sidebar
+            .update(cx, |sidebar, cx| sidebar.show_rename(from, to, cx));
+        let sidebar = self.sidebar.downgrade();
+        let job = cx.spawn(async move |_, cx| {
+            let result = job.await;
+            let to = result.as_ref().ok().map(item);
+            sidebar
+                .update(cx, |sidebar, cx| sidebar.end_rename(to, cx))
+                .ok();
+            result
+        });
+        self.finish(job, |_, _, _, _| {}, window, cx);
     }
 
     /// Waits for a file action and gives its result to `done`. An error shows in a quiet bar.

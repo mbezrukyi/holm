@@ -1042,6 +1042,125 @@ fn tags_rename_and_delete_in_all_notes_after_the_dialog(cx: &mut TestAppContext)
     );
 }
 
+/// Presses `keys` and runs all tasks, before the sidebar reads the notes again.
+fn keys_now(cx: &mut TestAppContext, handle: AnyWindowHandle, keys: &str) {
+    cx.simulate_keystrokes(handle, keys);
+    cx.run_until_parked();
+}
+
+/// The rows of the tree. The selected row has `*`.
+fn tree(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
+    labels(cx, handle, "sidebar", Role::TreeItem)
+}
+
+/// Starts the name field on the selected row and types `name` over the old name.
+fn type_new_name(cx: &mut TestAppContext, handle: AnyWindowHandle, name: &str) {
+    keys(cx, handle, "f2");
+    cx.update_window(handle, |_, window, cx| {
+        window.dispatch_action(Box::new(gpui_kit::component::input::SelectAll), cx);
+    })
+    .unwrap();
+    cx.simulate_input(handle, name);
+}
+
+#[gpui_kit::test]
+fn a_folder_rename_shows_the_new_name_at_once(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    fs::create_dir(notes_dir.join("work")).unwrap();
+    fs::write(notes_dir.join("Top.md"), "# Top\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    keys(cx, handle, "ctrl-shift-l escape down");
+    assert_eq!(tree(cx, handle), ["All notes", "work*"]);
+    type_new_name(cx, handle, "job");
+    keys_now(cx, handle, "enter");
+    assert_eq!(sidebar(cx, handle), "tree job");
+    assert_eq!(tree(cx, handle), ["All notes", "job*"]);
+    settle(cx);
+    assert_eq!(tree(cx, handle), ["All notes", "job*"]);
+    assert!(notes_dir.join("job").is_dir());
+}
+
+#[gpui_kit::test]
+fn a_folder_rename_on_a_clash_shows_the_name_on_disk(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    fs::create_dir(notes_dir.join("job")).unwrap();
+    fs::create_dir(notes_dir.join("work")).unwrap();
+    fs::write(notes_dir.join("Top.md"), "# Top\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    keys(cx, handle, "ctrl-shift-l escape down down");
+    assert_eq!(tree(cx, handle), ["All notes", "job", "work*"]);
+    type_new_name(cx, handle, "job");
+    keys_now(cx, handle, "enter");
+    assert_eq!(tree(cx, handle), ["All notes", "job", "job 2*"]);
+    settle(cx);
+    assert_eq!(tree(cx, handle), ["All notes", "job", "job 2*"]);
+    assert!(notes_dir.join("job 2").is_dir());
+}
+
+#[gpui_kit::test]
+fn a_failed_folder_rename_shows_the_old_name_and_the_error(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    fs::create_dir(notes_dir.join("work")).unwrap();
+    fs::write(notes_dir.join("Top.md"), "# Top\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    keys(cx, handle, "ctrl-shift-l escape down");
+    fs::remove_dir(notes_dir.join("work")).unwrap();
+    type_new_name(cx, handle, "job");
+    keys_now(cx, handle, "enter");
+    assert_eq!(tree(cx, handle), ["All notes", "work*"]);
+    assert_eq!(bars(cx, handle).len(), 1);
+}
+
+#[gpui_kit::test]
+fn a_tag_rename_shows_the_new_name_after_the_confirm(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    fs::write(notes_dir.join("A.md"), "---\ntags:\n  - old\n---\n# A\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    keys(cx, handle, "ctrl-shift-l escape down");
+    assert_eq!(tree(cx, handle), ["All notes", "#old*"]);
+    type_new_name(cx, handle, "new");
+    keys(cx, handle, "enter");
+    assert!(question(cx, handle).is_some());
+    assert_eq!(tree(cx, handle), ["All notes", "#old*"]);
+    keys(cx, handle, "escape");
+    assert_eq!(tree(cx, handle), ["All notes", "#old*"]);
+
+    type_new_name(cx, handle, "new");
+    keys(cx, handle, "enter");
+    keys_now(cx, handle, "enter");
+    assert_eq!(question(cx, handle), None);
+    assert_eq!(tree(cx, handle), ["All notes", "#new*"]);
+    settle(cx);
+    assert_eq!(tree(cx, handle), ["All notes", "#new*"]);
+}
+
+#[gpui_kit::test]
+fn a_tag_rename_onto_a_tag_merges_into_its_row_at_once(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    fs::write(notes_dir.join("A.md"), "---\ntags:\n  - old\n---\n# A\n").unwrap();
+    fs::write(notes_dir.join("B.md"), "---\ntags:\n  - new\n---\n# B\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    keys(cx, handle, "ctrl-shift-l escape down down");
+    assert_eq!(tree(cx, handle), ["All notes", "#new", "#old*"]);
+    type_new_name(cx, handle, "new");
+    keys(cx, handle, "enter");
+    keys_now(cx, handle, "enter");
+    assert_eq!(tree(cx, handle), ["All notes", "#new*"]);
+    settle(cx);
+    assert_eq!(tree(cx, handle), ["All notes", "#new*"]);
+    assert_eq!(fields(&notes_dir.join("A.md")).0, ["new"]);
+}
+
 #[gpui_kit::test]
 fn a_folder_delete_selects_the_parent_folder(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
