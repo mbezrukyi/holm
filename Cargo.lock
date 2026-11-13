@@ -3420,6 +3420,7 @@ dependencies = [
 name = "holm-core"
 version = "0.1.0"
 dependencies = [
+ "divan",
  "holm-markdown",
  "jiff",
  "notify",

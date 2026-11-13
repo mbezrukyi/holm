@@ -1677,3 +1677,6 @@ fn a_window_close_keeps_the_name_of_the_open_note(cx: &mut TestAppContext) {
     let settings = Config::load(fixture.config()).settings().clone();
     assert_eq!(settings.last_note, Some(PathBuf::from("Untitled.md")));
 }
+
+#[path = "window_speed.rs"]
+mod speed;

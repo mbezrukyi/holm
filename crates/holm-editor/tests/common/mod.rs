@@ -95,3 +95,11 @@ const CHUNK: &str = include_str!("../data/chunk.md");
 pub fn one_mb_note() -> String {
     CHUNK.repeat(1_000_000 / CHUNK.len() + 1)
 }
+
+/// 200 long lines that wrap, each with 12 file chips.
+pub fn chip_lines_note() -> String {
+    let part =
+        "some words before a file ![report](attachments/report.pdf) and more words after it, ";
+    let line = part.repeat(12);
+    vec![line.trim_end(); 200].join("\n\n")
+}

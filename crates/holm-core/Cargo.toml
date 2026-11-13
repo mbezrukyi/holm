@@ -17,7 +17,12 @@ tracing.workspace = true
 ulid.workspace = true
 
 [dev-dependencies]
+divan.workspace = true
 proptest.workspace = true
+
+[[bench]]
+name = "folder"
+harness = false
 
 [lints]
 workspace = true
