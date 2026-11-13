@@ -5,16 +5,15 @@
 //! creates a note. `Enter` picks a row, and `Esc` closes the window.
 
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use gpui_kit::base::actions::Cancel;
+use gpui_kit::component::IndexPath;
 use gpui_kit::component::command::{Command, CommandItem, CommandState};
 use gpui_kit::component::input::IndentInline;
-use gpui_kit::component::{ActiveTheme as _, IndexPath, h_flex};
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _, IntoElement,
-    ParentElement, Render, Role, SharedString, StatefulInteractiveElement as _, Styled,
-    TestSupportExt as _, Window, div, px,
+    ParentElement, Render, Role, StatefulInteractiveElement as _, TestSupportExt as _, Window, px,
 };
 use holm_core::Core;
 use holm_core::model::NoteInfo;
@@ -173,39 +172,20 @@ impl LinkPicker {
     }
 
     fn items(&self, cx: &Context<Self>) -> Vec<CommandItem> {
-        let muted = cx.theme().muted_foreground;
         self.rows
             .iter()
             .filter_map(|row| {
-                let (label, folder): (SharedString, Option<SharedString>) = match row {
+                Some(match row {
                     Row::Note(at) => {
                         let note = self.notes.get(*at)?;
-                        (note.title.clone().into(), folder(&note.path))
+                        popup::note_item(note, cx)
                     }
-                    Row::Heading(heading) => (heading.clone().into(), None),
-                    Row::Create(title) => (text::create_note(title).into(), None),
-                };
-                let shown = label.clone();
-                Some(CommandItem::new().label(label).child(move |_, _| {
-                    h_flex()
-                        .flex_1()
-                        .min_w_0()
-                        .gap_2()
-                        .child(div().truncate().child(shown.clone()))
-                        .children(folder.clone().map(|folder| {
-                            div().ml_auto().flex_none().text_color(muted).child(folder)
-                        }))
-                }))
+                    Row::Heading(heading) => popup::item(heading.clone(), cx),
+                    Row::Create(title) => popup::item(text::create_note(title), cx),
+                })
             })
             .collect()
     }
-}
-
-/// The folder of a note for its row, or `None` in the root folder.
-fn folder(path: &Path) -> Option<SharedString> {
-    path.parent()
-        .filter(|folder| !folder.as_os_str().is_empty())
-        .map(|folder| folder.display().to_string().into())
 }
 
 fn load_headings(core: Core, path: PathBuf, cx: &mut Context<LinkPicker>) {

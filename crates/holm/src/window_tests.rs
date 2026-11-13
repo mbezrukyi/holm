@@ -1329,6 +1329,47 @@ fn quick_open_opens_a_note_by_its_title(cx: &mut TestAppContext) {
     assert_eq!(focus(cx, handle), "sidebar");
 }
 
+/// The folder in each option of the popup `id`, or `None` for an option with no folder.
+fn folders(cx: &mut TestAppContext, handle: AnyWindowHandle, id: &str) -> Vec<Option<String>> {
+    let id = id.to_owned();
+    screen(cx, handle, |window| {
+        let popup = window.within(id);
+        let labels = popup.find_all_by_role(Role::Label);
+        popup
+            .find_all_by_role(Role::ListBoxOption)
+            .iter()
+            .map(|option| {
+                labels
+                    .iter()
+                    .find(|label| label.path().starts_with(option.path()))
+                    .and_then(|label| label.label().map(str::to_owned))
+            })
+            .collect()
+    })
+}
+
+#[gpui_kit::test]
+fn quick_open_shows_the_folder_of_each_note(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes = fixture.notes();
+    fs::create_dir_all(notes.join("work/old")).unwrap();
+    fs::write(notes.join("Plan.md"), "# Plan\n").unwrap();
+    fs::write(notes.join("work/old/Beta.md"), "# Beta\n").unwrap();
+    set_time(&notes.join("Plan.md"), 300);
+    set_time(&notes.join("work/old/Beta.md"), 200);
+    let handle = open(cx, fixture.startup(None));
+
+    keys(cx, handle, "ctrl-shift-o");
+    assert_eq!(
+        labels(cx, handle, "quick-open", Role::ListBoxOption),
+        ["Plan*", "Beta"]
+    );
+    assert_eq!(
+        folders(cx, handle, "quick-open"),
+        [None, Some("work/old".to_owned())]
+    );
+}
+
 /// The id in the frontmatter of a note file.
 fn id_of(path: &Path) -> String {
     holm_markdown::Note::parse(&read(path))
@@ -1358,6 +1399,10 @@ fn the_link_picker_links_notes_headings_and_new_notes(cx: &mut TestAppContext) {
     keys(cx, handle, "ctrl-k");
     assert_eq!(question(cx, handle).as_deref(), Some(text::LINK_TO_NOTE));
     assert_eq!(options(cx), ["Alpha*", "Beta"]);
+    assert_eq!(
+        folders(cx, handle, "link-picker"),
+        [None, Some("work".to_owned())]
+    );
     cx.simulate_input(handle, "bet");
     settle(cx);
     assert_eq!(options(cx), ["Beta*", "Create “bet”"]);

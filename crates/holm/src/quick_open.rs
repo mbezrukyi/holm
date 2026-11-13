@@ -1,13 +1,14 @@
 //! Quick open: a small window that finds a note by its title.
 //!
 //! It matches every title that holds the typed text, and shows the first [`MAX_ROWS`] of them.
+//! Each row shows the folder of its note on the right.
 //! `↑` and `↓` pick a note, `Enter` opens it, and `Esc` closes the window.
 
 use std::path::PathBuf;
 
 use gpui_kit::base::actions::Cancel;
 use gpui_kit::component::IndexPath;
-use gpui_kit::component::command::{Command, CommandItem, CommandState};
+use gpui_kit::component::command::{Command, CommandState};
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _, IntoElement,
     ParentElement, Render, Role, StatefulInteractiveElement as _, TestSupportExt as _, Window, px,
@@ -78,7 +79,7 @@ impl Render for QuickOpen {
             .rows
             .iter()
             .filter_map(|at| self.notes.get(*at))
-            .map(|note| CommandItem::new().label(note.title.clone()));
+            .map(|note| popup::note_item(note, cx));
         let command = Command::new(&self.state)
             .items(items.collect::<Vec<_>>())
             .placeholder(text::QUICK_OPEN)

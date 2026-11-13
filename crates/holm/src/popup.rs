@@ -1,14 +1,19 @@
-//! The look of a small window over the notes: a dim layer over the whole window, and a
-//! panel in its middle. Also [`Dropdown`], a popup under a part of a row.
+//! The look of a small window over the notes: a dim layer over the whole window, a panel in
+//! its middle, and the rows of a list in the panel. Also [`Dropdown`], a popup under a part of
+//! a row.
 
 use std::cell::Cell;
+use std::path::Path;
 use std::rc::Rc;
 
-use gpui_kit::component::{ActiveTheme as _, v_flex};
+use gpui_kit::component::command::CommandItem;
+use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::{
     App, Bounds, Context, Div, FocusHandle, InteractiveElement as _, MouseButton, MouseDownEvent,
-    ParentElement as _, Pixels, Styled, Subscription, Window, div, px,
+    ParentElement as _, Pixels, Role, SharedString, StatefulInteractiveElement as _, Styled,
+    Subscription, TestSupportExt as _, Window, div, px,
 };
+use holm_core::model::NoteInfo;
 
 /// A layer over the whole window that centers its child.
 pub(crate) fn layer(cx: &App) -> Div {
@@ -39,6 +44,46 @@ pub(crate) fn empty(message: &'static str, cx: &App) -> Div {
         .py_2()
         .text_color(cx.theme().muted_foreground)
         .child(message)
+}
+
+/// A row of a list in the panel.
+pub(crate) fn item(label: impl Into<SharedString>, cx: &App) -> CommandItem {
+    row(label.into(), None, cx)
+}
+
+/// The row of a note: its title, and its folder on the right. A note in the root folder shows
+/// no folder.
+pub(crate) fn note_item(note: &NoteInfo, cx: &App) -> CommandItem {
+    row(note.title.clone().into(), folder(&note.path), cx)
+}
+
+fn row(label: SharedString, folder: Option<SharedString>, cx: &App) -> CommandItem {
+    let shown = label.clone();
+    let muted = cx.theme().muted_foreground;
+    CommandItem::new().label(label).child(move |_, _| {
+        h_flex()
+            .flex_1()
+            .min_w_0()
+            .gap_2()
+            .child(div().truncate().child(shown.clone()))
+            .children(folder.clone().map(|folder| {
+                div()
+                    .id("folder")
+                    .role(Role::Label)
+                    .aria_label(folder.clone())
+                    .test_support()
+                    .ml_auto()
+                    .flex_none()
+                    .text_color(muted)
+                    .child(folder)
+            }))
+    })
+}
+
+fn folder(note: &Path) -> Option<SharedString> {
+    note.parent()
+        .filter(|folder| !folder.as_os_str().is_empty())
+        .map(|folder| folder.display().to_string().into())
 }
 
 /// A popup under a part of a row, the opener. Its owner `T` decides when it is open.
