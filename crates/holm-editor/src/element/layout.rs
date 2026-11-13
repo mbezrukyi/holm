@@ -14,9 +14,9 @@ use holm_markdown::{Alignment, CalloutKind};
 
 use super::theme::{Place, Theme};
 use crate::highlight::{Highlighter, Tokens};
-use crate::model::{Cell, DisplayLine, LineKind, Look, Mark, Model, Run};
+use crate::model::{Cell, Chip, Detail, DisplayLine, Embed, LineKind, Look, Mark, Model, Run};
 
-/// Space above and below an image or a file card.
+/// Space above and below an image.
 pub(crate) const IMAGE_MARGIN: Pixels = px(4.);
 
 /// The widest the text column gets. A wider editor centers the column.
@@ -27,6 +27,13 @@ pub(crate) const SIDE_MARGIN: Pixels = px(32.);
 
 /// The font of code blocks and inline code.
 pub(crate) const CODE_FONT: &str = "Adwaita Mono";
+
+/// The size of the detail of a file chip, like the file size, as a part of the text size.
+const DETAIL_SCALE: f32 = 0.72;
+
+/// The widest the name in a file chip gets, as a part of the text size. A longer name loses
+/// chars in the middle.
+const CHIP_NAME_WIDTH: f32 = 18.;
 
 /// The size of code text, as a part of the text size.
 const CODE_SCALE: f32 = 0.9;
@@ -41,9 +48,6 @@ fn callout_name(kind: CalloutKind) -> &'static str {
         CalloutKind::Caution => "Caution",
     }
 }
-
-/// The text of the button on a file card.
-const OPEN: &str = "Open";
 
 /// Where the view starts: a source line, and how far its top lies above the view.
 #[derive(Clone, Copy, Debug, Default)]
@@ -113,7 +117,8 @@ pub(crate) struct LaidLine {
     pub(crate) height: Pixels,
     pub(crate) mark: Option<LaidMark>,
     pub(crate) images: Vec<LaidImage>,
-    pub(crate) cards: Vec<LaidCard>,
+    /// The file chips in the text row.
+    pub(crate) chips: Vec<LaidChip>,
 }
 
 pub(crate) struct LaidCell {
@@ -125,6 +130,7 @@ pub(crate) struct LaidCell {
     /// Where the text starts in the cell: the padding plus the move for the alignment.
     pub(crate) inset: Pixels,
     pub(crate) place: Place,
+    pub(crate) chips: Vec<LaidChip>,
 }
 
 pub(crate) struct LaidMark {
@@ -139,28 +145,120 @@ pub(crate) struct LaidImage {
     pub(crate) bounds: Bounds<Pixels>,
 }
 
-pub(crate) struct LaidCard {
-    pub(crate) path: PathBuf,
-    pub(crate) bounds: Bounds<Pixels>,
-    pub(crate) name: ShapedLine,
-    /// The file extension, in capital letters.
-    pub(crate) tag: ShapedLine,
-    pub(crate) open: ShapedLine,
-    pub(crate) button: Bounds<Pixels>,
+/// A file chip in a text, from [`Chip`].
+pub(crate) struct LaidChip {
+    /// The screen text of the whole chip.
+    pub(crate) range: Range<usize>,
+    /// The screen text that the icon covers.
+    pub(crate) icon_range: Range<usize>,
+    pub(crate) icon: Icon,
+    /// The room for the detail, and its text in a smaller size.
+    pub(crate) detail: Option<(Range<usize>, ShapedLine)>,
 }
 
-/// A part of the layout that a click acts on.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Hit {
-    /// A task box, with the source of its `[ ]`.
-    Task(Range<usize>),
-    /// The "Open" button of a file card.
-    Open(PathBuf),
+/// The icon of a file chip.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Icon {
+    File,
+    Folder,
 }
 
-/// The pixel sizes of image files, read once from their headers. `None` for a file that is not
-/// an image.
-pub(crate) type ImageSizes = HashMap<PathBuf, Option<Size<u32>>>;
+/// What a linked path is on the disk.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FileKind {
+    /// An image, with its size in pixels.
+    Image(Size<u32>),
+    Folder,
+    /// Any other file, with its size in bytes.
+    File(u64),
+    Missing,
+}
+
+impl FileKind {
+    /// Reads the kind of `path` from the disk. An image file gives its size from its header.
+    pub(crate) fn of(path: &Path) -> Self {
+        let Ok(meta) = path.metadata() else {
+            return Self::Missing;
+        };
+        if meta.is_dir() {
+            return Self::Folder;
+        }
+        imagesize::size(path).map_or(Self::File(meta.len()), |found| {
+            Self::Image(Size {
+                width: u32::try_from(found.width).unwrap_or(u32::MAX),
+                height: u32::try_from(found.height).unwrap_or(u32::MAX),
+            })
+        })
+    }
+}
+
+/// `name` as it is when it `fits`. Else the longest cut that fits, with `…` in place of chars
+/// in the middle. The extension and the few chars before it stay.
+fn shorten(name: &str, fits: impl Fn(&str) -> bool) -> String {
+    if fits(name) {
+        return name.to_owned();
+    }
+    let chars: Vec<char> = name.chars().collect();
+    let tail = name
+        .rfind('.')
+        .map_or(0, |dot| name[dot..].chars().count())
+        .saturating_add(3)
+        .min(chars.len());
+    let end: String = chars[chars.len() - tail..].iter().collect();
+    let head = chars.len() - tail;
+    let cut =
+        |keep: usize| -> String { chars[..keep].iter().collect::<String>() + "\u{2026}" + &end };
+    // The most chars from the start that still fit.
+    let (mut low, mut high) = (0, head);
+    while low < high {
+        let mid = (low + high).div_ceil(2);
+        if fits(&cut(mid)) {
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+    cut(low)
+}
+
+/// The counts of spaces of two widths that cover `width` with the least room to spare.
+fn room(width: f32, wide: f32, narrow: f32) -> (usize, usize) {
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss,
+        reason = "a few spaces"
+    )]
+    (0..=(width / wide).ceil() as usize)
+        .map(|count| {
+            let rest = (width - count as f32 * wide).max(0.);
+            let narrow_count = (rest / narrow).ceil() as usize;
+            let spare = count as f32 * wide + narrow_count as f32 * narrow - width;
+            (spare, count, narrow_count)
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map_or((0, 0), |(_, count, narrow_count)| (count, narrow_count))
+}
+
+/// A file size like `48 KB` or `2.1 MB`, with a no-break space.
+fn file_size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    #[allow(clippy::cast_precision_loss, reason = "one decimal is shown")]
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 999.5 && unit < UNITS.len() - 1 {
+        value /= 1000.;
+        unit += 1;
+    }
+    if unit == 0 || value >= 10. {
+        format!("{value:.0}\u{a0}{}", UNITS[unit])
+    } else {
+        format!("{value:.1}\u{a0}{}", UNITS[unit])
+    }
+}
+
+/// The kinds of linked paths, each read once.
+pub(crate) type FileKinds = HashMap<PathBuf, FileKind>;
 
 /// Shapes source lines for one frame.
 pub(crate) struct Shaper<'a> {
@@ -168,7 +266,7 @@ pub(crate) struct Shaper<'a> {
     /// The width of the text column.
     width: Pixels,
     folder: Option<&'a Path>,
-    sizes: &'a mut ImageSizes,
+    kinds: &'a mut FileKinds,
     highlighter: &'a mut Highlighter,
     theme: &'a Theme,
     /// The column widths of the tables in this frame, by the start of each table.
@@ -181,7 +279,7 @@ impl<'a> Shaper<'a> {
         style: TextStyle,
         width: Pixels,
         folder: Option<&'a Path>,
-        sizes: &'a mut ImageSizes,
+        kinds: &'a mut FileKinds,
         highlighter: &'a mut Highlighter,
         theme: &'a Theme,
     ) -> Self {
@@ -189,7 +287,7 @@ impl<'a> Shaper<'a> {
             style,
             width,
             folder,
-            sizes,
+            kinds,
             highlighter,
             theme,
             tables: HashMap::new(),
@@ -203,7 +301,7 @@ impl Shaper<'_> {
     }
 
     pub(crate) fn line(&mut self, model: &Model, line: usize, window: &Window) -> LaidLine {
-        let display = model.display_line(line);
+        let display = model.display_line(line, &mut |target| self.embed(target, window));
         let base = self.font_size(window);
         let base_height = window.line_height();
         let scale = match display.heading {
@@ -245,34 +343,25 @@ impl Shaper<'_> {
 
         let mut height = pad + text_height;
         let mut images = Vec::new();
-        let mut cards = Vec::new();
-        for file in &display.files {
-            let path = match self.folder {
-                Some(folder) => folder.join(file),
-                None => PathBuf::from(file),
+        for file in &display.images {
+            let path = self.path_of(file);
+            let FileKind::Image(found) = self.kind(&path) else {
+                continue;
             };
-            if let Some(found) = self.image_size(&path) {
-                #[allow(clippy::cast_precision_loss)]
-                let image_size = size(px(found.width as f32), px(found.height as f32));
-                let fit = (width / image_size.width).min(1.);
-                let bounds = Bounds::new(
-                    point(left, height + IMAGE_MARGIN),
-                    size(image_size.width * fit, image_size.height * fit),
-                );
-                height = bounds.bottom() + IMAGE_MARGIN;
-                images.push(LaidImage { path, bounds });
-            } else {
-                let card = self.card(
-                    path,
-                    point(left, height + IMAGE_MARGIN),
-                    width,
-                    base,
-                    window,
-                );
-                height = card.bounds.bottom() + IMAGE_MARGIN;
-                cards.push(card);
-            }
+            #[allow(clippy::cast_precision_loss)]
+            let image_size = size(px(found.width as f32), px(found.height as f32));
+            let fit = (width / image_size.width).min(1.);
+            let bounds = Bounds::new(
+                point(left, height + IMAGE_MARGIN),
+                size(image_size.width * fit, image_size.height * fit),
+            );
+            height = bounds.bottom() + IMAGE_MARGIN;
+            images.push(LaidImage { path, bounds });
         }
+        let chips = match &content {
+            Content::Text(_) => self.chips(&display.shown.chips, font_size, window),
+            _ => Vec::new(),
+        };
         if let LineKind::Code { fence: true, .. } = display.kind
             && !display.raw
         {
@@ -296,7 +385,7 @@ impl Shaper<'_> {
             height,
             mark,
             images,
-            cards,
+            chips,
         }
     }
 
@@ -363,7 +452,7 @@ impl Shaper<'_> {
                 shape(&display.shown.text, &runs, width, font_size * CODE_SCALE)
                     .map_or(Content::Empty, Content::Text)
             }
-            _ if display.shown.text.is_empty() && !display.files.is_empty() => Content::Empty,
+            _ if display.shown.text.is_empty() && !display.images.is_empty() => Content::Empty,
             _ => {
                 let runs = self.runs(&display.shown.runs, display);
                 shape(&display.shown.text, &runs, width, font_size)
@@ -470,7 +559,7 @@ impl Shaper<'_> {
         let pad = font_size;
         let mut natural: Vec<Pixels> = Vec::new();
         for line in model.line_of(table.start)..=model.line_of(table.end) {
-            let display = model.display_line(line);
+            let display = model.display_line(line, &mut |target| self.embed(target, window));
             let LineKind::Row { cells, head, .. } = &display.kind else {
                 continue;
             };
@@ -502,7 +591,7 @@ impl Shaper<'_> {
     }
 
     fn row(
-        &self,
+        &mut self,
         cells: &[Cell],
         head: bool,
         columns: &[Pixels],
@@ -552,6 +641,7 @@ impl Shaper<'_> {
                 width,
                 inset: pad + shift,
                 place: cell_place(head),
+                chips: self.chips(&cell.shown.chips, font_size, window),
             });
             x += width;
         }
@@ -630,71 +720,84 @@ impl Shaper<'_> {
         }
     }
 
-    fn image_size(&mut self, path: &Path) -> Option<Size<u32>> {
-        *self.sizes.entry(path.to_owned()).or_insert_with(|| {
-            imagesize::size(path).ok().map(|found| Size {
-                width: u32::try_from(found.width).unwrap_or(u32::MAX),
-                height: u32::try_from(found.height).unwrap_or(u32::MAX),
-            })
-        })
+    /// The path of a link target. A relative target starts at the folder of the note.
+    fn path_of(&self, target: &str) -> PathBuf {
+        match self.folder {
+            Some(folder) => folder.join(target),
+            None => PathBuf::from(target),
+        }
     }
 
-    fn card(
-        &self,
-        path: PathBuf,
-        origin: Point<Pixels>,
-        width: Pixels,
-        base: Pixels,
-        window: &Window,
-    ) -> LaidCard {
-        let line = |text: String, bold: bool, code: bool, color, font_size: Pixels| {
-            let mut run_font = self.style.font();
-            if bold {
-                run_font.weight = FontWeight::BOLD;
-            }
-            if code {
-                run_font.family = CODE_FONT.into();
-            }
-            let run = TextRun {
-                len: text.len(),
-                font: run_font,
-                color,
-                background_color: None,
-                underline: None,
-                strikethrough: None,
-            };
-            window
-                .text_system()
-                .shape_line(text.into(), font_size, &[run], None)
-        };
-        let name = path
-            .file_name()
-            .map_or_else(|| path.to_string_lossy(), |name| name.to_string_lossy())
-            .into_owned();
-        let tag = path
-            .extension()
-            .map(|ext| ext.to_string_lossy().to_uppercase())
-            .unwrap_or_default();
-        let tag: String = tag.chars().take(4).collect();
-        let height = base * 3.2;
-        let bounds = Bounds::new(origin, size(width.min(base * 26.), height));
-        let open = line(OPEN.to_owned(), false, false, self.theme.link, base * 0.9);
-        let button_size = size(open.width() + base * 1.6, base * 1.8);
-        let button = Bounds::new(
-            point(
-                bounds.right() - button_size.width - base * 0.7,
-                bounds.top() + (height - button_size.height) / 2.,
-            ),
-            button_size,
-        );
-        LaidCard {
-            path,
-            bounds,
-            name: line(name, true, false, self.theme.text, base),
-            tag: line(tag, true, true, self.theme.muted, base * 0.6),
-            open,
-            button,
+    fn kind(&mut self, path: &Path) -> FileKind {
+        *self
+            .kinds
+            .entry(path.to_owned())
+            .or_insert_with(|| FileKind::of(path))
+    }
+
+    /// How a link to `target` shows. A file chip keeps room for the file size.
+    fn embed(&mut self, target: &str, window: &Window) -> Embed {
+        let path = self.path_of(target);
+        let kind = self.kind(&path);
+        if let FileKind::Image(_) = kind {
+            return Embed::Image;
         }
+        // All widths grow with the text size, so they fit in a heading too.
+        let base = self.font_size(window);
+        let full = Path::new(target)
+            .file_name()
+            .map_or_else(|| target.into(), |name| name.to_string_lossy());
+        let name = shorten(&full, |name| {
+            self.width_of(name, base, window) <= base * CHIP_NAME_WIDTH
+        });
+        let FileKind::File(bytes) = kind else {
+            return Embed::Chip { name, detail: None };
+        };
+        let text = file_size(bytes);
+        let width = f32::from(self.width_of(&text, base * DETAIL_SCALE, window));
+        let wide = f32::from(self.width_of("\u{a0}", base, window)).max(1.);
+        let narrow = f32::from(self.width_of("\u{202f}", base, window)).max(1.);
+        let (wide, narrow) = room(width, wide, narrow);
+        Embed::Chip {
+            name,
+            detail: Some(Detail { text, wide, narrow }),
+        }
+    }
+
+    fn chips(&mut self, chips: &[Chip], font_size: Pixels, window: &Window) -> Vec<LaidChip> {
+        chips
+            .iter()
+            .map(|chip| {
+                let path = self.path_of(&chip.target);
+                let icon = match self.kind(&path) {
+                    FileKind::Folder => Icon::Folder,
+                    _ => Icon::File,
+                };
+                let detail = chip.detail.as_ref().map(|(room, text)| {
+                    let run = TextRun {
+                        len: text.len(),
+                        font: self.style.font(),
+                        color: self.theme.text.opacity(0.7),
+                        background_color: None,
+                        underline: None,
+                        strikethrough: None,
+                    };
+                    let shaped = window.text_system().shape_line(
+                        text.clone().into(),
+                        font_size * DETAIL_SCALE,
+                        &[run],
+                        None,
+                    );
+                    (room.clone(), shaped)
+                });
+                LaidChip {
+                    range: chip.range.clone(),
+                    icon_range: chip.icon(),
+                    icon,
+                    detail,
+                }
+            })
+            .collect()
     }
 }
 
@@ -911,8 +1014,8 @@ impl Layout {
         }
     }
 
-    /// The task box or the file card button under a window point.
-    pub(crate) fn hit(&self, position: Point<Pixels>) -> Option<Hit> {
+    /// The source of the `[ ]` of the task box under a window point.
+    pub(crate) fn task_at(&self, position: Point<Pixels>) -> Option<Range<usize>> {
         let local = position - self.bounds.origin;
         let line = self
             .lines
@@ -923,12 +1026,9 @@ impl Layout {
             && let Mark::Task { range, .. } = &mark.mark
             && mark.bounds.dilate(px(3.)).contains(&at)
         {
-            return Some(Hit::Task(range.clone()));
+            return Some(range.clone());
         }
-        line.cards
-            .iter()
-            .find(|card| card.button.contains(&at))
-            .map(|card| Hit::Open(card.path.clone()))
+        None
     }
 
     /// The source offset one text row above or below the cursor, near `goal_x`.
@@ -1141,4 +1241,51 @@ impl Layout {
 /// Whether `offset` is in `range`, with its end.
 fn contains(range: &Range<usize>, offset: usize) -> bool {
     range.start <= offset && offset <= range.end
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn data(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join(name)
+    }
+
+    #[test]
+    fn the_kind_of_a_path_comes_from_the_disk() {
+        assert_eq!(FileKind::of(&data("data")), FileKind::Folder);
+        let path = data("data/chunk.md");
+        let size = path.metadata().map(|meta| meta.len()).unwrap_or_default();
+        assert_eq!(FileKind::of(&path), FileKind::File(size));
+        assert_eq!(FileKind::of(&data("data/gone.pdf")), FileKind::Missing);
+        assert!(matches!(
+            FileKind::of(&data("data/cat.png")),
+            FileKind::Image(_)
+        ));
+    }
+
+    #[test]
+    fn the_room_of_a_detail_covers_it_with_little_to_spare() {
+        assert_eq!(room(10., 5., 3.), (2, 0));
+        assert_eq!(room(11., 5., 3.), (1, 2));
+        assert_eq!(room(1., 5., 3.), (0, 1));
+    }
+
+    #[test]
+    fn a_long_name_loses_chars_in_the_middle() {
+        let fits = |name: &str| name.chars().count() <= 12;
+        assert_eq!(shorten("short.txt", fits), "short.txt");
+        assert_eq!(shorten("aaaaaaaaaaaaaaaa.txt", fits), "aaaa\u{2026}aaa.txt");
+        assert_eq!(shorten("abcdefghijklmnopq", fits), "abcdefgh\u{2026}opq");
+    }
+
+    #[test]
+    fn file_sizes_have_a_unit_and_at_most_one_decimal() {
+        assert_eq!(file_size(512), "512\u{a0}B");
+        assert_eq!(file_size(48_000), "48\u{a0}KB");
+        assert_eq!(file_size(2_140_000), "2.1\u{a0}MB");
+        assert_eq!(file_size(999_999), "1.0\u{a0}MB");
+    }
 }

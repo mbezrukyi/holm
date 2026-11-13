@@ -14,11 +14,11 @@ use gpui_kit::{
 use holm_markdown::{Color, Target};
 
 use crate::color::{self, ColorWindow, Paint, Step};
-use crate::element::{EditorElement, Hit, ImageSizes, Layout, Scroll, Theme};
+use crate::element::{EditorElement, FileKind, FileKinds, Layout, Scroll, Theme};
 use crate::find::Find;
 use crate::highlight::{self, Highlighter};
 use crate::ink;
-use crate::model::{Caret, Format, GoalRow, Model};
+use crate::model::{Caret, Format, GoalRow, LinkForm, Model};
 
 /// Spaces that Tab types outside a list.
 const TAB: &str = "    ";
@@ -41,7 +41,7 @@ const DRAG_START: Pixels = px(4.);
 /// into LF. Markdown syntax shows on the lines with the cursor or the selection, and hides on
 /// all other lines. A code block or a table shows its whole source while the cursor or the
 /// selection is in it. Embedded images show below their line, and other embedded files show
-/// as file cards.
+/// as file chips in their line.
 ///
 /// The editor takes its font, size and line height from the text style of its parent element.
 /// It draws its own background and centers a text column of a fixed width. The app sets light
@@ -81,7 +81,7 @@ pub struct Editor {
     /// The count of text changes, to know when [`Self::layout`] is out of date.
     pub(crate) version: u64,
     pub(crate) layout: Option<Rc<Layout>>,
-    pub(crate) image_sizes: ImageSizes,
+    pub(crate) file_kinds: FileKinds,
     pub(crate) highlighter: Highlighter,
     pub(crate) theme: Theme,
     drag: Option<Drag>,
@@ -159,7 +159,8 @@ pub struct UpFromStart;
 
 impl EventEmitter<UpFromStart> for Editor {}
 
-/// The user asked to open a file: with the "Open" button of a file card, or a file link.
+/// The user asked to open a file or a folder: with Ctrl and a click on a file link or a file
+/// chip, or Ctrl+Enter at the cursor.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpenFile {
     /// The path of the file. A relative link starts at the folder of the note.
@@ -216,7 +217,7 @@ impl EventEmitter<CustomColors> for Editor {}
 pub struct CursorLink {
     /// Where the link points.
     pub target: Target,
-    /// Whether it is `![..](..)`: an image or a file card.
+    /// Whether it is `![..](..)`: an image or a file chip.
     pub embedded: bool,
 }
 
@@ -246,7 +247,7 @@ impl Editor {
             autoscroll: false,
             version: 0,
             layout: None,
-            image_sizes: ImageSizes::default(),
+            file_kinds: FileKinds::default(),
             highlighter: Highlighter::default(),
             theme: Theme::new(Appearance::Light),
             drag: None,
@@ -310,7 +311,7 @@ impl Editor {
     /// Sets the folder of the note. Relative paths of embedded files start there.
     pub fn set_folder(&mut self, folder: Option<PathBuf>, cx: &mut Context<Self>) {
         self.folder = folder;
-        self.image_sizes.clear();
+        self.file_kinds.clear();
         cx.notify();
     }
 
@@ -339,8 +340,10 @@ impl Editor {
 
     /// Puts a link to `target` in place of the selection, as one undo step, and the cursor
     /// after it. The selection becomes the link text. With no selection, `text` does, written
-    /// so that it shows as it is. `embedded` writes `![..](..)` on a line of its own, which shows
-    /// an image or a file card. It sends [`Changed`].
+    /// so that it shows as it is. `embedded` writes `![..](..)`. A link to an image gets a line
+    /// of its own, and the image shows under it. A link to another file or a folder stays at
+    /// the cursor, as a file chip, with a space on each side where the text needs one.
+    /// It sends [`Changed`].
     pub fn insert_link(
         &mut self,
         text: &str,
@@ -348,7 +351,12 @@ impl Editor {
         embedded: bool,
         cx: &mut Context<Self>,
     ) {
-        let changed = self.model.insert_link(text, target, embedded);
+        let form = match target {
+            _ if !embedded => LinkForm::Text,
+            Target::File(path) if self.is_image(path) => LinkForm::Block,
+            _ => LinkForm::Inline,
+        };
+        let changed = self.model.insert_link(text, target, form);
         self.finish(changed, cx);
     }
 
@@ -413,6 +421,24 @@ impl Editor {
         self.moved(cx);
     }
 
+    /// The path of a file link. A relative link starts at the folder of the note.
+    fn file_path(&self, path: &str) -> PathBuf {
+        match &self.folder {
+            Some(folder) => folder.join(path),
+            None => PathBuf::from(path),
+        }
+    }
+
+    /// Whether a file link points to an image.
+    fn is_image(&mut self, path: &str) -> bool {
+        let path = self.file_path(path);
+        let kind = *self
+            .file_kinds
+            .entry(path)
+            .or_insert_with_key(|path| FileKind::of(path));
+        matches!(kind, FileKind::Image(_))
+    }
+
     /// Opens `target`: moves to a heading in this note, or tells the app.
     fn open_link(&mut self, target: Target, cx: &mut Context<Self>) {
         match target {
@@ -423,10 +449,7 @@ impl Editor {
                 }
             }
             Target::File(path) => {
-                let path = match &self.folder {
-                    Some(folder) => folder.join(path),
-                    None => PathBuf::from(path),
-                };
+                let path = self.file_path(&path);
                 cx.emit(OpenFile { path });
             }
             target => cx.emit(OpenLink { target }),
@@ -853,24 +876,17 @@ impl Editor {
         window.focus(&self.focus, cx);
         self.find = None;
         self.color = None;
-        let hit = self
+        let task = self
             .current_layout()
-            .and_then(|layout| layout.hit(event.position));
-        match hit {
-            Some(Hit::Task(range)) => {
-                // The cursor stays, so the view does not move.
-                if self.model.toggle_task(&range) {
-                    self.version += 1;
-                    cx.emit(Changed);
-                    cx.notify();
-                }
-                return;
+            .and_then(|layout| layout.task_at(event.position));
+        if let Some(range) = task {
+            // The cursor stays, so the view does not move.
+            if self.model.toggle_task(&range) {
+                self.version += 1;
+                cx.emit(Changed);
+                cx.notify();
             }
-            Some(Hit::Open(path)) => {
-                cx.emit(OpenFile { path });
-                return;
-            }
-            None => {}
+            return;
         }
         let Some(offset) = self.offset_at(event.position) else {
             return;

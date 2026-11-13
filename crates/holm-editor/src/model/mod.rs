@@ -19,10 +19,13 @@ use holm_markdown::{BlockKind, Body, Target};
 use ropey::{LineType, Rope};
 
 pub(crate) use caret::{Caret, GoalRow};
-pub(crate) use display::{Cell, DisplayLine, Highlight, LineKind, Look, Mark, Quote, Run};
+pub(crate) use display::{
+    Cell, Chip, Detail, DisplayLine, Embed, Highlight, LineKind, Look, Mark, Quote, Run,
+};
 pub(crate) use format::Format;
 pub(crate) use history::Group;
 use history::{Change, Ends, History, Step};
+pub(crate) use links::LinkForm;
 
 const LF: LineType = LineType::LF;
 
@@ -581,6 +584,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use display::plain_chip;
     use proptest::prelude::*;
 
     fn now() -> Instant {
@@ -826,7 +830,7 @@ mod tests {
     #[test]
     fn syntax_hides_away_from_the_cursor_line() {
         let model = model_at("a **b** c\n\nnext", 12);
-        let line = model.display_line(0);
+        let line = model.display_line(0, &mut plain_chip);
         assert!(!line.raw);
         assert_eq!(line.shown.text, "a b c");
         assert_eq!(line.shown.runs.len(), 3);
@@ -840,7 +844,7 @@ mod tests {
     #[test]
     fn syntax_shows_on_the_cursor_line() {
         let model = model_at("a **b** c\n\nnext", 1);
-        let line = model.display_line(0);
+        let line = model.display_line(0, &mut plain_chip);
         assert!(line.raw);
         assert_eq!(line.shown.text, "a **b** c");
         assert!(line.shown.runs[1].look.syntax);
@@ -851,24 +855,72 @@ mod tests {
     fn a_selection_shows_syntax_on_each_line_it_touches() {
         let mut model = Model::new("**a**\n**b**\n**c**");
         model.select(2..8);
-        assert!(model.display_line(0).raw);
-        assert!(model.display_line(1).raw);
-        assert!(!model.display_line(2).raw);
+        assert!(model.display_line(0, &mut plain_chip).raw);
+        assert!(model.display_line(1, &mut plain_chip).raw);
+        assert!(!model.display_line(2, &mut plain_chip).raw);
     }
 
     #[test]
-    fn embedded_files_hide_and_are_listed() {
+    fn embedded_images_hide_and_are_listed() {
         let model = model_at("top\n\n![cat](cat.png)\n", 0);
-        let line = model.display_line(2);
+        let line = model.display_line(2, &mut |_| Embed::Image);
         assert_eq!(line.shown.text, "");
-        assert_eq!(line.files, ["cat.png"]);
+        assert_eq!(line.images, ["cat.png"]);
+        assert_eq!(line.shown.chips, []);
         assert_eq!(line.to_source(0), line.source().start);
+    }
+
+    #[test]
+    fn an_embedded_file_shows_as_a_chip_in_its_line() {
+        let text = "top\n\nSee ![f](docs/report.pdf) now\n";
+        let model = model_at(text, 0);
+        let detail = Detail {
+            text: "48 KB".to_owned(),
+            wide: 1,
+            narrow: 2,
+        };
+        let line = model.display_line(2, &mut |_| Embed::Chip {
+            name: "report.pdf".to_owned(),
+            detail: Some(detail.clone()),
+        });
+        assert_eq!(line.images, [] as [String; 0]);
+        let [chip] = line.shown.chips.as_slice() else {
+            panic!("one chip");
+        };
+        assert_eq!(chip.target, "docs/report.pdf");
+        assert_eq!(
+            &line.shown.text[chip.range.clone()],
+            "\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}report.pdf\u{a0}\u{a0}\u{202f}\u{202f}\u{a0}\u{a0}"
+        );
+        assert_eq!(line.shown.text[chip.icon()].chars().count(), 6);
+        let Some((room, detail_text)) = &chip.detail else {
+            panic!("a detail");
+        };
+        assert_eq!(detail_text, &detail.text);
+        assert_eq!(line.shown.text[room.clone()].chars().count(), 3);
+        assert_eq!(&line.shown.text[..chip.range.start], "See ");
+        assert_eq!(&line.shown.text[chip.range.end..], " now");
+        let bang = text.find('!').unwrap_or_default();
+        assert_eq!(line.to_source(chip.range.start + 6), bang);
+        assert_eq!(line.to_display(bang + 3), chip.range.start);
+        assert_eq!(
+            line.to_source(chip.range.end),
+            text.find(" now").unwrap_or_default()
+        );
+    }
+
+    #[test]
+    fn a_line_with_the_cursor_shows_the_chip_as_markdown() {
+        let model = model_at("![f](report.pdf)\n", 3);
+        let line = model.display_line(0, &mut plain_chip);
+        assert_eq!(line.shown.text, "![f](report.pdf)");
+        assert_eq!(line.shown.chips, []);
     }
 
     #[test]
     fn heading_lines_know_their_level() {
         let model = model_at("x\n\n## Plans\n", 0);
-        let line = model.display_line(2);
+        let line = model.display_line(2, &mut plain_chip);
         assert_eq!(line.heading, Some(2));
         assert_eq!(line.shown.text, "Plans");
     }
@@ -1033,7 +1085,7 @@ mod tests {
         fn screen_lines_map_back_into_their_source(start in text(), at in 0..60usize) {
             let model = model_at(&start, at);
             for line in 0..model.line_count() {
-                let display = model.display_line(line);
+                let display = model.display_line(line, &mut plain_chip);
                 let source = display.source();
                 prop_assert_eq!(display.shown.runs.iter().map(|r| r.len).sum::<usize>(), display.shown.text.len());
                 for offset in (0..=display.shown.text.len()).filter(|o| display.shown.text.is_char_boundary(*o)) {

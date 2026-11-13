@@ -16,6 +16,8 @@ pub(crate) struct Look {
     pub(crate) underline: bool,
     pub(crate) code: bool,
     pub(crate) link: bool,
+    /// The text of a file chip. It has no underline.
+    pub(crate) chip: bool,
     /// The text of a link whose target is missing.
     pub(crate) broken: bool,
     /// Markdown syntax on a line that shows it.
@@ -46,9 +48,67 @@ pub(crate) struct Shown {
     pub(crate) text: String,
     /// The looks of `text`, in order. Their lengths add up to the length of `text`.
     pub(crate) runs: Vec<Run>,
+    /// The file chips in `text`, in order.
+    pub(crate) chips: Vec<Chip>,
     /// Where an empty text maps to.
     start: usize,
     segments: Vec<Segment>,
+}
+
+/// An embedded file that is not an image. It shows in the line as a chip: an icon and the
+/// file name. Its screen text is not in the source, and it all maps to the start of the link.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Chip {
+    /// The screen text of the whole chip.
+    pub(crate) range: Range<usize>,
+    /// The link target.
+    pub(crate) target: String,
+    /// The room for the detail, and its text.
+    pub(crate) detail: Option<(Range<usize>, String)>,
+}
+
+/// The padding of a chip before the name, with the room for the icon, and after the text.
+/// It is no-break spaces, because a wrap never breaks the text before one.
+const CHIP_START: &str = "\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}";
+const CHIP_END: &str = "\u{a0}\u{a0}";
+
+/// How an embedded file shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Embed {
+    /// An image under the line.
+    Image,
+    /// A chip in the line: a name, and a detail after it, like the file size.
+    Chip {
+        name: String,
+        detail: Option<Detail>,
+    },
+}
+
+/// A chip with the whole target as its name and no detail, for tests.
+#[cfg(test)]
+pub(crate) fn plain_chip(target: &str) -> Embed {
+    Embed::Chip {
+        name: target.to_owned(),
+        detail: None,
+    }
+}
+
+/// A small text after the name of a chip. A line of text has one font size, so the chip only
+/// keeps room for the detail: `wide` no-break spaces and `narrow` narrow no-break spaces. The
+/// two widths together can match the text closely. The editor paints the text there.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Detail {
+    pub(crate) text: String,
+    pub(crate) wide: usize,
+    pub(crate) narrow: usize,
+}
+
+/// An embedded file link on a line that shows as a chip.
+struct ChipLink<'a> {
+    start: usize,
+    target: &'a str,
+    name: String,
+    detail: Option<Detail>,
 }
 
 /// A part of the source that the screen shows.
@@ -66,8 +126,8 @@ pub(crate) struct DisplayLine {
     pub(crate) shown: Shown,
     /// The heading level, when the line is part of a heading.
     pub(crate) heading: Option<u8>,
-    /// The targets of the embedded files on the line, in order.
-    pub(crate) files: Vec<String>,
+    /// The targets of the embedded images on the line, in order. They show under the line.
+    pub(crate) images: Vec<String>,
     /// Whether the line shows its syntax.
     pub(crate) raw: bool,
     pub(crate) kind: LineKind,
@@ -138,9 +198,27 @@ pub(crate) enum Mark {
 }
 
 impl Model {
-    /// Line `line` as the screen shows it.
-    pub(crate) fn display_line(&self, line: usize) -> DisplayLine {
+    /// Line `line` as the screen shows it. `embed` tells how an embedded file with a target
+    /// shows.
+    pub(crate) fn display_line(
+        &self,
+        line: usize,
+        embed: &mut dyn FnMut(&str) -> Embed,
+    ) -> DisplayLine {
         let source = self.line_range(line);
+        let mut images = Vec::new();
+        let mut chips = Vec::new();
+        for (start, target) in self.files_in(&source) {
+            match embed(target) {
+                Embed::Image => images.push(target.to_owned()),
+                Embed::Chip { name, detail } => chips.push(ChipLink {
+                    start,
+                    target,
+                    name,
+                    detail,
+                }),
+            }
+        }
         let chain = self.blocks_of_line(&source);
         let from = chain.first().map_or(source.start, |b| b.range.start);
 
@@ -170,7 +248,7 @@ impl Model {
             items = self.lazy_items(line);
         }
 
-        let kind = self.line_kind(line, &source, &chain, raw);
+        let kind = self.line_kind(line, &source, &chain, raw, &chips);
         let mut mark = None;
         let mut list_prefix = None;
         if matches!(kind, LineKind::Text) {
@@ -190,7 +268,13 @@ impl Model {
                 start: source.start,
                 ..Shown::default()
             },
-            _ => self.shown(&source, from, raw, list_prefix.clone().filter(|_| !raw)),
+            _ => self.shown(
+                &source,
+                from,
+                raw,
+                list_prefix.clone().filter(|_| !raw),
+                &chips,
+            ),
         };
 
         DisplayLine {
@@ -199,7 +283,7 @@ impl Model {
                 BlockKind::Heading { level } => Some(level),
                 _ => None,
             }),
-            files: self.files_in(&source),
+            images,
             raw,
             kind,
             quotes,
@@ -284,6 +368,7 @@ impl Model {
         source: &Range<usize>,
         chain: &[&Block],
         raw: bool,
+        chips: &[ChipLink<'_>],
     ) -> LineKind {
         for block in chain.iter().rev() {
             match &block.kind {
@@ -291,7 +376,7 @@ impl Model {
                     return self.code_kind(line, block, language.as_deref(), *fenced);
                 }
                 BlockKind::Table { alignments } if !raw => {
-                    return self.table_kind(source, chain[0].range.start, block, alignments);
+                    return self.table_kind(source, chain[0].range.start, block, alignments, chips);
                 }
                 BlockKind::Rule if !raw => return LineKind::Rule,
                 BlockKind::Callout(kind) if !raw && self.line_of(block.range.start) == line => {
@@ -342,6 +427,7 @@ impl Model {
         from: usize,
         table: &Block,
         alignments: &[Alignment],
+        chips: &[ChipLink<'_>],
     ) -> LineKind {
         let row = table
             .children
@@ -364,7 +450,7 @@ impl Model {
                 let start = cell.range.start + text.len() - text.trim_start().len();
                 let end = cell.range.start + text.trim_end().len();
                 Cell {
-                    shown: self.shown(&(start..end.max(start)), from, false, None),
+                    shown: self.shown(&(start..end.max(start)), from, false, None, chips),
                     alignment,
                 }
             })
@@ -404,13 +490,15 @@ impl Model {
         (mark, end)
     }
 
-    /// The screen text of `range`. Without `raw`, it hides the syntax and `extra`.
+    /// The screen text of `range`. Without `raw`, it hides the syntax and `extra`, and shows
+    /// the `chips` that start in `range`.
     fn shown(
         &self,
         range: &Range<usize>,
         from: usize,
         raw: bool,
         extra: Option<Range<usize>>,
+        chips: &[ChipLink<'_>],
     ) -> Shown {
         let spans = self.body.spans();
         let spans: Vec<_> = spans[spans.partition_point(|s| s.range.start < from)
@@ -434,6 +522,12 @@ impl Model {
         for h in &hidden {
             cuts.extend([h.start, h.end]);
         }
+        let chips: &[ChipLink<'_>] = if raw { &[] } else { chips };
+        let mut chips = chips
+            .iter()
+            .filter(|chip| range.contains(&chip.start))
+            .peekable();
+        cuts.extend(chips.clone().map(|chip| chip.start));
         cuts.retain(|cut| range.contains(cut) || *cut == range.end);
         cuts.sort_unstable();
         cuts.dedup();
@@ -444,6 +538,9 @@ impl Model {
         };
         for piece in cuts.windows(2) {
             let piece = piece[0]..piece[1];
+            while let Some(chip) = chips.next_if(|chip| chip.start <= piece.start) {
+                shown.push_chip(chip);
+            }
             let syntax = hidden
                 .iter()
                 .any(|h| h.start <= piece.start && piece.end <= h.end);
@@ -470,14 +567,15 @@ impl Model {
         shown
     }
 
-    fn files_in(&self, line: &Range<usize>) -> Vec<String> {
+    /// The start and the target of each embedded file on `line`.
+    fn files_in(&self, line: &Range<usize>) -> Vec<(usize, &str)> {
         let links = self.body.links();
         links[links.partition_point(|l| l.range.start < line.start)
             ..links.partition_point(|l| l.range.start < line.end)]
             .iter()
             .filter(|link| link.embedded)
             .filter_map(|link| match &link.target {
-                Target::File(path) => Some(path.clone()),
+                Target::File(path) => Some((link.range.start, path.as_str())),
                 _ => None,
             })
             .collect()
@@ -519,6 +617,43 @@ impl Shown {
         self.text.push_str(&source[piece]);
     }
 
+    /// Adds a chip, which maps to the start of its link.
+    fn push_chip(&mut self, chip: &ChipLink<'_>) {
+        let start = self.text.len();
+        self.segments.push(Segment {
+            display: start,
+            source: chip.start,
+            len: 0,
+        });
+        let room = Look {
+            chip: true,
+            ..Look::default()
+        };
+        let label = Look { link: true, ..room };
+        let push = |shown: &mut Self, text: &str, look| {
+            shown.text.push_str(text);
+            shown.runs.push(Run {
+                len: text.len(),
+                look,
+            });
+        };
+        push(self, CHIP_START, room);
+        push(self, &chip.name, label);
+        let detail = chip.detail.as_ref().map(|detail| {
+            push(self, "\u{a0}", room);
+            let from = self.text.len();
+            let space = "\u{a0}".repeat(detail.wide) + &"\u{202f}".repeat(detail.narrow);
+            push(self, &space, room);
+            (from..self.text.len(), detail.text.clone())
+        });
+        push(self, CHIP_END, room);
+        self.chips.push(Chip {
+            range: start..self.text.len(),
+            target: chip.target.to_owned(),
+            detail,
+        });
+    }
+
     /// The source offset for a screen offset. Between two visible parts it picks the later one.
     pub(crate) fn to_source(&self, display: usize) -> usize {
         let Some(ix) = self
@@ -543,6 +678,13 @@ impl Shown {
         };
         let segment = self.segments[ix];
         segment.display + (source - segment.source).min(segment.len)
+    }
+}
+
+impl Chip {
+    /// The screen text that holds the icon, with the padding on its left and right.
+    pub(crate) fn icon(&self) -> Range<usize> {
+        self.range.start..self.range.start + CHIP_START.len()
     }
 }
 
@@ -576,15 +718,18 @@ mod tests {
     #[test]
     fn list_items_hide_their_markers_and_know_their_depth() {
         let model = model_at("x\n\n- one\n  - two\n1. three\n- [x] done\n", 0);
-        let one = model.display_line(2);
+        let one = model.display_line(2, &mut plain_chip);
         assert_eq!(one.shown.text, "one");
         assert_eq!(one.mark, Some(Mark::Bullet));
         assert_eq!(one.depth, 1);
-        let two = model.display_line(3);
+        let two = model.display_line(3, &mut plain_chip);
         assert_eq!(two.shown.text, "two");
         assert_eq!(two.depth, 2);
-        assert_eq!(model.display_line(4).mark, Some(Mark::Number("1.".into())));
-        let done = model.display_line(5);
+        assert_eq!(
+            model.display_line(4, &mut plain_chip).mark,
+            Some(Mark::Number("1.".into()))
+        );
+        let done = model.display_line(5, &mut plain_chip);
         assert_eq!(done.shown.text, "done");
         assert!(matches!(done.mark, Some(Mark::Task { checked: true, .. })));
     }
@@ -592,7 +737,7 @@ mod tests {
     #[test]
     fn a_list_line_with_the_cursor_shows_its_marker() {
         let model = model_at("- one\n", 3);
-        let line = model.display_line(0);
+        let line = model.display_line(0, &mut plain_chip);
         assert_eq!(line.shown.text, "- one");
         assert_eq!(line.mark, None);
         assert_eq!(line.prefix, Some(0..2));
@@ -602,46 +747,52 @@ mod tests {
     fn a_code_block_shows_its_fences_while_the_cursor_is_inside() {
         let text = "a\n```rust\nfn x() {}\n```\nb";
         let away = model_at(text, 0);
-        let fence = away.display_line(1);
+        let fence = away.display_line(1, &mut plain_chip);
         assert!(!fence.raw);
         assert!(matches!(fence.kind, LineKind::Code { fence: true, .. }));
         let LineKind::Code {
             language,
             code,
             fence: false,
-        } = away.display_line(2).kind
+        } = away.display_line(2, &mut plain_chip).kind
         else {
             panic!("line 2 is code");
         };
         assert_eq!(language, "rust");
         assert_eq!(&text[code], "fn x() {}");
         assert!(matches!(
-            away.display_line(3).kind,
+            away.display_line(3, &mut plain_chip).kind,
             LineKind::Code { fence: true, .. }
         ));
 
         let inside = model_at(text, 12);
-        assert!(inside.display_line(1).raw);
-        assert!(inside.display_line(3).raw);
-        assert_eq!(inside.display_line(1).shown.text, "```rust");
+        assert!(inside.display_line(1, &mut plain_chip).raw);
+        assert!(inside.display_line(3, &mut plain_chip).raw);
+        assert_eq!(
+            inside.display_line(1, &mut plain_chip).shown.text,
+            "```rust"
+        );
     }
 
     #[test]
     fn a_table_is_a_grid_until_the_cursor_is_inside() {
         let text = "a\n\n| x | **y** |\n|---|--:|\n| 1 | 2 |\n";
         let away = model_at(text, 0);
-        let LineKind::Row { head, cells, .. } = away.display_line(2).kind else {
+        let LineKind::Row { head, cells, .. } = away.display_line(2, &mut plain_chip).kind else {
             panic!("line 2 is a row");
         };
         assert!(head);
         assert_eq!(cells[0].shown.text, "x");
         assert_eq!(cells[1].shown.text, "y");
         assert_eq!(cells[1].alignment, Alignment::Right);
-        assert!(matches!(away.display_line(3).kind, LineKind::TableRule));
+        assert!(matches!(
+            away.display_line(3, &mut plain_chip).kind,
+            LineKind::TableRule
+        ));
 
         let inside = model_at(text, text.find('2').unwrap_or(0));
         for line in 2..=4 {
-            let display = inside.display_line(line);
+            let display = inside.display_line(line, &mut plain_chip);
             assert!(display.raw);
             assert!(matches!(display.kind, LineKind::Text));
         }
@@ -650,12 +801,12 @@ mod tests {
     #[test]
     fn a_callout_shows_its_name_and_its_quote() {
         let model = model_at("a\n\n> [!tip]\n> Use it.\n", 0);
-        let title = model.display_line(2);
+        let title = model.display_line(2, &mut plain_chip);
         assert!(matches!(
             title.kind,
             LineKind::CalloutTitle(CalloutKind::Tip)
         ));
-        let body = model.display_line(3);
+        let body = model.display_line(3, &mut plain_chip);
         assert_eq!(body.quotes, [Quote::Callout(CalloutKind::Tip)]);
         assert_eq!(body.shown.text, "Use it.");
     }
@@ -663,7 +814,7 @@ mod tests {
     #[test]
     fn a_rule_away_from_the_cursor_shows_no_text() {
         let model = model_at("a\n\n---\n", 0);
-        let line = model.display_line(2);
+        let line = model.display_line(2, &mut plain_chip);
         assert!(matches!(line.kind, LineKind::Rule));
         assert_eq!(line.shown.text, "");
     }

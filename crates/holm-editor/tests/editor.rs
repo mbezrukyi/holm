@@ -202,17 +202,20 @@ fn up_and_down_pass_a_wrap_inside_a_word() {
 }
 
 #[test]
-fn up_and_down_keep_the_column_into_a_line_with_only_a_card() {
-    let note = "abcdef\n![x](x.pdf)\nabcdef";
+fn up_and_down_keep_the_column_into_a_line_with_only_an_image() {
+    let note = "abcdef\n![x](cat.png)\nabcdef";
     for (keys, expected) in [
-        ("right right right down", "abcdef\n![xX](x.pdf)\nabcdef"),
+        ("right right right down", "abcdef\n![xX](cat.png)\nabcdef"),
         (
             "down down right right right up",
-            "abcdef\n![xX](x.pdf)\nabcdef",
+            "abcdef\n![xX](cat.png)\nabcdef",
         ),
     ] {
         let mut app = app();
         let (editor, cx) = open(&mut app, note, WIDTH, HEIGHT);
+        cx.update(|_, cx| {
+            editor.update(cx, |editor, cx| editor.set_folder(Some(data_folder()), cx));
+        });
         cx.simulate_keystrokes(keys);
         cx.simulate_input("X");
         assert_eq!(text(&editor, cx), expected, "{keys}");

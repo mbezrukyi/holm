@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use common::{LINE_HEIGHT, app, column_x, open};
+use common::{LINE_HEIGHT, app, column_x, data_folder, open};
 use gpui_kit::{
     ClipboardEntry, ClipboardItem, Entity, ExternalPaths, FileDropEvent, Image, ImageFormat,
     Modifiers, Pixels, VisualTestContext, point, px,
@@ -199,7 +199,7 @@ fn ctrl_v_with_files_sends_paste_files() {
             editor.insert_link("", &Target::File("attachments/a.pdf".into()), true, cx);
         });
     });
-    assert_eq!(text(&editor, cx), "![](attachments/a.pdf)\n");
+    assert_eq!(text(&editor, cx), "![](attachments/a.pdf)");
 }
 
 #[test]
@@ -238,20 +238,22 @@ fn show_heading_puts_the_cursor_at_the_heading() {
 }
 
 #[test]
-fn an_embedded_link_gets_a_line_of_its_own() {
+fn an_embedded_image_gets_a_line_of_its_own_and_a_file_stays_in_the_line() {
     let mut app = app();
     let (editor, cx) = open(&mut app, "ab", WIDTH, HEIGHT);
     cx.simulate_keystrokes("right");
     let file = |path: &str| Target::File(path.into());
     cx.update(|_, cx| {
         editor.update(cx, |editor, cx| {
+            editor.set_folder(Some(data_folder()), cx);
             editor.insert_link("x", &file("x.pdf"), true, cx);
-            editor.insert_link("y", &file("y.pdf"), true, cx);
+            editor.insert_link("y", &file("../data"), true, cx);
+            editor.insert_link("cat", &file("cat.png"), true, cx);
             editor.insert_link("z", &file("z.pdf"), false, cx);
         });
     });
     assert_eq!(
         text(&editor, cx),
-        "a\n![x](x.pdf)\n![y](y.pdf)\n[z](z.pdf)b"
+        "a ![x](x.pdf) ![y](../data)\n![cat](cat.png)\n[z](z.pdf) b"
     );
 }

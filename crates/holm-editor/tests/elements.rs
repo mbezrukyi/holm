@@ -1,5 +1,5 @@
 //! How the editor shows Markdown elements: the cursor rules of code blocks and tables, task
-//! boxes and file cards.
+//! boxes and file chips.
 
 mod common;
 
@@ -100,27 +100,45 @@ fn ctrl_l_toggles_the_task_at_the_cursor() {
     assert_eq!(text(&editor, cx), "- [ ] one\n- [x] two");
 }
 
-#[test]
-fn the_open_button_of_a_file_card_sends_open_file() {
-    let mut app = app();
-    let (editor, cx) = open(&mut app, "a\n\n![f](report.pdf)", WIDTH, HEIGHT);
+/// The paths of the files that `editor` asks to open, from now on.
+fn opened_files(editor: &Entity<Editor>, cx: &mut VisualTestContext) -> Rc<RefCell<Vec<PathBuf>>> {
     let opened = Rc::new(RefCell::new(Vec::new()));
     let seen = opened.clone();
     cx.update(|_, cx| {
-        cx.subscribe(&editor, move |_, event: &OpenFile, _| {
+        cx.subscribe(editor, move |_, event: &OpenFile, _| {
             seen.borrow_mut().push(event.path.clone());
         })
         .detach();
     });
-    // The card is 26 text sizes wide at most. Its button sits at its right end, in the middle.
-    let card_right = MARGIN + FONT_SIZE * 26.;
-    let middle = LINE_HEIGHT * 2. + px(4.) + FONT_SIZE * 1.6;
-    cx.simulate_click(
-        point(card_right - FONT_SIZE * 2.5, middle),
-        Modifiers::none(),
-    );
+    opened
+}
+
+#[test]
+fn a_file_link_shows_as_a_chip_in_its_line() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "a\n\nSee ![f](report.pdf) now\nb", WIDTH, HEIGHT);
+    // The chip line is one row high, so the next row holds "b".
+    click(cx, 0.2, LINE_HEIGHT * 3.5);
+    cx.simulate_input("X");
+    assert_eq!(text(&editor, cx), "a\n\nSee ![f](report.pdf) now\nXb");
+}
+
+#[test]
+fn ctrl_click_on_a_file_chip_sends_open_file() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "a\n\nSee ![f](report.pdf) now", WIDTH, HEIGHT);
+    let opened = opened_files(&editor, cx);
+    // "See ", then the icon room of six chars, then the name.
+    let name = point(column_x(cx, 12.5), LINE_HEIGHT * 2.5);
+    cx.simulate_click(name, Modifiers::control());
     assert_eq!(*opened.borrow(), [PathBuf::from("report.pdf")]);
-    assert_eq!(text(&editor, cx), "a\n\n![f](report.pdf)");
+
+    // A plain click only places the cursor, and the line shows its Markdown.
+    cx.simulate_click(name, Modifiers::none());
+    assert_eq!(opened.borrow().len(), 1);
+    cx.simulate_keystrokes("ctrl-enter");
+    assert_eq!(*opened.borrow(), vec![PathBuf::from("report.pdf"); 2]);
+    assert_eq!(text(&editor, cx), "a\n\nSee ![f](report.pdf) now");
 }
 
 #[test]

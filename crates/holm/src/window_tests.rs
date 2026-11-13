@@ -1487,7 +1487,7 @@ fn ctrl_o_embeds_a_file_where_it_is(cx: &mut TestAppContext) {
     settle(cx);
     assert_eq!(
         editor_text(cx, handle),
-        "# A\n![plan.pdf](../docs/plan.pdf)\n"
+        "# A\n![plan.pdf](../docs/plan.pdf)"
     );
     assert_eq!(fs::read_dir(notes.join("work")).unwrap().count(), 1);
 }

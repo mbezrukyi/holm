@@ -7,14 +7,13 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui_kit::{
-    AnyElement, App, AvailableSpace, BorderStyle, Bounds, ContentMask, Corners, CursorStyle,
-    DispatchPhase, ElementId, ElementInputHandler, Entity, FontStyle, FontWeight, GlobalElementId,
-    Hitbox, HitboxBehavior, ImgResourceLoader, InspectorElementId, IntoElement, LayoutId,
-    MouseMoveEvent, PathBuilder, Pixels, Point, Resource, Style, TextAlign, Window, WrappedLine,
-    fill, outline, point, px, relative, size,
+    AnyElement, App, AvailableSpace, BorderStyle, Bounds, ContentMask, Corners, ElementId,
+    ElementInputHandler, Entity, FontStyle, FontWeight, GlobalElementId, Hsla, ImgResourceLoader,
+    InspectorElementId, IntoElement, LayoutId, PathBuilder, Pixels, Point, Resource, Style,
+    TextAlign, Window, WrappedLine, fill, outline, point, px, relative, size,
 };
 
-pub(crate) use layout::{Hit, ImageSizes, Layout, Scroll};
+pub(crate) use layout::{FileKind, FileKinds, Layout, Scroll};
 use theme::Place;
 pub(crate) use theme::Theme;
 
@@ -22,7 +21,10 @@ use crate::Editor;
 use crate::ink;
 use crate::model::{LineKind, Mark, Quote, Run};
 use layout::{COLUMN_WIDTH, SIDE_MARGIN};
-use layout::{Content, LaidCard, LaidLine, Shaper, lay_out, run_font};
+use layout::{Content, Icon, LaidChip, LaidLine, Shaper, lay_out, run_font};
+
+/// How far below the baseline the underline of a chip detail lies, as a part of its size.
+const CHIP_UNDERLINE: f32 = 0.2;
 
 /// The width of a quote bar.
 const BAR: Pixels = px(3.);
@@ -54,11 +56,10 @@ fn column(bounds: Bounds<Pixels>) -> Bounds<Pixels> {
     )
 }
 
-/// The layout of a frame, the view before the text, and the "Open" buttons of the file cards.
+/// The layout of a frame, and the view before the text.
 pub(crate) struct Prepainted {
     layout: Rc<Layout>,
     start: Option<AnyElement>,
-    buttons: Vec<Hitbox>,
 }
 
 impl gpui_kit::Element for EditorElement {
@@ -116,7 +117,7 @@ impl gpui_kit::Element for EditorElement {
                 style,
                 column.size.width,
                 editor.folder.as_deref(),
-                &mut editor.image_sizes,
+                &mut editor.file_kinds,
                 &mut editor.highlighter,
                 &editor.theme,
             );
@@ -156,12 +157,7 @@ impl gpui_kit::Element for EditorElement {
             });
             start
         });
-        let buttons = card_buttons(&layout, bounds, window);
-        Some(Prepainted {
-            layout,
-            start,
-            buttons,
-        })
+        Some(Prepainted { layout, start })
     }
 
     fn paint(
@@ -174,32 +170,9 @@ impl gpui_kit::Element for EditorElement {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let Some(Prepainted {
-            layout,
-            mut start,
-            buttons,
-        }) = layout.take()
-        else {
+        let Some(Prepainted { layout, mut start }) = layout.take() else {
             return;
         };
-        let hovered: Vec<Bounds<Pixels>> = buttons
-            .iter()
-            .filter(|button| button.is_hovered(window))
-            .map(|button| button.bounds)
-            .collect();
-        for button in &buttons {
-            window.set_cursor_style(CursorStyle::PointingHand, button);
-        }
-        // Draw again when the mouse moves onto a button or off it.
-        let shown = hovered.clone();
-        window.on_mouse_event(move |_: &MouseMoveEvent, phase, window, _| {
-            let changed = buttons
-                .iter()
-                .any(|button| button.is_hovered(window) != shown.contains(&button.bounds));
-            if phase == DispatchPhase::Bubble && changed {
-                window.refresh();
-            }
-        });
         let editor = self.editor.read(cx);
         let focus = editor.focus.clone();
         let selection = editor.model.selection();
@@ -228,7 +201,7 @@ impl gpui_kit::Element for EditorElement {
                 window.paint_quad(fill(rect, theme.selection));
             }
             for line in &layout.lines {
-                paint_line(line, layout.bounds, &theme, &hovered, window, cx);
+                paint_line(line, layout.bounds, &theme, window, cx);
             }
             if focus.is_focused(window)
                 && let Some(rect) = layout.cursor_bounds(cursor, row_start)
@@ -241,27 +214,6 @@ impl gpui_kit::Element for EditorElement {
             }
         });
     }
-}
-
-/// The hitboxes of the "Open" buttons of the file cards, clipped to the editor `bounds`.
-fn card_buttons(layout: &Layout, bounds: Bounds<Pixels>, window: &mut Window) -> Vec<Hitbox> {
-    let column = layout.bounds;
-    let buttons = layout
-        .lines
-        .iter()
-        .flat_map(|line| {
-            let origin = column.origin + point(px(0.), line.top);
-            line.cards
-                .iter()
-                .map(move |card| Bounds::new(origin + card.button.origin, card.button.size))
-        })
-        .collect::<Vec<_>>();
-    window.with_content_mask(Some(ContentMask { bounds }), |window| {
-        buttons
-            .into_iter()
-            .map(|button| window.insert_hitbox(button, HitboxBehavior::Normal))
-            .collect()
-    })
 }
 
 /// Paints what lies behind the text: code backgrounds, quote bars, callouts, tables and rules.
@@ -333,13 +285,11 @@ fn paint_blocks(line: &LaidLine, column: Bounds<Pixels>, theme: &Theme, window: 
     }
 }
 
-/// Paints the text, the list marker, the images and the file cards of a line.
-/// `hovered` holds the bounds of the card button under the mouse.
+/// Paints the text, the list marker and the images of a line.
 fn paint_line(
     line: &LaidLine,
     column: Bounds<Pixels>,
     theme: &Theme,
-    hovered: &[Bounds<Pixels>],
     window: &mut Window,
     cx: &mut App,
 ) {
@@ -349,7 +299,7 @@ fn paint_line(
         Content::Text(text) => {
             let runs = &line.display.shown.runs;
             paint_text(
-                (text, runs, line.place),
+                (text, runs, line.place, &line.chips),
                 text_origin,
                 line,
                 theme,
@@ -359,7 +309,7 @@ fn paint_line(
         }
         Content::Label(text) => {
             paint_text(
-                (text, &[], line.place),
+                (text, &[], line.place, &[]),
                 text_origin,
                 line,
                 theme,
@@ -371,7 +321,12 @@ fn paint_line(
             let top = (line.height - line.text_height.max(line.line_height)) / 2.;
             for cell in cells {
                 let cell_origin = text_origin + point(cell.x + cell.inset, top.max(px(0.)));
-                let piece = (&cell.text, cell.shown.shown.runs.as_slice(), cell.place);
+                let piece = (
+                    &cell.text,
+                    cell.shown.shown.runs.as_slice(),
+                    cell.place,
+                    cell.chips.as_slice(),
+                );
                 paint_text(piece, cell_origin, line, theme, window, cx);
             }
         }
@@ -408,16 +363,13 @@ fn paint_line(
             _ => window.paint_quad(fill(bounds, theme.panel)),
         }
     }
-    for card in &line.cards {
-        paint_card(card, origin, line.line_height, theme, hovered, window, cx);
-    }
 }
 
-/// Paints a text of `line`, with its runs and its place, and the highlights, code backgrounds
-/// and underlines of its runs.
+/// Paints a text of `line`, with its runs, its place and its file chips, and the highlights,
+/// code backgrounds and underlines of its runs.
 /// A failed paint only loses glyphs in this frame.
 fn paint_text(
-    (text, runs, place): (&WrappedLine, &[Run], Place),
+    (text, runs, place, chips): (&WrappedLine, &[Run], Place, &[LaidChip]),
     origin: Point<Pixels>,
     line: &LaidLine,
     theme: &Theme,
@@ -443,8 +395,114 @@ fn paint_text(
         }
         start = end;
     }
+    // A chip is as tall as the row allows, so chips on two rows do not touch.
+    let chip_height = (line.font_size * 1.8).min(line_height - px(2.));
+    for chip in chips {
+        // A chip that wraps gets a piece of background on each row. A piece gets padding at
+        // the end where the chip goes on, because no padding chars are there.
+        let spans = row_spans(text, chip.range.clone(), line_height, line.font_size);
+        let last = spans.len().saturating_sub(1);
+        let pad = line.font_size * 0.4;
+        for (ix, (x, y, right)) in spans.into_iter().enumerate() {
+            let left = if ix > 0 { x - pad } else { x };
+            let right = if ix < last { right + pad } else { right };
+            let bounds = Bounds::from_corners(
+                origin + point(left, y + (line_height - chip_height) / 2.),
+                origin + point(right, y + (line_height + chip_height) / 2.),
+            );
+            window.paint_quad(
+                fill(bounds, theme.panel)
+                    .corner_radii(chip_height / 2.)
+                    .border_widths(px(1.))
+                    .border_color(theme.line),
+            );
+        }
+    }
     let _ = text.paint(origin, line_height, TextAlign::Left, None, window, cx);
     paint_underlines(text, runs, place, origin, line, theme, window);
+    for chip in chips {
+        if let Some((range, detail)) = &chip.detail
+            && let Some((x, y, _)) =
+                row_spans(text, range.clone(), line_height, line.font_size).first()
+        {
+            // In the middle of the row, like the name, so it sits a bit above the baseline of
+            // the name.
+            let height = detail.ascent + detail.descent;
+            let at = origin + point(*x, *y + (line_height - height) / 2.);
+            let _ = detail.paint(at, height, TextAlign::Left, None, window, cx);
+            let under = at.y + detail.ascent + detail.font_size * CHIP_UNDERLINE;
+            window.paint_quad(fill(
+                Bounds::new(point(at.x, under), size(detail.width, px(1.))),
+                theme.line,
+            ));
+        }
+        let room = row_spans(text, chip.icon_range.clone(), line_height, line.font_size);
+        if let Some((x, y, right)) = room.first() {
+            let pad = line.font_size * 0.4;
+            let side = (*right - *x - pad * 2.)
+                .min(line.font_size * 1.07)
+                .max(px(0.));
+            let at = origin + point(*x + pad, *y + (line_height - side) / 2.);
+            paint_icon(
+                chip.icon,
+                Bounds::new(at, size(side, side)),
+                theme.link,
+                window,
+            );
+        }
+    }
+}
+
+/// The lines of each icon, on a grid of 24 by 24. A line that ends where it starts is closed.
+fn icon_lines(icon: Icon) -> &'static [&'static [(f32, f32)]] {
+    match icon {
+        Icon::File => &[
+            &[
+                (6., 3.),
+                (14., 3.),
+                (18., 7.),
+                (18., 21.),
+                (6., 21.),
+                (6., 3.),
+            ],
+            &[(14., 3.), (14., 7.), (18., 7.)],
+        ],
+        Icon::Folder => &[&[
+            (3., 6.),
+            (9., 6.),
+            (11., 8.),
+            (21., 8.),
+            (21., 19.),
+            (3., 19.),
+            (3., 6.),
+        ]],
+    }
+}
+
+/// Draws the lines of `icon` in `bounds`, which is square.
+fn paint_icon(icon: Icon, bounds: Bounds<Pixels>, color: Hsla, window: &mut Window) {
+    let unit = bounds.size.width / 24.;
+    let at = |(x, y): (f32, f32)| bounds.origin + point(unit * x, unit * y);
+    for points in icon_lines(icon) {
+        let mut path = PathBuilder::stroke(unit * 1.6);
+        let Some((first, rest)) = points.split_first() else {
+            continue;
+        };
+        path.move_to(at(*first));
+        if points.len() > 2 && points.last() == Some(first) {
+            for point in &rest[..rest.len() - 1] {
+                path.line_to(at(*point));
+            }
+            path.close();
+        } else {
+            for point in rest {
+                path.line_to(at(*point));
+            }
+        }
+        if let Ok(path) = path.build() {
+            window.paint_path(path, color);
+        }
+    }
 }
 
 /// Paints the underlines of underlined text and links: thin, a bit light, close below the text
@@ -461,23 +519,23 @@ fn paint_underlines(
     let line_height = line.line_height;
     let layout = &text.unwrapped_layout;
     let baseline = (line_height - layout.ascent - layout.descent) / 2. + layout.ascent;
-    let offset = (line.font_size * 0.1).max(px(1.5));
     // The room between the line and the ink on each side of a gap.
     let room = (line.font_size * 0.07).max(px(1.));
-    // Only ink at the height of the line itself makes a gap, as in a browser.
-    let band = ink::Band {
-        font_size: f32::from(layout.font_size),
-        top: f32::from(offset),
-        bottom: f32::from(offset) + 1.,
-    };
     let content = text.text.as_ref();
     let mut start = 0;
     for run in runs {
         let end = start + run.len;
-        if !(run.look.underline || run.look.link) {
+        if !(run.look.underline || run.look.link) || run.look.chip {
             start = end;
             continue;
         }
+        let offset = (line.font_size * 0.1).max(px(1.5));
+        // Only ink at the height of the line itself makes a gap, as in a browser.
+        let band = ink::Band {
+            font_size: f32::from(layout.font_size),
+            top: f32::from(offset),
+            bottom: f32::from(offset) + 1.,
+        };
         let font = run_font(&line.font, run.look, place);
         let font = ink::FontKey {
             family: font.family.to_string(),
@@ -541,86 +599,24 @@ fn row_spans(
     let mut spans: Vec<(Pixels, Pixels, Pixels)> = Vec::new();
     for (at, c) in content[range.clone()].char_indices() {
         let at = range.start + at;
-        let Some(here) = text.position_for_index(at, line_height) else {
+        let Some(mut here) = text.position_for_index(at, line_height) else {
             continue;
         };
-        let right = text
-            .position_for_index(at + c.len_utf8(), line_height)
-            .filter(|next| next.y == here.y)
-            .map_or(here.x + font_size * 0.5, |next| next.x);
+        let right = match text.position_for_index(at + c.len_utf8(), line_height) {
+            Some(next) if next.y == here.y => next.x,
+            // The offset of a char that starts a row shows at the end of the row above.
+            Some(next) if next.y > here.y => {
+                here = point(px(0.), next.y);
+                next.x
+            }
+            _ => here.x + font_size * 0.5,
+        };
         match spans.last_mut() {
             Some(last) if last.1 == here.y => last.2 = right,
             _ => spans.push((here.x, here.y, right)),
         }
     }
     spans
-}
-
-/// Paints a file card. `origin` is the top left of its line.
-fn paint_card(
-    card: &LaidCard,
-    origin: Point<Pixels>,
-    line_height: Pixels,
-    theme: &Theme,
-    hovered: &[Bounds<Pixels>],
-    window: &mut Window,
-    cx: &mut App,
-) {
-    let bounds = Bounds::new(origin + card.bounds.origin, card.bounds.size);
-    window.paint_quad(
-        fill(bounds, theme.panel)
-            .corner_radii(px(6.))
-            .border_widths(px(1.))
-            .border_color(theme.line),
-    );
-    let unit = bounds.size.height / 3.2;
-    let icon_width = (card.tag.width() + unit * 0.8).max(unit * 1.6);
-    let icon = Bounds::new(
-        bounds.origin + point(unit * 0.7, unit * 0.6),
-        size(icon_width, unit * 2.),
-    );
-    window.paint_quad(fill(icon, theme.line).corner_radii(px(4.)));
-    let tag_origin = icon.origin
-        + point(
-            (icon.size.width - card.tag.width()) / 2.,
-            (icon.size.height - line_height) / 2.,
-        );
-    let _ = card
-        .tag
-        .paint(tag_origin, line_height, TextAlign::Left, None, window, cx);
-    let name_origin = point(
-        icon.right() + unit * 0.6,
-        bounds.top() + (bounds.size.height - line_height) / 2.,
-    );
-    let name_room = Bounds::from_corners(
-        point(name_origin.x, bounds.top()),
-        point(origin.x + card.button.left() - unit * 0.4, bounds.bottom()),
-    );
-    window.with_content_mask(Some(ContentMask { bounds: name_room }), |window| {
-        let _ = card
-            .name
-            .paint(name_origin, line_height, TextAlign::Left, None, window, cx);
-    });
-    let button = Bounds::new(origin + card.button.origin, card.button.size);
-    let fill_color = if hovered.contains(&button) {
-        theme.line
-    } else {
-        theme.background
-    };
-    window.paint_quad(
-        fill(button, fill_color)
-            .corner_radii(px(4.))
-            .border_widths(px(1.))
-            .border_color(theme.line),
-    );
-    let open_origin = button.origin
-        + point(
-            (button.size.width - card.open.width()) / 2.,
-            (button.size.height - line_height) / 2.,
-        );
-    let _ = card
-        .open
-        .paint(open_origin, line_height, TextAlign::Left, None, window, cx);
 }
 
 fn paint_task(bounds: Bounds<Pixels>, checked: bool, theme: &Theme, window: &mut Window) {

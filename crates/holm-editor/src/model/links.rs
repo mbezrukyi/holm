@@ -7,6 +7,18 @@ use holm_markdown::{Link, Target, escape_text};
 
 use super::{Group, Model, map_offset};
 
+/// How a new link is written.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LinkForm {
+    /// `[..](..)` at the cursor.
+    Text,
+    /// `![..](..)` at the cursor, which shows a file chip. It gets a space before it and after
+    /// it, where the text around it needs one.
+    Inline,
+    /// `![..](..)` on a line of its own, which shows an image. The cursor goes to the next line.
+    Block,
+}
+
 impl Model {
     /// Sets the targets that the app knows are broken.
     pub(crate) fn set_broken(&mut self, broken: HashSet<Target>) {
@@ -60,32 +72,43 @@ impl Model {
 
     /// Puts a link to `target` in place of the selection, and the cursor after it. The selected
     /// source becomes the link text. With no selection, the link text is `text`.
-    /// `embedded` writes `![..](..)` on a line of its own, and the cursor goes to the next line.
-    pub(crate) fn insert_link(&mut self, text: &str, target: &Target, embedded: bool) -> bool {
+    pub(crate) fn insert_link(&mut self, text: &str, target: &Target, form: LinkForm) -> bool {
         let range = self.selection();
         let label = if range.is_empty() {
             escape_text(text)
         } else {
             self.text[range.clone()].to_owned()
         };
-        let bang = if embedded { "!" } else { "" };
+        let bang = if form == LinkForm::Text { "" } else { "!" };
         let link = format!("{bang}[{label}]({})", target.to_destination());
-        // An embedded file shows as a block, so it gets a line of its own. The cursor goes to the
-        // start of the next line, below the block.
-        let (start, end) = if embedded {
-            let before = &self.text[..range.start];
-            let after = &self.text[range.end..];
-            let start = if before.is_empty() || before.ends_with('\n') {
-                ""
-            } else {
-                "\n"
-            };
-            let end = if after.starts_with('\n') { "" } else { "\n" };
-            (start, end)
-        } else {
-            ("", "")
+        let before = self.text[..range.start].chars().next_back();
+        let after = self.text[range.end..].chars().next();
+        let (start, end, cursor_after) = match form {
+            LinkForm::Text => ("", "", 0),
+            LinkForm::Inline => (
+                if before.is_some_and(|c| !c.is_whitespace()) {
+                    " "
+                } else {
+                    ""
+                },
+                if after.is_some_and(char::is_alphanumeric) {
+                    " "
+                } else {
+                    ""
+                },
+                0,
+            ),
+            LinkForm::Block => (
+                if before.is_none_or(|c| c == '\n') {
+                    ""
+                } else {
+                    "\n"
+                },
+                if after == Some('\n') { "" } else { "\n" },
+                1,
+            ),
         };
-        let cursor = range.start + start.len() + link.len() + usize::from(embedded);
+        let cursor = range.start + start.len() + link.len() + cursor_after;
         self.edit(
             vec![(range, format!("{start}{link}{end}"))],
             (cursor, cursor),
@@ -149,6 +172,7 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::display::plain_chip;
 
     fn model(text: &str, selection: Range<usize>) -> Model {
         let mut model = Model::new(text);
@@ -184,7 +208,7 @@ mod tests {
     #[test]
     fn a_new_link_takes_the_selection_as_its_text() {
         let mut m = model("see plans here", 4..9);
-        assert!(m.insert_link("Plans", &note("X", Some("Bug list")), false));
+        assert!(m.insert_link("Plans", &note("X", Some("Bug list")), LinkForm::Text));
         assert_eq!(m.text(), "see [plans](<holm:X#Bug list>) here");
         assert_eq!(m.selection(), 30..30);
     }
@@ -192,14 +216,31 @@ mod tests {
     #[test]
     fn a_new_link_with_no_selection_escapes_its_text() {
         let mut m = model("x ", 2..2);
-        assert!(m.insert_link("A *bold* [idea]", &note("X", None), false));
+        assert!(m.insert_link("A *bold* [idea]", &note("X", None), LinkForm::Text));
         assert_eq!(m.text(), r"x [A \*bold\* \[idea\]](holm:X)");
         let mut m = model("", 0..0);
-        assert!(m.insert_link("photo", &Target::File("attachments/a b.png".into()), true));
+        let photo = Target::File("attachments/a b.png".into());
+        assert!(m.insert_link("photo", &photo, LinkForm::Block));
         assert_eq!(m.text(), "![photo](<attachments/a b.png>)\n");
         assert_eq!(m.selection(), 32..32);
         assert!(m.undo());
         assert_eq!(m.text(), "");
+    }
+
+    #[test]
+    fn an_inline_file_link_gets_spaces_where_the_text_needs_them() {
+        let file = |path: &str| Target::File(path.into());
+        let mut m = model("see now", 3..3);
+        assert!(m.insert_link("a", &file("a.pdf"), LinkForm::Inline));
+        assert!(m.insert_link("b", &file("b.pdf"), LinkForm::Inline));
+        assert_eq!(m.text(), "see ![a](a.pdf) ![b](b.pdf) now");
+        assert_eq!(m.cursor(), 27);
+        let mut m = model("one two.", 7..7);
+        assert!(m.insert_link("a", &file("a.pdf"), LinkForm::Inline));
+        assert_eq!(m.text(), "one two ![a](a.pdf).");
+        let mut m = model("one\n", 4..4);
+        assert!(m.insert_link("a", &file("a.pdf"), LinkForm::Inline));
+        assert_eq!(m.text(), "one\n![a](a.pdf)");
     }
 
     #[test]
@@ -230,7 +271,7 @@ mod tests {
         let mut m = model("[a](holm:X#b) [c](#d) [e](holm:Y)\n\n# d\n", 40..40);
         m.set_broken(HashSet::from([note("X", Some("b"))]));
         let looks: Vec<_> = m
-            .display_line(0)
+            .display_line(0, &mut plain_chip)
             .shown
             .runs
             .iter()

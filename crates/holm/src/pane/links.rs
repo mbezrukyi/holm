@@ -80,7 +80,7 @@ impl Links {
     }
 
     /// Opens the system file picker, and embeds each picked file at the cursor, with no copy.
-    /// It shows as an image or a file card, like a pasted file.
+    /// It shows as an image or a file chip, like a pasted file.
     pub(super) fn pick_files(&mut self, cx: &mut Context<Self>) {
         let Some(note) = self.note.clone() else {
             return;
@@ -218,7 +218,7 @@ impl Links {
     }
 
     /// Embeds a link to each file at the cursor, as `![..](..)`. It shows an image or a file
-    /// card. An error shows in a quiet bar.
+    /// chip. An error shows in a quiet bar.
     fn insert_file_links(
         &mut self,
         files: Vec<holm_core::Result<PathBuf>>,
