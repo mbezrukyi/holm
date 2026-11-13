@@ -145,6 +145,9 @@ mod tests {
         let many: Vec<String> = (0..MAX_ROWS + 10).map(|n| format!("Note {n}")).collect();
         let list = notes(&many);
         assert_eq!(rows("", &list), (0..MAX_ROWS).collect::<Vec<_>>());
-        assert_eq!(rows("note 5", &list), [5, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59]);
+        assert_eq!(
+            rows("note 5", &list),
+            [5, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59]
+        );
     }
 }
