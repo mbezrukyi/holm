@@ -82,24 +82,15 @@ pub(crate) enum SidebarEvent {
 struct Rename {
     item: Item,
     input: Entity<InputState>,
+    /// After `Enter`, the field stays locked until the app ends the rename.
+    locked: bool,
     _subscription: Subscription,
-}
-
-/// A rename in the tree that the snapshot does not show yet. The rows of `from` show `to`.
-struct Renamed {
-    from: Item,
-    to: Item,
-    /// The core revision after the rename. A snapshot from it on shows the rename.
-    done_at: Option<u64>,
 }
 
 pub(crate) struct Sidebar {
     notes_folder: Entity<NotesFolder>,
     order: Order,
     tree: Tree,
-    /// The revision of the snapshot of `tree`.
-    revision: u64,
-    renamed: Option<Renamed>,
     view: View,
     open: HashSet<Item>,
     rows: Vec<Row>,
@@ -151,8 +142,6 @@ impl Sidebar {
             notes_folder,
             order,
             tree: Tree::default(),
-            revision: 0,
-            renamed: None,
             view,
             open: HashSet::new(),
             rows: Vec::new(),
@@ -183,22 +172,23 @@ impl Sidebar {
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let snapshot = self.notes_folder.read(cx).snapshot();
         self.tree = Tree::new(snapshot, self.order);
-        self.revision = snapshot.revision();
         self.error = None;
-        if self
-            .renamed
+        let item = self.tree.nearest(self.view.item());
+        if &item != self.view.item() {
+            self.show_in_tree(item, cx);
+        }
+        // The open items below a renamed item stay, so they open below its new name.
+        let renaming = self
+            .rename
             .as_ref()
-            .is_some_and(|renamed| renamed.done_at.is_some_and(|at| self.revision >= at))
-        {
-            self.renamed = None;
-        }
-        if self.renamed.is_none() {
-            let item = self.tree.nearest(self.view.item());
-            if &item != self.view.item() {
-                self.show_in_tree(item, cx);
-            }
-        }
-        self.open.retain(|item| self.tree.has(item));
+            .filter(|rename| rename.locked)
+            .map(|rename| rename.item.clone());
+        self.open.retain(|item| {
+            self.tree.has(item)
+                || renaming
+                    .as_ref()
+                    .is_some_and(|from| item.moved(from, from).is_some())
+        });
         self.rebuild();
         cx.notify();
         if self.searching() {
@@ -283,20 +273,6 @@ impl Sidebar {
 
     fn rebuild(&mut self) {
         self.rows = self.tree.rows(&self.open);
-        if let Some(renamed) = &self.renamed {
-            // A rename onto an item that the tree has merges into its row.
-            self.rows.retain_mut(|row| {
-                let Some(item) = row.item.moved(&renamed.from, &renamed.to) else {
-                    return true;
-                };
-                if item != row.item && self.tree.has(&item) {
-                    return false;
-                }
-                row.name = item.name();
-                row.item = item;
-                true
-            });
-        }
         self.entries.clear();
         for (at, row) in self.rows.iter().enumerate() {
             let first = |kind: fn(&Item) -> bool| {
@@ -386,37 +362,23 @@ impl Sidebar {
         self.set_view(View::Tree(item), cx);
     }
 
-    /// Shows the row of `from` with the name of `to` and selects it, while the rename runs.
-    pub(crate) fn show_rename(&mut self, from: Item, to: Item, cx: &mut Context<Self>) {
-        self.open_moved(&from, &to);
-        self.renamed = Some(Renamed {
-            from,
-            to: to.clone(),
-            done_at: None,
-        });
-        self.show_in_tree(to, cx);
-    }
-
-    /// Ends the rename of [`Self::show_rename`] with the item on disk, or with `None` after a
-    /// fail. The row keeps the new name until the next read of the notes.
-    pub(crate) fn end_rename(&mut self, to: Option<Item>, cx: &mut Context<Self>) {
-        let Some(renamed) = self.renamed.take() else {
+    /// Closes the locked name field when the app ends its rename. With `to`, the item after
+    /// the rename, it selects `to` or its nearest parent in the tree.
+    pub(crate) fn close_rename(&mut self, to: Option<Item>, cx: &mut Context<Self>) {
+        let Some(rename) = self.rename.take_if(|rename| rename.locked) else {
             return;
         };
-        let Some(to) = to else {
-            self.show_in_tree(renamed.from, cx);
-            return;
-        };
-        self.open_moved(&renamed.from, &to);
-        let done_at = self.notes_folder.read(cx).snapshot().revision();
-        if self.revision < done_at {
-            self.renamed = Some(Renamed {
-                from: renamed.from,
-                to: to.clone(),
-                done_at: Some(done_at),
-            });
+        if let Some(to) = &to {
+            self.open_moved(&rename.item, to);
         }
-        self.show_in_tree(to, cx);
+        self.open.retain(|item| self.tree.has(item));
+        if let Some(to) = to {
+            let to = self.tree.nearest(&to);
+            self.show_in_tree(to, cx);
+        } else {
+            self.rebuild();
+            cx.notify();
+        }
     }
 
     /// Opens the items below `to` that are open below `from`.
@@ -459,23 +421,16 @@ impl Sidebar {
     }
 
     /// Starts the name field for a folder or a tag in the tree. A tag field holds the full
-    /// name, so a rename can also move the tag under another parent. It does nothing for a tag
-    /// that the tree has no row for. A new folder may not be in the tree yet, so its field
-    /// shows after the next read of the notes. It returns whether it started the field.
-    pub(crate) fn rename(
-        &mut self,
-        item: Item,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    /// name, so a rename can also move the tag under another parent. `Enter` locks the field
+    /// and sends the rename. It does nothing while a locked field waits.
+    pub(crate) fn rename(&mut self, item: Item, window: &mut Window, cx: &mut Context<Self>) {
         let name = match &item {
-            Item::All => return false,
+            Item::All => return,
             Item::Folder(_) => item.name(),
             Item::Tag(tag) => tag.clone(),
         };
-        let in_tree = self.tree.has(&item) || self.rows.iter().any(|row| row.item == item);
-        if matches!(item, Item::Tag(_)) && !in_tree {
-            return false;
+        if self.rename.as_ref().is_some_and(|rename| rename.locked) {
+            return;
         }
         if self.searching() {
             self.clear_search(window, cx);
@@ -489,25 +444,36 @@ impl Sidebar {
                 |sidebar, input, event, window, cx| match event {
                     InputEvent::PressEnter { .. } => {
                         let name = input.read(cx).value().trim().to_owned();
-                        if let Some(rename) = sidebar.rename.take()
-                            && !name.is_empty()
-                        {
-                            match rename.item {
-                                Item::Folder(folder) => {
-                                    cx.emit(SidebarEvent::RenameFolder { folder, name });
-                                }
-                                Item::Tag(from) if from != name => {
-                                    cx.emit(SidebarEvent::RenameTag { from, to: name });
-                                }
-                                Item::Tag(_) | Item::All => {}
-                            }
+                        let Some(rename) = sidebar.rename.as_mut().filter(|rename| !rename.locked)
+                        else {
+                            return;
+                        };
+                        let event = match &rename.item {
+                            _ if name.is_empty() => None,
+                            Item::Folder(folder) => Some(SidebarEvent::RenameFolder {
+                                folder: folder.clone(),
+                                name,
+                            }),
+                            Item::Tag(from) if *from != name => Some(SidebarEvent::RenameTag {
+                                from: from.clone(),
+                                to: name,
+                            }),
+                            Item::Tag(_) | Item::All => None,
+                        };
+                        if let Some(event) = event {
+                            rename.locked = true;
+                            cx.emit(event);
+                        } else {
+                            sidebar.rename = None;
                         }
                         window.focus(&sidebar.focus, cx);
                         cx.notify();
                     }
                     InputEvent::Blur => {
-                        sidebar.rename = None;
-                        cx.notify();
+                        if !sidebar.rename.as_ref().is_some_and(|rename| rename.locked) {
+                            sidebar.rename = None;
+                            cx.notify();
+                        }
                     }
                     InputEvent::Change | InputEvent::Focus => {}
                 },
@@ -519,17 +485,17 @@ impl Sidebar {
         self.rename = Some(Rename {
             item,
             input,
+            locked: false,
             _subscription: subscription,
         });
         cx.notify();
-        true
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let keystroke = &event.keystroke;
         let modifiers = keystroke.modifiers;
-        if self.rename.is_some() {
-            if keystroke.key == "escape" {
+        if let Some(rename) = &self.rename {
+            if keystroke.key == "escape" && !rename.locked {
                 self.rename = None;
                 window.focus(&self.focus, cx);
                 cx.notify();
@@ -740,6 +706,7 @@ impl Sidebar {
             .filter(|rename| rename.item == row.item);
         let label = match renaming {
             Some(rename) => Input::new(&rename.input)
+                .disabled(rename.locked)
                 .appearance(false)
                 .small()
                 .flex_1()

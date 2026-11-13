@@ -135,6 +135,11 @@ impl NotesFolder {
         self.write(move |core| core.read(&path), cx)
     }
 
+    /// Ends after the writes before it, so the step after it sees their snapshot.
+    pub(crate) fn wait(&mut self, cx: &mut Context<Self>) -> Task<holm_core::Result<()>> {
+        self.write(|_| Ok(()), cx)
+    }
+
     /// Renames the note file to match its title.
     pub(crate) fn rename_to_title(
         &mut self,

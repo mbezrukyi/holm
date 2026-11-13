@@ -40,7 +40,7 @@ pub(crate) enum Ask {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum DialogEvent {
     Confirm { ask: Ask, do_not_ask: bool },
-    Cancel,
+    Cancel(Ask),
 }
 
 pub(crate) struct Dialog {
@@ -78,7 +78,7 @@ impl Dialog {
                 do_not_ask: self.do_not_ask,
             }
         } else {
-            DialogEvent::Cancel
+            DialogEvent::Cancel(self.ask.clone())
         });
     }
 

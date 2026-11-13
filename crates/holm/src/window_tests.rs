@@ -584,6 +584,8 @@ fn keys_make_rename_and_move_notes_and_folders(cx: &mut TestAppContext) {
 
     keys(cx, handle, "ctrl-shift-n");
     assert!(notes_dir.join(text::NEW_FOLDER).is_dir());
+    assert_eq!(tree(cx, handle), ["All notes", "New folder*"]);
+    assert_eq!(tree_field(cx, handle).as_deref(), Some(text::NEW_FOLDER));
     cx.simulate_input(handle, "work");
     keys(cx, handle, "enter");
     assert!(notes_dir.join("work").is_dir());
@@ -1063,23 +1065,54 @@ fn type_new_name(cx: &mut TestAppContext, handle: AnyWindowHandle, name: &str) {
     cx.simulate_input(handle, name);
 }
 
+/// Presses `key` and runs no task, so a write that it starts has not run yet.
+fn press(cx: &mut TestAppContext, handle: AnyWindowHandle, key: &'static str) {
+    cx.update_window(handle, |_, window, cx| {
+        window.dispatch_keystroke(gpui_kit::Keystroke::parse(key).unwrap(), cx);
+    })
+    .unwrap();
+}
+
+/// The text of the name field in the tree, with or without the focus.
+fn tree_field(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
+    screen(cx, handle, |window| {
+        window.try_find("sidebar")?;
+        window
+            .within("sidebar")
+            .find_all_by_role(Role::TextInput)
+            .into_iter()
+            .find(|field| field.label() != Some(text::SEARCH))
+            .and_then(|field| field.value().map(str::to_owned))
+    })
+}
+
 #[gpui_kit::test]
-fn a_folder_rename_shows_the_new_name_at_once(cx: &mut TestAppContext) {
+fn a_folder_rename_locks_the_field_until_the_write_ends(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     let notes_dir = fixture.notes();
     fs::create_dir(notes_dir.join("work")).unwrap();
+    fs::create_dir(notes_dir.join("work/sub")).unwrap();
     fs::write(notes_dir.join("Top.md"), "# Top\n").unwrap();
     let handle = open(cx, fixture.startup(None));
 
-    keys(cx, handle, "ctrl-shift-l escape down");
-    assert_eq!(tree(cx, handle), ["All notes", "work*"]);
+    keys(cx, handle, "ctrl-shift-l escape down right");
+    assert_eq!(tree(cx, handle), ["All notes", "work*", "work/sub"]);
     type_new_name(cx, handle, "job");
-    keys_now(cx, handle, "enter");
-    assert_eq!(sidebar(cx, handle), "tree job");
-    assert_eq!(tree(cx, handle), ["All notes", "job*"]);
+    assert_eq!(tree_field(cx, handle).as_deref(), Some("job"));
+    press(cx, handle, "enter");
+    assert_eq!(tree_field(cx, handle).as_deref(), Some("job"));
+    assert_eq!(tree(cx, handle), ["All notes", "work*", "work/sub"]);
+
+    // A key on the locked field does nothing.
+    press(cx, handle, "escape");
+    assert_eq!(tree_field(cx, handle).as_deref(), Some("job"));
+
+    cx.run_until_parked();
+    assert_eq!(tree_field(cx, handle), None);
+    assert_eq!(tree(cx, handle), ["All notes", "job*", "job/sub"]);
     settle(cx);
-    assert_eq!(tree(cx, handle), ["All notes", "job*"]);
-    assert!(notes_dir.join("job").is_dir());
+    assert_eq!(tree(cx, handle), ["All notes", "job*", "job/sub"]);
+    assert!(notes_dir.join("job/sub").is_dir());
 }
 
 #[gpui_kit::test]
@@ -1113,6 +1146,7 @@ fn a_failed_folder_rename_shows_the_old_name_and_the_error(cx: &mut TestAppConte
     fs::remove_dir(notes_dir.join("work")).unwrap();
     type_new_name(cx, handle, "job");
     keys_now(cx, handle, "enter");
+    assert_eq!(tree_field(cx, handle), None);
     assert_eq!(tree(cx, handle), ["All notes", "work*"]);
     assert_eq!(bars(cx, handle).len(), 1);
 }
@@ -1129,21 +1163,27 @@ fn a_tag_rename_shows_the_new_name_after_the_confirm(cx: &mut TestAppContext) {
     type_new_name(cx, handle, "new");
     keys(cx, handle, "enter");
     assert!(question(cx, handle).is_some());
+    assert_eq!(tree_field(cx, handle).as_deref(), Some("new"));
     assert_eq!(tree(cx, handle), ["All notes", "#old*"]);
     keys(cx, handle, "escape");
+    assert_eq!(tree_field(cx, handle), None);
     assert_eq!(tree(cx, handle), ["All notes", "#old*"]);
 
     type_new_name(cx, handle, "new");
     keys(cx, handle, "enter");
-    keys_now(cx, handle, "enter");
+    press(cx, handle, "enter");
     assert_eq!(question(cx, handle), None);
+    assert_eq!(tree_field(cx, handle).as_deref(), Some("new"));
+    assert_eq!(tree(cx, handle), ["All notes", "#old*"]);
+    cx.run_until_parked();
+    assert_eq!(tree_field(cx, handle), None);
     assert_eq!(tree(cx, handle), ["All notes", "#new*"]);
     settle(cx);
     assert_eq!(tree(cx, handle), ["All notes", "#new*"]);
 }
 
 #[gpui_kit::test]
-fn a_tag_rename_onto_a_tag_merges_into_its_row_at_once(cx: &mut TestAppContext) {
+fn a_tag_rename_onto_a_tag_merges_into_its_row(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     let notes_dir = fixture.notes();
     fs::write(notes_dir.join("A.md"), "---\ntags:\n  - old\n---\n# A\n").unwrap();
@@ -1223,9 +1263,14 @@ fn a_new_tag_renames_in_all_notes_with_no_wait(cx: &mut TestAppContext) {
 
     keys_now(cx, handle, "ctrl-shift-t");
     cx.simulate_input(handle, "fresh");
-    keys_now(cx, handle, "enter");
-    keys_now(cx, handle, "down f2");
+    // F2 comes before the write of the new tag ends.
+    press(cx, handle, "enter");
+    press(cx, handle, "down");
+    press(cx, handle, "f2");
+    cx.run_until_parked();
     assert_eq!(name_field(cx, handle).as_deref(), Some("fresh"));
+    assert_eq!(tree(cx, handle), ["All notes", "#fresh*"]);
+    assert_eq!(tree_field(cx, handle).as_deref(), Some("fresh"));
     cx.update_window(handle, |_, window, cx| {
         window.dispatch_action(Box::new(gpui_kit::component::input::SelectAll), cx);
     })

@@ -146,15 +146,20 @@ impl NotesView {
         cx: &mut Context<Self>,
     ) {
         let item = Item::Tag(tag.clone());
-        // A hidden sidebar still has its tree, so the field can start before it shows.
-        if self
-            .sidebar
-            .update(cx, |sidebar, cx| sidebar.rename(item, window, cx))
-        {
-            self.hidden = false;
-            self.keep_state(cx);
-            cx.notify();
-        }
+        self.hidden = false;
+        self.keep_state(cx);
+        self.focus_sidebar(window, cx);
+        cx.notify();
+        // A new tag may still wait in the write line.
+        self.write(
+            window,
+            cx,
+            NotesFolder::wait,
+            move |this, (), window, cx| {
+                this.sidebar
+                    .update(cx, |sidebar, cx| sidebar.rename(item, window, cx));
+            },
+        );
     }
 
     /// Opens `next`, or shows the empty pane.
@@ -194,8 +199,6 @@ impl NotesView {
             }
             SidebarEvent::RenameFolder { folder, name } => {
                 let (folder, name) = (folder.clone(), name.clone());
-                let from = Item::Folder(folder.clone());
-                let to = Item::Folder(folder.with_file_name(&name));
                 let job = self.start(
                     {
                         let folder = folder.clone();
@@ -204,20 +207,29 @@ impl NotesView {
                     cx,
                 );
                 let job = self.follow(folder, job, cx);
-                self.finish_rename(from, to, job, |to| Item::Folder(to.clone()), window, cx);
+                Self::rename_step(
+                    job,
+                    |this, to, _, cx| this.close_rename(Some(Item::Folder(to)), cx),
+                    window,
+                    cx,
+                );
             }
             SidebarEvent::RenameTag { from, to } => {
                 let (from, to) = (from.clone(), to.clone());
-                self.write(
-                    window,
-                    cx,
+                let job = self.start(
                     {
                         let (from, to) = (from.clone(), to.clone());
                         |notes_folder, cx| notes_folder.tag_rename_count(from, to, cx)
                     },
+                    cx,
+                );
+                Self::rename_step(
+                    job,
                     move |this, notes, window, cx| {
                         this.ask(Ask::RenameTag { from, to, notes }, window, cx);
                     },
+                    window,
+                    cx,
                 );
             }
             SidebarEvent::DeleteTag(tag) => {
@@ -442,8 +454,14 @@ impl NotesView {
         self.dialog = None;
         self.focus_sidebar(window, cx);
         cx.notify();
-        let DialogEvent::Confirm { ask, do_not_ask } = event.clone() else {
-            return;
+        let (ask, do_not_ask) = match event.clone() {
+            DialogEvent::Confirm { ask, do_not_ask } => (ask, do_not_ask),
+            DialogEvent::Cancel(ask) => {
+                if matches!(ask, Ask::RenameTag { .. }) {
+                    self.close_rename(None, cx);
+                }
+                return;
+            }
         };
         if do_not_ask {
             let mut settings = self.config.read(cx).settings().clone();
@@ -457,16 +475,14 @@ impl NotesView {
         match ask {
             Ask::Delete { target, .. } => self.delete(target, window, cx),
             Ask::RenameTag { from, to, .. } => {
-                let shown = holm_markdown::normalize_tag(&to);
-                let item = Item::Tag(from.clone());
+                let shown = holm_markdown::normalize_tag(&to).map(Item::Tag);
                 let job = self.start(|notes_folder, cx| notes_folder.rename_tag(from, to, cx), cx);
-                match shown {
-                    Some(tag) => {
-                        let tag = Item::Tag(tag);
-                        self.finish_rename(item, tag.clone(), job, move |_| tag, window, cx);
-                    }
-                    None => self.finish(job, |_, _, _, _| {}, window, cx),
-                }
+                Self::rename_step(
+                    job,
+                    |this, _, _, cx| this.close_rename(shown, cx),
+                    window,
+                    cx,
+                );
             }
             Ask::DeleteTag { tag, .. } => {
                 self.write(
@@ -575,29 +591,31 @@ impl NotesView {
         })
     }
 
-    /// Shows the rename of `from` to `to` in the tree at once, and waits for `job`. `item`
-    /// gives the item on disk from the result of `job`.
-    fn finish_rename<T: 'static>(
-        &mut self,
-        from: Item,
-        to: Item,
+    /// Like [`Self::finish`], for a step of a rename. A fail also closes the name field of the
+    /// sidebar. A later action does not cancel the step, so the field always closes.
+    fn rename_step<T: 'static>(
         job: Task<holm_core::Result<T>>,
-        item: impl FnOnce(&T) -> Item + 'static,
+        done: impl FnOnce(&mut Self, T, &mut Window, &mut Context<Self>) + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.sidebar
-            .update(cx, |sidebar, cx| sidebar.show_rename(from, to, cx));
-        let sidebar = self.sidebar.downgrade();
-        let job = cx.spawn(async move |_, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             let result = job.await;
-            let to = result.as_ref().ok().map(item);
-            sidebar
-                .update(cx, |sidebar, cx| sidebar.end_rename(to, cx))
-                .ok();
-            result
-        });
-        self.finish(job, |_, _, _, _| {}, window, cx);
+            this.update_in(cx, |this, window, cx| match result {
+                Ok(value) => done(this, value, window, cx),
+                Err(error) => {
+                    this.close_rename(None, cx);
+                    this.fail(error, cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn close_rename(&self, to: Option<Item>, cx: &mut Context<Self>) {
+        self.sidebar
+            .update(cx, |sidebar, cx| sidebar.close_rename(to, cx));
     }
 
     /// Waits for a file action and gives its result to `done`. An error shows in a quiet bar.
@@ -614,16 +632,20 @@ impl NotesView {
                 this.action = None;
                 match result {
                     Ok(value) => done(this, value, window, cx),
-                    Err(error) => {
-                        let error = AppError::from(error);
-                        tracing::warn!(error = %crate::chain(&error), "a file action failed");
-                        this.error = Some(error.message());
-                    }
+                    Err(error) => this.fail(error, cx),
                 }
                 cx.notify();
             })
             .ok();
         }));
+    }
+
+    /// Shows the error of a file action in a quiet bar.
+    fn fail(&mut self, error: holm_core::Error, cx: &mut Context<Self>) {
+        let error = AppError::from(error);
+        tracing::warn!(error = %crate::chain(&error), "a file action failed");
+        self.error = Some(error.message());
+        cx.notify();
     }
 
     fn focus_editor(&self, window: &mut Window, cx: &mut Context<Self>) {
