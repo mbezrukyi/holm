@@ -12,7 +12,7 @@ use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::{
     AppContext as _, Context, CursorStyle, Entity, FocusHandle, Focusable as _,
     InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseMoveEvent, MouseUpEvent,
-    ParentElement, Pixels, Render, Styled, Subscription, Task, Window, div, px,
+    ParentElement, Pixels, Render, Styled, Subscription, Window, div, px,
 };
 use holm_core::model::{Note, Order};
 use holm_core::{Core, Snapshot};
@@ -22,7 +22,7 @@ use crate::config::{Config, SidebarSettings};
 use crate::dialog::{Ask, Dialog, DialogEvent};
 use crate::error::AppError;
 use crate::link_picker::{LinkPicker, LinkPickerEvent, LinkStart};
-use crate::notes_folder::NotesFolder;
+use crate::notes_folder::{NotesFolder, Step};
 use crate::pane::{Leave, NotePane, PaneEvent};
 use crate::picker::{FolderPicker, PickerEvent};
 use crate::quick_open::{QuickOpen, QuickOpenEvent};
@@ -51,7 +51,6 @@ pub(crate) struct NotesView {
     /// back on `Esc`.
     before_popup: Option<FocusHandle>,
     error: Option<&'static str>,
-    action: Option<Task<()>>,
     subscriptions: Vec<Subscription>,
 }
 
@@ -96,7 +95,6 @@ impl NotesView {
             link_picker: None,
             before_popup: None,
             error: None,
-            action: None,
             subscriptions,
         };
         this.keep_state(cx);
@@ -154,7 +152,7 @@ impl NotesView {
         self.write(
             window,
             cx,
-            NotesFolder::wait,
+            |notes_folder, done, cx| notes_folder.wait(done, cx),
             move |this, (), window, cx| {
                 this.sidebar
                     .update(cx, |sidebar, cx| sidebar.rename(item, window, cx));
@@ -199,37 +197,28 @@ impl NotesView {
             }
             SidebarEvent::RenameFolder { folder, name } => {
                 let (folder, name) = (folder.clone(), name.clone());
-                let job = self.start(
-                    {
-                        let folder = folder.clone();
-                        |notes_folder, cx| notes_folder.rename_folder(folder, name, cx)
-                    },
-                    cx,
-                );
-                let job = self.follow(folder, job, cx);
-                Self::rename_step(
-                    job,
-                    |this, to, _, cx| this.close_rename(Some(Item::Folder(to)), cx),
+                self.rename_write(
                     window,
                     cx,
+                    |notes_folder, done, cx| notes_folder.rename_folder(folder, name, done, cx),
+                    |this, _, _, cx| {
+                        this.close_rename(cx);
+                        this.keep_state(cx);
+                    },
                 );
             }
             SidebarEvent::RenameTag { from, to } => {
                 let (from, to) = (from.clone(), to.clone());
-                let job = self.start(
+                self.rename_write(
+                    window,
+                    cx,
                     {
                         let (from, to) = (from.clone(), to.clone());
-                        |notes_folder, cx| notes_folder.tag_rename_count(from, to, cx)
+                        |notes_folder, done, cx| notes_folder.tag_rename_count(from, to, done, cx)
                     },
-                    cx,
-                );
-                Self::rename_step(
-                    job,
                     move |this, notes, window, cx| {
                         this.ask(Ask::RenameTag { from, to, notes }, window, cx);
                     },
-                    window,
-                    cx,
                 );
             }
             SidebarEvent::DeleteTag(tag) => {
@@ -239,7 +228,7 @@ impl NotesView {
                     cx,
                     {
                         let tag = tag.clone();
-                        |notes_folder, cx| notes_folder.tag_delete_count(tag, cx)
+                        |notes_folder, done, cx| notes_folder.tag_delete_count(tag, done, cx)
                     },
                     move |this, notes, window, cx| {
                         this.ask(Ask::DeleteTag { tag, notes }, window, cx);
@@ -277,28 +266,21 @@ impl NotesView {
             return;
         };
         match target {
-            Target::Note(path) => {
-                let job = self.start(
-                    {
-                        let path = path.clone();
-                        |notes_folder, cx| notes_folder.move_note(path, folder, cx)
-                    },
-                    cx,
-                );
-                let job = self.follow(path, job, cx);
-                self.finish(job, |_, _, _, _| {}, window, cx);
-            }
-            Target::Folder(path) => {
-                let job = self.start(
-                    {
-                        let path = path.clone();
-                        |notes_folder, cx| notes_folder.move_folder(path, folder, cx)
-                    },
-                    cx,
-                );
-                let job = self.follow(path, job, cx);
-                self.finish(job, Self::show_folder, window, cx);
-            }
+            Target::Note(path) => self.write(
+                window,
+                cx,
+                |notes_folder, done, cx| notes_folder.move_note(path, folder, done, cx),
+                |this, _, _, cx| this.keep_state(cx),
+            ),
+            Target::Folder(path) => self.write(
+                window,
+                cx,
+                |notes_folder, done, cx| notes_folder.move_folder(path, folder, done, cx),
+                |this, to, window, cx| {
+                    this.show_folder(to, window, cx);
+                    this.keep_state(cx);
+                },
+            ),
         }
     }
 
@@ -314,9 +296,8 @@ impl NotesView {
 
     /// Ctrl+K: opens the link picker.
     fn open_link_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(job) = self.pane.update(cx, NotePane::start_link) {
-            self.finish(job, Self::show_link_picker, window, cx);
-        }
+        let done = Self::step(window, cx, Self::show_link_picker);
+        self.pane.update(cx, |pane, cx| pane.start_link(done, cx));
     }
 
     fn show_link_picker(&mut self, start: LinkStart, window: &mut Window, cx: &mut Context<Self>) {
@@ -342,13 +323,10 @@ impl NotesView {
             LinkPickerEvent::Pick(choice) => {
                 self.focus_editor(window, cx);
                 let choice = choice.clone();
-                let job = self.pane.update(cx, |pane, cx| pane.link(choice, cx));
-                self.finish(
-                    job,
-                    |this, (), window, cx| this.focus_editor(window, cx),
-                    window,
-                    cx,
-                );
+                let done = Self::then(window, cx, |this, (), window, cx| {
+                    this.focus_editor(window, cx);
+                });
+                self.pane.update(cx, |pane, cx| pane.link(choice, done, cx));
             }
             LinkPickerEvent::Close => self.focus_before(before, window, cx),
         }
@@ -396,24 +374,14 @@ impl NotesView {
     }
 
     fn ask_delete(&mut self, target: Target, window: &mut Window, cx: &mut Context<Self>) {
-        let count = match &target {
-            Target::Note(path) => {
-                let path = path.clone();
-                self.start(
-                    |notes_folder, cx| notes_folder.note_delete_count(path, cx),
-                    cx,
-                )
-            }
-            Target::Folder(path) => {
-                let path = path.clone();
-                self.start(
-                    |notes_folder, cx| notes_folder.folder_delete_count(path, cx),
-                    cx,
-                )
-            }
-        };
-        self.finish(
-            count,
+        let counted = target.clone();
+        self.write(
+            window,
+            cx,
+            |notes_folder, done, cx| match counted {
+                Target::Note(path) => notes_folder.note_delete_count(path, done, cx),
+                Target::Folder(path) => notes_folder.folder_delete_count(path, done, cx),
+            },
             move |this, count, window, cx| {
                 let name = match &target {
                     Target::Note(path) => this
@@ -439,8 +407,6 @@ impl NotesView {
                     cx,
                 );
             },
-            window,
-            cx,
         );
     }
 
@@ -458,7 +424,7 @@ impl NotesView {
             DialogEvent::Confirm { ask, do_not_ask } => (ask, do_not_ask),
             DialogEvent::Cancel(ask) => {
                 if matches!(ask, Ask::RenameTag { .. }) {
-                    self.close_rename(None, cx);
+                    self.close_rename(cx);
                 }
                 return;
             }
@@ -474,21 +440,17 @@ impl NotesView {
     fn confirmed(&mut self, ask: Ask, window: &mut Window, cx: &mut Context<Self>) {
         match ask {
             Ask::Delete { target, .. } => self.delete(target, window, cx),
-            Ask::RenameTag { from, to, .. } => {
-                let shown = holm_markdown::normalize_tag(&to).map(Item::Tag);
-                let job = self.start(|notes_folder, cx| notes_folder.rename_tag(from, to, cx), cx);
-                Self::rename_step(
-                    job,
-                    |this, _, _, cx| this.close_rename(shown, cx),
-                    window,
-                    cx,
-                );
-            }
+            Ask::RenameTag { from, to, .. } => self.rename_write(
+                window,
+                cx,
+                |notes_folder, done, cx| notes_folder.rename_tag(from, to, done, cx),
+                |this, _, _, cx| this.close_rename(cx),
+            ),
             Ask::DeleteTag { tag, .. } => {
                 self.write(
                     window,
                     cx,
-                    |notes_folder, cx| notes_folder.delete_tag(tag, cx),
+                    |notes_folder, done, cx| notes_folder.delete_tag(tag, done, cx),
                     |_, _, _, _| {},
                 );
             }
@@ -506,9 +468,9 @@ impl NotesView {
         self.write(
             window,
             cx,
-            |notes_folder, cx| match target {
-                Target::Note(path) => notes_folder.delete_note(path, cx),
-                Target::Folder(path) => notes_folder.delete_folder(path, cx),
+            |notes_folder, done, cx| match target {
+                Target::Note(path) => notes_folder.delete_note(path, done, cx),
+                Target::Folder(path) => notes_folder.delete_folder(path, done, cx),
             },
             move |this, (), window, cx| {
                 if open_gone {
@@ -524,7 +486,7 @@ impl NotesView {
         self.write(
             window,
             cx,
-            |notes_folder, cx| notes_folder.create_note(folder, tag, cx),
+            |notes_folder, done, cx| notes_folder.create_note(folder, tag, done, cx),
             |this, path, window, cx| {
                 this.pane
                     .update(cx, |pane, cx| pane.open(path, Leave::Keep, cx));
@@ -541,7 +503,9 @@ impl NotesView {
         self.write(
             window,
             cx,
-            |notes_folder, cx| notes_folder.create_folder(parent, text::NEW_FOLDER, cx),
+            |notes_folder, done, cx| {
+                notes_folder.create_folder(parent, text::NEW_FOLDER, done, cx);
+            },
             |this, folder, window, cx| {
                 this.hidden = false;
                 this.sidebar.update(cx, |sidebar, cx| {
@@ -551,93 +515,76 @@ impl NotesView {
         );
     }
 
-    /// Puts the unsaved text of the pane in the write line, and then the action of `start`.
-    fn start<T>(
-        &mut self,
-        start: impl FnOnce(&mut NotesFolder, &mut Context<NotesFolder>) -> Task<holm_core::Result<T>>,
-        cx: &mut Context<Self>,
-    ) -> Task<holm_core::Result<T>> {
-        self.pane.update(cx, |pane, cx| pane.save_now(cx).detach());
-        self.notes_folder.update(cx, start)
-    }
-
-    /// Like [`Self::start`], and gives the result of the action to `done`.
+    /// Puts the unsaved text of the pane in the write line, and then the write of `start`.
+    /// `done` gets its value in the update where the write ends. An error shows in a quiet bar.
     fn write<T: 'static>(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-        start: impl FnOnce(&mut NotesFolder, &mut Context<NotesFolder>) -> Task<holm_core::Result<T>>,
+        start: impl FnOnce(&mut NotesFolder, Step<holm_core::Result<T>>, &mut Context<NotesFolder>),
         done: impl FnOnce(&mut Self, T, &mut Window, &mut Context<Self>) + 'static,
     ) {
-        let job = self.start(start, cx);
-        self.finish(job, done, window, cx);
+        self.pane.update(cx, NotePane::save);
+        let done = Self::then(window, cx, done);
+        self.notes_folder
+            .update(cx, |notes_folder, cx| start(notes_folder, done, cx));
     }
 
-    /// Waits for `job`, which moves the note or folder at `from` and gives its new path.
-    /// When that holds the open note, the pane follows it.
-    fn follow(
-        &self,
-        from: PathBuf,
-        job: Task<holm_core::Result<PathBuf>>,
-        cx: &mut Context<Self>,
-    ) -> Task<holm_core::Result<PathBuf>> {
-        let pane = self.pane.downgrade();
-        cx.spawn(async move |_, cx| {
-            let result = job.await;
-            if let Ok(to) = &result {
-                pane.update(cx, |pane, cx| pane.moved(&from, to, cx)).ok();
-            }
-            result
-        })
-    }
-
-    /// Like [`Self::finish`], for a step of a rename. A fail also closes the name field of the
-    /// sidebar. A later action does not cancel the step, so the field always closes.
-    fn rename_step<T: 'static>(
-        job: Task<holm_core::Result<T>>,
-        done: impl FnOnce(&mut Self, T, &mut Window, &mut Context<Self>) + 'static,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        cx.spawn_in(window, async move |this, cx| {
-            let result = job.await;
-            this.update_in(cx, |this, window, cx| match result {
-                Ok(value) => done(this, value, window, cx),
-                Err(error) => {
-                    this.close_rename(None, cx);
-                    this.fail(error, cx);
-                }
-            })
-            .ok();
-        })
-        .detach();
-    }
-
-    fn close_rename(&self, to: Option<Item>, cx: &mut Context<Self>) {
-        self.sidebar
-            .update(cx, |sidebar, cx| sidebar.close_rename(to, cx));
-    }
-
-    /// Waits for a file action and gives its result to `done`. An error shows in a quiet bar.
-    fn finish<T: 'static>(
+    /// Like [`Self::write`], for a step of a rename. A fail also closes the name field of the
+    /// sidebar.
+    fn rename_write<T: 'static>(
         &mut self,
-        job: Task<holm_core::Result<T>>,
-        done: impl FnOnce(&mut Self, T, &mut Window, &mut Context<Self>) + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
+        start: impl FnOnce(&mut NotesFolder, Step<holm_core::Result<T>>, &mut Context<NotesFolder>),
+        done: impl FnOnce(&mut Self, T, &mut Window, &mut Context<Self>) + 'static,
     ) {
-        self.action = Some(cx.spawn_in(window, async move |this, cx| {
-            let result = job.await;
-            this.update_in(cx, |this, window, cx| {
-                this.action = None;
-                match result {
-                    Ok(value) => done(this, value, window, cx),
-                    Err(error) => this.fail(error, cx),
-                }
-                cx.notify();
-            })
-            .ok();
-        }));
+        self.pane.update(cx, NotePane::save);
+        let done = Self::step(window, cx, move |this, result, window, cx| match result {
+            Ok(value) => done(this, value, window, cx),
+            Err(error) => {
+                this.close_rename(cx);
+                this.fail(error, cx);
+            }
+        });
+        self.notes_folder
+            .update(cx, |notes_folder, cx| start(notes_folder, done, cx));
+    }
+
+    /// Like [`Self::step`], for the result of a file action. An error shows in a quiet bar.
+    fn then<T: 'static>(
+        window: &Window,
+        cx: &Context<Self>,
+        done: impl FnOnce(&mut Self, T, &mut Window, &mut Context<Self>) + 'static,
+    ) -> Step<holm_core::Result<T>> {
+        Self::step(window, cx, move |this, result, window, cx| match result {
+            Ok(value) => done(this, value, window, cx),
+            Err(error) => this.fail(error, cx),
+        })
+    }
+
+    /// A `done` step for the notes folder or the pane: it runs `done` on the view.
+    fn step<R: 'static>(
+        window: &Window,
+        cx: &Context<Self>,
+        done: impl FnOnce(&mut Self, R, &mut Window, &mut Context<Self>) + 'static,
+    ) -> Step<R> {
+        let this = cx.weak_entity();
+        let window = window.window_handle();
+        Box::new(move |value, cx| {
+            window
+                .update(cx, |_, window, cx| {
+                    this.update(cx, |this, cx| {
+                        done(this, value, window, cx);
+                        cx.notify();
+                    })
+                })
+                .ok();
+        })
+    }
+
+    fn close_rename(&self, cx: &mut Context<Self>) {
+        self.sidebar.update(cx, Sidebar::close_rename);
     }
 
     /// Shows the error of a file action in a quiet bar.

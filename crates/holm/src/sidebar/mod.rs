@@ -28,7 +28,7 @@ use holm_core::model::{NoteInfo, Order};
 
 use crate::error::AppError;
 use crate::icons::Icon;
-use crate::notes_folder::{FolderEvent, NotesFolder};
+use crate::notes_folder::{FolderEvent, Move, NotesFolder};
 use crate::text;
 
 pub(crate) use tree::{Item, View};
@@ -91,6 +91,8 @@ pub(crate) struct Sidebar {
     notes_folder: Entity<NotesFolder>,
     order: Order,
     tree: Tree,
+    /// The revision of the snapshot that `tree` shows.
+    revision: u64,
     view: View,
     open: HashSet<Item>,
     rows: Vec<Row>,
@@ -124,8 +126,8 @@ impl Sidebar {
         cx: &mut Context<Self>,
     ) -> Self {
         let changed = cx.subscribe(&notes_folder, |sidebar, _, event, cx| {
-            if *event == FolderEvent::Changed {
-                sidebar.refresh(cx);
+            if let FolderEvent::Changed(moves) = event {
+                sidebar.changed(moves, cx);
             }
         });
         let search = cx.new(|cx| InputState::new(window, cx).placeholder(text::SEARCH));
@@ -142,6 +144,7 @@ impl Sidebar {
             notes_folder,
             order,
             tree: Tree::default(),
+            revision: 0,
             view,
             open: HashSet::new(),
             rows: Vec::new(),
@@ -167,28 +170,62 @@ impl Sidebar {
         &self.view
     }
 
-    /// Builds the tree from the snapshot of the notes folder. The sidebar calls it itself for
-    /// each new snapshot.
+    /// Takes the end of a write or of outside changes: it follows the moves, and then shows
+    /// the snapshot.
+    fn changed(&mut self, moves: &[Move], cx: &mut Context<Self>) {
+        let revision = self.notes_folder.read(cx).snapshot().revision();
+        if moves.is_empty() && revision == self.revision {
+            return;
+        }
+        let view = self.view.clone();
+        for one in moves {
+            self.follow(one, cx);
+        }
+        self.refresh(cx);
+        if self.view != view {
+            self.scroll_to_selection();
+        }
+    }
+
+    /// Moves the view, the open items, the name field and the note in the editor with `one`.
+    fn follow(&mut self, one: &Move, cx: &mut Context<Self>) {
+        let view = match &self.view {
+            View::Tree(item) => item.moved(one).map(View::Tree),
+            View::List(item) => item.moved(one).map(View::List),
+        };
+        if let Some(view) = view {
+            self.view = view;
+            cx.emit(SidebarEvent::ViewChanged);
+        }
+        self.open = self
+            .open
+            .drain()
+            .map(|item| item.moved(one).unwrap_or(item))
+            .collect();
+        if let Some(rename) = &mut self.rename
+            && let Some(item) = rename.item.moved(one)
+        {
+            rename.item = item;
+        }
+        if let Some(current) = &mut self.current
+            && let Some(path) = one.path(current)
+        {
+            *current = path;
+        }
+    }
+
+    /// Builds the tree from the snapshot of the notes folder. An item that is gone leaves the
+    /// view and the open items.
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let snapshot = self.notes_folder.read(cx).snapshot();
+        self.revision = snapshot.revision();
         self.tree = Tree::new(snapshot, self.order);
         self.error = None;
         let item = self.tree.nearest(self.view.item());
         if &item != self.view.item() {
             self.show_in_tree(item, cx);
         }
-        // The open items below a renamed item stay, so they open below its new name.
-        let renaming = self
-            .rename
-            .as_ref()
-            .filter(|rename| rename.locked)
-            .map(|rename| rename.item.clone());
-        self.open.retain(|item| {
-            self.tree.has(item)
-                || renaming
-                    .as_ref()
-                    .is_some_and(|from| item.moved(from, from).is_some())
-        });
+        self.open.retain(|item| self.tree.has(item));
         self.rebuild();
         cx.notify();
         if self.searching() {
@@ -362,33 +399,11 @@ impl Sidebar {
         self.set_view(View::Tree(item), cx);
     }
 
-    /// Closes the locked name field when the app ends its rename. With `to`, the item after
-    /// the rename, it selects `to` or its nearest parent in the tree.
-    pub(crate) fn close_rename(&mut self, to: Option<Item>, cx: &mut Context<Self>) {
-        let Some(rename) = self.rename.take_if(|rename| rename.locked) else {
-            return;
-        };
-        if let Some(to) = &to {
-            self.open_moved(&rename.item, to);
-        }
-        self.open.retain(|item| self.tree.has(item));
-        if let Some(to) = to {
-            let to = self.tree.nearest(&to);
-            self.show_in_tree(to, cx);
-        } else {
-            self.rebuild();
+    /// Closes the locked name field when the app ends its rename.
+    pub(crate) fn close_rename(&mut self, cx: &mut Context<Self>) {
+        if self.rename.take_if(|rename| rename.locked).is_some() {
             cx.notify();
         }
-    }
-
-    /// Opens the items below `to` that are open below `from`.
-    fn open_moved(&mut self, from: &Item, to: &Item) {
-        let moved: Vec<Item> = self
-            .open
-            .iter()
-            .filter_map(|item| item.moved(from, to))
-            .collect();
-        self.open.extend(moved);
     }
 
     fn set_view(&mut self, view: View, cx: &mut Context<Self>) {
@@ -696,17 +711,13 @@ impl Sidebar {
             Item::Tag(_) if row.open => Icon::TagsOpen,
             Item::Tag(_) => Icon::Tags,
         };
-        let name: SharedString = match &row.item {
-            Item::All => text::ALL_NOTES.into(),
-            Item::Folder(_) | Item::Tag(_) => row.name.clone().into(),
-        };
-        let renaming = self
+        let (name, aria) = self.row_name(row, cx);
+        let field = self
             .rename
             .as_ref()
-            .filter(|rename| rename.item == row.item);
-        let label = match renaming {
+            .filter(|rename| rename.item == row.item && !rename.locked);
+        let label = match field {
             Some(rename) => Input::new(&rename.input)
-                .disabled(rename.locked)
                 .appearance(false)
                 .small()
                 .flex_1()
@@ -738,13 +749,13 @@ impl Sidebar {
                     cx.stop_propagation();
                 }
             }));
-        let editing = renaming.is_some();
+        let editing = field.is_some();
         let depth = f32::from(u16::try_from(row.depth).unwrap_or(u16::MAX));
         let item = row.item.clone();
         h_flex()
             .id(ElementId::NamedInteger("tree-row".into(), at as u64))
             .role(Role::TreeItem)
-            .aria_label(item_label(&row.item))
+            .aria_label(aria)
             .aria_selected(selected)
             .when(row.has_children, |row_element| {
                 row_element.aria_expanded(row.open)
@@ -780,6 +791,24 @@ impl Sidebar {
                 sidebar.set_view(View::List(item.clone()), cx);
             }))
             .into_any_element()
+    }
+
+    /// The name of a tree row and its accessible name. After `Enter` in the name field, the
+    /// row shows the typed name until the write ends.
+    fn row_name(&self, row: &Row, cx: &App) -> (SharedString, String) {
+        let typed = self
+            .rename
+            .as_ref()
+            .filter(|rename| rename.item == row.item && rename.locked)
+            .map(|rename| rename.input.read(cx).value().trim().to_owned());
+        match (&row.item, typed) {
+            (Item::All, _) => (text::ALL_NOTES.into(), item_label(&row.item)),
+            (item, Some(typed)) => {
+                let label = item_label(&typed_item(item, &typed));
+                (typed.into(), label)
+            }
+            (item, None) => (row.name.clone().into(), item_label(item)),
+        }
     }
 
     /// The head of a note list: `‹`, the name of the list, and its count. A click leaves the
@@ -901,6 +930,15 @@ fn item_label(item: &Item) -> String {
         Item::All => text::ALL_NOTES.to_owned(),
         Item::Folder(path) => path.display().to_string(),
         Item::Tag(name) => format!("#{name}"),
+    }
+}
+
+/// The item that a rename of `item` to `typed` asks for.
+fn typed_item(item: &Item, typed: &str) -> Item {
+    match item {
+        Item::All => Item::All,
+        Item::Folder(path) => Item::Folder(path.with_file_name(typed)),
+        Item::Tag(_) => Item::Tag(typed.to_owned()),
     }
 }
 

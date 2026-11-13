@@ -37,6 +37,8 @@ pub(super) struct Links {
     backlinks: Entity<Backlinks>,
     /// The path of the open note, relative to the notes folder.
     note: Option<PathBuf>,
+    /// The revision of the snapshot that the links come from.
+    revision: u64,
     reading: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -50,8 +52,9 @@ impl Links {
         cx: &mut Context<Self>,
     ) -> Self {
         let subscriptions = vec![
-            cx.subscribe(&notes_folder, |links, _, event, cx| {
-                if *event == FolderEvent::Changed {
+            cx.subscribe(&notes_folder, |links, notes_folder, event, cx| {
+                let revision = notes_folder.read(cx).snapshot().revision();
+                if matches!(event, FolderEvent::Changed(_)) && revision != links.revision {
                     links.read(cx);
                 }
             }),
@@ -70,6 +73,7 @@ impl Links {
             editor,
             backlinks,
             note: None,
+            revision: 0,
             reading: None,
             _subscriptions: subscriptions,
         }
@@ -121,6 +125,7 @@ impl Links {
             return;
         };
         let notes_folder = self.notes_folder.read(cx);
+        self.revision = notes_folder.snapshot().revision();
         let backlinks = notes_folder.snapshot().backlinks(&path, Order::LastChange);
         let broken = notes_folder.broken_links(path.clone(), cx);
         let job = cx.background_spawn(async move {
@@ -182,16 +187,19 @@ impl Links {
         let Some(note) = self.note.clone() else {
             return;
         };
-        let job = self
-            .notes_folder
-            .update(cx, |notes_folder, cx| notes_folder.attach(note, files, cx));
-        cx.spawn(async move |links, cx| {
-            let copies = job.await;
-            links
-                .update(cx, |links, cx| links.insert_file_links(copies, cx))
-                .ok();
-        })
-        .detach();
+        let links = cx.weak_entity();
+        self.notes_folder.update(cx, |notes_folder, cx| {
+            notes_folder.attach(
+                note,
+                files,
+                move |copies, cx| {
+                    links
+                        .update(cx, |links, cx| links.insert_file_links(copies, cx))
+                        .ok();
+                },
+                cx,
+            );
+        });
     }
 
     /// Embeds a link to each file at the cursor, as `![..](..)`. It shows an image or a file

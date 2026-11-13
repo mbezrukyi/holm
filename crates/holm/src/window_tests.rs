@@ -1100,18 +1100,28 @@ fn a_folder_rename_locks_the_field_until_the_write_ends(cx: &mut TestAppContext)
     type_new_name(cx, handle, "job");
     assert_eq!(tree_field(cx, handle).as_deref(), Some("job"));
     press(cx, handle, "enter");
-    assert_eq!(tree_field(cx, handle).as_deref(), Some("job"));
-    assert_eq!(tree(cx, handle), ["All notes", "work*", "work/sub"]);
+    // The locked field shows as a plain row with the typed name.
+    assert_eq!(tree_field(cx, handle), None);
+    assert_eq!(tree(cx, handle), ["All notes", "job*", "work/sub"]);
 
     // A key on the locked field does nothing.
     press(cx, handle, "escape");
-    assert_eq!(tree_field(cx, handle).as_deref(), Some("job"));
+    press(cx, handle, "up");
+    assert_eq!(tree(cx, handle), ["All notes", "job*", "work/sub"]);
 
-    cx.run_until_parked();
+    assert_eq!(
+        tree_steps(cx, handle),
+        [
+            ["All notes", "job*", "work/sub"],
+            ["All notes", "job*", "job/sub"]
+        ]
+    );
     assert_eq!(tree_field(cx, handle), None);
-    assert_eq!(tree(cx, handle), ["All notes", "job*", "job/sub"]);
+    // The first key after the write goes to the tree.
+    press(cx, handle, "up");
+    assert_eq!(tree(cx, handle), ["All notes*", "job", "job/sub"]);
     settle(cx);
-    assert_eq!(tree(cx, handle), ["All notes", "job*", "job/sub"]);
+    assert_eq!(tree(cx, handle), ["All notes*", "job", "job/sub"]);
     assert!(notes_dir.join("job/sub").is_dir());
 }
 
@@ -1163,8 +1173,8 @@ fn a_tag_rename_shows_the_new_name_after_the_confirm(cx: &mut TestAppContext) {
     type_new_name(cx, handle, "new");
     keys(cx, handle, "enter");
     assert!(question(cx, handle).is_some());
-    assert_eq!(tree_field(cx, handle).as_deref(), Some("new"));
-    assert_eq!(tree(cx, handle), ["All notes", "#old*"]);
+    assert_eq!(tree_field(cx, handle), None);
+    assert_eq!(tree(cx, handle), ["All notes", "#new*"]);
     keys(cx, handle, "escape");
     assert_eq!(tree_field(cx, handle), None);
     assert_eq!(tree(cx, handle), ["All notes", "#old*"]);
@@ -1173,11 +1183,9 @@ fn a_tag_rename_shows_the_new_name_after_the_confirm(cx: &mut TestAppContext) {
     keys(cx, handle, "enter");
     press(cx, handle, "enter");
     assert_eq!(question(cx, handle), None);
-    assert_eq!(tree_field(cx, handle).as_deref(), Some("new"));
-    assert_eq!(tree(cx, handle), ["All notes", "#old*"]);
-    cx.run_until_parked();
     assert_eq!(tree_field(cx, handle), None);
     assert_eq!(tree(cx, handle), ["All notes", "#new*"]);
+    assert_eq!(tree_steps(cx, handle), [["All notes", "#new*"]]);
     settle(cx);
     assert_eq!(tree(cx, handle), ["All notes", "#new*"]);
 }
@@ -1199,6 +1207,235 @@ fn a_tag_rename_onto_a_tag_merges_into_its_row(cx: &mut TestAppContext) {
     settle(cx);
     assert_eq!(tree(cx, handle), ["All notes", "#new*"]);
     assert_eq!(fields(&notes_dir.join("A.md")).0, ["new"]);
+}
+
+/// Runs the tasks one at a time, and gives the tree before them and after each one that
+/// changes it. A frame can show each of these.
+fn tree_steps(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<Vec<String>> {
+    let mut steps = vec![tree(cx, handle)];
+    while cx.executor().tick() {
+        let now = tree(cx, handle);
+        if steps.last() != Some(&now) {
+            steps.push(now);
+        }
+    }
+    steps
+}
+
+/// Renames the selected row to `name`, and gives the tree steps of the write.
+fn rename_steps(cx: &mut TestAppContext, handle: AnyWindowHandle, name: &str) -> Vec<Vec<String>> {
+    type_new_name(cx, handle, name);
+    press(cx, handle, "enter");
+    tree_steps(cx, handle)
+}
+
+/// A nested folder `area/work` with an open child `sub` and the note `A.md`, which is open.
+fn nested_folders(fixture: &Fixture) {
+    let notes_dir = fixture.notes();
+    fs::create_dir_all(notes_dir.join("area/work/sub")).unwrap();
+    fs::create_dir(notes_dir.join("area/bebra")).unwrap();
+    fs::write(notes_dir.join("area/work/A.md"), "# A\n").unwrap();
+}
+
+#[gpui_kit::test]
+fn a_folder_rename_keeps_the_row_selected_in_every_frame(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    nested_folders(&fixture);
+    let handle = open(cx, fixture.startup(None));
+
+    keys(cx, handle, "ctrl-shift-l escape down right down down right");
+    let before = [
+        "All notes",
+        "area",
+        "area/bebra",
+        "area/work*",
+        "area/work/sub",
+    ];
+    assert_eq!(tree(cx, handle), before);
+    assert_eq!(
+        rename_steps(cx, handle, "job"),
+        [
+            vec![
+                "All notes",
+                "area",
+                "area/bebra",
+                "area/job*",
+                "area/work/sub"
+            ],
+            vec![
+                "All notes",
+                "area",
+                "area/bebra",
+                "area/job*",
+                "area/job/sub"
+            ],
+        ]
+    );
+
+    // The open note follows the folder, so the next save goes to the new file.
+    assert_eq!(editor_text(cx, handle), "# A\n");
+    keys(cx, handle, "ctrl-shift-l");
+    cx.simulate_input(handle, "x");
+    autosave(cx);
+    let notes_dir = fixture.notes();
+    assert!(read(&notes_dir.join("area/job/A.md")).contains('x'));
+    assert!(!notes_dir.join("area/work").exists());
+}
+
+#[gpui_kit::test]
+fn a_folder_rename_scrolls_to_the_new_place_of_the_row(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    for folder in 0..60 {
+        fs::create_dir(fixture.notes().join(format!("f{folder:02}"))).unwrap();
+    }
+    fs::write(fixture.notes().join("Top.md"), "# Top\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    keys(cx, handle, "ctrl-shift-l escape down");
+    assert_eq!(sidebar(cx, handle), "tree f00");
+    rename_steps(cx, handle, "zz");
+    assert_eq!(sidebar(cx, handle), "tree zz");
+}
+
+#[gpui_kit::test]
+fn a_folder_rename_to_a_taken_name_keeps_the_row_selected_in_every_frame(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    nested_folders(&fixture);
+    let handle = open(cx, fixture.startup(None));
+
+    keys(cx, handle, "ctrl-shift-l escape down right down down right");
+    assert_eq!(
+        rename_steps(cx, handle, "bebra"),
+        [
+            vec![
+                "All notes",
+                "area",
+                "area/bebra",
+                "area/bebra*",
+                "area/work/sub"
+            ],
+            vec![
+                "All notes",
+                "area",
+                "area/bebra",
+                "area/bebra 2*",
+                "area/bebra 2/sub"
+            ],
+        ]
+    );
+}
+
+#[gpui_kit::test]
+fn a_folder_move_takes_the_open_note_with_it(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    nested_folders(&fixture);
+    let handle = open(cx, fixture.startup(None));
+
+    // The picker lists the root folder first, then `area`.
+    keys(cx, handle, "ctrl-shift-l escape down right down down");
+    assert_eq!(sidebar(cx, handle), "tree area/work");
+    keys(cx, handle, "ctrl-shift-m");
+    keys(cx, handle, "enter");
+    let notes_dir = fixture.notes();
+    assert!(notes_dir.join("work/A.md").is_file());
+    assert_eq!(sidebar(cx, handle), "tree work");
+
+    keys(cx, handle, "ctrl-shift-l");
+    cx.simulate_input(handle, "x");
+    autosave(cx);
+    assert!(read(&notes_dir.join("work/A.md")).contains('x'));
+    assert!(!notes_dir.join("area/work").exists());
+}
+
+#[gpui_kit::test]
+fn a_tag_rename_keeps_the_row_selected_in_every_frame(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    fs::write(
+        notes_dir.join("A.md"),
+        "---\ntags:\n  - area/old/x\n  - area/new\n---\n# A\n",
+    )
+    .unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    keys(cx, handle, "ctrl-shift-l escape down right down down right");
+    assert_eq!(
+        tree(cx, handle),
+        [
+            "All notes",
+            "#area",
+            "#area/new",
+            "#area/old*",
+            "#area/old/x"
+        ]
+    );
+    type_new_name(cx, handle, "area/fresh");
+    keys(cx, handle, "enter");
+    press(cx, handle, "enter");
+    assert_eq!(
+        tree_steps(cx, handle),
+        [
+            // The row keeps its place until the write ends.
+            vec![
+                "All notes",
+                "#area",
+                "#area/new",
+                "#area/fresh*",
+                "#area/old/x"
+            ],
+            vec![
+                "All notes",
+                "#area",
+                "#area/fresh*",
+                "#area/fresh/x",
+                "#area/new"
+            ],
+        ]
+    );
+
+    // A rename into a tag that exists merges into its row.
+    keys(cx, handle, "f2");
+    cx.update_window(handle, |_, window, cx| {
+        window.dispatch_action(Box::new(gpui_kit::component::input::SelectAll), cx);
+    })
+    .unwrap();
+    cx.simulate_input(handle, "area/new");
+    keys(cx, handle, "enter");
+    press(cx, handle, "enter");
+    let steps = tree_steps(cx, handle);
+    assert!(
+        steps
+            .iter()
+            .all(|step| !step.contains(&"#area*".to_owned())),
+        "{steps:?}"
+    );
+    assert_eq!(
+        steps.last().unwrap(),
+        &["All notes", "#area", "#area/new*", "#area/new/x"]
+    );
+}
+
+#[gpui_kit::test]
+fn an_outside_folder_rename_selects_the_parent(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    nested_folders(&fixture);
+    let handle = open(cx, fixture.startup(None));
+
+    keys(cx, handle, "ctrl-shift-l escape down right down down right");
+    assert_eq!(sidebar(cx, handle), "tree area/work");
+    let notes_dir = fixture.notes();
+    fs::rename(notes_dir.join("area/work"), notes_dir.join("area/job")).unwrap();
+    let feed = fixture.feed.lock().unwrap();
+    feed.as_ref()
+        .unwrap()
+        .changed(["area/work", "area/job"])
+        .unwrap();
+    drop(feed);
+    settle(cx);
+    assert_eq!(
+        tree(cx, handle),
+        ["All notes", "area*", "area/bebra", "area/job"]
+    );
 }
 
 /// The text of the name field in the sidebar, while it has the focus.

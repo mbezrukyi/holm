@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use gpui_kit::TestAppContext;
 
-use super::{Fixture, autosave, keys, open, screen, settle};
+use super::{Fixture, autosave, keys, open, screen, settle, type_new_name};
 
 const NOTES: usize = 5_000;
 const FOLDERS: usize = 50;
@@ -109,4 +109,13 @@ fn window_speed(cx: &mut TestAppContext) {
         });
     }
     keys(cx, handle, "escape");
+
+    // Quick open gives the focus back to the note list, after the search.
+    keys(cx, handle, "escape down");
+    type_new_name(cx, handle, "renamed");
+    time("folder rename", || {
+        cx.simulate_keystrokes(handle, "enter");
+        settle(cx);
+        frame(cx);
+    });
 }

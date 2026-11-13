@@ -40,7 +40,7 @@ use crate::backlinks::{Backlinks, OpenBacklink};
 use crate::bar::{self, Bar};
 use crate::error::AppError;
 use crate::link_picker::{LinkChoice, LinkStart};
-use crate::notes_folder::{FolderEvent, NoteText, NotesFolder};
+use crate::notes_folder::{FolderEvent, Move, NoteText, NotesFolder, Step};
 use crate::tags::{TagChange, TagRow};
 use crate::{text, theme};
 use links::{Links, LinksEvent};
@@ -95,7 +95,8 @@ pub(crate) struct NotePane {
     /// Another tool deleted the note while the editor had unsaved changes.
     deleted: bool,
     error: Option<&'static str>,
-    opening: Option<Task<()>>,
+    /// The number of the last open or drop of a note. A read for an older one is dropped.
+    opening: u64,
     /// The heading to show when the note that opens is ready.
     open_heading: Option<String>,
     /// Whether the link picker changes the link at the cursor, not inserts a new one.
@@ -123,7 +124,10 @@ impl NotePane {
             cx.new(|cx| Links::new(notes_folder.clone(), editor.clone(), backlinks.clone(), cx));
         let subscriptions = vec![
             cx.subscribe(&notes_folder, |pane, _, event, cx| match event {
-                FolderEvent::Changed => pane.show_fields(cx),
+                FolderEvent::Changed(moves) => {
+                    pane.follow(moves, cx);
+                    pane.show_fields(cx);
+                }
                 FolderEvent::Outside(change) => pane.outside_change(change.clone(), cx),
             }),
             cx.subscribe(&editor, |pane, _, _: &Changed, cx| pane.schedule_save(cx)),
@@ -167,7 +171,7 @@ impl NotePane {
             conflict: false,
             deleted: false,
             error: None,
-            opening: None,
+            opening: 0,
             open_heading: None,
             replace_link: false,
             _subscriptions: subscriptions,
@@ -222,7 +226,7 @@ impl NotePane {
         self.last_info = None;
         self.fields_pending = 0;
         self.autosave = None;
-        self.opening = None;
+        self.opening += 1;
         self.conflict = false;
         self.deleted = false;
         self.error = None;
@@ -253,21 +257,22 @@ impl NotePane {
         self.links.update(cx, Links::pick_files);
     }
 
-    /// Ctrl+K: reads what the link picker starts with, after the pane saves the open note.
-    /// In a note link, the field starts with its target, and the pick changes that link.
-    /// With no open note, it gives no task.
+    /// Ctrl+K: gives `done` what the link picker starts with, after the pane saves the open
+    /// note. In a note link, the field starts with its target, and the pick changes that link.
+    /// With no open note, it does nothing.
     pub(crate) fn start_link(
         &mut self,
+        done: impl FnOnce(LinkStart, &mut App) + 'static,
         cx: &mut Context<Self>,
-    ) -> Option<Task<holm_core::Result<LinkStart>>> {
-        let open_note = self.path.clone()?;
+    ) {
+        let Some(open_note) = self.path.clone() else {
+            return;
+        };
         let link = self.editor.read(cx).link_at_cursor();
         self.replace_link = link.as_ref().is_some_and(|link| !link.embedded);
         let target = link.map(|link| link.target);
-        let save = self.save_now(cx);
-        Some(cx.spawn(async move |pane, cx| {
-            save.await;
-            let start = pane.read_with(cx, |pane, cx| {
+        self.save_then(
+            move |pane, _, cx| {
                 let snapshot = pane.notes_folder.read(cx).snapshot();
                 let mut notes = snapshot.notes(Order::LastChange);
                 notes.sort_by_key(|note| std::cmp::Reverse(note.modified));
@@ -282,17 +287,16 @@ impl NotePane {
                     Some(Target::Heading(heading)) => format!("#{heading}"),
                     _ => String::new(),
                 };
-                LinkStart {
+                let start = LinkStart {
                     notes,
                     open_note,
                     query,
-                }
-            });
-            match start {
-                Ok(start) => Ok(start),
-                Err(_) => std::future::pending().await,
-            }
-        }))
+                };
+                // The caller may still be in its own update here.
+                cx.defer(move |cx| done(start, cx));
+            },
+            cx,
+        );
     }
 
     /// Makes the link that the user picked in the link picker, and puts it at the cursor.
@@ -300,56 +304,56 @@ impl NotePane {
     pub(crate) fn link(
         &mut self,
         choice: LinkChoice,
+        done: impl FnOnce(holm_core::Result<()>, &mut App) + 'static,
         cx: &mut Context<Self>,
-    ) -> Task<holm_core::Result<()>> {
+    ) {
         let Some(path) = self.path.clone() else {
-            return Task::ready(Ok(()));
+            cx.defer(move |cx| done(Ok(()), cx));
+            return;
         };
         let folder = path.parent().map(Path::to_owned).unwrap_or_default();
-        self.save_now(cx).detach();
-        let make: Task<holm_core::Result<(Target, String)>> = match choice {
+        self.save(cx);
+        let pane = cx.weak_entity();
+        let put = move |target: Target, text: String, cx: &mut App| {
+            pane.update(cx, |pane, cx| pane.put_link(&target, &text, cx))
+                .ok();
+        };
+        match choice {
             LinkChoice::Note {
                 path,
                 title,
                 heading,
-            } => {
-                let id = self
-                    .notes_folder
-                    .update(cx, |notes_folder, cx| notes_folder.link_id(path, cx));
-                cx.background_spawn(async move {
-                    let text = heading.clone().unwrap_or(title);
-                    Ok((
-                        Target::Note {
-                            id: id.await?,
-                            heading,
-                        },
-                        text,
-                    ))
-                })
-            }
+            } => self.notes_folder.update(cx, |notes_folder, cx| {
+                notes_folder.link_id(
+                    path,
+                    move |id, cx| {
+                        let made = id.map(|id| {
+                            let text = heading.clone().unwrap_or(title);
+                            put(Target::Note { id, heading }, text, cx);
+                        });
+                        done(made, cx);
+                    },
+                    cx,
+                );
+            }),
             LinkChoice::SameNote(heading) => {
-                Task::ready(Ok((Target::Heading(heading.clone()), heading)))
+                self.put_link(&Target::Heading(heading.clone()), &heading, cx);
+                cx.defer(move |cx| done(Ok(()), cx));
             }
-            LinkChoice::Create(title) => {
-                let id = self.notes_folder.update(cx, |notes_folder, cx| {
-                    notes_folder.create_titled_note(folder, title.clone(), cx)
-                });
-                cx.background_spawn(async move {
-                    let id = id.await?;
-                    Ok((Target::Note { id, heading: None }, title))
-                })
-            }
-        };
-        cx.spawn(async move |pane, cx| {
-            let (target, text) = make.await?;
-            pane.update(cx, |pane, cx| pane.put_link(&target, &text, cx))
-                .ok();
-            Ok(())
-        })
+            LinkChoice::Create(title) => self.notes_folder.update(cx, |notes_folder, cx| {
+                notes_folder.create_titled_note(
+                    folder,
+                    title.clone(),
+                    move |id, cx| {
+                        let made = id.map(|id| put(Target::Note { id, heading: None }, title, cx));
+                        done(made, cx);
+                    },
+                    cx,
+                );
+            }),
+        }
     }
 
-    /// Puts a link to `target` at the cursor, with the selection or `text` as its text.
-    /// When the picker started in a link, it points that link to `target` and keeps its text.
     fn put_link(&mut self, target: &Target, text: &str, cx: &mut Context<Self>) {
         if self.path.is_none() {
             return;
@@ -384,10 +388,10 @@ impl NotePane {
         let Some(path) = self.path.clone() else {
             return;
         };
-        let write = self.notes_folder.update(cx, |notes_folder, cx| {
-            notes_folder.change_tag(path, change, cx)
+        let done = self.field_step(cx);
+        self.notes_folder.update(cx, |notes_folder, cx| {
+            notes_folder.change_tag(path, change, done, cx);
         });
-        self.write_fields(write, cx);
     }
 
     /// Opens the tag popup. The editor scrolls to it.
@@ -413,30 +417,25 @@ impl NotePane {
             return;
         };
         let pinned = self.tag_row.update(cx, TagRow::toggle_pin);
-        let write = self.notes_folder.update(cx, |notes_folder, cx| {
-            notes_folder.set_pinned(path, pinned, cx)
+        let done = self.field_step(cx);
+        self.notes_folder.update(cx, |notes_folder, cx| {
+            notes_folder.set_pinned(path, pinned, done, cx);
         });
-        self.write_fields(write, cx);
     }
 
-    /// Waits for a write of the tags or the pin. An error shows in the quiet bar.
-    fn write_fields(&mut self, write: Task<holm_core::Result<()>>, cx: &mut Context<Self>) {
+    /// The end of a write of the tags or the pin. An error shows in the quiet bar.
+    fn field_step(&mut self, cx: &Context<Self>) -> Step<holm_core::Result<()>> {
         self.fields_pending += 1;
-        cx.spawn(async move |pane, cx| {
-            let result = write.await;
-            pane.update(cx, |pane, cx| {
-                pane.fields_pending = pane.fields_pending.saturating_sub(1);
-                if let Err(error) = result {
-                    let error = AppError::from(error);
-                    tracing::warn!(error = %crate::chain(&error), "cannot change the tags or the pin");
-                    pane.error = Some(error.message());
-                    cx.notify();
-                }
-                pane.show_fields(cx);
-            })
-            .ok();
+        step(cx, |pane, result, cx| {
+            pane.fields_pending = pane.fields_pending.saturating_sub(1);
+            if let Err(error) = result {
+                let error = AppError::from(error);
+                tracing::warn!(error = %crate::chain(&error), "cannot change the tags or the pin");
+                pane.error = Some(error.message());
+                cx.notify();
+            }
+            pane.show_fields(cx);
         })
-        .detach();
     }
 
     fn is_dirty(&self, cx: &App) -> bool {
@@ -453,30 +452,37 @@ impl NotePane {
     /// Saves unsaved changes with no conflict.
     fn autosave(&mut self, cx: &mut Context<Self>) {
         if !(self.conflict || self.deleted) {
-            self.save_now(cx).detach();
+            self.save(cx);
         }
     }
 
     /// Puts the unsaved text in the write line now. It wins over an outside change, and
-    /// writes the note again after an outside delete. The task gives whether the text reached
-    /// the file.
-    pub(crate) fn save_now(&mut self, cx: &mut Context<Self>) -> Task<bool> {
+    /// writes the note again after an outside delete.
+    pub(crate) fn save(&mut self, cx: &mut Context<Self>) {
+        self.save_then(|_, _, _| {}, cx);
+    }
+
+    /// Like [`Self::save`], and then gives `then` whether the text reached the file. With no
+    /// unsaved text, `then` runs at once.
+    fn save_then(
+        &mut self,
+        then: impl FnOnce(&mut Self, bool, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) {
         self.autosave = None;
-        if !self.is_dirty(cx) {
-            return Task::ready(true);
-        }
-        let Some(text) = self.note_text(cx) else {
-            return Task::ready(true);
+        let text = self.note_text(cx).filter(|_| self.is_dirty(cx));
+        let Some(text) = text else {
+            then(self, true, cx);
+            return;
         };
         let shown = self.editor.read(cx).text().to_owned();
-        let write = self
-            .notes_folder
-            .update(cx, |notes_folder, cx| notes_folder.save_text(text, cx));
-        cx.spawn(async move |pane, cx| {
-            let result = write.await;
-            pane.update(cx, |pane, cx| pane.saved(shown, result, cx))
-                .unwrap_or(false)
-        })
+        let done = step(cx, move |pane, result, cx| {
+            let saved = pane.saved(shown, result, cx);
+            then(pane, saved, cx);
+        });
+        self.notes_folder.update(cx, |notes_folder, cx| {
+            notes_folder.save_text(text, done, cx);
+        });
     }
 
     /// The editor text of the open note, for a write: a restore after an outside delete,
@@ -563,12 +569,12 @@ impl NotePane {
         let Some(path) = self.path.clone() else {
             return;
         };
-        let read = self
-            .notes_folder
-            .update(cx, |notes_folder, cx| notes_folder.read(path, cx));
-        cx.spawn(async move |pane, cx| {
-            let result = read.await;
-            pane.update(cx, |pane, cx| match result {
+        let opening = self.opening;
+        let done = step(cx, move |pane: &mut Self, result, cx| {
+            if pane.opening != opening {
+                return;
+            }
+            match result {
                 Ok(note) => pane.show(note, true, cx),
                 Err(error) => {
                     let error = AppError::from(error);
@@ -576,21 +582,21 @@ impl NotePane {
                     pane.error = Some(error.message());
                     cx.notify();
                 }
-            })
-            .ok();
-        })
-        .detach();
+            }
+        });
+        self.notes_folder
+            .update(cx, |notes_folder, cx| notes_folder.read(path, done, cx));
     }
 
     fn keep_mine(&mut self, cx: &mut Context<Self>) {
         self.conflict = false;
-        self.save_now(cx).detach();
+        self.save(cx);
         cx.notify();
     }
 
     /// "Keep mine" after an outside delete: writes the note again at its path.
     fn keep_deleted(&mut self, cx: &mut Context<Self>) {
-        self.save_now(cx).detach();
+        self.save(cx);
         cx.notify();
     }
 
@@ -627,35 +633,48 @@ impl NotePane {
         if leave == Leave::Keep && self.path() == Some(path.as_path()) {
             return;
         }
-        let old = self.path.clone().filter(|_| leave == Leave::Keep);
-        let save = old.is_some().then(|| self.save_now(cx));
-        self.opening = Some(cx.spawn(async move |pane, cx| {
-            if let Some(save) = save
-                && !save.await
-            {
-                return;
-            }
-            let Ok((renamed, read)) = pane.update(cx, |pane, cx| {
+        self.opening += 1;
+        let opening = self.opening;
+        let Some(old) = self.path.clone().filter(|_| leave == Leave::Keep) else {
+            self.read_note(path, opening, cx);
+            return;
+        };
+        self.save_then(
+            move |pane, saved, cx| {
+                if !saved || pane.opening != opening {
+                    return;
+                }
                 pane.notes_folder.update(cx, |notes_folder, cx| {
-                    let renamed = old.map(|old| notes_folder.rename_to_title(old, cx));
-                    (renamed, notes_folder.read(path, cx))
-                })
-            }) else {
-                return;
-            };
-            if let Some(renamed) = renamed
-                && let Err(error) = renamed.await
-            {
-                let error = AppError::from(error);
-                tracing::warn!(error = %crate::chain(&error), "cannot rename the note to its title");
+                    notes_folder.rename_to_title(
+                        old,
+                        |renamed, _| {
+                            if let Err(error) = renamed {
+                                let error = AppError::from(error);
+                                tracing::warn!(error = %crate::chain(&error), "cannot rename the note to its title");
+                            }
+                        },
+                        cx,
+                    );
+                });
+                pane.read_note(path, opening, cx);
+            },
+            cx,
+        );
+    }
+
+    /// Reads the note at `path` and shows it, unless another open or drop came after
+    /// `opening`.
+    fn read_note(&mut self, path: PathBuf, opening: u64, cx: &mut Context<Self>) {
+        let done = step(cx, move |pane: &mut Self, read, cx| {
+            if pane.opening == opening {
+                pane.opened(read, cx);
             }
-            let read = read.await;
-            pane.update(cx, |pane, cx| pane.opened(read, cx)).ok();
-        }));
+        });
+        self.notes_folder
+            .update(cx, |notes_folder, cx| notes_folder.read(path, done, cx));
     }
 
     fn opened(&mut self, read: holm_core::Result<Note>, cx: &mut Context<Self>) {
-        self.opening = None;
         match read {
             Ok(note) => {
                 let path = note.info.path.clone();
@@ -671,26 +690,25 @@ impl NotePane {
         }
     }
 
-    /// Follows a move of the open note, or of a folder that holds it, from `from` to `to`, and
-    /// reads it again. A move can change the file links in the note.
-    pub(crate) fn moved(&mut self, from: &Path, to: &Path, cx: &mut Context<Self>) {
-        let Some(path) = &mut self.path else {
+    /// Follows a write that moved the open note, or a folder that holds it. A move to
+    /// another folder can change the file links in the note, so the pane reads it again.
+    fn follow(&mut self, moves: &[Move], cx: &mut Context<Self>) {
+        let Some(path) = &self.path else {
             return;
         };
-        let Ok(rest) = path.strip_prefix(from) else {
+        let Some(new) = moves.iter().find_map(|one| one.path(path)) else {
             return;
         };
-        let new = if rest.as_os_str().is_empty() {
-            to.to_owned()
+        let other_folder = new.parent() != path.parent();
+        self.path = Some(new.clone());
+        if other_folder {
+            let folder = new.parent().map(|parent| self.root.join(parent));
+            self.editor
+                .update(cx, |editor, cx| editor.set_folder(folder, cx));
+            self.reload(cx);
         } else {
-            to.join(rest)
-        };
-        path.clone_from(&new);
-        let folder = new.parent().map(|parent| self.root.join(parent));
-        self.editor
-            .update(cx, |editor, cx| editor.set_folder(folder, cx));
-        self.reload(cx);
-        cx.emit(PaneEvent::Opened(new));
+            self.links.update(cx, |links, cx| links.show(Some(new), cx));
+        }
     }
 
     /// Selects the title text in the editor and gives the editor the focus.
@@ -701,6 +719,18 @@ impl NotePane {
         self.editor.update(cx, Editor::select_title);
         window.focus(&self.editor.focus_handle(cx), cx);
     }
+}
+
+/// A `done` step for a write of the notes folder: it runs `step` on the pane, when the pane
+/// still exists.
+fn step<R: 'static>(
+    cx: &Context<NotePane>,
+    step: impl FnOnce(&mut NotePane, R, &mut Context<NotePane>) + 'static,
+) -> Step<R> {
+    let pane = cx.weak_entity();
+    Box::new(move |result, cx| {
+        pane.update(cx, |pane, cx| step(pane, result, cx)).ok();
+    })
 }
 
 impl EventEmitter<PaneEvent> for NotePane {}

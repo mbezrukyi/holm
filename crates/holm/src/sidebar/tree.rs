@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use holm_core::Snapshot;
 use holm_core::model::{NoteInfo, Order, Tag};
 
+use crate::notes_folder::Move;
+
 /// An item of the folder tree. Each item has a note list.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Item {
@@ -53,25 +55,12 @@ impl Item {
         }
     }
 
-    /// This item after a rename of `from` to `to`, when it is `from` or below it.
-    pub(crate) fn moved(&self, from: &Self, to: &Self) -> Option<Self> {
-        match (self, from, to) {
-            (Self::Folder(path), Self::Folder(from), Self::Folder(to)) => {
-                let rest = path.strip_prefix(from).ok()?;
-                Some(Self::Folder(if rest.as_os_str().is_empty() {
-                    to.clone()
-                } else {
-                    to.join(rest)
-                }))
-            }
-            (Self::Tag(name), Self::Tag(from), Self::Tag(to)) => {
-                if name == from {
-                    return Some(Self::Tag(to.clone()));
-                }
-                let rest = name.strip_prefix(from.as_str())?.strip_prefix('/')?;
-                Some(Self::Tag(format!("{to}/{rest}")))
-            }
-            _ => None,
+    /// This item after `one`, when `one` moves it.
+    pub(crate) fn moved(&self, one: &Move) -> Option<Self> {
+        match self {
+            Self::All => None,
+            Self::Folder(path) => one.path(path).map(Self::Folder),
+            Self::Tag(name) => one.tag(name).map(Self::Tag),
         }
     }
 }
@@ -370,20 +359,23 @@ mod tests {
     fn a_rename_moves_the_item_and_its_children() {
         let folder = |path: &str| Item::Folder(path.into());
         let tag = |name: &str| Item::Tag(name.into());
-        let (work, job) = (folder("work"), folder("job"));
-        assert_eq!(work.moved(&work, &job), Some(job.clone()));
-        assert_eq!(
-            folder("work/deep").moved(&work, &job),
-            Some(folder("job/deep"))
-        );
-        assert_eq!(folder("workshop").moved(&work, &job), None);
-        assert_eq!(tag("work").moved(&work, &job), None);
-        let (work, job) = (tag("work"), tag("home/job"));
-        assert_eq!(
-            tag("work/holm").moved(&work, &job),
-            Some(tag("home/job/holm"))
-        );
-        assert_eq!(tag("workshop").moved(&work, &job), None);
+        let work = Move::Path {
+            from: "work".into(),
+            to: "job".into(),
+        };
+        assert_eq!(folder("work").moved(&work), Some(folder("job")));
+        assert_eq!(folder("work/deep").moved(&work), Some(folder("job/deep")));
+        assert_eq!(folder("workshop").moved(&work), None);
+        assert_eq!(tag("work").moved(&work), None);
+        assert_eq!(Item::All.moved(&work), None);
+        let work = Move::Tag {
+            from: "work".into(),
+            to: "home/job".into(),
+        };
+        assert_eq!(tag("work").moved(&work), Some(tag("home/job")));
+        assert_eq!(tag("work/holm").moved(&work), Some(tag("home/job/holm")));
+        assert_eq!(tag("workshop").moved(&work), None);
+        assert_eq!(folder("work").moved(&work), None);
         assert_eq!(tag("home/job/holm").name(), "holm");
     }
 
