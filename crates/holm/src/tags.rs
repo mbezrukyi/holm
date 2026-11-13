@@ -11,7 +11,7 @@
 //!   typed tag. A click on a line does the same as `Enter` on it.
 //! - `Esc`, a click outside the popup, or `↓` with an empty list closes the popup. See
 //!   [`Dropdown`] for the focus.
-//! - `F2` on a tag line sends [`RenameTag`]. The app starts the rename of the tag in the
+//! - `F2` on a tag line dispatches [`RenameTag`]. The app starts the rename of the tag in the
 //!   sidebar, for all notes. The focus moves to the sidebar, so the popup closes.
 //! - A click on the row opens the popup. A click on a chip also puts the cursor on its tag.
 //!
@@ -28,7 +28,7 @@ use gpui_kit::component::input::{
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, CursorStyle, ElementId, Entity, EventEmitter,
+    Action, AnyElement, AppContext as _, Context, CursorStyle, ElementId, Entity, EventEmitter,
     FocusHandle, InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, ParentElement,
     Pixels, Render, Role, StatefulInteractiveElement, Styled, Subscription, Task,
     TestSupportExt as _, Toggled, Window, div, px,
@@ -53,8 +53,10 @@ const POPUP_WIDTH: Pixels = px(300.);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TagsChanged(pub(crate) Vec<String>);
 
-/// The user pressed `F2` on the line of this tag.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// The user pressed `F2` on the line of this tag. As an action, it goes up the element
+/// tree to the app.
+#[derive(Clone, Debug, PartialEq, Eq, Action)]
+#[action(namespace = holm, no_json)]
 pub(crate) struct RenameTag(pub(crate) String);
 
 /// One line of the list in the popup.
@@ -269,8 +271,8 @@ impl TagRow {
         cx.notify();
     }
 
-    /// `F2`: sends [`RenameTag`] for the tag line under the cursor.
-    fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+    /// `F2`: dispatches [`RenameTag`] for the tag line under the cursor.
+    fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let keystroke = &event.keystroke;
         if keystroke.key != "f2" || keystroke.modifiers.modified() {
             return;
@@ -278,7 +280,7 @@ impl TagRow {
         cx.stop_propagation();
         let line = self.cursor.and_then(|at| self.lines().get(at).cloned());
         if let Some(Line::Tag { name, .. }) = line {
-            cx.emit(RenameTag(name));
+            window.dispatch_action(Box::new(RenameTag(name)), cx);
         }
     }
 
@@ -483,7 +485,6 @@ fn flatten(tags: &[Tag], names: &mut Vec<String>) {
 }
 
 impl EventEmitter<TagsChanged> for TagRow {}
-impl EventEmitter<RenameTag> for TagRow {}
 
 impl Render for TagRow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

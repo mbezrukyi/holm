@@ -26,6 +26,7 @@ use crate::pane::{Leave, NotePane, PaneEvent};
 use crate::picker::{FolderPicker, PickerEvent};
 use crate::quick_open::{QuickOpen, QuickOpenEvent};
 use crate::sidebar::{Item, Sidebar, SidebarEvent, Target};
+use crate::tags::RenameTag;
 use crate::text;
 
 const MIN_WIDTH: f32 = 160.;
@@ -134,18 +135,25 @@ impl NotesView {
                 let job = cx.background_spawn(async move { next_note(&core, next, order) });
                 self.finish(job, Self::show_next, window, cx);
             }
-            PaneEvent::RenameTag(tag) => {
-                let item = Item::Tag(tag.clone());
-                // A hidden sidebar still has its tree, so the field can start before it shows.
-                if self
-                    .sidebar
-                    .update(cx, |sidebar, cx| sidebar.rename(item, window, cx))
-                {
-                    self.hidden = false;
-                    self.keep_state(cx);
-                    cx.notify();
-                }
-            }
+        }
+    }
+
+    /// Starts the rename of a tag in the sidebar, for all notes.
+    fn rename_tag(
+        &mut self,
+        RenameTag(tag): &RenameTag,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let item = Item::Tag(tag.clone());
+        // A hidden sidebar still has its tree, so the field can start before it shows.
+        if self
+            .sidebar
+            .update(cx, |sidebar, cx| sidebar.rename(item, window, cx))
+        {
+            self.hidden = false;
+            self.keep_state(cx);
+            cx.notify();
         }
     }
 
@@ -753,6 +761,7 @@ impl Render for NotesView {
             .size_full()
             .relative()
             .on_key_down(cx.listener(Self::key_down))
+            .on_action(cx.listener(Self::rename_tag))
             .on_mouse_move(cx.listener(Self::mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::mouse_up))
