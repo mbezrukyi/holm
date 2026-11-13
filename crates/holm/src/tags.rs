@@ -11,6 +11,8 @@
 //!   typed tag. A click on a line does the same as `Enter` on it.
 //! - `Esc`, a click outside the popup, or `↓` with an empty list closes the popup. See
 //!   [`Dropdown`] for the focus.
+//! - `F2` on a tag line sends [`RenameTag`]. The app starts the rename of the tag in the
+//!   sidebar, for all notes, and closes the popup.
 //! - A click on the row opens the popup. A click on a chip also puts the cursor on its tag.
 //!
 //! The row is one line. Chips that do not fit fold into a "+N" chip. A click on it opens the
@@ -27,9 +29,9 @@ use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, AppContext as _, Context, CursorStyle, ElementId, Entity, EventEmitter,
-    FocusHandle, InteractiveElement as _, IntoElement, MouseButton, ParentElement, Pixels, Render,
-    Role, StatefulInteractiveElement, Styled, Subscription, Task, TestSupportExt as _, Toggled,
-    Window, div, px,
+    FocusHandle, InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, ParentElement,
+    Pixels, Render, Role, StatefulInteractiveElement, Styled, Subscription, Task,
+    TestSupportExt as _, Toggled, Window, div, px,
 };
 use holm_core::Core;
 use holm_core::model::Tag;
@@ -50,6 +52,10 @@ const POPUP_WIDTH: Pixels = px(300.);
 /// The user added or removed a tag. These are all the tags of the note now.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TagsChanged(pub(crate) Vec<String>);
+
+/// The user pressed `F2` on the line of this tag.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RenameTag(pub(crate) String);
 
 /// One line of the list in the popup.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -162,7 +168,7 @@ impl TagRow {
         cx.notify();
     }
 
-    fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open = false;
         self.clear(window, cx);
         cx.notify();
@@ -261,6 +267,19 @@ impl TagRow {
             None => {}
         }
         cx.notify();
+    }
+
+    /// `F2`: sends [`RenameTag`] for the tag line under the cursor.
+    fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let keystroke = &event.keystroke;
+        if keystroke.key != "f2" || keystroke.modifiers.modified() {
+            return;
+        }
+        cx.stop_propagation();
+        let line = self.cursor.and_then(|at| self.lines().get(at).cloned());
+        if let Some(Line::Tag { name, .. }) = line {
+            cx.emit(RenameTag(name));
+        }
     }
 
     /// Builds the quiet "+N" chip for a range of folded tags.
@@ -416,6 +435,7 @@ impl TagRow {
             .panel(POPUP_WIDTH, cx)
             .left_0()
             .key_context("TagRow")
+            .on_key_down(cx.listener(Self::key_down))
             .capture_action(cx.listener(|row, _: &Enter, window, cx| {
                 row.choose(window, cx);
                 cx.stop_propagation();
@@ -463,6 +483,7 @@ fn flatten(tags: &[Tag], names: &mut Vec<String>) {
 }
 
 impl EventEmitter<TagsChanged> for TagRow {}
+impl EventEmitter<RenameTag> for TagRow {}
 
 impl Render for TagRow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

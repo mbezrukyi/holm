@@ -1161,6 +1161,106 @@ fn a_tag_rename_onto_a_tag_merges_into_its_row_at_once(cx: &mut TestAppContext) 
     assert_eq!(fields(&notes_dir.join("A.md")).0, ["new"]);
 }
 
+/// The text of the name field in the sidebar, while it has the focus.
+fn name_field(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
+    screen(cx, handle, |window| {
+        window.try_find("sidebar")?;
+        window
+            .within("sidebar")
+            .find_all_by_role(Role::TextInput)
+            .into_iter()
+            .find(|field| field.focused() == Some(true))
+            .and_then(|field| field.value().map(str::to_owned))
+    })
+}
+
+/// A has the tags `home` and `work/holm`, B has `work/holm`. A is open.
+fn two_tagged_notes(fixture: &Fixture) -> (PathBuf, PathBuf) {
+    let notes_dir = fixture.notes();
+    let a = notes_dir.join("A.md");
+    let b = notes_dir.join("B.md");
+    fs::write(&a, "---\ntags:\n  - home\n  - work/holm\n---\n# A\n").unwrap();
+    fs::write(&b, "---\ntags:\n  - work/holm\n---\n# B\n").unwrap();
+    set_time(&a, 200);
+    set_time(&b, 100);
+    (a, b)
+}
+
+#[gpui_kit::test]
+fn f2_in_the_tag_popup_renames_the_tag_in_the_sidebar(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let (a, b) = two_tagged_notes(&fixture);
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(chips(cx, handle), ["home", "work/holm"]);
+
+    keys(cx, handle, "ctrl-shift-t down down f2");
+    assert!(!popup_open(cx, handle));
+    assert_eq!(sidebar(cx, handle), "tree #work/holm");
+    assert_eq!(name_field(cx, handle).as_deref(), Some("work/holm"));
+
+    cx.update_window(handle, |_, window, cx| {
+        window.dispatch_action(Box::new(gpui_kit::component::input::SelectAll), cx);
+    })
+    .unwrap();
+    cx.simulate_input(handle, "job");
+    keys(cx, handle, "enter");
+    assert_eq!(
+        question(cx, handle).as_deref(),
+        Some("Rename “#work/holm” to “#job”? This changes 2 notes.")
+    );
+    keys(cx, handle, "enter");
+    assert_eq!(fields(&a).0, ["home", "job"]);
+    assert_eq!(fields(&b).0, ["job"]);
+    assert_eq!(chips(cx, handle), ["home", "job"]);
+}
+
+#[gpui_kit::test]
+fn f2_in_the_tag_popup_shows_a_hidden_sidebar(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    two_tagged_notes(&fixture);
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-shift-l ctrl-shift-l");
+    assert_eq!(sidebar(cx, handle), "hidden");
+
+    keys(cx, handle, "ctrl-shift-t down f2");
+    assert!(!popup_open(cx, handle));
+    assert_eq!(sidebar(cx, handle), "tree #home");
+    assert_eq!(name_field(cx, handle).as_deref(), Some("home"));
+    keys(cx, handle, "escape");
+    assert_eq!(focus(cx, handle), "sidebar");
+    assert_eq!(name_field(cx, handle), None);
+}
+
+#[gpui_kit::test]
+fn f2_in_the_tag_popup_needs_a_tag_line(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let (a, _) = two_tagged_notes(&fixture);
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-shift-l ctrl-shift-l");
+    assert_eq!(sidebar(cx, handle), "hidden");
+
+    keys(cx, handle, "ctrl-shift-t f2");
+    assert!(popup_open(cx, handle), "with no cursor, F2 does nothing");
+    cx.simulate_input(handle, "new");
+    settle(cx);
+    assert_eq!(options(cx, handle), ["Add #new"]);
+    keys(cx, handle, "down f2");
+    assert!(popup_open(cx, handle));
+    assert_eq!(options(cx, handle), ["Add #new*"]);
+    assert_eq!(focus(cx, handle), "tag field");
+    assert_eq!(sidebar(cx, handle), "hidden");
+    assert_eq!(fields(&a).0, ["home", "work/holm"]);
+
+    // The tree gets a new tag at the next read of the notes. Before it, F2 does nothing.
+    keys_now(cx, handle, "enter");
+    assert_eq!(chips(cx, handle), ["home", "work/holm", "new"]);
+    keys_now(cx, handle, "down down down f2");
+    assert_eq!(options(cx, handle), ["#home ✓", "#work/holm ✓", "#new ✓*"]);
+    assert_eq!(focus(cx, handle), "tag field");
+    assert_eq!(sidebar(cx, handle), "hidden");
+    assert_eq!(name_field(cx, handle), None);
+}
+
 #[gpui_kit::test]
 fn a_folder_delete_selects_the_parent_folder(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();

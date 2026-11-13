@@ -134,6 +134,19 @@ impl NotesView {
                 let job = cx.background_spawn(async move { next_note(&core, next, order) });
                 self.finish(job, Self::show_next, window, cx);
             }
+            PaneEvent::RenameTag(tag) => {
+                let item = Item::Tag(tag.clone());
+                // A hidden sidebar still has its tree, so the field can start before it shows.
+                if self
+                    .sidebar
+                    .update(cx, |sidebar, cx| sidebar.rename(item, window, cx))
+                {
+                    self.pane.update(cx, |pane, cx| pane.close_tags(window, cx));
+                    self.hidden = false;
+                    self.keep_state(cx);
+                    cx.notify();
+                }
+            }
         }
     }
 

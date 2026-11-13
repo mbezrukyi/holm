@@ -490,13 +490,27 @@ impl Sidebar {
     }
 
     /// Starts the name field for a folder or a tag in the tree. A tag field holds the full
-    /// name, so a rename can also move the tag under another parent.
-    pub(crate) fn rename(&mut self, item: Item, window: &mut Window, cx: &mut Context<Self>) {
+    /// name, so a rename can also move the tag under another parent. It does nothing for a tag
+    /// that the tree has no row for. A new folder may not be in the tree yet, so its field
+    /// shows after the next read of the notes. It returns whether it started the field.
+    pub(crate) fn rename(
+        &mut self,
+        item: Item,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let name = match &item {
-            Item::All => return,
+            Item::All => return false,
             Item::Folder(_) => item.name(),
             Item::Tag(tag) => tag.clone(),
         };
+        let in_tree = self.snapshot.has(&item) || self.rows.iter().any(|row| row.item == item);
+        if matches!(item, Item::Tag(_)) && !in_tree {
+            return false;
+        }
+        if self.searching() {
+            self.clear_search(window, cx);
+        }
         self.show_in_tree(item.clone(), cx);
         let input = cx.new(|cx| InputState::new(window, cx).default_value(name));
         let subscription =
@@ -539,6 +553,7 @@ impl Sidebar {
             _subscription: subscription,
         });
         cx.notify();
+        true
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -619,7 +634,9 @@ impl Sidebar {
             }
             "enter" => self.set_view(View::List(item), cx),
             "escape" => cx.emit(SidebarEvent::FocusEditor),
-            "f2" => self.rename(item, window, cx),
+            "f2" => {
+                self.rename(item, window, cx);
+            }
             "delete" => match item {
                 Item::Tag(tag) => cx.emit(SidebarEvent::DeleteTag(tag)),
                 Item::Folder(folder) => cx.emit(SidebarEvent::Delete(Target::Folder(folder))),

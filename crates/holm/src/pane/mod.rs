@@ -41,7 +41,7 @@ use crate::backlinks::{Backlinks, OpenBacklink};
 use crate::bar::{self, Bar};
 use crate::error::AppError;
 use crate::link_picker::{LinkChoice, LinkStart};
-use crate::tags::{TagRow, TagsChanged};
+use crate::tags::{RenameTag, TagRow, TagsChanged};
 use crate::{changes, text, theme};
 use links::{Links, LinksEvent};
 
@@ -62,6 +62,8 @@ pub(crate) enum PaneEvent {
     /// The app must open another note or call [`NotePane::close`]. The pane cannot pick the
     /// note, because the neighbor comes from the sidebar list.
     Gone(PathBuf),
+    /// The user asked for a rename of this tag in all notes.
+    RenameTag(String),
 }
 
 /// What happens to the open note when the pane opens another one.
@@ -131,6 +133,9 @@ impl NotePane {
             }),
             cx.subscribe(&tag_row, |pane, _, TagsChanged(tags), cx| {
                 pane.set_tags(tags, cx);
+            }),
+            cx.subscribe(&tag_row, |_, _, RenameTag(tag), cx| {
+                cx.emit(PaneEvent::RenameTag(tag.clone()));
             }),
             cx.subscribe(&links, Self::links_event),
             cx.subscribe_in(
@@ -370,6 +375,10 @@ impl NotePane {
             return;
         }
         self.tag_row.update(cx, |row, cx| row.enter(window, cx));
+    }
+
+    pub(crate) fn close_tags(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.tag_row.update(cx, |row, cx| row.close(window, cx));
     }
 
     /// Ctrl+Shift+B: opens the backlinks list. The editor scrolls to it.
