@@ -733,30 +733,11 @@ pub(crate) fn lay_out(
     start: Pixels,
     window: &Window,
 ) -> Vec<LaidLine> {
-    let last = model.line_count() - 1;
     let view = bounds.size.height;
     let start_of = |line: usize| if line == 0 { start } else { px(0.) };
     let height =
         |shaper: &mut Shaper<'_>, line| shaper.line(model, line, window).height + start_of(line);
-    scroll.line = scroll.line.min(last);
-    while scroll.offset < px(0.) {
-        if scroll.line == 0 {
-            scroll.offset = px(0.);
-            break;
-        }
-        scroll.line -= 1;
-        scroll.offset += height(shaper, scroll.line);
-    }
-    while scroll.line < last {
-        let line_height = height(shaper, scroll.line);
-        if scroll.offset < line_height {
-            break;
-        }
-        scroll.offset -= line_height;
-        scroll.line += 1;
-    }
-
-    let mut lines = fill_view(model, *scroll, shaper, view, start, window);
+    let lines = fill_view(model, scroll, shaper, view, start, window);
     if !autoscroll {
         return lines;
     }
@@ -789,32 +770,57 @@ pub(crate) fn lay_out(
             offset: (-top).max(px(0.)),
         };
     }
-    lines = fill_view(model, *scroll, shaper, view, start, window);
-    lines
+    fill_view(model, scroll, shaper, view, start, window)
 }
 
 /// The lines that fill a view of height `view`, after a start view of height `start`.
+///
+/// It moves `scroll` to the start of the first line in view.
 fn fill_view(
     model: &Model,
-    scroll: Scroll,
+    scroll: &mut Scroll,
     shaper: &mut Shaper<'_>,
     view: Pixels,
     start: Pixels,
     window: &Window,
 ) -> Vec<LaidLine> {
+    let last = model.line_count() - 1;
+    let start_of = |line: usize| if line == 0 { start } else { px(0.) };
+    scroll.line = scroll.line.min(last);
+    // The lines that a scroll up passes. The last one is the new scroll line.
+    let mut above = Vec::new();
+    while scroll.offset < px(0.) {
+        if scroll.line == 0 {
+            scroll.offset = px(0.);
+            break;
+        }
+        scroll.line -= 1;
+        let line = shaper.line(model, scroll.line, window);
+        scroll.offset += line.height + start_of(scroll.line);
+        above.push(line);
+    }
+
     let mut lines = Vec::new();
     let mut top = -scroll.offset;
-    for ix in scroll.line..model.line_count() {
-        if ix == 0 {
-            top += start;
-        }
+    for ix in scroll.line..=last {
+        top += start_of(ix);
         if top >= view {
             break;
         }
-        let mut line = shaper.line(model, ix, window);
-        line.top = top;
-        top += line.height;
-        lines.push(line);
+        let mut line = above
+            .pop()
+            .unwrap_or_else(|| shaper.line(model, ix, window));
+        let bottom = top + line.height;
+        if bottom <= px(0.) && ix < last {
+            *scroll = Scroll {
+                line: ix + 1,
+                offset: -bottom,
+            };
+        } else {
+            line.top = top;
+            lines.push(line);
+        }
+        top = bottom;
     }
     lines
 }
