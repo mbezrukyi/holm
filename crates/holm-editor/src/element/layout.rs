@@ -7,13 +7,14 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use gpui_kit::{
-    Bounds, Font, FontStyle, FontWeight, Pixels, Point, ShapedLine, Size, StrikethroughStyle,
-    TextRun, TextStyle, Window, point, px, size,
+    Bounds, Font, FontStyle, FontWeight, Pixels, Point, ShapedLine, StrikethroughStyle, TextRun,
+    TextStyle, Window, point, px, size,
 };
 use holm_markdown::{Alignment, CalloutKind};
 
 use super::flow::{ChipBox, FlowLine, Icon};
 use super::theme::{Place, Theme};
+use crate::files::{FileKind, LinkedFiles};
 use crate::highlight::{Highlighter, Tokens};
 use crate::model::{Cell, Chip, DisplayLine, Embed, LineKind, Look, Mark, Model, Run};
 
@@ -28,13 +29,6 @@ pub(crate) const SIDE_MARGIN: Pixels = px(32.);
 
 /// The font of code blocks and inline code.
 pub(crate) const CODE_FONT: &str = "Adwaita Mono";
-
-/// The size of the detail of a file chip, like the file size, as a part of the text size.
-const DETAIL_SCALE: f32 = 0.72;
-
-/// The widest the name in a file chip gets, as a part of the text size. A longer name loses
-/// chars in the middle.
-const CHIP_NAME_WIDTH: f32 = 18.;
 
 /// The size of code text, as a part of the text size.
 const CODE_SCALE: f32 = 0.9;
@@ -143,64 +137,6 @@ pub(crate) struct LaidImage {
     pub(crate) bounds: Bounds<Pixels>,
 }
 
-/// What a linked path is on the disk.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum FileKind {
-    /// An image, with its size in pixels.
-    Image(Size<u32>),
-    Folder,
-    /// Any other file, with its size in bytes.
-    File(u64),
-    Missing,
-}
-
-impl FileKind {
-    /// Reads the kind of `path` from the disk. An image file gives its size from its header.
-    pub(crate) fn of(path: &Path) -> Self {
-        let Ok(meta) = path.metadata() else {
-            return Self::Missing;
-        };
-        if meta.is_dir() {
-            return Self::Folder;
-        }
-        imagesize::size(path).map_or(Self::File(meta.len()), |found| {
-            Self::Image(Size {
-                width: u32::try_from(found.width).unwrap_or(u32::MAX),
-                height: u32::try_from(found.height).unwrap_or(u32::MAX),
-            })
-        })
-    }
-}
-
-/// `name` as it is when it `fits`. Else the longest cut that fits, with `…` in place of chars
-/// in the middle. The extension and the few chars before it stay.
-fn shorten(name: &str, fits: impl Fn(&str) -> bool) -> String {
-    if fits(name) {
-        return name.to_owned();
-    }
-    let chars: Vec<char> = name.chars().collect();
-    let tail = name
-        .rfind('.')
-        .map_or(0, |dot| name[dot..].chars().count())
-        .saturating_add(3)
-        .min(chars.len());
-    let end: String = chars[chars.len() - tail..].iter().collect();
-    let head = chars.len() - tail;
-    let cut =
-        |keep: usize| -> String { chars[..keep].iter().collect::<String>() + "\u{2026}" + &end };
-    // The most chars from the start that still fit.
-    let (mut low, mut high) = (0, head);
-    while low < high {
-        let mid = (low + high).div_ceil(2);
-        if fits(&cut(mid)) {
-            low = mid;
-        } else {
-            high = mid - 1;
-        }
-    }
-    cut(low)
-}
-
 /// A file size like `48 KB` or `2.1 MB`, with a no-break space.
 fn file_size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
@@ -218,16 +154,12 @@ fn file_size(bytes: u64) -> String {
     }
 }
 
-/// The kinds of linked paths, each read once.
-pub(crate) type FileKinds = HashMap<PathBuf, FileKind>;
-
 /// Shapes source lines for one frame.
 pub(crate) struct Shaper<'a> {
     style: TextStyle,
     /// The width of the text column.
     width: Pixels,
-    folder: Option<&'a Path>,
-    kinds: &'a mut FileKinds,
+    files: &'a mut LinkedFiles,
     highlighter: &'a mut Highlighter,
     theme: &'a Theme,
     /// The column widths of the tables in this frame, by the start of each table.
@@ -235,20 +167,18 @@ pub(crate) struct Shaper<'a> {
 }
 
 impl<'a> Shaper<'a> {
-    /// A shaper for one frame, with a column of `width`. Relative file links start at `folder`.
+    /// A shaper for one frame, with a column of `width`.
     pub(crate) fn new(
         style: TextStyle,
         width: Pixels,
-        folder: Option<&'a Path>,
-        kinds: &'a mut FileKinds,
+        files: &'a mut LinkedFiles,
         highlighter: &'a mut Highlighter,
         theme: &'a Theme,
     ) -> Self {
         Self {
             style,
             width,
-            folder,
-            kinds,
+            files,
             highlighter,
             theme,
             tables: HashMap::new(),
@@ -305,10 +235,10 @@ impl Shaper<'_> {
         let mut height = pad + text_height;
         let mut images = Vec::new();
         for file in &display.images {
-            let path = self.path_of(file);
-            let FileKind::Image(found) = self.kind(&path) else {
+            let FileKind::Image(found) = self.files.kind(file) else {
                 continue;
             };
+            let path = self.files.path(file);
             #[allow(clippy::cast_precision_loss)]
             let image_size = size(px(found.width as f32), px(found.height as f32));
             let fit = (width / image_size.width).min(1.);
@@ -693,25 +623,9 @@ impl Shaper<'_> {
         }
     }
 
-    /// The path of a link target. A relative target starts at the folder of the note.
-    fn path_of(&self, target: &str) -> PathBuf {
-        match self.folder {
-            Some(folder) => folder.join(target),
-            None => PathBuf::from(target),
-        }
-    }
-
-    fn kind(&mut self, path: &Path) -> FileKind {
-        *self
-            .kinds
-            .entry(path.to_owned())
-            .or_insert_with(|| FileKind::of(path))
-    }
-
     /// How a link to `target` shows.
     fn embed(&mut self, target: &str) -> Embed {
-        let path = self.path_of(target);
-        match self.kind(&path) {
+        match self.files.kind(target) {
             FileKind::Image(_) => Embed::Image,
             _ => Embed::Chip,
         }
@@ -725,14 +639,6 @@ impl Shaper<'_> {
         font_size: Pixels,
         window: &Window,
     ) -> Vec<ChipBox> {
-        let text_system = window.text_system();
-        let shape = |text: String, run: &TextRun, font_size: Pixels| {
-            let run = TextRun {
-                len: text.len(),
-                ..run.clone()
-            };
-            text_system.shape_line(text.into(), font_size, &[run], None)
-        };
         let detail_run = TextRun {
             len: 0,
             font: self.style.font(),
@@ -752,34 +658,28 @@ impl Shaper<'_> {
                         at > chip.range.start
                     })
                     .unwrap_or(&detail_run);
-                let path = self.path_of(&chip.target);
-                let kind = self.kind(&path);
-                let full = Path::new(&chip.target).file_name().map_or_else(
+                let kind = self.files.kind(&chip.target);
+                let name = Path::new(&chip.target).file_name().map_or_else(
                     || chip.target.as_str().into(),
                     |name| name.to_string_lossy(),
                 );
-                // All widths grow with the text size, so a chip fits in a heading too.
-                let name = shorten(&full, |name| {
-                    shape(name.to_owned(), run, font_size).width() <= font_size * CHIP_NAME_WIDTH
-                });
                 let detail = match kind {
-                    FileKind::File(bytes) => Some(shape(
-                        file_size(bytes),
-                        &detail_run,
-                        font_size * DETAIL_SCALE,
-                    )),
+                    FileKind::File(bytes) => Some((file_size(bytes), &detail_run)),
                     _ => None,
                 };
-                ChipBox {
-                    range: chip.range.clone(),
-                    icon: if kind == FileKind::Folder {
-                        Icon::Folder
-                    } else {
-                        Icon::File
-                    },
-                    name: shape(name, run, font_size),
+                let icon = if kind == FileKind::Folder {
+                    Icon::Folder
+                } else {
+                    Icon::File
+                };
+                ChipBox::new(
+                    chip.range.clone(),
+                    icon,
+                    (&name, run),
                     detail,
-                }
+                    font_size,
+                    window,
+                )
             })
             .collect()
     }
@@ -1230,33 +1130,6 @@ fn contains(range: &Range<usize>, offset: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn data(name: &str) -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests")
-            .join(name)
-    }
-
-    #[test]
-    fn the_kind_of_a_path_comes_from_the_disk() {
-        assert_eq!(FileKind::of(&data("data")), FileKind::Folder);
-        let path = data("data/chunk.md");
-        let size = path.metadata().map(|meta| meta.len()).unwrap_or_default();
-        assert_eq!(FileKind::of(&path), FileKind::File(size));
-        assert_eq!(FileKind::of(&data("data/gone.pdf")), FileKind::Missing);
-        assert!(matches!(
-            FileKind::of(&data("data/cat.png")),
-            FileKind::Image(_)
-        ));
-    }
-
-    #[test]
-    fn a_long_name_loses_chars_in_the_middle() {
-        let fits = |name: &str| name.chars().count() <= 12;
-        assert_eq!(shorten("short.txt", fits), "short.txt");
-        assert_eq!(shorten("aaaaaaaaaaaaaaaa.txt", fits), "aaaa\u{2026}aaa.txt");
-        assert_eq!(shorten("abcdefghijklmnopq", fits), "abcdefgh\u{2026}opq");
-    }
 
     #[test]
     fn file_sizes_have_a_unit_and_at_most_one_decimal() {

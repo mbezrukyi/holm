@@ -14,7 +14,7 @@ use gpui_kit::{
     TextAlign, Window, fill, outline, point, px, relative, size,
 };
 
-pub(crate) use layout::{FileKind, FileKinds, Layout, Scroll};
+pub(crate) use layout::{Layout, Scroll};
 use theme::Place;
 pub(crate) use theme::Theme;
 
@@ -115,8 +115,7 @@ impl gpui_kit::Element for EditorElement {
             let mut shaper = Shaper::new(
                 style,
                 column.size.width,
-                editor.folder.as_deref(),
-                &mut editor.file_kinds,
+                &mut editor.files,
                 &mut editor.highlighter,
                 &editor.theme,
             );
@@ -503,7 +502,7 @@ fn paint_underlines(
     let mut start = 0;
     for run in runs {
         let end = start + run.len;
-        if !(run.look.underline || run.look.link) || run.look.chip {
+        if !(run.look.underline || run.look.link) {
             start = end;
             continue;
         }
@@ -525,6 +524,9 @@ fn paint_underlines(
         let mut rows: Vec<(Pixels, Vec<(Pixels, Pixels)>)> = Vec::new();
         for (at, c) in content[start..end].char_indices() {
             let at = start + at;
+            if text.in_chip(at) {
+                continue;
+            }
             let Some(here) = text.position_for_index(at, line_height) else {
                 continue;
             };

@@ -31,6 +31,13 @@ const CHIP_HEIGHT: f32 = 1.8;
 /// How far below the baseline the underline of a detail lies, as a part of its size.
 const CHIP_UNDERLINE: f32 = 0.2;
 
+/// The size of the detail of a chip, like the file size, as a part of the text size.
+const DETAIL_SCALE: f32 = 0.72;
+
+/// The widest the name in a chip gets, as a part of the text size. A longer name loses chars
+/// in the middle.
+const CHIP_NAME_WIDTH: f32 = 18.;
+
 /// The icon of a file chip.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Icon {
@@ -46,6 +53,67 @@ pub(crate) struct ChipBox {
     pub(crate) name: ShapedLine,
     /// A small text after the name, like the file size.
     pub(crate) detail: Option<ShapedLine>,
+}
+
+impl ChipBox {
+    /// A chip in place of the screen text `range`. Its name has the look of a run, and gets
+    /// shorter to fit. Its detail has the look of a run too, in a smaller font. All sizes grow
+    /// with `font_size`, so a chip fits in a heading too.
+    pub(crate) fn new(
+        range: Range<usize>,
+        icon: Icon,
+        (name, name_run): (&str, &TextRun),
+        detail: Option<(String, &TextRun)>,
+        font_size: Pixels,
+        window: &Window,
+    ) -> Self {
+        let text_system = window.text_system();
+        let shape = |text: String, run: &TextRun, font_size: Pixels| {
+            let run = TextRun {
+                len: text.len(),
+                ..run.clone()
+            };
+            text_system.shape_line(text.into(), font_size, &[run], None)
+        };
+        let name = shorten(name, |name| {
+            shape(name.to_owned(), name_run, font_size).width() <= font_size * CHIP_NAME_WIDTH
+        });
+        Self {
+            range,
+            icon,
+            name: shape(name, name_run, font_size),
+            detail: detail.map(|(text, run)| shape(text, run, font_size * DETAIL_SCALE)),
+        }
+    }
+}
+
+/// `name` as it is when it `fits`. Else the longest cut that fits, with `…` in place of chars
+/// in the middle. The extension and the few chars before it stay.
+fn shorten(name: &str, fits: impl Fn(&str) -> bool) -> String {
+    if fits(name) {
+        return name.to_owned();
+    }
+    let chars: Vec<char> = name.chars().collect();
+    let tail = name
+        .rfind('.')
+        .map_or(0, |dot| name[dot..].chars().count())
+        .saturating_add(3)
+        .min(chars.len());
+    let end: String = chars[chars.len() - tail..].iter().collect();
+    let head = chars.len() - tail;
+    let cut =
+        |keep: usize| -> String { chars[..keep].iter().collect::<String>() + "\u{2026}" + &end };
+    // The most chars from the start that still fit.
+    let (mut low, mut high) = (0, head);
+    while low < high {
+        let mid = (low + high).div_ceil(2);
+        if fits(&cut(mid)) {
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+    cut(low)
 }
 
 /// A line of screen text with its chips, wrapped into rows.
@@ -548,6 +616,11 @@ impl FlowLine {
         })
     }
 
+    /// Whether the screen offset `at` is in the screen text of a chip.
+    pub(crate) fn in_chip(&self, at: usize) -> bool {
+        self.chips.iter().any(|chip| chip.range.contains(&at))
+    }
+
     /// The pieces of the chips, for painting.
     pub(crate) fn chip_paints(&self, line_height: Pixels) -> Vec<ChipPaint<'_>> {
         let font_size = self.font_size;
@@ -708,12 +781,15 @@ mod tests {
     ) -> (FlowLine, Range<usize>) {
         let text = format!("{before}\u{fffc}{after}");
         let range = before.len()..text.len() - after.len();
-        let chip = ChipBox {
-            range: range.clone(),
-            icon: Icon::File,
-            name: shape(name, SIZE, window),
-            detail: detail.map(|detail| shape(detail, SIZE * 0.72, window)),
-        };
+        let look = run(0);
+        let chip = ChipBox::new(
+            range.clone(),
+            Icon::File,
+            (name, &look),
+            detail.map(|detail| (detail.to_owned(), &look)),
+            SIZE,
+            window,
+        );
         let line = FlowLine::new(
             text.clone().into(),
             &[run(text.len())],
@@ -735,6 +811,14 @@ mod tests {
     }
 
     #[test]
+    fn a_long_name_loses_chars_in_the_middle() {
+        let fits = |name: &str| name.chars().count() <= 12;
+        assert_eq!(shorten("short.txt", fits), "short.txt");
+        assert_eq!(shorten("aaaaaaaaaaaaaaaa.txt", fits), "aaaa\u{2026}aaa.txt");
+        assert_eq!(shorten("abcdefghijklmnopq", fits), "abcdefgh\u{2026}opq");
+    }
+
+    #[test]
     fn a_chip_box_has_the_width_of_its_parts() {
         in_window(|window| {
             let (line, chip) = flow(
@@ -745,7 +829,7 @@ mod tests {
             let parts = SIZE * (CHIP_PAD + CHIP_ICON + CHIP_ICON_GAP)
                 + shape("report.pdf", SIZE, window).width()
                 + SIZE * CHIP_DETAIL_GAP
-                + shape("48 KB", SIZE * 0.72, window).width()
+                + shape("48 KB", SIZE * DETAIL_SCALE, window).width()
                 + SIZE * CHIP_PAD;
             assert!(close(
                 x(&line, chip.start),

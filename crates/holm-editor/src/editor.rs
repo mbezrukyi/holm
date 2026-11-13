@@ -14,7 +14,8 @@ use gpui_kit::{
 use holm_markdown::{Color, Target};
 
 use crate::color::{self, ColorWindow, Paint, Step};
-use crate::element::{EditorElement, FileKind, FileKinds, Layout, Scroll, Theme};
+use crate::element::{EditorElement, Layout, Scroll, Theme};
+use crate::files::{FileKind, LinkedFiles};
 use crate::find::Find;
 use crate::highlight::{self, Highlighter};
 use crate::ink;
@@ -73,7 +74,6 @@ const DRAG_START: Pixels = px(4.);
 /// [`WritingHelp`] turns off the format keys, the color window and the list keys.
 pub struct Editor {
     pub(crate) model: Model,
-    pub(crate) folder: Option<PathBuf>,
     pub(crate) focus: FocusHandle,
     pub(crate) scroll: Scroll,
     /// Whether the next layout moves the view to the cursor.
@@ -81,7 +81,7 @@ pub struct Editor {
     /// The count of text changes, to know when [`Self::layout`] is out of date.
     pub(crate) version: u64,
     pub(crate) layout: Option<Rc<Layout>>,
-    pub(crate) file_kinds: FileKinds,
+    pub(crate) files: LinkedFiles,
     pub(crate) highlighter: Highlighter,
     pub(crate) theme: Theme,
     drag: Option<Drag>,
@@ -241,13 +241,12 @@ impl Editor {
             .detach();
         Self {
             model: Model::new(""),
-            folder: None,
             focus: cx.focus_handle(),
             scroll: Scroll::default(),
             autoscroll: false,
             version: 0,
             layout: None,
-            file_kinds: FileKinds::default(),
+            files: LinkedFiles::default(),
             highlighter: Highlighter::default(),
             theme: Theme::new(Appearance::Light),
             drag: None,
@@ -310,8 +309,7 @@ impl Editor {
 
     /// Sets the folder of the note. Relative paths of embedded files start there.
     pub fn set_folder(&mut self, folder: Option<PathBuf>, cx: &mut Context<Self>) {
-        self.folder = folder;
-        self.file_kinds.clear();
+        self.files.set_folder(folder);
         cx.notify();
     }
 
@@ -353,7 +351,9 @@ impl Editor {
     ) {
         let form = match target {
             _ if !embedded => LinkForm::Text,
-            Target::File(path) if self.is_image(path) => LinkForm::Block,
+            Target::File(path) if matches!(self.files.kind(path), FileKind::Image(_)) => {
+                LinkForm::Block
+            }
             _ => LinkForm::Inline,
         };
         let changed = self.model.insert_link(text, target, form);
@@ -421,24 +421,6 @@ impl Editor {
         self.moved(cx);
     }
 
-    /// The path of a file link. A relative link starts at the folder of the note.
-    fn file_path(&self, path: &str) -> PathBuf {
-        match &self.folder {
-            Some(folder) => folder.join(path),
-            None => PathBuf::from(path),
-        }
-    }
-
-    /// Whether a file link points to an image.
-    fn is_image(&mut self, path: &str) -> bool {
-        let path = self.file_path(path);
-        let kind = *self
-            .file_kinds
-            .entry(path)
-            .or_insert_with_key(|path| FileKind::of(path));
-        matches!(kind, FileKind::Image(_))
-    }
-
     /// Opens `target`: moves to a heading in this note, or tells the app.
     fn open_link(&mut self, target: Target, cx: &mut Context<Self>) {
         match target {
@@ -449,7 +431,7 @@ impl Editor {
                 }
             }
             Target::File(path) => {
-                let path = self.file_path(&path);
+                let path = self.files.path(&path);
                 cx.emit(OpenFile { path });
             }
             target => cx.emit(OpenLink { target }),

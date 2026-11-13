@@ -5,6 +5,7 @@
 mod color;
 mod editor;
 mod element;
+mod files;
 mod find;
 mod highlight;
 mod ink;

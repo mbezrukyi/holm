@@ -16,8 +16,6 @@ pub(crate) struct Look {
     pub(crate) underline: bool,
     pub(crate) code: bool,
     pub(crate) link: bool,
-    /// The screen text of a file chip. The layout puts a box in its place.
-    pub(crate) chip: bool,
     /// The text of a link whose target is missing.
     pub(crate) broken: bool,
     /// Markdown syntax on a line that shows it.
@@ -603,7 +601,6 @@ impl Shown {
             len: CHIP_ATOM.len(),
             look: Look {
                 link: true,
-                chip: true,
                 ..Look::default()
             },
         });
