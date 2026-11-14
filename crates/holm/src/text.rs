@@ -43,7 +43,7 @@ pub(crate) const NEW_NOTE: &str = "New note";
 pub(crate) const CLOSE: &str = "Close";
 
 pub(crate) fn folder_missing(folder: &Path) -> String {
-    format!("Holm can't find the notes folder {}.", folder.display())
+    format!("Holm can't find the notes folder {}.", home_path(folder))
 }
 
 /// The words under [`CONFIG_BROKEN`] before the path of the config file.
@@ -64,7 +64,7 @@ pub(crate) fn home_path(path: &Path) -> String {
 pub(crate) fn crashed(log: &Path) -> String {
     format!(
         "Holm closed after an error. The log is at {}.",
-        log.display()
+        home_path(log)
     )
 }
 
