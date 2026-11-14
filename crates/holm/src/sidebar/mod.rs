@@ -72,6 +72,8 @@ pub(crate) enum SidebarEvent {
     DeleteTag(String),
     /// The view changed. The app keeps it in the config.
     ViewChanged,
+    /// Show this answer in the message line.
+    Answer(&'static str),
 }
 
 /// Writes a name from a name field of the tree. It must end with `done`.
@@ -140,7 +142,6 @@ pub(crate) struct Sidebar {
     finding: Option<Task<()>>,
     focus: FocusHandle,
     scroll: UniformListScrollHandle,
-    error: Option<&'static str>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -189,7 +190,6 @@ impl Sidebar {
             finding: None,
             focus: cx.focus_handle(),
             scroll: UniformListScrollHandle::new(),
-            error: None,
             _subscriptions: vec![changed, search_changed],
         };
         sidebar.refresh(cx);
@@ -250,7 +250,6 @@ impl Sidebar {
         let snapshot = self.notes_folder.read(cx).snapshot();
         self.revision = snapshot.revision();
         self.tree = Tree::new(snapshot, self.order);
-        self.error = None;
         let item = self.tree.nearest(self.view.item());
         if &item != self.view.item() {
             self.show_in_tree(item, cx);
@@ -300,7 +299,7 @@ impl Sidebar {
                         Err(error) => {
                             let error = AppError::from(error);
                             tracing::warn!(error = %crate::chain(&error), "cannot search the notes");
-                            sidebar.error = Some(error.message());
+                            cx.emit(SidebarEvent::Answer(error.message()));
                         }
                     }
                     sidebar.rebuild();
@@ -1076,14 +1075,6 @@ impl Render for Sidebar {
             .bg(theme.sidebar)
             .child(self.search_field(window, cx))
             .children(header)
-            .children(self.error.map(|error| {
-                div()
-                    .px_3()
-                    .py_2()
-                    .text_sm()
-                    .text_color(theme.muted_foreground)
-                    .child(error)
-            }))
             .children(empty.then(|| {
                 div()
                     .px_3()

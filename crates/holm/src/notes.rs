@@ -196,6 +196,9 @@ impl NotesView {
                     .update(cx, |pane, cx| pane.open(path, Leave::Keep, cx));
             }
             SidebarEvent::FocusEditor => self.focus_home(window, cx),
+            SidebarEvent::Answer(message) => {
+                self.line.update(cx, |line, cx| line.show(*message, cx));
+            }
             SidebarEvent::RenameNote => {
                 self.pane.update(cx, |pane, cx| pane.edit_title(window, cx));
             }
