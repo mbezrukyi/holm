@@ -411,6 +411,26 @@ fn a_broken_config_is_a_problem_in_the_message_line(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn the_message_line_does_not_move_the_folder_question(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let log = PathBuf::from("/state/holm/holm.log");
+    let handle = open(cx, fixture.startup(Some(log.clone())));
+    assert_eq!(message(cx, handle), Some(text::crashed(&log)));
+    let with = bounds_of(cx, handle, "folder-question").unwrap();
+    let line = bounds_of(cx, handle, "message-line").unwrap();
+    let screen = bounds_of(cx, handle, "folder-screen").unwrap();
+    assert_eq!(
+        line.bottom(),
+        screen.bottom(),
+        "the line lies over the screen"
+    );
+
+    keys(cx, handle, "escape");
+    assert_eq!(message(cx, handle), None);
+    assert_eq!(bounds_of(cx, handle, "folder-question"), Some(with));
+}
+
+#[gpui_kit::test]
 fn an_answer_shows_under_the_note_until_the_next_key(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     fs::write(fixture.notes().join("Note.md"), "[gone](holm:01X)\n").unwrap();

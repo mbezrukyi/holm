@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, Bounds, Context, Entity, InteractiveElement as _,
     IntoElement, ParentElement, PathPromptOptions, Render, Role, SharedString,
@@ -298,7 +299,13 @@ impl HolmWindow {
             .flex()
             .items_center()
             .justify_center()
-            .child(div().max_w(px(480.)).child(content))
+            .child(
+                div()
+                    .id("folder-question")
+                    .test_support()
+                    .max_w(px(480.))
+                    .child(content),
+            )
             .into_any_element()
     }
 }
@@ -315,8 +322,22 @@ impl Render for HolmWindow {
             .on_action(cx.listener(|this, Answer(message), _, cx| {
                 this.line.update(cx, |line, cx| line.show(*message, cx));
             }))
+            .relative()
             .child(self.folder_screen(cx))
-            .child(self.line.clone())
+            .map(|root| {
+                if matches!(self.stage, Stage::Open(_)) {
+                    root.child(self.line.clone())
+                } else {
+                    // The question stays in the middle of the window, under the line.
+                    root.child(
+                        div()
+                            .absolute()
+                            .bottom_0()
+                            .w_full()
+                            .child(self.line.clone()),
+                    )
+                }
+            })
     }
 }
 
