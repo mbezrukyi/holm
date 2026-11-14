@@ -38,7 +38,7 @@ use holm_core::model::Tag;
 use crate::backlinks::Backlinks;
 use crate::fold::Fold;
 use crate::notes_folder::NotesFolder;
-use crate::popup::Dropdown;
+use crate::popup::{self, Dropdown};
 use crate::text;
 
 /// The most known tags in the list while the user types.
@@ -376,47 +376,42 @@ impl TagRow {
                 ),
                 Line::Add(name) => (text::add_tag_line(&name), "+", None),
             };
-            div()
-                .id(ElementId::NamedInteger("tag-option".into(), at as u64))
-                .role(Role::ListBoxOption)
-                .aria_label(label.clone())
-                .aria_selected(current)
-                .when_some(toggled, StatefulInteractiveElement::aria_toggled)
-                .flex()
-                .items_center()
-                .gap_2()
-                .px_3()
-                .cursor(CursorStyle::PointingHand)
-                .when(current, |line| line.bg(theme.selection))
-                .when(!current, |line| line.hover(|line| line.bg(theme.secondary)))
-                .child(
-                    div()
-                        .w(px(12.))
-                        .flex_none()
-                        .text_color(theme.primary)
-                        .child(mark),
-                )
-                .child(div().flex_1().min_w_0().truncate().child(label))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |row, _, window, cx| {
-                        row.cursor = Some(at);
-                        row.choose(window, cx);
-                    }),
-                )
-                .test_support()
+            popup::option(
+                ElementId::NamedInteger("tag-option".into(), at as u64),
+                current,
+                cx,
+            )
+            .aria_label(label.clone())
+            .when_some(toggled, StatefulInteractiveElement::aria_toggled)
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(
+                div()
+                    .w(px(12.))
+                    .flex_none()
+                    .text_color(theme.primary)
+                    .child(mark),
+            )
+            .child(div().flex_1().min_w_0().truncate().child(label))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |row, _, window, cx| {
+                    row.cursor = Some(at);
+                    row.choose(window, cx);
+                }),
+            )
+            .test_support()
         });
         Some(
             v_flex()
                 .border_t_1()
                 .border_color(theme.border)
-                .mt_1()
                 .children(label)
                 .child(
-                    v_flex()
+                    popup::options()
                         .id("tag-options")
                         .role(Role::ListBox)
-                        .py_1()
                         .children(rows)
                         .test_support(),
                 ),
@@ -453,7 +448,7 @@ impl TagRow {
                 cx.stop_propagation();
             }))
             .child(
-                div().px_1().child(
+                div().p_1().child(
                     Input::new(&self.input)
                         .id("tag-input")
                         .aria_label(text::ADD_TAG)

@@ -10,7 +10,7 @@
 
 use std::path::PathBuf;
 
-use gpui_kit::component::{ActiveTheme as _, v_flex};
+use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Context, CursorStyle, ElementId, EventEmitter, FocusHandle, InteractiveElement as _,
@@ -19,7 +19,7 @@ use gpui_kit::{
 };
 use holm_core::model::NoteInfo;
 
-use crate::popup::Dropdown;
+use crate::popup::{self, Dropdown};
 use crate::text;
 
 const LIST_WIDTH: Pixels = px(260.);
@@ -148,24 +148,19 @@ impl Backlinks {
     fn list(&self, window: &Window, cx: &Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let rows = self.notes.iter().enumerate().map(|(at, note)| {
-            let current = self.cursor == at;
-            div()
-                .id(ElementId::NamedInteger("backlink".into(), at as u64))
-                .role(Role::ListBoxOption)
-                .aria_label(note.title.clone())
-                .aria_selected(current)
-                .test_support()
-                .px_3()
-                .py_0p5()
-                .truncate()
-                .cursor(CursorStyle::PointingHand)
-                .when(current, |row| row.bg(theme.selection))
-                .when(!current, |row| row.hover(|row| row.bg(theme.secondary)))
-                .child(note.title.clone())
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |list, _, _, cx| list.pick(at, cx)),
-                )
+            popup::option(
+                ElementId::NamedInteger("backlink".into(), at as u64),
+                self.cursor == at,
+                cx,
+            )
+            .aria_label(note.title.clone())
+            .test_support()
+            .truncate()
+            .child(note.title.clone())
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |list, _, _, cx| list.pick(at, cx)),
+            )
         });
         self.dropdown
             .panel(LIST_WIDTH, window, cx)
@@ -178,14 +173,13 @@ impl Backlinks {
             .child(
                 div()
                     .px_3()
-                    .pt_1()
-                    .pb_1()
+                    .pt_2()
                     .text_size(px(11.))
                     .text_color(theme.muted_foreground)
                     .child(text::LINKED_FROM),
             )
             .child(
-                v_flex()
+                popup::options()
                     .id("backlink-list")
                     .role(Role::ListBox)
                     .max_h(LIST_HEIGHT)

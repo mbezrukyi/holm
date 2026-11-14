@@ -10,9 +10,10 @@ use gpui_kit::component::command::CommandItem;
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, Bounds, Context, Div, FocusHandle, InteractiveElement as _, MouseButton, MouseDownEvent,
-    ParentElement as _, Pixels, Role, SharedString, StatefulInteractiveElement as _, Styled,
-    Subscription, TestSupportExt as _, Window, div, px,
+    App, Bounds, Context, CursorStyle, Div, ElementId, FocusHandle, InteractiveElement as _,
+    MouseButton, MouseDownEvent, ParentElement as _, Pixels, Role, SharedString, Stateful,
+    StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _, Window, div, phi,
+    px,
 };
 use holm_core::model::NoteInfo;
 
@@ -81,6 +82,28 @@ fn row(label: SharedString, folder: Option<SharedString>, cx: &App) -> CommandIt
                     .child(folder)
             }))
     })
+}
+
+/// The rows of a [`Dropdown`] list, inset from the panel by the same space on every side.
+pub(crate) fn options() -> Div {
+    v_flex().p_1().gap(px(2.))
+}
+
+/// A row of [`options`]. The row under the cursor, `current`, has the selection color.
+pub(crate) fn option(id: impl Into<ElementId>, current: bool, cx: &App) -> Stateful<Div> {
+    let theme = cx.theme();
+    // The row corners follow the panel corners across the inset.
+    let radius = (theme.radius - px(2.)).max(px(0.));
+    div()
+        .id(id)
+        .role(Role::ListBoxOption)
+        .aria_selected(current)
+        .px_2()
+        .py_1()
+        .rounded(radius)
+        .cursor(CursorStyle::PointingHand)
+        .when(current, |row| row.bg(theme.selection))
+        .when(!current, |row| row.hover(|row| row.bg(theme.secondary)))
 }
 
 fn folder(note: &Path) -> Option<SharedString> {
@@ -190,9 +213,10 @@ impl<T: 'static> Dropdown<T> {
         let close = self.close;
         panel(width, cx)
             .track_focus(&self.focus)
-            .py_1()
             .occlude()
             .text_size(px(12.))
+            // A popup in the note would take the line height of the note text.
+            .line_height(phi())
             .when(left, Styled::hidden)
             .on_mouse_down(
                 MouseButton::Left,

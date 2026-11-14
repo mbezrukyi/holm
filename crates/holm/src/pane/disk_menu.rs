@@ -1,4 +1,5 @@
-//! The disk menu: the answers to a disk question, right above the state in the message line.
+//! The disk menu: the answers to a disk question, right above the state in the message line
+//! and as wide as it.
 //!
 //! - It opens with the cursor on "Keep mine".
 //! - `↑` and `↓` move the cursor. `Enter` or a click picks the answer under it.
@@ -8,16 +9,14 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use gpui_kit::component::ActiveTheme as _;
-use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Anchor, Bounds, Context, CursorStyle, ElementId, EventEmitter, FocusHandle,
-    InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, ParentElement, Pixels, Render,
-    Role, StatefulInteractiveElement as _, Styled, TestSupportExt as _, Window, anchored, deferred,
-    div, point, px,
+    Anchor, Bounds, Context, ElementId, EventEmitter, FocusHandle, InteractiveElement as _,
+    IntoElement, KeyDownEvent, MouseButton, ParentElement, Pixels, Render, Role,
+    StatefulInteractiveElement as _, TestSupportExt as _, Window, anchored, deferred, div, point,
+    px,
 };
 
-use crate::popup::Dropdown;
+use crate::popup::{self, Dropdown};
 use crate::text;
 
 /// A question about the open note after another tool changed its file, while the editor had
@@ -128,44 +127,38 @@ impl Render for DiskMenu {
         let Some(disk) = self.open else {
             return div().into_any_element();
         };
-        let theme = cx.theme();
         let rows = disk.choices().into_iter().enumerate().map(|(at, choice)| {
             let label = match choice {
                 Choice::KeepMine => text::KEEP_MINE,
                 Choice::Reload => text::RELOAD,
                 Choice::Close => text::CLOSE,
             };
-            let current = self.cursor == at;
-            div()
-                .id(ElementId::NamedInteger("disk-choice".into(), at as u64))
-                .role(Role::ListBoxOption)
-                .aria_label(label)
-                .aria_selected(current)
-                .test_support()
-                .px_3()
-                .py_0p5()
-                .cursor(CursorStyle::PointingHand)
-                .when(current, |row| row.bg(theme.selection))
-                .when(!current, |row| row.hover(|row| row.bg(theme.secondary)))
-                .child(label)
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |menu, _, _, cx| menu.pick(at, cx)),
-                )
+            popup::option(
+                ElementId::NamedInteger("disk-choice".into(), at as u64),
+                self.cursor == at,
+                cx,
+            )
+            .aria_label(label)
+            .test_support()
+            .child(label)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |menu, _, _, cx| menu.pick(at, cx)),
+            )
         });
         let state = self.dropdown.opener();
         let panel = self
             .dropdown
-            .frame(px(160.), window, cx)
+            .frame(state.size.width, window, cx)
             .on_key_down(cx.listener(Self::key_down))
             .id("disk-menu")
             .role(Role::ListBox)
             .test_support()
-            .children(rows);
+            .child(popup::options().children(rows));
         deferred(
             anchored()
-                .anchor(Anchor::BottomRight)
-                .position(point(state.right(), state.top() - px(4.)))
+                .anchor(Anchor::BottomLeft)
+                .position(point(state.left(), state.top() - px(4.)))
                 .child(panel),
         )
         .into_any_element()

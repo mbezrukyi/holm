@@ -332,6 +332,14 @@ fn an_outside_change_with_unsaved_text_asks_to_reload_or_keep_mine(cx: &mut Test
     assert_eq!(disk_menu(cx, handle), Vec::<String>::new());
     assert_eq!(focus(cx, handle), "editor");
 
+    // The menu is as wide as the state, right above it.
+    keys(cx, handle, "alt-d");
+    let menu = bounds_of(cx, handle, "disk-menu").unwrap();
+    let opener = bounds_of(cx, handle, "message-state").unwrap();
+    assert_eq!((menu.left(), menu.right()), (opener.left(), opener.right()));
+    assert!(menu.bottom() <= opener.top());
+    keys(cx, handle, "escape");
+
     keys(cx, handle, "alt-d enter");
     assert!(read(&note).ends_with("\n---\nmine old\n"));
     assert_eq!(state(cx, handle), None);
