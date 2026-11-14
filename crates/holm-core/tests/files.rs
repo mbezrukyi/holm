@@ -8,8 +8,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use common::Folder;
-use holm_core::Error;
 use holm_core::model::{DeleteCount, LinkTarget, NoteInfo, Order};
+use holm_core::{Error, NameProblem};
 
 fn note(id: &str, body: &str) -> String {
     format!("---\nid: {id}\n---\n{body}")
@@ -194,14 +194,22 @@ fn move_note_keeps_the_text_and_permissions_when_no_link_changes() {
 }
 
 #[test]
-fn move_note_adds_a_number_on_a_clash() {
-    let folder = Folder::new(&[("a.md", "one\n"), ("work/a.md", "two\n")]);
+fn move_note_into_a_taken_name_fails_and_moves_nothing() {
+    let folder = Folder::new(&[
+        ("a.md", "one\n"),
+        ("B.md", "b\n"),
+        ("work/a.md", "two\n"),
+        ("work/b.md", ""),
+    ]);
 
-    let info = folder.core.move_note("a.md", "work").result.unwrap();
+    for from in ["a.md", "B.md"] {
+        let error = folder.core.move_note(from, "work").result.unwrap_err();
+        assert!(matches!(error, Error::NameTaken { .. }), "{error:?}");
+    }
 
-    assert_eq!(info.path, Path::new("work/a 2.md"));
+    assert_eq!(folder.text("a.md"), "one\n");
     assert_eq!(folder.text("work/a.md"), "two\n");
-    assert_eq!(folder.text("work/a 2.md"), "one\n");
+    assert_eq!(all(&folder), ["B.md", "a.md", "work/a.md", "work/b.md"]);
 }
 
 #[test]
@@ -226,38 +234,18 @@ fn move_note_to_a_missing_folder_fails_and_keeps_the_note() {
 }
 
 #[test]
-fn create_folder_cleans_the_name_and_adds_a_number_on_a_clash() {
+fn create_folder_keeps_the_typed_name() {
     let folder = Folder::new(&[("work/a.md", "")]);
 
     let core = &folder.core;
     assert_eq!(
-        core.create_folder("", "Ideas").result.unwrap(),
-        Path::new("Ideas")
+        core.create_folder("", "Ideas: 2026?").result.unwrap(),
+        Path::new("Ideas: 2026?")
     );
     assert_eq!(
-        core.create_folder("", " Ideas ").result.unwrap(),
-        Path::new("Ideas 2")
+        core.create_folder("work", "attachments").result.unwrap(),
+        Path::new("work/attachments")
     );
-    assert_eq!(
-        core.create_folder("", "work").result.unwrap(),
-        Path::new("work 2")
-    );
-    assert_eq!(
-        core.create_folder("work", "a/b").result.unwrap(),
-        Path::new("work/a-b")
-    );
-    assert_eq!(
-        core.create_folder("", ".git").result.unwrap(),
-        Path::new("-git")
-    );
-    assert_eq!(
-        core.create_folder("", "attachments").result.unwrap(),
-        Path::new("attachments 2")
-    );
-    assert!(matches!(
-        core.create_folder("", "  ").result,
-        Err(Error::BadPath { .. })
-    ));
     assert!(matches!(
         core.create_folder("missing", "x").result,
         Err(Error::Write { .. })
@@ -269,16 +257,78 @@ fn create_folder_cleans_the_name_and_adds_a_number_on_a_clash() {
                 .map(Path::to_path_buf)
                 .collect::<Vec<_>>()
         ),
-        [
-            "-git",
-            "Ideas",
-            "Ideas 2",
-            "attachments 2",
-            "work",
-            "work/a-b",
-            "work 2"
-        ]
+        ["Ideas: 2026?", "work", "work/attachments"]
     );
+}
+
+#[test]
+fn create_folder_refuses_a_taken_name() {
+    let folder = Folder::new(&[("work/a.md", ""), ("Plans/b.md", ""), ("notes.md", "")]);
+
+    for name in ["work", "Work", "plans", "NOTES.md"] {
+        let error = folder.core.create_folder("", name).result.unwrap_err();
+        assert!(
+            matches!(error, Error::NameTaken { .. }),
+            "{name}: {error:?}"
+        );
+    }
+    assert_eq!(folder.names(""), ["Plans", "notes.md", "work"]);
+}
+
+#[test]
+fn create_folder_refuses_a_bad_name() {
+    let folder = Folder::new(&[("a.md", "")]);
+    let long = "x".repeat(256);
+
+    for (name, problem) in [
+        ("", NameProblem::Empty),
+        ("  ", NameProblem::Empty),
+        ("a/b", NameProblem::Slash),
+        (".git", NameProblem::Dot),
+        ("attachments", NameProblem::Attachments),
+        ("Attachments", NameProblem::Attachments),
+        (long.as_str(), NameProblem::TooLong),
+    ] {
+        let error = folder.core.create_folder("", name).result.unwrap_err();
+        assert!(
+            matches!(error, Error::BadName { problem: found, .. } if found == problem),
+            "{name}: {error:?}"
+        );
+    }
+    assert!(
+        folder
+            .core
+            .create_folder("", &"x".repeat(255))
+            .result
+            .is_ok()
+    );
+    assert_eq!(folder.core.snapshot().folders().count(), 1);
+}
+
+#[test]
+fn rename_folder_refuses_a_taken_name_but_takes_its_own_in_other_capitals() {
+    let folder = Folder::new(&[("plans/a.md", ""), ("work/b.md", "")]);
+
+    for name in ["work", "Work"] {
+        let error = folder.core.rename_folder("plans", name).result.unwrap_err();
+        assert!(
+            matches!(error, Error::NameTaken { .. }),
+            "{name}: {error:?}"
+        );
+    }
+    let error = folder
+        .core
+        .rename_folder("plans", "a/b")
+        .result
+        .unwrap_err();
+    assert!(matches!(error, Error::BadName { .. }), "{error:?}");
+    assert_eq!(folder.names(""), ["plans", "work"]);
+
+    let new = folder.core.rename_folder("plans", "Plans").result.unwrap();
+
+    assert_eq!(new, Path::new("Plans"));
+    assert_eq!(folder.names(""), ["Plans", "work"]);
+    assert_eq!(all(&folder), ["Plans/a.md", "work/b.md"]);
 }
 
 #[test]
@@ -345,14 +395,26 @@ fn move_folder_fixes_links_to_files_outside_it() {
 }
 
 #[test]
-fn move_folder_adds_a_number_on_a_clash() {
-    let folder = Folder::new(&[("work/a.md", "one\n"), ("archive/work/a.md", "two\n")]);
+fn move_folder_into_a_taken_name_fails_and_moves_nothing() {
+    let folder = Folder::new(&[
+        ("work/a.md", "one\n"),
+        ("plans/b.md", ""),
+        ("archive/work/a.md", "two\n"),
+        ("archive/Plans/c.md", ""),
+    ]);
 
-    let new = folder.core.move_folder("work", "archive").result.unwrap();
+    for from in ["work", "plans"] {
+        let error = folder.core.move_folder(from, "archive").result.unwrap_err();
+        assert!(
+            matches!(error, Error::NameTaken { .. }),
+            "{from}: {error:?}"
+        );
+    }
 
-    assert_eq!(new, Path::new("archive/work 2"));
+    assert_eq!(folder.text("work/a.md"), "one\n");
     assert_eq!(folder.text("archive/work/a.md"), "two\n");
-    assert_eq!(folder.text("archive/work 2/a.md"), "one\n");
+    assert_eq!(folder.names("archive"), ["Plans", "work"]);
+    assert_eq!(folder.names("plans"), ["b.md"]);
 }
 
 #[test]

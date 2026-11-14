@@ -67,6 +67,16 @@ impl Folder {
         fs::read_to_string(self.path(path)).unwrap()
     }
 
+    /// The sorted names in the folder `path`, hidden ones too.
+    pub(crate) fn names(&self, path: &str) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(self.path(path))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
     /// Sets the modification time to `secs` after 1970.
     pub(crate) fn set_time(&self, path: &str, secs: u64) -> SystemTime {
         let time = SystemTime::UNIX_EPOCH + Duration::from_secs(secs);

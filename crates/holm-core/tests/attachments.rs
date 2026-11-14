@@ -17,21 +17,40 @@ fn attach_file_copies_the_file_and_returns_the_path_from_the_note() {
     let file = outside.path().join("photo.jpg");
     fs::write(&file, b"jpg").unwrap();
 
-    let from_root = folder.core.attach_file("a.md", &file).unwrap();
-    let from_work = folder.core.attach_file("work/b.md", &file).unwrap();
+    let path = folder.core.attach_file("work/b.md", &file).unwrap();
 
-    assert_eq!(from_root, Path::new("attachments/photo.jpg"));
-    assert_eq!(from_work, Path::new("../attachments/photo 2.jpg"));
+    assert_eq!(path, Path::new("../attachments/photo-f8146b6c.jpg"));
     assert_eq!(
-        fs::read(folder.path("attachments/photo.jpg")).unwrap(),
-        b"jpg"
-    );
-    assert_eq!(
-        fs::read(folder.path("attachments/photo 2.jpg")).unwrap(),
+        fs::read(folder.path("attachments/photo-f8146b6c.jpg")).unwrap(),
         b"jpg"
     );
     assert_eq!(fs::read(&file).unwrap(), b"jpg");
-    assert_eq!(folder.text("a.md"), "# A\n");
+    assert_eq!(folder.text("work/b.md"), "# B\n");
+}
+
+#[test]
+fn the_same_file_twice_is_one_copy_and_two_files_are_two() {
+    let folder = Folder::new(&[("a.md", "# A\n")]);
+    let outside = tempfile::tempdir().unwrap();
+    let file = outside.path().join("photo.jpg");
+    let other = outside.path().join("other/photo.jpg");
+    fs::write(&file, b"jpg").unwrap();
+    fs::create_dir(outside.path().join("other")).unwrap();
+    fs::write(&other, b"other jpg").unwrap();
+
+    let first = folder.core.attach_file("a.md", &file).unwrap();
+    let again = folder.core.attach_file("a.md", &file).unwrap();
+    let second = folder.core.attach_file("a.md", &other).unwrap();
+
+    assert_eq!(first, Path::new("attachments/photo-f8146b6c.jpg"));
+    assert_eq!(again, first);
+    assert_eq!(second, Path::new("attachments/photo-6abacb38.jpg"));
+    let mut names: Vec<_> = fs::read_dir(folder.path("attachments"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["photo-6abacb38.jpg", "photo-f8146b6c.jpg"]);
 }
 
 #[test]
@@ -45,15 +64,11 @@ fn attach_file_names_a_hidden_file_and_a_file_with_no_extension() {
 
     assert_eq!(
         folder.core.attach_file("a.md", &hidden).unwrap(),
-        Path::new("attachments/-config")
+        Path::new("attachments/-config-e3b0c442")
     );
     assert_eq!(
         folder.core.attach_file("a.md", &plain).unwrap(),
-        Path::new("attachments/README")
-    );
-    assert_eq!(
-        folder.core.attach_file("a.md", &plain).unwrap(),
-        Path::new("attachments/README 2")
+        Path::new("attachments/README-e3b0c442")
     );
 }
 
@@ -91,28 +106,14 @@ fn attach_file_fails_when_attachments_is_a_file() {
 }
 
 #[test]
-fn paste_image_names_the_file_by_the_time() {
+fn paste_image_names_the_file_by_its_content() {
     let folder = Folder::new(&[("work/a.md", "# A\n")]);
 
     let path = folder.core.paste_image("work/a.md", "png", b"png").unwrap();
 
-    let name = path
-        .strip_prefix("../attachments")
-        .unwrap()
-        .to_str()
-        .unwrap();
-    // Like `Pasted image 2026-11-08 15-30-12.png`.
-    let time = name
-        .strip_prefix("Pasted image ")
-        .and_then(|rest| rest.strip_suffix(".png"))
-        .unwrap();
-    let shape: String = time
-        .chars()
-        .map(|c| if c.is_ascii_digit() { '0' } else { c })
-        .collect();
-    assert_eq!(shape, "0000-00-00 00-00-00", "{name}");
+    assert_eq!(path, Path::new("../attachments/Pasted image-8f8cbb7d.png"));
     assert_eq!(
-        fs::read(folder.path("attachments").join(name)).unwrap(),
+        fs::read(folder.path("attachments/Pasted image-8f8cbb7d.png")).unwrap(),
         b"png"
     );
 }

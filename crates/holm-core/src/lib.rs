@@ -19,7 +19,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-pub use error::{Error, Result};
+pub use error::{Error, NameProblem, Result};
 pub use snapshot::Snapshot;
 pub use watch::Feed;
 
@@ -29,6 +29,9 @@ use retag::TagEdit;
 use snapshot::Delta;
 use store::{Store, folder_of};
 use watch::{Apply, Batch};
+
+/// The stem of a pasted image before its hash.
+const PASTED_IMAGE: &str = "Pasted image";
 
 /// The handle to one notes folder.
 ///
@@ -322,42 +325,53 @@ impl Core {
         self.inner.write(|draft| {
             let (note, _) = self.inner.store.read(path)?;
             let stem = holm_markdown::file_stem(&note.info.title);
-            let new = self
-                .inner
-                .store
-                .move_note(path, folder_of(path), OsStr::new(&stem))?;
-            self.inner.settle(draft, path, &new)
+            let folder = folder_of(path);
+            for name in store::numbered(OsStr::new(&stem), ".md") {
+                match self.inner.store.move_note(path, folder, &name) {
+                    Err(Error::NameTaken { .. }) => {}
+                    Err(error) => return Err(error),
+                    Ok(new) => return self.inner.settle(draft, path, &new),
+                }
+            }
+            Err(Error::Write {
+                path: self.inner.store.root().join(path),
+                source: std::io::ErrorKind::StorageFull.into(),
+            })
         })
     }
 
-    /// Moves the note to `folder` and returns it at its new path.
+    /// Moves the note to `folder` with its file name, and returns it at its new path.
     ///
-    /// It keeps its file name. When the name is taken, it gets a number: `Plans 2.md`.
     /// Relative file links in the note change, so they point to the same files.
     /// No other note changes, because note links use the id.
     ///
     /// # Errors
     ///
+    /// - [`Error::NameTaken`] when something in `folder` has the file name, also with other
+    ///   capital letters. Nothing moves.
     /// - [`Error::BadPath`] when `path` is not a note path, or `folder` is not a folder path.
     /// - Else as in [`Core::rename_to_title`].
     pub fn move_note(&self, path: impl AsRef<Path>, folder: impl AsRef<Path>) -> Written<NoteInfo> {
         let path = path.as_ref();
         self.inner.write(|draft| {
             Store::check_note(path)?;
-            let stem = path.file_stem().unwrap_or_default();
-            let new = self.inner.store.move_note(path, folder.as_ref(), stem)?;
+            let name = path.file_name().unwrap_or_default();
+            let new = self.inner.store.move_note(path, folder.as_ref(), name)?;
             self.inner.settle(draft, path, &new)
         })
     }
 
     /// Creates the folder `name` in `parent`, and returns its path.
     ///
-    /// `name` is cleaned like a note file name. When it is taken, it gets a number: `Work 2`.
-    /// The name `attachments` at the root is always taken.
+    /// Holm uses `name` as it is and never adds a number.
     ///
     /// # Errors
     ///
-    /// - [`Error::BadPath`] when `parent` is not a folder path, or `name` is empty.
+    /// - [`Error::BadName`] when `name` is empty, holds `/`, starts with `.`, is too long,
+    ///   or is `attachments` at the root.
+    /// - [`Error::NameTaken`] when something in `parent` has the name, also with other
+    ///   capital letters.
+    /// - [`Error::BadPath`] when `parent` is not a folder path.
     /// - [`Error::Write`] when the folder can't be made, for example when `parent` is missing.
     /// - [`Error::Read`] when the new folder can't be read.
     pub fn create_folder(&self, parent: impl AsRef<Path>, name: &str) -> Written<PathBuf> {
@@ -370,14 +384,16 @@ impl Core {
 
     /// Renames the folder to `name`, and returns its new path.
     ///
-    /// Names work as in [`Core::create_folder`]. Relative file links in its notes change,
-    /// so they point to the same files. A note whose links can't change keeps them,
-    /// with a log line.
+    /// Names work as in [`Core::create_folder`]. A change of only the capital letters works.
+    /// Relative file links in its notes change, so they point to the same files.
+    /// A note whose links can't change keeps them, with a log line.
     ///
     /// # Errors
     ///
+    /// - [`Error::BadName`] and [`Error::NameTaken`] as in [`Core::create_folder`].
+    ///   Nothing moves.
     /// - [`Error::BadPath`] when `folder` is the root or `attachments/`,
-    ///   or is not a folder path, or `name` is empty.
+    ///   or is not a folder path.
     /// - [`Error::Read`] when `folder` is missing or is not a folder.
     /// - [`Error::Write`] when the folder can't be moved. It then stays where it was.
     /// - [`Error::Index`] as in [`Core::save`].
@@ -617,7 +633,8 @@ impl Core {
     /// Copies the file into `attachments/` at the root of the notes folder,
     /// and returns its path from the folder of `note`, for a link.
     ///
-    /// The copy keeps the file name. When it is taken, it gets a number: `photo 2.png`.
+    /// The copy is `<stem>-<hash>.<ext>`, with a short hash of the content: `photo-3fa9c2e1.png`.
+    /// So the same file twice is one copy, and two files never clash.
     /// A leading `.` becomes `-`. Holm makes `attachments/` when it is missing.
     /// The note itself does not change, and neither does the snapshot.
     ///
@@ -648,8 +665,7 @@ impl Core {
     /// Saves a pasted image into `attachments/`, and returns its path from the folder
     /// of `note`, for a link. `extension` names the image format, like `png`.
     ///
-    /// The name holds the local time: `Pasted image 2026-11-08 15-30-12.png`.
-    /// Else it works as [`Core::attach_file`].
+    /// The name is `Pasted image-<hash>.<extension>`. Else it works as [`Core::attach_file`].
     ///
     /// # Errors
     ///
@@ -661,11 +677,8 @@ impl Core {
         extension: &str,
         bytes: &[u8],
     ) -> Result<PathBuf> {
-        let stem = jiff::Zoned::now()
-            .strftime("Pasted image %Y-%m-%d %H-%M-%S")
-            .to_string();
         let ext = format!(".{}", holm_markdown::file_stem(extension));
-        self.attach(note.as_ref(), &OsString::from(stem), &ext, bytes)
+        self.attach(note.as_ref(), OsStr::new(PASTED_IMAGE), &ext, bytes)
     }
 
     fn attach(

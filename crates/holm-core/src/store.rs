@@ -10,13 +10,19 @@ use std::time::SystemTime;
 use holm_markdown::Note as Text;
 use tempfile::NamedTempFile;
 
-use crate::error::{Error, Result};
+use sha2::{Digest as _, Sha256};
+
+use crate::error::{Error, NameProblem, Result};
 use crate::model::{Note, NoteId, NoteInfo};
 use crate::relink::{Moved, relink};
 
 /// The folder for pasted files at the root. The folder list skips it.
 pub(crate) const ATTACHMENTS: &str = "attachments";
 const NEW_NOTE: &str = "Untitled";
+/// The longest file name that Linux file systems take.
+const MAX_NAME_BYTES: usize = 255;
+/// The bytes of the content hash in an attachment name: 8 hex digits.
+const HASH_BYTES: usize = 4;
 /// A new file gets these bits before the umask.
 const NEW_FILE_MODE: u32 = 0o666;
 
@@ -228,9 +234,10 @@ impl Store {
         self.read(&folder.join(name))
     }
 
-    /// Copies `content` into a new file in `attachments/` at the root, and returns its path.
+    /// Copies `content` into `attachments/` at the root as `<stem>-<hash>` + `ext`, and returns
+    /// its path. The hash is a short hash of the content, so a name never clashes.
     ///
-    /// The file is `stem` + `ext`, or `stem 2` + `ext` and so on on a clash.
+    /// When a file with that name is there, it keeps that file and drops the new copy.
     /// It makes the `attachments/` folder when it is missing.
     pub(crate) fn add_attachment(
         &self,
@@ -254,20 +261,43 @@ impl Store {
                 return Err(write_error(&dir, io::ErrorKind::NotADirectory.into()));
             }
         }
+        let mut hashed = Hashed {
+            inner: content,
+            hash: Sha256::new(),
+        };
         let file =
-            temp_file(&dir, content, None, None).map_err(|source| write_error(&dir, source))?;
-        let name = persist_new(file, &dir, stem, ext)?;
+            temp_file(&dir, &mut hashed, None, None).map_err(|source| write_error(&dir, source))?;
+        let hash = hashed.hash.finalize();
+        let mut name = stem.to_owned();
+        name.push("-");
+        for byte in &hash[..HASH_BYTES] {
+            name.push(format!("{byte:02x}"));
+        }
+        name.push(ext);
+        let path = dir.join(&name);
+        match file.persist_noclobber(&path) {
+            Ok(_) => sync_dir(&dir).map_err(|e| write_error(&path, e))?,
+            Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(write_error(&path, e.error)),
+        }
         Ok(Path::new(ATTACHMENTS).join(name))
     }
 
-    /// Moves the note at `from` to `folder` as `<stem>.md`, or `<stem> 2.md` and so on
-    /// on a clash, and returns its new path. It fixes the relative file links in the note.
+    /// Moves the note at `from` to `folder` as `name`, and returns its new path.
+    /// It fixes the relative file links in the note.
     ///
-    /// The note keeps its modification time and permissions.
-    /// When `from` is one of the names to try, the note stays where it is.
-    pub(crate) fn move_note(&self, from: &Path, folder: &Path, stem: &OsStr) -> Result<PathBuf> {
+    /// The note keeps its modification time and permissions. When the new path is `from`,
+    /// the note stays where it is. It fails with [`Error::NameTaken`] when something in
+    /// `folder` has the name.
+    pub(crate) fn move_note(&self, from: &Path, folder: &Path, name: &OsStr) -> Result<PathBuf> {
         let source = self.note_path(from)?;
         let dir = self.root.join(plain_path(folder)?);
+        let rel = folder.join(name);
+        if rel == from {
+            return Ok(rel);
+        }
+        Self::check_note(&rel)?;
+        self.check_free(&rel, Some(from))?;
         let (old, stamp) = read_text(&source)?;
         let text = relink(&old, &self.root, folder_of(from), folder, None).unwrap_or(old);
         let permissions = fs::metadata(&source)
@@ -276,99 +306,109 @@ impl Store {
                 source: e,
             })?
             .permissions();
-        let mut file = None;
-        for name in numbered(stem, ".md") {
-            let rel = folder.join(&name);
-            if rel == from {
-                return Ok(rel);
+        let temp = temp_file(
+            &dir,
+            text.as_bytes(),
+            Some(permissions),
+            Some(time(stamp.modified)),
+        )
+        .map_err(|source| write_error(&dir, source))?;
+        let path = dir.join(name);
+        match temp.persist_noclobber(&path) {
+            Ok(_) => {
+                remove(&source)?;
+                sync_dir(&dir).map_err(|e| write_error(&path, e))?;
+                sync_dir(folder_abs(&source)).map_err(|e| write_error(&source, e))?;
+                Ok(rel)
             }
-            let temp = match file.take() {
-                Some(temp) => temp,
-                None => temp_file(
-                    &dir,
-                    text.as_bytes(),
-                    Some(permissions.clone()),
-                    Some(time(stamp.modified)),
-                )
-                .map_err(|source| write_error(&dir, source))?,
-            };
-            let path = dir.join(&name);
-            match temp.persist_noclobber(&path) {
-                Ok(_) => {
-                    remove(&source)?;
-                    sync_dir(&dir).map_err(|e| write_error(&path, e))?;
-                    sync_dir(folder_abs(&source)).map_err(|e| write_error(&source, e))?;
-                    return Ok(rel);
-                }
-                Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => file = Some(e.file),
-                Err(e) => return Err(write_error(&path, e.error)),
+            Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => {
+                Err(Error::NameTaken { path })
             }
+            Err(e) => Err(write_error(&path, e.error)),
         }
-        Err(write_error(&dir, io::ErrorKind::StorageFull.into()))
     }
 
-    /// Creates the folder `name` in `parent`, or `name 2` and so on on a clash,
-    /// and returns its path.
+    /// Creates the folder `name` in `parent`, and returns its path.
+    ///
+    /// `name` follows the rules of [`check_name`]. It fails with [`Error::NameTaken`] when
+    /// something in `parent` has the name.
     pub(crate) fn create_folder(&self, parent: &Path, name: &str) -> Result<PathBuf> {
         let parent = plain_path(parent)?;
-        for name in numbered(&folder_name(name)?, "") {
-            let rel = parent.join(name);
-            if rel == Path::new(ATTACHMENTS) {
-                continue;
+        let rel = parent.join(check_name(parent, name)?);
+        self.check_free(&rel, None)?;
+        let path = self.root.join(&rel);
+        match fs::create_dir(&path) {
+            Ok(()) => {
+                sync_dir(folder_abs(&path)).map_err(|e| write_error(&path, e))?;
+                Ok(rel)
             }
-            let path = self.root.join(&rel);
-            match fs::create_dir(&path) {
-                Ok(()) => {
-                    sync_dir(folder_abs(&path)).map_err(|e| write_error(&path, e))?;
-                    return Ok(rel);
-                }
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
-                Err(e) => return Err(write_error(&path, e)),
-            }
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Err(Error::NameTaken { path }),
+            Err(e) => Err(write_error(&path, e)),
         }
-        Err(write_error(&self.root, io::ErrorKind::StorageFull.into()))
     }
 
-    /// Moves the folder `from` to `parent` as `name`, or `name 2` and so on on a clash,
-    /// and returns its new path.
+    /// Moves the folder `from` to `parent` as `name`, and returns its new path.
     ///
-    /// It fixes the relative file links in the notes inside. A note that can't be fixed
-    /// keeps its links, with a log line.
+    /// Names work as in [`Store::create_folder`]. The folder may take its own name with other
+    /// capital letters. It fixes the relative file links in the notes inside. A note that can't
+    /// be fixed keeps its links, with a log line.
     pub(crate) fn move_folder(&self, from: &Path, parent: &Path, name: &str) -> Result<PathBuf> {
         self.check_user_folder(from)?;
         let parent = plain_path(parent)?;
         if parent.starts_with(from) {
             return Err(bad_path(parent));
         }
-        let source = self.root.join(from);
-        for name in numbered(&folder_name(name)?, "") {
-            let rel = parent.join(name);
-            if rel == from {
-                return Ok(rel);
-            }
-            if rel == Path::new(ATTACHMENTS) {
-                continue;
-            }
-            let path = self.root.join(&rel);
-            // An empty folder takes the name first. The rename then replaces it,
-            // so it never replaces a folder that someone else made.
-            match fs::create_dir(&path) {
-                Ok(()) => {}
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-                Err(e) => return Err(write_error(&path, e)),
-            }
-            if let Err(e) = fs::rename(&source, &path) {
-                if let Err(error) = fs::remove_dir(&path) {
-                    tracing::warn!(%error, path = %path.display(), "kept an empty folder");
-                }
-                return Err(write_error(&source, e));
-            }
-            sync_dir(folder_abs(&path)).map_err(|e| write_error(&path, e))?;
-            sync_dir(folder_abs(&source)).map_err(|e| write_error(&source, e))?;
-            self.relink_folder(Moved { from, to: &rel })?;
+        let rel = parent.join(check_name(parent, name)?);
+        if rel == from {
             return Ok(rel);
         }
-        Err(write_error(&self.root, io::ErrorKind::StorageFull.into()))
+        self.check_free(&rel, Some(from))?;
+        let source = self.root.join(from);
+        let path = self.root.join(&rel);
+        // An empty folder takes the name first. The rename then replaces it,
+        // so it never replaces a folder that someone else made.
+        match fs::create_dir(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                return Err(Error::NameTaken { path });
+            }
+            Err(e) => return Err(write_error(&path, e)),
+        }
+        if let Err(e) = fs::rename(&source, &path) {
+            if let Err(error) = fs::remove_dir(&path) {
+                tracing::warn!(%error, path = %path.display(), "kept an empty folder");
+            }
+            return Err(write_error(&source, e));
+        }
+        sync_dir(folder_abs(&path)).map_err(|e| write_error(&path, e))?;
+        sync_dir(folder_abs(&source)).map_err(|e| write_error(&source, e))?;
+        self.relink_folder(Moved { from, to: &rel })?;
+        Ok(rel)
+    }
+
+    /// Fails with [`Error::NameTaken`] when an entry next to `rel` has its name, also with other
+    /// capital letters. `own` is the entry that moves to `rel`, so it does not count.
+    fn check_free(&self, rel: &Path, own: Option<&Path>) -> Result<()> {
+        let folder = folder_of(rel);
+        let wanted = rel
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_lowercase();
+        let Ok(entries) = fs::read_dir(self.root.join(folder)) else {
+            return Ok(());
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if name.to_string_lossy().to_lowercase() == wanted
+                && own != Some(folder.join(&name).as_path())
+            {
+                return Err(Error::NameTaken {
+                    path: self.root.join(rel),
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Deletes the note file at `rel`. A note that is already gone is no error.
@@ -536,7 +576,7 @@ fn folder_abs(path: &Path) -> &Path {
 }
 
 /// `stem` + `ext`, then `stem 2` + `ext`, `stem 3` + `ext` and so on.
-fn numbered(stem: &OsStr, ext: &str) -> impl Iterator<Item = OsString> {
+pub(crate) fn numbered(stem: &OsStr, ext: &str) -> impl Iterator<Item = OsString> {
     (1_u32..).map(move |n| {
         let mut name = stem.to_owned();
         if n > 1 {
@@ -564,13 +604,42 @@ fn persist_new(mut file: NamedTempFile, dir: &Path, stem: &OsStr, ext: &str) -> 
     Err(write_error(dir, io::ErrorKind::StorageFull.into()))
 }
 
-/// A folder name from what the user typed, cleaned like a note file name.
-fn folder_name(name: &str) -> Result<OsString> {
-    let name = holm_markdown::file_stem(name.trim());
-    if name.is_empty() {
-        return Err(bad_path(Path::new(&name)));
+/// Checks a typed name for a new entry in `parent`, and returns it as it is.
+pub(crate) fn check_name<'a>(parent: &Path, name: &'a str) -> Result<&'a str> {
+    let problem = if name.trim().is_empty() {
+        Some(NameProblem::Empty)
+    } else if name.contains('/') {
+        Some(NameProblem::Slash)
+    } else if name.starts_with('.') {
+        Some(NameProblem::Dot)
+    } else if parent.as_os_str().is_empty() && name.eq_ignore_ascii_case(ATTACHMENTS) {
+        Some(NameProblem::Attachments)
+    } else if name.len() > MAX_NAME_BYTES {
+        Some(NameProblem::TooLong)
+    } else {
+        None
+    };
+    match problem {
+        Some(problem) => Err(Error::BadName {
+            name: name.to_owned(),
+            problem,
+        }),
+        None => Ok(name),
     }
-    Ok(name.into())
+}
+
+/// A reader that hashes what it reads.
+struct Hashed<R> {
+    inner: R,
+    hash: Sha256,
+}
+
+impl<R: io::Read> io::Read for Hashed<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let read = self.inner.read(buf)?;
+        self.hash.update(&buf[..read]);
+        Ok(read)
+    }
 }
 
 /// Deletes the file at `path`. A file that is already gone is no error.

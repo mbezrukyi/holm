@@ -86,7 +86,7 @@ pub struct Tag {
 pub struct Link {
     /// Where the link points.
     pub target: LinkTarget,
-    /// Whether it is `![..](..)`: an image or a file card.
+    /// Whether it is `![..](..)`: an image or a file chip.
     pub embedded: bool,
 }
 
