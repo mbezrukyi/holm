@@ -30,8 +30,8 @@ fn file_stems() {
 
 #[test]
 fn long_file_stem_stops_at_a_char() {
-    let title = "é".repeat(200);
-    let stem = file_stem(&title);
+    let text = "é".repeat(200);
+    let stem = file_stem(&text);
     assert_eq!(stem.len(), 240);
-    assert!(title.starts_with(&stem));
+    assert!(text.starts_with(&stem));
 }

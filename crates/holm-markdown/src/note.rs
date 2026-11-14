@@ -1,8 +1,8 @@
 use std::fmt;
 
 use crate::frontmatter::{Frontmatter, Key};
+use crate::preview::preview;
 use crate::tag::clean_tags;
-use crate::title::{preview, title};
 
 /// The line ending of a note.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -43,7 +43,7 @@ impl LineEnding {
 ///
 /// let text = "---\nauthor: me\n---\n# Plans\n";
 /// let mut note = Note::parse(text);
-/// assert_eq!(note.title().as_deref(), Some("Plans"));
+/// assert_eq!(note.preview(), "Plans");
 ///
 /// note.set_tags(&["work/holm"]);
 /// assert_eq!(note.to_string(), "---\ntags:\n  - work/holm\nauthor: me\n---\n# Plans\n");
@@ -99,21 +99,14 @@ impl Note {
         self.frontmatter.as_ref().is_some_and(Frontmatter::pinned)
     }
 
-    /// The title: the text of a `# heading` that is the first block of the body.
+    /// The first line of text of the body, with no Markdown syntax, for a note list.
     ///
-    /// It is `None` when the first block is something else. The caller then uses the file name.
-    pub fn title(&self) -> Option<String> {
-        title(&self.body)
-    }
-
-    /// The first line of text after the title, with no Markdown syntax, for a note list.
-    ///
-    /// It is empty when the body has no other text. A long line is cut to 200 chars.
+    /// It is empty when the body has no text. A long line is cut to 200 chars.
     ///
     /// ```
     /// use holm_markdown::Note;
     ///
-    /// let note = Note::parse("# Plans\n\n- Buy **milk**\n");
+    /// let note = Note::parse("\n- Buy **milk**\n");
     /// assert_eq!(note.preview(), "Buy milk");
     /// ```
     pub fn preview(&self) -> String {

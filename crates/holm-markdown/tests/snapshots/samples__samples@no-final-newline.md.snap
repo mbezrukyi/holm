@@ -7,7 +7,6 @@ line ending: Lf
 id: Some("no-final-newline")
 tags: []
 pinned: false
-title: None
 preview: ""
 
 --- frontmatter ---

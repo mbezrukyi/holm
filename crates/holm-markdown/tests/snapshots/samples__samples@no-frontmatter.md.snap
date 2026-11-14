@@ -7,8 +7,7 @@ line ending: Lf
 id: None
 tags: []
 pinned: false
-title: Some("Just a title")
-preview: "No frontmatter here."
+preview: "Just a title"
 
 --- frontmatter ---
 

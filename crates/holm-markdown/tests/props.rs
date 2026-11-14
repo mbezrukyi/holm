@@ -82,23 +82,12 @@ proptest! {
         let note = Note::parse(&text);
         prop_assert_eq!(note.to_string(), text);
         // The readers never panic.
-        let _ = (note.id(), note.tags(), note.pinned(), note.title(), note.preview());
+        let _ = (note.id(), note.tags(), note.pinned(), note.preview());
     }
 
     #[test]
     fn any_string_joins_back(text in any::<String>()) {
         prop_assert_eq!(Note::parse(&text).to_string(), text);
-    }
-
-    #[test]
-    fn a_title_always_has_a_range_in_the_body(body in "[#a-z \t\r\n]{0,40}") {
-        let range = holm_markdown::title_range(&body);
-        if Note::parse(&body).title().is_some() {
-            prop_assert!(range.is_some());
-        }
-        if let Some(range) = range {
-            prop_assert!(body.get(range).is_some());
-        }
     }
 
     #[test]

@@ -7,8 +7,7 @@ line ending: Lf
 id: Some("01JC3X5Z8K")
 tags: ["a", "b"]
 pinned: true
-title: Some("Title after a blank line")
-preview: ""
+preview: "Title after a blank line"
 
 --- frontmatter ---
 ---

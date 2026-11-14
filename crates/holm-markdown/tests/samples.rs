@@ -29,7 +29,6 @@ fn report(text: &str) -> String {
     let _ = writeln!(out, "id: {:?}", note.id());
     let _ = writeln!(out, "tags: {:?}", note.tags());
     let _ = writeln!(out, "pinned: {}", note.pinned());
-    let _ = writeln!(out, "title: {:?}", note.title());
     let _ = writeln!(out, "preview: {:?}", note.preview());
     let _ = writeln!(out, "\n--- frontmatter ---\n{}", visible(frontmatter));
     let _ = writeln!(out, "--- body ---\n{}", visible(note.body()));

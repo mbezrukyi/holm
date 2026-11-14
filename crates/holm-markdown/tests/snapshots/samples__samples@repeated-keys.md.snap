@@ -7,8 +7,7 @@ line ending: Lf
 id: Some("first")
 tags: ["a", "A"]
 pinned: false
-title: Some("Repeated keys")
-preview: ""
+preview: "Repeated keys"
 
 --- frontmatter ---
 ---
