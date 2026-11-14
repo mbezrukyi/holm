@@ -18,7 +18,7 @@ use holm_core::Core;
 
 use crate::config::{Config, Settings, Theme};
 use crate::error::AppError;
-use crate::message_line::MessageLine;
+use crate::message_line::{Answer, MessageLine};
 use crate::notes::NotesView;
 use crate::{notes_folder, text, theme};
 
@@ -328,6 +328,9 @@ impl Render for HolmWindow {
             .text_color(theme.foreground)
             .font_family(theme.font_family.clone())
             .text_size(theme.font_size)
+            .on_action(cx.listener(|this, Answer(message), _, cx| {
+                this.line.update(cx, |line, cx| line.show(*message, cx));
+            }))
             .child(self.folder_screen(cx))
             .child(self.line.clone())
     }

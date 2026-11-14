@@ -19,7 +19,6 @@ use gpui_kit::{
     Styled, Subscription, TestSupportExt as _, Window, div, px,
 };
 
-use crate::message_line::MessageLine;
 use crate::name_field::{Look, NameEvent, NameField, NameWrite};
 use crate::text;
 use crate::text_field;
@@ -37,18 +36,16 @@ pub(crate) struct TitleField {
     /// The path of the open note.
     path: Option<PathBuf>,
     write: NameWrite,
-    line: Entity<MessageLine>,
     home: FocusHandle,
     field: Option<(Entity<NameField>, Subscription)>,
 }
 
 impl TitleField {
     /// `write` gives the note a typed title. `home` gets the focus when the field closes.
-    pub(crate) fn new(write: NameWrite, line: Entity<MessageLine>, home: FocusHandle) -> Self {
+    pub(crate) fn new(write: NameWrite, home: FocusHandle) -> Self {
         Self {
             path: None,
             write,
-            line,
             home,
             field: None,
         }
@@ -82,8 +79,8 @@ impl TitleField {
             placeholder: text::NOTE_TITLE.into(),
         };
         let title = self.title();
-        let (write, line, home) = (self.write.clone(), self.line.clone(), self.home.clone());
-        let field = cx.new(|cx| NameField::new(look, &title, write, line, home, window, cx));
+        let (write, home) = (self.write.clone(), self.home.clone());
+        let field = cx.new(|cx| NameField::new(look, &title, write, home, window, cx));
         let subscription = cx.subscribe(&field, |this, _, event: &NameEvent, cx| {
             if matches!(event, NameEvent::Done | NameEvent::Escape) {
                 this.close(cx);

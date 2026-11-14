@@ -86,7 +86,6 @@ impl NotesView {
                 settings.sidebar.view.clone(),
                 current,
                 write,
-                line.clone(),
                 window,
                 cx,
             )

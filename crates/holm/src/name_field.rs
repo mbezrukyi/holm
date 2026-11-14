@@ -22,7 +22,7 @@ use gpui_kit::{
 };
 
 use crate::error::AppError;
-use crate::message_line::MessageLine;
+use crate::message_line::Answer;
 use crate::notes_folder::{Step, window_step};
 use crate::text_field::{self, FieldEvent, TextField};
 
@@ -45,7 +45,6 @@ pub(crate) struct NameField {
     /// The name before the rename. It is empty for a new name.
     start: String,
     write: NameWrite,
-    line: Entity<MessageLine>,
     /// It gets the focus while a write runs, and after `Esc` or the end of the field.
     home: FocusHandle,
     /// The typed name while its write runs.
@@ -67,7 +66,6 @@ impl NameField {
         look: Look,
         start: &str,
         write: NameWrite,
-        line: Entity<MessageLine>,
         home: FocusHandle,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -83,7 +81,6 @@ impl NameField {
             field,
             start: start.to_owned(),
             write,
-            line,
             home,
             pending: None,
             _subscription: subscription,
@@ -154,8 +151,7 @@ impl NameField {
         );
         let error = AppError::from(error);
         tracing::warn!(error = %crate::chain(&error), "cannot write the name");
-        self.line
-            .update(cx, |line, cx| line.show(error.message(), cx));
+        window.dispatch_action(Box::new(Answer(error.message())), cx);
         if refused {
             self.focus(window, cx);
         } else {

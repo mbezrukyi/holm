@@ -11,12 +11,18 @@ use std::rc::Rc;
 
 use gpui_kit::component::{ActiveTheme as _, h_flex};
 use gpui_kit::{
-    Bounds, Context, CursorStyle, EventEmitter, InteractiveElement as _, IntoElement, MouseButton,
-    ParentElement, Pixels, Render, Role, SharedString, StatefulInteractiveElement as _, Styled,
-    Subscription, TestSupportExt as _, Window, div,
+    Action, Bounds, Context, CursorStyle, EventEmitter, InteractiveElement as _, IntoElement,
+    MouseButton, ParentElement, Pixels, Render, Role, SharedString,
+    StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _, Window, div,
 };
 
 use crate::text;
+
+/// Shows this answer in the message line. As an action, it goes up the element tree to the
+/// window.
+#[derive(Clone, Debug, PartialEq, Eq, Action)]
+#[action(namespace = holm, no_json)]
+pub(crate) struct Answer(pub(crate) &'static str);
 
 /// The user clicked the state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -17,7 +17,6 @@ use gpui_kit::{
 };
 use holm_editor::{COLUMN_WIDTH, SIDE_MARGIN};
 
-use crate::message_line::MessageLine;
 use crate::name_field::{NameEvent, NameWrite};
 use crate::notes_folder::{NotesFolder, window_step};
 use crate::tags;
@@ -36,22 +35,20 @@ pub(crate) struct NewNote {
     tag: Option<String>,
     before: Option<PathBuf>,
     title: Entity<TitleField>,
+    focus: FocusHandle,
     /// The path of the file after the create write.
     created: Option<PathBuf>,
     _subscription: Subscription,
 }
 
 impl NewNote {
-    /// A note for `folder` with `tag`, with the focus in its title field. `home` gets the focus
-    /// when the field closes.
-    #[allow(clippy::too_many_arguments, reason = "the parts of one new note")]
+    /// A note for `folder` with `tag`, with the focus in its title field. The note keeps the
+    /// focus while the create write runs.
     pub(crate) fn new(
         notes_folder: Entity<NotesFolder>,
         folder: PathBuf,
         tag: Option<String>,
         before: Option<PathBuf>,
-        line: Entity<MessageLine>,
-        home: FocusHandle,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -74,7 +71,9 @@ impl NewNote {
                 notes_folder.create_note(folder, title, tag, created, cx);
             });
         });
-        let title = cx.new(|_| TitleField::new(write, line, home));
+        let focus = cx.focus_handle();
+        let home = focus.clone();
+        let title = cx.new(|_| TitleField::new(write, home));
         let subscription = cx.subscribe(&title, |note, _, event: &NameEvent, cx| match event {
             NameEvent::Done => match note.created.clone() {
                 Some(path) => cx.emit(NewNoteEvent::Created(path)),
@@ -93,6 +92,7 @@ impl NewNote {
             tag,
             before,
             title,
+            focus,
             created: None,
             _subscription: subscription,
         }
@@ -113,6 +113,7 @@ impl Render for NewNote {
             .role(Role::Group)
             .aria_label(text::NEW_NOTE)
             .test_support()
+            .track_focus(&self.focus)
             .size_full()
             .flex()
             .justify_center()

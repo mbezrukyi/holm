@@ -30,7 +30,6 @@ use holm_core::model::{NoteInfo, Order};
 
 use crate::error::AppError;
 use crate::icons::Icon;
-use crate::message_line::MessageLine;
 use crate::name_field::{Look, NameDone, NameEvent, NameField, NameWrite};
 use crate::notes_folder::{FolderEvent, Move, NotesFolder};
 use crate::text;
@@ -122,7 +121,6 @@ pub(crate) struct Sidebar {
     left: Option<(PathBuf, PathBuf)>,
     field: Option<Naming>,
     write: SidebarWrite,
-    line: Entity<MessageLine>,
     search: Entity<InputState>,
     /// The trimmed text of the search field. With text, the list shows `found`.
     query: String,
@@ -135,14 +133,12 @@ pub(crate) struct Sidebar {
 }
 
 impl Sidebar {
-    #[allow(clippy::too_many_arguments, reason = "the parts of the sidebar")]
     pub(crate) fn new(
         notes_folder: Entity<NotesFolder>,
         order: Order,
         view: View,
         current: Option<PathBuf>,
         write: SidebarWrite,
-        line: Entity<MessageLine>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -175,7 +171,6 @@ impl Sidebar {
             left: None,
             field: None,
             write,
-            line,
             search,
             query: String::new(),
             found: Vec::new(),
@@ -545,8 +540,8 @@ impl Sidebar {
                 None => done(Ok(()), cx),
             }
         });
-        let (line, home) = (self.line.clone(), self.focus.clone());
-        let field = cx.new(|cx| NameField::new(look, text, write, line, home, window, cx));
+        let home = self.focus.clone();
+        let field = cx.new(|cx| NameField::new(look, text, write, home, window, cx));
         let subscription = cx.subscribe(&field, |sidebar, _, _: &NameEvent, cx| {
             sidebar.field = None;
             sidebar.rebuild();

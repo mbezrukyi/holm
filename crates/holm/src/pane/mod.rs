@@ -137,7 +137,7 @@ impl NotePane {
             pane.update(cx, |pane, cx| pane.rename(title, done, cx))
                 .ok();
         });
-        let title = cx.new(|_| TitleField::new(rename, line.clone(), text.clone()));
+        let title = cx.new(|_| TitleField::new(rename, text.clone()));
         let tag_row = cx.new(|cx| {
             TagRow::new(
                 notes_folder.clone(),
@@ -838,11 +838,9 @@ impl NotePane {
             }
             let before = pane.path.clone();
             pane.drop_note(cx);
-            let (notes_folder, line) = (pane.notes_folder.clone(), pane.line.clone());
-            let home = pane.editor.focus_handle(cx);
-            let note = cx
-                .new(|cx| NewNote::new(notes_folder, folder, tag, before, line, home, window, cx));
-            let subscription = cx.subscribe(&note, Self::new_note_event);
+            let notes_folder = pane.notes_folder.clone();
+            let note = cx.new(|cx| NewNote::new(notes_folder, folder, tag, before, window, cx));
+            let subscription = cx.subscribe_in(&note, window, Self::new_note_event);
             pane.new_note = Some((note, subscription));
             cx.notify();
         });
@@ -856,8 +854,15 @@ impl NotePane {
         );
     }
 
-    fn new_note_event(&mut self, _: Entity<NewNote>, event: &NewNoteEvent, cx: &mut Context<Self>) {
+    fn new_note_event(
+        &mut self,
+        _: &Entity<NewNote>,
+        event: &NewNoteEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.new_note = None;
+        window.focus(&self.editor.focus_handle(cx), cx);
         cx.notify();
         match event {
             NewNoteEvent::Created(path) => self.open(path.clone(), Leave::Drop, cx),
