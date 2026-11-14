@@ -23,7 +23,6 @@ use crate::dialog::{Ask, Dialog, DialogEvent};
 use crate::error::AppError;
 use crate::link_picker::{LinkPicker, LinkPickerEvent, LinkStart};
 use crate::message_line::MessageLine;
-use crate::name_field::NameDone;
 use crate::notes_folder::{NotesFolder, Step, window_step};
 use crate::pane::{Leave, NotePane, PaneEvent};
 use crate::picker::{FolderPicker, PickerEvent};
@@ -52,7 +51,7 @@ pub(crate) struct NotesView {
     /// back on `Esc`.
     before_popup: Option<FocusHandle>,
     /// The end of the tag rename in the name field, while its dialog shows.
-    tag_rename: Option<NameDone>,
+    tag_rename: Option<Step<holm_core::Result<()>>>,
     line: Entity<MessageLine>,
     subscriptions: Vec<Subscription>,
 }
@@ -521,7 +520,7 @@ impl NotesView {
         &mut self,
         named: Named,
         name: String,
-        done: NameDone,
+        done: Step<holm_core::Result<()>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -558,7 +557,7 @@ impl NotesView {
                     notes_folder.create_folder(parent, name, shown, cx);
                 });
             }
-            Named::Item(Item::Tag(from)) if !name.is_empty() => {
+            Named::Item(Item::Tag(from)) if !name.trim().is_empty() => {
                 let (counted_from, counted_to) = (from.clone(), name.clone());
                 let asked =
                     window_step(

@@ -25,6 +25,7 @@
 //! field, and no popup.
 
 use std::ops::Range;
+use std::path::PathBuf;
 
 use gpui_kit::component::input::{
     Enter, Escape, IndentInline, Input, InputEvent, InputState, MoveDown, MoveUp,
@@ -84,7 +85,7 @@ pub(crate) struct TagRow {
     notes_folder: Entity<NotesFolder>,
     tags: Vec<String>,
     pinned: bool,
-    title: Entity<TitleField>,
+    title: Entity<TitleField<PathBuf>>,
     backlinks: Entity<Backlinks>,
     /// Every tag name in the notes folder, for the list.
     known: Vec<String>,
@@ -103,7 +104,7 @@ impl TagRow {
     /// `text` gets the focus back when the popup closes with it.
     pub(crate) fn new(
         notes_folder: Entity<NotesFolder>,
-        title: Entity<TitleField>,
+        title: Entity<TitleField<PathBuf>>,
         backlinks: Entity<Backlinks>,
         text: FocusHandle,
         window: &mut Window,
@@ -497,13 +498,13 @@ fn chip(at: usize, tag: &str, cx: &App) -> impl InteractiveElement + IntoElement
 /// The tag row of a note with no file yet: its tag, and `title` at the right end.
 pub(crate) fn new_note_row(
     tag: Option<&str>,
-    title: Entity<TitleField>,
+    title: AnyElement,
     cx: &App,
 ) -> impl IntoElement + use<> {
     let chips = tag.map(|tag| chip(0, tag, cx).into_any_element());
-    frame().font_family(cx.theme().font_family.clone()).child(
-        Fold::new(px(6.), chips, |_| div().into_any_element()).tail(Some(title.into_any_element())),
-    )
+    frame()
+        .font_family(cx.theme().font_family.clone())
+        .child(Fold::new(px(6.), chips, |_| div().into_any_element()).tail(Some(title)))
 }
 
 /// Every tag name in the tree, parents first.

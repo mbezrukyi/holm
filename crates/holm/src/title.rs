@@ -5,7 +5,7 @@
 //! The title field takes the place of the title. It is a [`NameField`] with the write of the
 //! owner. The title, the field and the name of a running write share one text element, so the
 //! path does not move when the field opens or closes.
-//! The field closes after [`NameEvent::Done`] and [`NameEvent::Escape`], and it sends each
+//! The field closes after [`NameEvent::Written`] and [`NameEvent::Closed`], and it sends each
 //! [`NameEvent`] on to the owner. The owner decides what a blur does.
 
 use std::path::{Path, PathBuf};
@@ -32,17 +32,17 @@ const TEXT_SIZE: Pixels = px(12.);
 /// field fits the text.
 const LINE_HEIGHT: Pixels = px(14.);
 
-pub(crate) struct TitleField {
+pub(crate) struct TitleField<T> {
     /// The path of the open note.
     path: Option<PathBuf>,
-    write: NameWrite,
+    write: NameWrite<T>,
     home: FocusHandle,
-    field: Option<(Entity<NameField>, Subscription)>,
+    field: Option<(Entity<NameField<T>>, Subscription)>,
 }
 
-impl TitleField {
+impl<T: Clone + 'static> TitleField<T> {
     /// `write` gives the note a typed title. `home` gets the focus when the field closes.
-    pub(crate) fn new(write: NameWrite, home: FocusHandle) -> Self {
+    pub(crate) fn new(write: NameWrite<T>, home: FocusHandle) -> Self {
         Self {
             path: None,
             write,
@@ -78,14 +78,18 @@ impl TitleField {
             label: text::NOTE_TITLE.into(),
             placeholder: text::NOTE_TITLE.into(),
         };
-        let title = self.title();
         let (write, home) = (self.write.clone(), self.home.clone());
-        let field = cx.new(|cx| NameField::new(look, &title, write, home, window, cx));
-        let subscription = cx.subscribe(&field, |this, _, event: &NameEvent, cx| {
-            if matches!(event, NameEvent::Done | NameEvent::Escape) {
+        let field = if self.path.is_some() {
+            let title = self.title();
+            cx.new(|cx| NameField::rename(look, &title, write, home, window, cx))
+        } else {
+            cx.new(|cx| NameField::new_name(look, write, home, window, cx))
+        };
+        let subscription = cx.subscribe(&field, |this, _, event: &NameEvent<T>, cx| {
+            if !matches!(event, NameEvent::Blur) {
                 this.close(cx);
             }
-            cx.emit(*event);
+            cx.emit(event.clone());
         });
         self.field = Some((field, subscription));
         cx.notify();
@@ -99,9 +103,9 @@ impl TitleField {
     }
 }
 
-impl EventEmitter<NameEvent> for TitleField {}
+impl<T: 'static> EventEmitter<NameEvent<T>> for TitleField<T> {}
 
-impl Render for TitleField {
+impl<T: Clone + 'static> Render for TitleField<T> {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let folders: Vec<String> = self

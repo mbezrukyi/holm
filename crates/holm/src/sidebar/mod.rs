@@ -30,8 +30,8 @@ use holm_core::model::{NoteInfo, Order};
 
 use crate::error::AppError;
 use crate::icons::Icon;
-use crate::name_field::{Look, NameDone, NameEvent, NameField, NameWrite};
-use crate::notes_folder::{FolderEvent, Move, NotesFolder};
+use crate::name_field::{Look, NameEvent, NameField, NameState, NameWrite};
+use crate::notes_folder::{FolderEvent, Move, NotesFolder, Step};
 use crate::text;
 
 pub(crate) use tree::{Item, View};
@@ -75,12 +75,13 @@ pub(crate) enum SidebarEvent {
 }
 
 /// Writes a name from a name field of the tree. It must end with `done`.
-pub(crate) type SidebarWrite = Rc<dyn Fn(Named, String, NameDone, &mut Window, &mut App)>;
+pub(crate) type SidebarWrite =
+    Rc<dyn Fn(Named, String, Step<holm_core::Result<()>>, &mut Window, &mut App)>;
 
 /// A name field in the tree: for a folder or a tag after `F2`, or for a new folder.
 struct Naming {
     named: Named,
-    field: Entity<NameField>,
+    field: Entity<NameField<()>>,
     _subscription: Subscription,
 }
 
@@ -484,7 +485,7 @@ impl Sidebar {
             Item::Folder(_) => item.name(),
             Item::Tag(tag) => tag.clone(),
         };
-        self.open_name_field(Named::Item(item.clone()), &name, item, window, cx);
+        self.open_name_field(Named::Item(item.clone()), Some(&name), item, window, cx);
     }
 
     /// Starts an empty name field for a new folder in `parent`, as its first child row.
@@ -502,14 +503,15 @@ impl Sidebar {
             self.open.insert(item.clone());
             item
         };
-        self.open_name_field(Named::NewFolder(parent), "", item, window, cx);
+        self.open_name_field(Named::NewFolder(parent), None, item, window, cx);
     }
 
-    /// Opens the name field for `named` with `text`, and shows `item` selected in the tree.
+    /// Opens the name field for `named`, with `text` for a rename, and shows `item` selected in
+    /// the tree.
     fn open_name_field(
         &mut self,
         named: Named,
-        text: &str,
+        text: Option<&str>,
         item: Item,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -528,7 +530,7 @@ impl Sidebar {
         let sidebar = cx.weak_entity();
         let sidebar_write = self.write.clone();
         // The name field follows moves, so the write takes what it names at `Enter`.
-        let write: NameWrite = Rc::new(move |name, done, window, cx| {
+        let write: NameWrite<()> = Rc::new(move |name, done, window, cx| {
             let named = sidebar
                 .read_with(cx, |sidebar, _| {
                     sidebar.field.as_ref().map(|naming| naming.named.clone())
@@ -541,8 +543,11 @@ impl Sidebar {
             }
         });
         let home = self.focus.clone();
-        let field = cx.new(|cx| NameField::new(look, text, write, home, window, cx));
-        let subscription = cx.subscribe(&field, |sidebar, _, _: &NameEvent, cx| {
+        let field = match text {
+            Some(text) => cx.new(|cx| NameField::rename(look, text, write, home, window, cx)),
+            None => cx.new(|cx| NameField::new_name(look, write, home, window, cx)),
+        };
+        let subscription = cx.subscribe(&field, |sidebar, _, _: &NameEvent<()>, cx| {
             sidebar.field = None;
             sidebar.rebuild();
             cx.notify();
@@ -559,7 +564,7 @@ impl Sidebar {
     fn writing(&self, cx: &App) -> bool {
         self.field
             .as_ref()
-            .is_some_and(|naming| naming.field.read(cx).pending().is_some())
+            .is_some_and(|naming| *naming.field.read(cx).state() != NameState::Editing)
     }
 
     /// The typed name of the name field of `named`, while its write runs.
@@ -567,7 +572,10 @@ impl Sidebar {
         self.field
             .as_ref()
             .filter(|naming| naming.named == *named)
-            .and_then(|naming| naming.field.read(cx).pending().map(str::to_owned))
+            .and_then(|naming| match naming.field.read(cx).state() {
+                NameState::Writing(name) => Some(name.clone()),
+                NameState::Editing => None,
+            })
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -1008,7 +1016,7 @@ fn row_frame(depth: usize, editing: bool, cx: &App) -> Div {
 }
 
 /// The name field in the place of the name of a tree row.
-fn field_label(field: &Entity<NameField>) -> AnyElement {
+fn field_label(field: &Entity<NameField<()>>) -> AnyElement {
     div()
         .flex_1()
         .min_w_0()

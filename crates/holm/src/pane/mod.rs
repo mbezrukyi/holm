@@ -46,7 +46,7 @@ use crate::backlinks::{Backlinks, OpenBacklink};
 use crate::error::AppError;
 use crate::link_picker::{LinkChoice, LinkStart};
 use crate::message_line::{MessageLine, OpenState};
-use crate::name_field::{NameDone, NameEvent, NameWrite};
+use crate::name_field::{NameEvent, NameWrite};
 use crate::notes_folder::{FolderEvent, Move, NoteText, NotesFolder, Step, window_step};
 use crate::tags::{TagChange, TagRow};
 use crate::title::TitleField;
@@ -88,7 +88,7 @@ pub(crate) struct NotePane {
     root: PathBuf,
     editor: Entity<Editor>,
     tag_row: Entity<TagRow>,
-    title: Entity<TitleField>,
+    title: Entity<TitleField<PathBuf>>,
     backlinks: Entity<Backlinks>,
     links: Entity<Links>,
     /// The path of the open note. With no note and no new note, the pane is empty.
@@ -133,7 +133,7 @@ impl NotePane {
         let state = line.read(cx).state_bounds();
         let disk_menu = cx.new(|cx| DiskMenu::new(text.clone(), state, window, cx));
         let pane = cx.weak_entity();
-        let rename: NameWrite = Rc::new(move |title, done, _, cx| {
+        let rename: NameWrite<PathBuf> = Rc::new(move |title, done, _, cx| {
             pane.update(cx, |pane, cx| pane.rename(title, done, cx))
                 .ok();
         });
@@ -169,7 +169,7 @@ impl NotePane {
                 pane.change_tag(change.clone(), cx);
             }),
             cx.subscribe(&links, Self::links_event),
-            cx.subscribe(&title, |_, title, event: &NameEvent, cx| {
+            cx.subscribe(&title, |_, title, event: &NameEvent<PathBuf>, cx| {
                 if *event == NameEvent::Blur {
                     title.update(cx, TitleField::close);
                 }
@@ -800,19 +800,19 @@ impl NotePane {
     }
 
     /// Gives the open note the title `title`, after its unsaved text.
-    fn rename(&mut self, title: String, done: NameDone, cx: &mut Context<Self>) {
+    fn rename(
+        &mut self,
+        title: String,
+        done: Step<holm_core::Result<PathBuf>>,
+        cx: &mut Context<Self>,
+    ) {
+        // With no note, the title field is gone too.
         let Some(path) = self.path.clone() else {
-            done(Ok(()), cx);
             return;
         };
         self.save(cx);
         self.notes_folder.update(cx, |notes_folder, cx| {
-            notes_folder.rename_note(
-                path,
-                title,
-                move |renamed, cx| done(renamed.map(drop), cx),
-                cx,
-            );
+            notes_folder.rename_note(path, title, done, cx);
         });
     }
 

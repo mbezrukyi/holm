@@ -18,7 +18,7 @@ use gpui_kit::{
 use holm_editor::{COLUMN_WIDTH, SIDE_MARGIN};
 
 use crate::name_field::{NameEvent, NameWrite};
-use crate::notes_folder::{NotesFolder, window_step};
+use crate::notes_folder::NotesFolder;
 use crate::tags;
 use crate::text;
 use crate::title::TitleField;
@@ -34,10 +34,8 @@ pub(crate) enum NewNoteEvent {
 pub(crate) struct NewNote {
     tag: Option<String>,
     before: Option<PathBuf>,
-    title: Entity<TitleField>,
+    title: Entity<TitleField<PathBuf>>,
     focus: FocusHandle,
-    /// The path of the file after the create write.
-    created: Option<PathBuf>,
     _subscription: Subscription,
 }
 
@@ -52,48 +50,34 @@ impl NewNote {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let this = cx.weak_entity();
         let create_tag = tag.clone();
-        let write: NameWrite = Rc::new(move |title, done, window, cx| {
-            let Ok(created) = this.update(cx, |_, cx| {
-                window_step(
-                    window,
-                    cx,
-                    move |note: &mut Self, result: holm_core::Result<PathBuf>, _, cx| {
-                        done(result.map(|path| note.created = Some(path)), cx);
-                    },
-                )
-            }) else {
-                return;
-            };
+        let write: NameWrite<PathBuf> = Rc::new(move |title, done, _, cx| {
             let (folder, tag) = (folder.clone(), create_tag.clone());
             notes_folder.update(cx, |notes_folder, cx| {
-                notes_folder.create_note(folder, title, tag, created, cx);
+                notes_folder.create_note(folder, title, tag, done, cx);
             });
         });
         let focus = cx.focus_handle();
         let home = focus.clone();
         let title = cx.new(|_| TitleField::new(write, home));
-        let subscription = cx.subscribe(&title, |note, _, event: &NameEvent, cx| match event {
-            NameEvent::Done => match note.created.clone() {
-                Some(path) => cx.emit(NewNoteEvent::Created(path)),
-                None => cx.emit(NewNoteEvent::Cancelled {
-                    before: note.before.clone(),
-                }),
-            },
-            NameEvent::Escape => cx.emit(NewNoteEvent::Cancelled {
-                before: note.before.clone(),
-            }),
-            // A click elsewhere loses nothing.
-            NameEvent::Blur => {}
-        });
+        let subscription =
+            cx.subscribe(
+                &title,
+                |note, _, event: &NameEvent<PathBuf>, cx| match event {
+                    NameEvent::Written(path) => cx.emit(NewNoteEvent::Created(path.clone())),
+                    NameEvent::Closed => cx.emit(NewNoteEvent::Cancelled {
+                        before: note.before.clone(),
+                    }),
+                    // A click elsewhere loses nothing.
+                    NameEvent::Blur => {}
+                },
+            );
         title.update(cx, |title, cx| title.open(window, cx));
         Self {
             tag,
             before,
             title,
             focus,
-            created: None,
             _subscription: subscription,
         }
     }
@@ -125,7 +109,7 @@ impl Render for NewNote {
             })
             .child(div().w_full().max_w(COLUMN_WIDTH).child(tags::new_note_row(
                 self.tag.as_deref(),
-                self.title.clone(),
+                self.title.clone().into_any_element(),
                 cx,
             )))
     }
