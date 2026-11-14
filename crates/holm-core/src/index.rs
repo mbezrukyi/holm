@@ -1,7 +1,8 @@
 //! The SQLite index of notes, tags and links, with full-text search.
 //!
 //! The index is a copy of the files. Holm deletes it and rebuilds it when its shape
-//! is old or when SQLite finds it broken.
+//! is old or when SQLite fails on it. When the file can't be rebuilt, the index lives
+//! in memory until Holm ends.
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
@@ -13,7 +14,7 @@ use std::sync::{Mutex, PoisonError};
 
 use holm_markdown::{Body, Target};
 use rusqlite::types::Value;
-use rusqlite::{Connection, ErrorCode, OptionalExtension as _, params};
+use rusqlite::{Connection, OptionalExtension as _, params};
 
 use crate::error::{Error, Result};
 use crate::model::{Change, Link, LinkTarget, Note, NoteId, NoteInfo, Order};
@@ -99,18 +100,15 @@ impl Index {
     /// Opens the index in `dir` and brings it up to date with the files.
     pub(crate) fn open(dir: &Path, store: &Store) -> Result<Self> {
         let path = dir.join(FILE);
-        let fail = |fail: Fail| fail.into_error(&path);
-        fs::create_dir_all(dir).map_err(|e| fail(Fail::Io(e)))?;
-        let conn = match connect(&path).and_then(|mut conn| {
+        let opened = fs::create_dir_all(dir).map_err(Fail::Io).and_then(|()| {
+            let mut conn = connect(&path)?;
             sync(&mut conn, store, &[PathBuf::new()])?;
             Ok(conn)
-        }) {
+        });
+        let conn = match opened {
             Ok(conn) => conn,
-            Err(Fail::Sql(error)) if broken(&error) => {
-                tracing::warn!(%error, path = %path.display(), "the index is broken, so Holm rebuilds it");
-                rebuild(&path, store).map_err(fail)?
-            }
-            Err(error) => return Err(fail(error)),
+            Err(Fail::Core(error)) => return Err(error),
+            Err(fail) => fresh(&path, store, &fail).map_err(|fail| fail.into_error(&path))?,
         };
         Ok(Self {
             path,
@@ -211,15 +209,15 @@ impl Index {
         })
     }
 
-    /// Runs `op`. When SQLite finds the index broken, it rebuilds the index and runs `op` again.
+    /// Runs `op`. When SQLite fails, it rebuilds the index and runs `op` again.
     fn run<T>(&self, store: &Store, op: impl Fn(&mut Connection) -> Result<T, Fail>) -> Result<T> {
         let mut conn = self.conn.lock().unwrap_or_else(PoisonError::into_inner);
         match op(&mut conn) {
-            Err(Fail::Sql(error)) if broken(&error) => {
-                tracing::warn!(%error, path = %self.path.display(), "the index is broken, so Holm rebuilds it");
-                *conn = rebuild(&self.path, store).map_err(|fail| fail.into_error(&self.path))?;
+            Err(Fail::Core(error)) => Err(Fail::Core(error)),
+            Err(fail) => fresh(&self.path, store, &fail).and_then(|fresh| {
+                *conn = fresh;
                 op(&mut conn)
-            }
+            }),
             result => result,
         }
         .map_err(|fail| fail.into_error(&self.path))
@@ -259,11 +257,31 @@ impl From<Error> for Fail {
     }
 }
 
-fn broken(error: &rusqlite::Error) -> bool {
-    matches!(
-        error.sqlite_error_code(),
-        Some(ErrorCode::DatabaseCorrupt | ErrorCode::NotADatabase)
-    )
+impl std::fmt::Display for Fail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Sql(error) => error.fmt(f),
+            Self::Io(error) => error.fmt(f),
+            Self::Core(error) => error.fmt(f),
+        }
+    }
+}
+
+/// A new index after `fail`: the file rebuilt from the files, or else one in memory.
+fn fresh(path: &Path, store: &Store, fail: &Fail) -> Result<Connection, Fail> {
+    tracing::warn!(error = %fail, path = %path.display(), "the index failed, so Holm rebuilds it");
+    match rebuild(path, store) {
+        Err(Fail::Core(error)) => Err(Fail::Core(error)),
+        Err(error) => {
+            tracing::warn!(%error, path = %path.display(), "Holm keeps the index in memory");
+            let mut conn = Connection::open_in_memory()?;
+            conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+            schema(&mut conn)?;
+            sync(&mut conn, store, &[PathBuf::new()])?;
+            Ok(conn)
+        }
+        conn => conn,
+    }
 }
 
 /// Opens the index file. A new file gets the schema. A file with another shape is deleted first.
@@ -284,11 +302,16 @@ fn connect(path: &Path) -> Result<Connection, Fail> {
         remove(path)?;
         return connect(path);
     }
+    schema(&mut conn)?;
+    Ok(conn)
+}
+
+fn schema(conn: &mut Connection) -> Result<(), Fail> {
     let tx = conn.transaction()?;
     tx.execute_batch(SCHEMA)?;
     tx.pragma_update(None, "user_version", SHAPE)?;
     tx.commit()?;
-    Ok(conn)
+    Ok(())
 }
 
 fn rebuild(path: &Path, store: &Store) -> Result<Connection, Fail> {

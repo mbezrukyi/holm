@@ -37,7 +37,7 @@ pub enum Error {
         /// The cause.
         source: io::Error,
     },
-    /// The index can't be opened or used, also after a rebuild.
+    /// The index can't be used, even in memory.
     #[error("cannot use the index {path}")]
     Index {
         /// The index file.

@@ -37,7 +37,6 @@ impl AppError {
                 holm_core::Error::Read { .. } => text::READ,
                 holm_core::Error::NotUtf8 { .. } => text::NOT_UTF8,
                 holm_core::Error::Write { .. } => text::WRITE,
-                holm_core::Error::Index { .. } => text::INDEX,
                 holm_core::Error::BadPath { .. } => text::BAD_PATH,
                 holm_core::Error::BadTag { .. } => text::BAD_TAG,
                 holm_core::Error::NameTaken { .. } => text::NAME_TAKEN,

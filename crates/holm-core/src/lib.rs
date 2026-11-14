@@ -69,7 +69,9 @@ impl Core {
     /// Then it keeps the facts of the notes folder in memory, as a [`Snapshot`].
     ///
     /// Holm can delete the index and rebuild it from the files at any time.
-    /// It does so when the index is broken, or when it comes from a Holm with another index shape.
+    /// It does so when SQLite fails on it, or when it comes from a Holm with another index shape.
+    /// When the file can't be rebuilt, for example on a full disk, the index lives in memory,
+    /// with a log line. So a write fails only when its change did not reach the disk.
     ///
     /// When two note files have the same id, the file that the index already knows keeps it.
     /// The other file gets a new id, written into the file.
@@ -78,7 +80,7 @@ impl Core {
     ///
     /// - [`Error::NotesFolder`] when `notes_folder` is missing or is not a folder.
     /// - [`Error::Read`] when the notes folder can't be read.
-    /// - [`Error::Index`] when the index can't be written, for example on a full disk.
+    /// - [`Error::Index`] when the index can't be used, even in memory. Only a bug does this.
     pub fn open(notes_folder: impl AsRef<Path>, index_dir: impl AsRef<Path>) -> Result<Self> {
         let store = Store::open(notes_folder.as_ref())?;
         // The watch starts before the first index sync, so no change falls between the two.
@@ -140,7 +142,7 @@ impl Core {
     ///
     /// # Errors
     ///
-    /// [`Error::Index`] when the index can't be read, also after a rebuild.
+    /// [`Error::Index`] as in [`Core::open`].
     pub fn search(&self, text: &str, order: Order) -> Result<Vec<NoteInfo>> {
         self.inner.index.search(&self.inner.store, text, order)
     }
@@ -253,7 +255,6 @@ impl Core {
     /// - [`Error::BadPath`] as in [`Core::read`].
     /// - [`Error::Read`] or [`Error::NotUtf8`] when the file on disk can't be read.
     /// - [`Error::Write`] when the new file can't be written. The old file then stays.
-    /// - [`Error::Index`] as in [`Core::search`]. The file is saved all the same.
     pub fn save(&self, path: impl AsRef<Path>, body: &str) -> Written<Note> {
         self.inner.write(|draft| {
             let (note, stamp) = self.inner.store.save(path.as_ref(), body)?;
@@ -269,7 +270,6 @@ impl Core {
     ///
     /// - [`Error::BadPath`] as in [`Core::read`].
     /// - [`Error::Write`] when the file can't be written, for example when the folder is missing.
-    /// - [`Error::Index`] as in [`Core::search`]. The file is saved all the same.
     pub fn restore(&self, note: &Note) -> Written<Note> {
         self.inner.write(|draft| {
             let (note, stamp) = self.inner.store.restore(note)?;
@@ -289,7 +289,6 @@ impl Core {
     ///   capital letters.
     /// - [`Error::BadPath`] when `folder` is not a plain folder path inside the notes folder.
     /// - [`Error::Write`] when the file can't be written, for example when the folder is missing.
-    /// - [`Error::Index`] as in [`Core::save`].
     pub fn create(&self, folder: impl AsRef<Path>, title: &str) -> Written<Note> {
         self.inner.write(|draft| {
             let (note, stamp) = self.inner.store.create(folder.as_ref(), title)?;
@@ -310,7 +309,6 @@ impl Core {
     /// - [`Error::BadPath`] as in [`Core::read`].
     /// - [`Error::Read`] or [`Error::NotUtf8`] when the file can't be read as text.
     /// - [`Error::Write`] when the file can't be moved. The note then stays where it was.
-    /// - [`Error::Index`] as in [`Core::save`].
     pub fn rename_note(&self, path: impl AsRef<Path>, title: &str) -> Written<NoteInfo> {
         let path = path.as_ref();
         self.inner.write(|draft| {
@@ -381,7 +379,6 @@ impl Core {
     ///   or is not a folder path.
     /// - [`Error::Read`] when `folder` is missing or is not a folder.
     /// - [`Error::Write`] when the folder can't be moved. It then stays where it was.
-    /// - [`Error::Index`] as in [`Core::save`].
     pub fn rename_folder(&self, folder: impl AsRef<Path>, name: &str) -> Written<PathBuf> {
         let folder = folder.as_ref();
         self.move_folder_to(folder, folder_of(folder), name)
@@ -447,7 +444,6 @@ impl Core {
     /// - [`Error::BadPath`] as in [`Core::read`].
     /// - [`Error::Write`] when the note can't be deleted.
     ///   An attachment that can't be deleted stays, with a log line.
-    /// - [`Error::Index`] as in [`Core::save`].
     pub fn delete_note(&self, path: impl AsRef<Path>) -> Written<()> {
         let path = path.as_ref();
         self.inner.write(|draft| {
@@ -466,7 +462,6 @@ impl Core {
     /// - [`Error::BadPath`] when `folder` is the root or `attachments/`, or is not a folder path.
     /// - [`Error::Read`] when `folder` is not a folder.
     /// - [`Error::Write`] when the folder can't be deleted. Some files in it may be gone.
-    /// - [`Error::Index`] as in [`Core::save`].
     pub fn delete_folder(&self, folder: impl AsRef<Path>) -> Written<()> {
         let folder = folder.as_ref();
         self.inner.write(|draft| {
@@ -486,7 +481,6 @@ impl Core {
     /// - [`Error::BadPath`] as in [`Core::read`].
     /// - [`Error::Read`] or [`Error::NotUtf8`] when the file can't be read as text.
     /// - [`Error::Write`] when the id can't be written.
-    /// - [`Error::Index`] as in [`Core::save`].
     pub fn link_id(&self, path: impl AsRef<Path>) -> Written<NoteId> {
         self.inner.write(|draft| {
             let note = self.inner.edit_fields(draft, path.as_ref(), |text| {
@@ -511,7 +505,6 @@ impl Core {
     /// - [`Error::BadPath`] as in [`Core::read`].
     /// - [`Error::Read`] or [`Error::NotUtf8`] when the file can't be read as text.
     /// - [`Error::Write`] when the file can't be written. The old file then stays.
-    /// - [`Error::Index`] as in [`Core::save`].
     pub fn add_tag(&self, path: impl AsRef<Path>, tag: &str) -> Written<NoteInfo> {
         self.inner.write(|draft| {
             let tag = retag::clean(tag)?;

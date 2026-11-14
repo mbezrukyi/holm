@@ -7,7 +7,6 @@ pub(crate) const READ: &str = "Holm can't read a file in the notes folder.";
 pub(crate) const NOT_UTF8: &str = "This file is not plain text, so Holm can't open it.";
 pub(crate) const WRITE: &str =
     "Holm can't save the change. Check the free disk space and the folder permissions.";
-pub(crate) const INDEX: &str = "Holm can't use its search index.";
 pub(crate) const BAD_PATH: &str = "Holm can't use this name or place.";
 pub(crate) const BAD_TAG: &str = "This is not a tag name.";
 pub(crate) const NAME_TAKEN: &str = "This folder already has something with this name.";

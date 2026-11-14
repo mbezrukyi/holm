@@ -136,7 +136,7 @@ impl Feed {
     ///
     /// - [`Error::BadPath`] when a path is absolute or holds `..`. Then no path is checked.
     /// - [`Error::Read`] when the notes folder itself can't be read.
-    /// - [`Error::Index`] when the index can't be used, also after a rebuild.
+    /// - [`Error::Index`] as in [`Core::open`](crate::Core::open).
     pub fn changed<P: AsRef<Path>>(&self, paths: impl IntoIterator<Item = P>) -> Result<()> {
         let mut batch = Batch::new();
         for path in paths {

@@ -5,11 +5,12 @@
 mod common;
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::os::unix::fs::PermissionsExt as _;
+use std::path::PathBuf;
 
 use common::Folder;
 use holm_core::model::{Link, LinkTarget, NoteInfo, Order, Tag};
-use holm_core::{Core, Error};
+use holm_core::Core;
 
 fn paths(notes: Vec<NoteInfo>) -> Vec<String> {
     common::paths(notes.into_iter().map(|n| n.path))
@@ -391,16 +392,19 @@ fn an_index_with_another_shape_is_rebuilt() {
 }
 
 #[test]
-fn open_fails_when_the_index_folder_cannot_be_made() {
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("file");
-    fs::write(&file, "").unwrap();
+fn the_index_lives_in_memory_when_its_folder_cannot_be_written() {
+    let folder = Folder::new(&[("a.md", "old\n")]);
+    let cache = tempfile::tempdir().unwrap();
+    fs::set_permissions(cache.path(), fs::Permissions::from_mode(0o555)).unwrap();
 
-    let error = Core::open(dir.path(), file.join("index")).unwrap_err();
+    let core = Core::open(folder.dir.path(), cache.path()).unwrap();
+    let saved = core.save("a.md", "new\n");
 
-    assert!(
-        matches!(error, Error::Index { path, .. } if path == Path::new(&file).join("index/index.sqlite"))
-    );
+    fs::set_permissions(cache.path(), fs::Permissions::from_mode(0o755)).unwrap();
+    saved.result.unwrap();
+    let preview = &saved.snapshot.note("a.md").unwrap().preview;
+    assert_eq!(preview, "new");
+    assert!(!cache.path().join("index.sqlite").exists());
 }
 
 #[test]
