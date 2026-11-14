@@ -59,8 +59,8 @@ pub(crate) enum SidebarEvent {
     /// Open this note in the editor.
     Open(PathBuf),
     FocusEditor,
-    /// Put the cursor on the title of the open note.
-    EditTitle,
+    /// Open the title field of the open note.
+    RenameNote,
     /// Delete, with the dialog.
     Delete(Target),
     /// Move, with the folder picker.
@@ -718,7 +718,7 @@ impl Sidebar {
             }
             "f2" => {
                 if self.selected_note().is_some() {
-                    cx.emit(SidebarEvent::EditTitle);
+                    cx.emit(SidebarEvent::RenameNote);
                 }
             }
             "delete" => {

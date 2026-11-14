@@ -8,12 +8,16 @@
 //! When another tool deletes the note, the app opens another one. With unsaved changes, the
 //! message line first asks to write the note again or to close it.
 //!
-//! When the user opens another note, the pane saves the note and renames the file to match
-//! the title. When the window closes, the pane only saves the note.
+//! When the user opens another note, the pane saves the note. Holm never renames a note by
+//! itself.
 //!
-//! The tag row before the first line shows the tags and the pin of the note. It scrolls with
-//! the text. The pane writes their changes at once. The editor undo stack holds only the text,
-//! so Ctrl+Z does not undo them.
+//! The title field in the tag row renames the note. Ctrl+N shows an unnamed note: an empty
+//! title field, and locked text. `Enter` writes `<title>.md` and opens it. `Esc` leaves
+//! nothing behind and opens the note from before again.
+//!
+//! The tag row before the first line shows the tags, the pin and the path of the note. It
+//! scrolls with the text. The pane writes the changes of the tags and the pin at once. The
+//! editor undo stack holds only the text, so Ctrl+Z does not undo them.
 //!
 //! The pane runs the link picker flow. `links` opens the links of the note and reads its
 //! backlinks. The backlinks show in the tag row.
@@ -43,6 +47,7 @@ use crate::link_picker::{LinkChoice, LinkStart};
 use crate::message_line::{MessageLine, OpenState};
 use crate::notes_folder::{FolderEvent, Move, NoteText, NotesFolder, Step};
 use crate::tags::{TagChange, TagRow};
+use crate::title::{TitleEvent, TitleField, title_of};
 use crate::{text, theme};
 use disk_menu::{Answer, Choice, Disk, DiskMenu};
 use links::{Links, LinksEvent};
@@ -66,7 +71,7 @@ pub(crate) enum PaneEvent {
 /// What happens to the open note when the pane opens another one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Leave {
-    /// Save it and rename its file to match the title.
+    /// Save it.
     Keep,
     /// The note is gone. Drop its text.
     Drop,
@@ -80,10 +85,13 @@ pub(crate) struct NotePane {
     root: PathBuf,
     editor: Entity<Editor>,
     tag_row: Entity<TagRow>,
+    title: Entity<TitleField>,
     backlinks: Entity<Backlinks>,
     links: Entity<Links>,
-    /// The path of the open note. With no note, the pane is empty.
+    /// The path of the open note. With no note and no unnamed note, the pane is empty.
     path: Option<PathBuf>,
+    /// The unnamed note after Ctrl+N. It has no path.
+    unnamed: Option<Unnamed>,
     /// The facts of the open note in the last snapshot that had it. A restore after an
     /// outside delete writes them again.
     last_info: Option<NoteInfo>,
@@ -121,8 +129,17 @@ impl NotePane {
         let backlinks = cx.new(|cx| Backlinks::new(text.clone(), window, cx));
         let state = line.read(cx).state_bounds();
         let disk_menu = cx.new(|cx| DiskMenu::new(text.clone(), state, window, cx));
-        let tag_row =
-            cx.new(|cx| TagRow::new(notes_folder.clone(), backlinks.clone(), text, window, cx));
+        let title = cx.new(|_| TitleField::new());
+        let tag_row = cx.new(|cx| {
+            TagRow::new(
+                notes_folder.clone(),
+                title.clone(),
+                backlinks.clone(),
+                text,
+                window,
+                cx,
+            )
+        });
         editor.update(cx, |editor, cx| {
             editor.set_start(Some(tag_row.clone().into()), cx);
         });
@@ -144,6 +161,7 @@ impl NotePane {
                 pane.change_tag(change.clone(), cx);
             }),
             cx.subscribe(&links, Self::links_event),
+            cx.subscribe_in(&title, window, Self::title_event),
             cx.subscribe(&disk_menu, |pane, _, answer: &Answer, cx| {
                 pane.answer_disk(*answer, cx);
             }),
@@ -174,9 +192,11 @@ impl NotePane {
             root,
             editor,
             tag_row,
+            title,
             backlinks,
             links,
             path: None,
+            unnamed: None,
             last_info: None,
             fields_pending: 0,
             ending: LineEnding::Lf,
@@ -233,6 +253,8 @@ impl NotePane {
 
     /// Drops the open note and its text, with no save.
     fn drop_note(&mut self, cx: &mut Context<Self>) {
+        self.end_unnamed(cx);
+        self.title.update(cx, TitleField::close);
         self.path = None;
         self.last_info = None;
         self.fields_pending = 0;
@@ -242,6 +264,7 @@ impl NotePane {
         self.editor.update(cx, |editor, cx| editor.set_text("", cx));
         self.saved = String::new();
         self.links.update(cx, |links, cx| links.show(None, cx));
+        self.show_fields(cx);
         cx.notify();
     }
 
@@ -399,7 +422,7 @@ impl NotePane {
                 cx.defer(move |cx| done(Ok(()), cx));
             }
             LinkChoice::Create(title) => self.notes_folder.update(cx, |notes_folder, cx| {
-                notes_folder.create_titled_note(
+                notes_folder.create_linked_note(
                     folder,
                     title.clone(),
                     move |id, cx| {
@@ -427,6 +450,8 @@ impl NotePane {
     /// Shows the tags and the pin of the open note from the snapshot, when no write of them
     /// waits.
     fn show_fields(&mut self, cx: &mut Context<Self>) {
+        let path = self.path.clone();
+        self.title.update(cx, |title, cx| title.show(path, cx));
         let Some(path) = &self.path else {
             return;
         };
@@ -609,6 +634,7 @@ impl NotePane {
                 path.clone_from(&note.path);
                 self.links
                     .update(cx, |links, cx| links.show(Some(note.path), cx));
+                self.show_fields(cx);
             }
             Change::Removed(gone) if gone == *path => {
                 if unsaved {
@@ -681,36 +707,24 @@ impl NotePane {
         self.path.as_deref()
     }
 
-    /// Opens the note at `path`. With [`Leave::Keep`], the pane first saves the open note and
-    /// renames its file to match the title. When that save fails, the pane stays on the note.
+    /// Opens the note at `path`, and ends an unnamed note. With [`Leave::Keep`], the pane
+    /// first saves the open note. When that save fails, the pane stays on the note.
     pub(crate) fn open(&mut self, path: PathBuf, leave: Leave, cx: &mut Context<Self>) {
         if leave == Leave::Keep && self.path() == Some(path.as_path()) {
             return;
         }
+        self.end_unnamed(cx);
         self.opening += 1;
         let opening = self.opening;
-        let Some(old) = self.path.clone().filter(|_| leave == Leave::Keep) else {
+        if self.path.is_none() || leave == Leave::Drop {
             self.read_note(path, opening, cx);
             return;
-        };
+        }
         self.save_then(
             move |pane, saved, cx| {
-                if !saved || pane.opening != opening {
-                    return;
+                if saved && pane.opening == opening {
+                    pane.read_note(path, opening, cx);
                 }
-                pane.notes_folder.update(cx, |notes_folder, cx| {
-                    notes_folder.rename_to_title(
-                        old,
-                        |renamed, _| {
-                            if let Err(error) = renamed {
-                                let error = AppError::from(error);
-                                tracing::warn!(error = %crate::chain(&error), "cannot rename the note to its title");
-                            }
-                        },
-                        cx,
-                    );
-                });
-                pane.read_note(path, opening, cx);
             },
             cx,
         );
@@ -764,14 +778,210 @@ impl NotePane {
         }
     }
 
-    /// Selects the title text in the editor and gives the editor the focus.
-    pub(crate) fn select_title(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// F2: opens the title field of the open note.
+    pub(crate) fn edit_title(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.path.is_none() {
             return;
         }
-        self.editor.update(cx, Editor::select_title);
+        self.title.update(cx, |title, cx| {
+            let text = title.title();
+            title.open(&text, window, cx);
+        });
+    }
+
+    /// Ctrl+N: saves the open note, and then shows an unnamed note for `folder`, with `tag`
+    /// when it has one. When the save fails, the pane stays on the note. Another Ctrl+N on an
+    /// unnamed note only gives its field the focus.
+    pub(crate) fn new_note(
+        &mut self,
+        folder: PathBuf,
+        tag: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.unnamed.is_some() {
+            self.title
+                .update(cx, |title, cx| title.open("", window, cx));
+            return;
+        }
+        self.opening += 1;
+        let opening = self.opening;
+        let start = window_step(window, cx, move |pane, (), window, cx| {
+            if pane.opening != opening {
+                return;
+            }
+            let before = pane.path.clone();
+            pane.drop_note(cx);
+            pane.opening = opening;
+            pane.editor.update(cx, |editor, _| editor.set_locked(true));
+            pane.tag_row.update(cx, |row, cx| {
+                row.show(tag.as_slice(), false, cx);
+                row.set_locked(true, cx);
+            });
+            pane.title
+                .update(cx, |title, cx| title.open("", window, cx));
+            pane.unnamed = Some(Unnamed {
+                folder,
+                tag,
+                before,
+            });
+            cx.notify();
+        });
+        self.save_then(
+            move |_, saved, cx| {
+                if saved {
+                    cx.defer(move |cx| start((), cx));
+                }
+            },
+            cx,
+        );
+    }
+
+    /// Ends the unnamed note: unlocks the text and the tag row, and closes the title field.
+    fn end_unnamed(&mut self, cx: &mut Context<Self>) {
+        if self.unnamed.take().is_none() {
+            return;
+        }
+        self.editor.update(cx, |editor, _| editor.set_locked(false));
+        self.tag_row.update(cx, |row, cx| row.set_locked(false, cx));
+        self.title.update(cx, TitleField::close);
+        cx.notify();
+    }
+
+    fn title_event(
+        &mut self,
+        _: &Entity<TitleField>,
+        event: &TitleEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            TitleEvent::Submit(title) => match &self.unnamed {
+                Some(unnamed) => self.create(unnamed.clone(), title.clone(), window, cx),
+                None => self.rename(title.clone(), window, cx),
+            },
+            TitleEvent::Cancel => match self.unnamed.as_ref() {
+                Some(unnamed) => {
+                    let before = unnamed.before.clone();
+                    self.end_unnamed(cx);
+                    match before {
+                        Some(before) => self.open(before, Leave::Drop, cx),
+                        None => self.close(cx),
+                    }
+                    window.focus(&self.editor.focus_handle(cx), cx);
+                }
+                None => self.close_title(window, cx),
+            },
+            // An unnamed note keeps its field, so a click elsewhere loses nothing.
+            TitleEvent::Blur if self.unnamed.is_none() => self.title.update(cx, TitleField::close),
+            TitleEvent::Blur => {}
+        }
+    }
+
+    /// Closes the title field and gives the editor the focus.
+    fn close_title(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.title.update(cx, TitleField::close);
         window.focus(&self.editor.focus_handle(cx), cx);
     }
+
+    /// Renames the open note to `title`, after its unsaved text.
+    fn rename(&mut self, title: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(path) = self.path.clone() else {
+            return;
+        };
+        if title == title_of(&path) {
+            self.close_title(window, cx);
+            return;
+        }
+        self.save(cx);
+        let done = window_step(window, cx, |pane, renamed, window, cx| {
+            pane.titled(renamed, window, cx);
+        });
+        self.notes_folder.update(cx, |notes_folder, cx| {
+            notes_folder.rename_note(path, title, done, cx);
+        });
+    }
+
+    /// Writes the unnamed note as `<title>.md` and opens it.
+    fn create(
+        &mut self,
+        unnamed: Unnamed,
+        title: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let done = window_step(
+            window,
+            cx,
+            |pane, created: holm_core::Result<PathBuf>, window, cx| {
+                if pane.unnamed.is_none() {
+                    return;
+                }
+                if let Ok(path) = &created {
+                    pane.end_unnamed(cx);
+                    pane.opening += 1;
+                    pane.read_note(path.clone(), pane.opening, cx);
+                }
+                pane.titled(created.map(drop), window, cx);
+            },
+        );
+        self.notes_folder.update(cx, |notes_folder, cx| {
+            notes_folder.create_note(unnamed.folder, title, unnamed.tag, done, cx);
+        });
+    }
+
+    /// Takes the end of a write from the title field. A refused title keeps the field open
+    /// with its text, and an answer names the reason.
+    fn titled<T>(
+        &mut self,
+        result: holm_core::Result<T>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Err(error) = result else {
+            self.close_title(window, cx);
+            return;
+        };
+        let keep = self.unnamed.is_some()
+            || matches!(
+                error,
+                holm_core::Error::NameTaken { .. } | holm_core::Error::BadName { .. }
+            );
+        let error = AppError::from(error);
+        tracing::warn!(error = %crate::chain(&error), "cannot give the note its title");
+        if keep {
+            self.title.update(cx, |title, cx| title.unlock(window, cx));
+        } else {
+            self.close_title(window, cx);
+        }
+        self.answer(error.message(), cx);
+    }
+}
+
+/// The note after Ctrl+N, before it has a title and a file.
+#[derive(Clone, Debug)]
+struct Unnamed {
+    folder: PathBuf,
+    tag: Option<String>,
+    /// The note that was open before. `Esc` opens it again.
+    before: Option<PathBuf>,
+}
+
+/// Like [`step`], with the window, for a step that moves the focus.
+fn window_step<R: 'static>(
+    window: &Window,
+    cx: &Context<NotePane>,
+    step: impl FnOnce(&mut NotePane, R, &mut Window, &mut Context<NotePane>) + 'static,
+) -> Step<R> {
+    let pane = cx.weak_entity();
+    let window = window.window_handle();
+    Box::new(move |result, cx| {
+        window
+            .update(cx, |_, window, cx| {
+                pane.update(cx, |pane, cx| step(pane, result, window, cx))
+            })
+            .ok();
+    })
 }
 
 /// A `done` step for a write of the notes folder: it runs `step` on the pane, when the pane
@@ -796,7 +1006,7 @@ impl Focusable for NotePane {
 
 impl Render for NotePane {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let body = if self.path.is_some() {
+        let body = if self.path.is_some() || self.unnamed.is_some() {
             div()
                 .flex_1()
                 .min_h_0()

@@ -20,6 +20,7 @@ use gpui_kit::{
 use holm_core::model::NoteInfo;
 
 use crate::popup::{self, Dropdown};
+use crate::tags::TAIL_GAP;
 use crate::text;
 
 const LIST_WIDTH: Pixels = px(260.);
@@ -121,7 +122,7 @@ impl Backlinks {
             .role(Role::Button)
             .aria_label(label.clone())
             .test_support()
-            .px_2()
+            .px(TAIL_GAP)
             .rounded(theme.radius)
             .text_size(px(12.))
             .text_color(theme.muted_foreground)

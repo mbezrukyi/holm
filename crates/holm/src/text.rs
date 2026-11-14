@@ -76,6 +76,11 @@ pub(crate) const TAGS_LABEL: &str = "Tags";
 pub(crate) const ADD_TAG: &str = "Add tag";
 pub(crate) const ADD_TAG_CHIP: &str = "+ Tag";
 pub(crate) const ON_THIS_NOTE: &str = "On this note";
+pub(crate) const NOTE_TITLE: &str = "Title";
+/// The mark between two folders, or a folder and the title, in the tag row.
+pub(crate) const PATH_GAP: &str = " › ";
+/// The mark between the path and the backlinks count.
+pub(crate) const PATH_DOT: &str = "·";
 
 /// The line in the tag popup that adds a new tag.
 pub(crate) fn add_tag_line(tag: &str) -> String {

@@ -61,7 +61,7 @@ pub(crate) struct LinkPicker {
     rows: Vec<Row>,
     /// The note of the heading rows, or `None` for the open note.
     heading_note: Option<usize>,
-    /// The headings of each note that the field named, without the title.
+    /// The headings of each note that the field named.
     headings: HashMap<PathBuf, Vec<String>>,
     loading: HashSet<PathBuf>,
 }

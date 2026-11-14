@@ -182,17 +182,18 @@ impl NotesFolder {
         self.write(|_| Ok(()), done, cx);
     }
 
-    /// Renames the note file to match its title.
-    pub(crate) fn rename_to_title(
+    /// Gives the note at `path` a new title, and gives its new path.
+    pub(crate) fn rename_note(
         &mut self,
         path: PathBuf,
-        done: impl FnOnce(holm_core::Result<NoteInfo>, &mut App) + 'static,
+        title: String,
+        done: impl FnOnce(holm_core::Result<PathBuf>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
         let from = path.clone();
         self.queue(
-            move |core| core.rename_to_title(&path).result,
-            move |info: &NoteInfo| moved(from, &info.path),
+            move |core| core.rename_note(&path, &title).result.map(|info| info.path),
+            move |to: &PathBuf| moved(from, to),
             done,
             cx,
         );
@@ -234,17 +235,18 @@ impl NotesFolder {
         );
     }
 
-    /// Creates a note in `folder`, with `tag` when it has one, and gives its path.
+    /// Creates the note `title` in `folder`, with `tag` when it has one, and gives its path.
     pub(crate) fn create_note(
         &mut self,
         folder: PathBuf,
+        title: String,
         tag: Option<String>,
         done: impl FnOnce(holm_core::Result<PathBuf>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
         self.write(
             move |core| {
-                let note = core.create(&folder).result?;
+                let note = core.create(&folder, &title).result?;
                 match tag {
                     Some(tag) => core
                         .add_tag(&note.info.path, &tag)
@@ -258,8 +260,8 @@ impl NotesFolder {
         );
     }
 
-    /// Creates a note in `folder` with `title` as its heading, and gives its id for a link.
-    pub(crate) fn create_titled_note(
+    /// Creates the note `title` in `folder`, and gives its id for a link.
+    pub(crate) fn create_linked_note(
         &mut self,
         folder: PathBuf,
         title: String,
@@ -268,10 +270,8 @@ impl NotesFolder {
     ) {
         self.write(
             move |core| {
-                let note = core.create(&folder).result?;
-                let note = core.save(&note.info.path, &format!("# {title}\n")).result?;
-                let info = core.rename_to_title(&note.info.path).result?;
-                Ok(core.link_id(&info.path).result?.to_string())
+                let note = core.create(&folder, &title).result?;
+                Ok(core.link_id(&note.info.path).result?.to_string())
             },
             done,
             cx,
@@ -500,7 +500,7 @@ impl NotesFolder {
         self.look(move |core| core.search(&query, order), cx)
     }
 
-    /// The headings of the note at `path`, without its title. It does not wait for the line.
+    /// The headings of the note at `path`. It does not wait for the line.
     pub(crate) fn headings(&self, path: PathBuf, cx: &App) -> Task<holm_core::Result<Vec<String>>> {
         self.look(move |core| core.headings(&path), cx)
     }

@@ -16,9 +16,12 @@
 //! - A click on the row opens the popup. A click on a chip also puts the cursor on its tag.
 //!
 //! The row is one line. Chips that do not fit fold into a "+N" chip. A click on it opens the
-//! popup with the cursor on the first folded tag. The [`Backlinks`] count sits at the right
-//! end of the row. The row always shows. A note with no tags has a quiet "+ Tag" chip, and a
+//! popup with the cursor on the first folded tag. The path of the note and the [`Backlinks`]
+//! count sit at the right end of the row: `Work › 2026 › Plans · ← 2 notes`. See
+//! [`TitleField`]. The row always shows. A note with no tags has a quiet "+ Tag" chip, and a
 //! click on it opens the popup as a click on the row does.
+//!
+//! A locked row opens no popup, so only its title field works.
 
 use std::ops::Range;
 
@@ -40,6 +43,7 @@ use crate::fold::Fold;
 use crate::notes_folder::NotesFolder;
 use crate::popup::{self, Dropdown};
 use crate::text;
+use crate::title::TitleField;
 
 /// The most known tags in the list while the user types.
 const SUGGESTIONS: usize = 5;
@@ -48,6 +52,10 @@ const SUGGESTIONS: usize = 5;
 pub(crate) const CHIP_WIDTH: Pixels = px(200.);
 
 const POPUP_WIDTH: Pixels = px(300.);
+
+/// The gap between the title and the dot before the backlinks count. The count has the same
+/// padding.
+pub(crate) const TAIL_GAP: Pixels = px(6.);
 
 /// The user added or removed one tag of the note.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -75,7 +83,9 @@ pub(crate) struct TagRow {
     notes_folder: Entity<NotesFolder>,
     tags: Vec<String>,
     pinned: bool,
+    title: Entity<TitleField>,
     backlinks: Entity<Backlinks>,
+    locked: bool,
     /// Every tag name in the notes folder, for the list.
     known: Vec<String>,
     /// Whether the popup is open.
@@ -93,6 +103,7 @@ impl TagRow {
     /// `text` gets the focus back when the popup closes with it.
     pub(crate) fn new(
         notes_folder: Entity<NotesFolder>,
+        title: Entity<TitleField>,
         backlinks: Entity<Backlinks>,
         text: FocusHandle,
         window: &mut Window,
@@ -101,6 +112,7 @@ impl TagRow {
         let input = cx.new(|cx| InputState::new(window, cx).placeholder(text::ADD_TAG));
         let subscriptions = vec![
             cx.observe(&backlinks, |_, _, cx| cx.notify()),
+            cx.observe(&title, |_, _, cx| cx.notify()),
             cx.subscribe(&input, |row, input, event, cx| {
                 if matches!(event, InputEvent::Change) {
                     let value = input.read(cx).value().to_string();
@@ -116,7 +128,9 @@ impl TagRow {
             notes_folder,
             tags: Vec::new(),
             pinned: false,
+            title,
             backlinks,
+            locked: false,
             known: Vec::new(),
             open: false,
             cursor: None,
@@ -137,6 +151,14 @@ impl TagRow {
         }
     }
 
+    /// Locks or unlocks the row.
+    pub(crate) fn set_locked(&mut self, locked: bool, cx: &mut Context<Self>) {
+        if self.locked != locked {
+            self.locked = locked;
+            cx.notify();
+        }
+    }
+
     /// Opens the popup with an empty field and no cursor.
     pub(crate) fn enter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open_at(None, window, cx);
@@ -152,6 +174,9 @@ impl TagRow {
     /// Opens the popup with an empty field and the cursor on `cursor`. It takes the known
     /// tags for the list from the snapshot.
     fn open_at(&mut self, cursor: Option<usize>, window: &mut Window, cx: &mut Context<Self>) {
+        if self.locked {
+            return;
+        }
         self.open = true;
         self.clear(window, cx);
         self.cursor = cursor.filter(|at| *at < self.tags.len());
@@ -487,7 +512,28 @@ impl Render for TagRow {
                 .text_color(theme.primary)
                 .child(text::PIN_MARK)
         });
-        let add = self.tags.is_empty().then(|| Self::add_chip(cx));
+        let add = (self.tags.is_empty() && !self.locked).then(|| Self::add_chip(cx));
+        // The count has its own padding, so it needs no gap after the dot. Then the dot sits
+        // in the middle between the title and the count text.
+        let tail = h_flex()
+            .gap(TAIL_GAP)
+            .child(self.title.clone())
+            .when(has_backlinks, |tail| {
+                tail.child(
+                    h_flex()
+                        .child(
+                            div()
+                                .id("path-dot")
+                                .test_support()
+                                .text_size(px(12.))
+                                .text_color(theme.muted_foreground)
+                                .child(text::PATH_DOT),
+                        )
+                        .child(self.backlinks.clone()),
+                )
+            })
+            // A click between the parts must not open the tag popup.
+            .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default());
         let lead = (pin.is_some() || add.is_some())
             .then(|| h_flex().gap(px(6.)).children(pin).children(add));
         let row = h_flex()
@@ -520,7 +566,7 @@ impl Render for TagRow {
                     Self::more_chip(cx),
                 )
                 .lead(lead)
-                .tail(has_backlinks.then(|| self.backlinks.clone())),
+                .tail(Some(tail)),
             );
         self.dropdown
             .root()

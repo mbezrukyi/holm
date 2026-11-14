@@ -23,6 +23,7 @@ mod sidebar;
 mod tags;
 mod text;
 mod theme;
+mod title;
 mod window;
 
 use std::cell::Cell;

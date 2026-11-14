@@ -123,6 +123,9 @@ impl Links {
     /// Reads the backlinks and the broken note links of the open note, and shows them.
     fn read(&mut self, cx: &mut Context<Self>) {
         let Some(path) = self.note.clone() else {
+            self.reading = None;
+            self.backlinks
+                .update(cx, |list, cx| list.show(Vec::new(), cx));
             return;
         };
         let notes_folder = self.notes_folder.read(cx);

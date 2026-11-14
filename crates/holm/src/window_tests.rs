@@ -482,7 +482,7 @@ fn sidebar(cx: &mut TestAppContext, handle: AnyWindowHandle) -> String {
     })
 }
 
-/// Which part has the focus: "sidebar", "editor", "tag field", "tag row", "search", or
+/// Which part has the focus: "sidebar", "editor", "tag field", "title field", "search", or
 /// "other". The tag row lies inside the editor, so it comes first.
 fn focus(cx: &mut TestAppContext, handle: AnyWindowHandle) -> &'static str {
     screen(cx, handle, |window| {
@@ -493,6 +493,8 @@ fn focus(cx: &mut TestAppContext, handle: AnyWindowHandle) -> &'static str {
             "sidebar"
         } else if focused("tag-input") {
             "tag field"
+        } else if focused("title-input") {
+            "title field"
         } else if focused("editor") {
             "editor"
         } else {
@@ -646,17 +648,19 @@ fn the_keyboard_moves_through_tree_list_and_editor(cx: &mut TestAppContext) {
     keys(cx, handle, "down");
     assert_eq!(editor_text(cx, handle), "# Plan\n");
     keys(cx, handle, "f2");
-    assert_eq!(focus(cx, handle), "editor");
+    assert_eq!(focus(cx, handle), "title field");
     cx.simulate_input(handle, "Goals");
-    autosave(cx);
+    keys(cx, handle, "enter");
+    assert_eq!(focus(cx, handle), "editor");
 
     keys(cx, handle, "ctrl-shift-l");
     assert_eq!(focus(cx, handle), "sidebar");
     keys(cx, handle, "escape");
     assert_eq!(sidebar(cx, handle), "tree work");
-    keys(cx, handle, "up enter down");
+    // The rename keeps the time of the note, so it stays below "Top".
+    keys(cx, handle, "up enter up");
     assert_eq!(editor_text(cx, handle), "# Top\n");
-    assert!(read(&notes_dir.join("work/Goals.md")).ends_with("---\n# Goals\n"));
+    assert_eq!(read(&notes_dir.join("work/Goals.md")), "# Plan\n");
     assert!(!notes_dir.join("work/Plan.md").exists());
 
     keys(cx, handle, "enter");
@@ -715,7 +719,9 @@ fn keys_make_rename_and_move_notes_and_folders(cx: &mut TestAppContext) {
     assert_eq!(tree(cx, handle), ["All notes", "work*"]);
 
     keys(cx, handle, "enter ctrl-n");
-    assert!(notes_dir.join("work/Untitled.md").is_file());
+    cx.simulate_input(handle, "Plans");
+    keys(cx, handle, "enter");
+    assert!(notes_dir.join("work/Plans.md").is_file());
     assert_eq!(focus(cx, handle), "editor");
 
     keys(cx, handle, "ctrl-shift-l escape up enter down");
@@ -930,7 +936,7 @@ fn clicks_open_and_close_the_tag_popup(cx: &mut TestAppContext) {
     cx.update_window(handle, |_, window, cx| {
         window.click_at(
             "tag-row",
-            gpui_kit::point(right - gpui_kit::px(4.), gpui_kit::px(16.)),
+            gpui_kit::point(right / 2., gpui_kit::px(16.)),
             cx,
         );
     })
@@ -1034,8 +1040,8 @@ fn the_tag_row_stays_on_one_line_and_folds_the_rest_into_a_chip(cx: &mut TestApp
     let count = bounds_of(cx, handle, "backlinks-button").unwrap();
     let more = bounds_of(cx, handle, "tag-more").unwrap();
     assert_eq!(
-        count.top(),
-        more.top(),
+        count.center().y,
+        more.center().y,
         "the count is on the line of the chips"
     );
     assert!(more.right() <= count.left());
@@ -2120,7 +2126,7 @@ fn the_link_picker_links_notes_headings_and_new_notes(cx: &mut TestAppContext) {
     keys(cx, handle, "ctrl-k");
     cx.simulate_input(handle, "be");
     keys(cx, handle, "tab");
-    assert_eq!(options(cx), ["Bug list*", "Ideas"]);
+    assert_eq!(options(cx), ["Beta*", "Bug list", "Ideas"]);
     cx.simulate_input(handle, "bug");
     settle(cx);
     keys(cx, handle, "enter");
@@ -2137,7 +2143,7 @@ fn the_link_picker_links_notes_headings_and_new_notes(cx: &mut TestAppContext) {
     assert_eq!(options(cx), ["Create “Gamma”*"]);
     keys(cx, handle, "enter");
     let gamma_path = notes.join("Gamma.md");
-    assert!(read(&gamma_path).ends_with("---\n# Gamma\n"));
+    assert_eq!(holm_markdown::Note::parse(&read(&gamma_path)).body(), "");
     let gamma = id_of(&gamma_path);
     let text = editor_text(cx, handle);
     assert!(text.starts_with("# Alpha\n"));
@@ -2380,10 +2386,14 @@ fn an_empty_folder_shows_the_empty_pane_and_makes_no_note(cx: &mut TestAppContex
     keys(cx, handle, "ctrl-n");
     assert!(!empty_pane(cx, handle));
     assert_eq!(editor_text(cx, handle), "");
+    assert_eq!(focus(cx, handle), "title field");
+    assert_eq!(files(&fixture.notes()), Vec::<String>::new());
+    cx.simulate_input(handle, "Plans");
+    keys(cx, handle, "enter");
     assert_eq!(focus(cx, handle), "editor");
-    assert_eq!(files(&fixture.notes()), ["Untitled.md"]);
+    assert_eq!(files(&fixture.notes()), ["Plans.md"]);
     let settings = Config::load(fixture.config()).settings().clone();
-    assert_eq!(settings.last_note, Some(PathBuf::from("Untitled.md")));
+    assert_eq!(settings.last_note, Some(PathBuf::from("Plans.md")));
 }
 
 #[gpui_kit::test]
@@ -2504,9 +2514,9 @@ fn close_after_an_outside_delete_writes_no_file(cx: &mut TestAppContext) {
 fn the_delete_dialog_names_the_note_by_its_title(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     let handle = open(cx, fixture.startup(None));
-    keys(cx, handle, "ctrl-n");
-    cx.simulate_input(handle, "# Plans");
-    assert_eq!(files(&fixture.notes()), ["Untitled.md"]);
+    new_note(cx, handle, "Plans");
+    cx.simulate_input(handle, "# Spring plans");
+    assert_eq!(files(&fixture.notes()), ["Plans.md"]);
 
     keys(cx, handle, "ctrl-shift-l delete");
     assert_eq!(
@@ -2519,31 +2529,244 @@ fn the_delete_dialog_names_the_note_by_its_title(cx: &mut TestAppContext) {
 fn a_quit_keeps_the_name_of_the_open_note(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     let handle = open(cx, fixture.startup(None));
-    keys(cx, handle, "ctrl-n");
-    cx.simulate_input(handle, "# Plans");
-    assert_eq!(files(&fixture.notes()), ["Untitled.md"]);
+    new_note(cx, handle, "Plans");
+    cx.simulate_input(handle, "# Spring plans");
 
     cx.quit();
-    assert_eq!(files(&fixture.notes()), ["Untitled.md"]);
-    assert!(read(&fixture.notes().join("Untitled.md")).ends_with("\n# Plans\n"));
+    assert_eq!(files(&fixture.notes()), ["Plans.md"]);
+    assert!(read(&fixture.notes().join("Plans.md")).ends_with("\n# Spring plans\n"));
     let settings = Config::load(fixture.config()).settings().clone();
-    assert_eq!(settings.last_note, Some(PathBuf::from("Untitled.md")));
+    assert_eq!(settings.last_note, Some(PathBuf::from("Plans.md")));
 }
 
 #[gpui_kit::test]
 fn a_window_close_keeps_the_name_of_the_open_note(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     let handle = open(cx, fixture.startup(None));
-    keys(cx, handle, "ctrl-n");
-    cx.simulate_input(handle, "# Plans");
+    new_note(cx, handle, "Plans");
+    cx.simulate_input(handle, "# Spring plans");
 
     cx.update_window(handle, |_, window, _| window.remove_window())
         .unwrap();
     cx.run_until_parked();
-    assert_eq!(files(&fixture.notes()), ["Untitled.md"]);
-    assert!(read(&fixture.notes().join("Untitled.md")).ends_with("\n# Plans\n"));
+    assert_eq!(files(&fixture.notes()), ["Plans.md"]);
+    assert!(read(&fixture.notes().join("Plans.md")).ends_with("\n# Spring plans\n"));
     let settings = Config::load(fixture.config()).settings().clone();
-    assert_eq!(settings.last_note, Some(PathBuf::from("Untitled.md")));
+    assert_eq!(settings.last_note, Some(PathBuf::from("Plans.md")));
+}
+
+/// Ctrl+N, then `title` and Enter.
+fn new_note(cx: &mut TestAppContext, handle: AnyWindowHandle, title: &str) {
+    keys(cx, handle, "ctrl-n");
+    cx.simulate_input(handle, title);
+    keys(cx, handle, "enter");
+}
+
+/// The path at the end of the tag row, like `work › Plans`.
+fn note_path(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
+    label(cx, handle, "note-path")
+}
+
+/// The text of the title field, while it is open.
+fn title_field(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
+    screen(cx, handle, |window| {
+        window
+            .try_find("title-input")
+            .and_then(|field| field.value().map(str::to_owned))
+    })
+}
+
+#[gpui_kit::test]
+fn f2_renames_the_note_and_esc_keeps_the_old_title(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes = fixture.notes();
+    fs::create_dir(notes.join("work")).unwrap();
+    fs::write(notes.join("work/Plans.md"), "# Spring plans\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(note_path(cx, handle).as_deref(), Some("work › Plans"));
+
+    keys(cx, handle, "f2");
+    assert_eq!(focus(cx, handle), "title field");
+    assert_eq!(title_field(cx, handle).as_deref(), Some("Plans"));
+    cx.simulate_input(handle, "Goals");
+    keys(cx, handle, "escape");
+    assert_eq!(title_field(cx, handle), None);
+    assert_eq!(focus(cx, handle), "editor");
+    assert_eq!(files(&notes.join("work")), ["Plans.md"]);
+
+    keys(cx, handle, "f2");
+    cx.simulate_input(handle, "Goals");
+    keys(cx, handle, "enter");
+    assert_eq!(title_field(cx, handle), None);
+    assert_eq!(focus(cx, handle), "editor");
+    assert_eq!(files(&notes.join("work")), ["Goals.md"]);
+    assert_eq!(read(&notes.join("work/Goals.md")), "# Spring plans\n");
+    assert_eq!(note_path(cx, handle).as_deref(), Some("work › Goals"));
+
+    // The text goes on in the renamed file.
+    cx.simulate_input(handle, "x");
+    autosave(cx);
+    assert!(read(&notes.join("work/Goals.md")).ends_with("---\nx# Spring plans\n"));
+    assert_eq!(files(&notes.join("work")), ["Goals.md"]);
+}
+
+#[gpui_kit::test]
+fn f2_with_a_taken_title_shows_the_answer_and_keeps_the_field(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes = fixture.notes();
+    fs::write(notes.join("Plans.md"), "").unwrap();
+    fs::write(notes.join("Ideas.md"), "").unwrap();
+    set_time(&notes.join("Plans.md"), 200);
+    set_time(&notes.join("Ideas.md"), 100);
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(note_path(cx, handle).as_deref(), Some("Plans"));
+
+    keys(cx, handle, "f2");
+    cx.simulate_input(handle, "ideas");
+    keys(cx, handle, "enter");
+    assert_eq!(message(cx, handle).as_deref(), Some(text::NAME_TAKEN));
+    assert_eq!(title_field(cx, handle).as_deref(), Some("ideas"));
+    assert_eq!(focus(cx, handle), "title field");
+    assert_eq!(files(&notes), ["Ideas.md", "Plans.md"]);
+
+    // F2 in the note list opens the same field.
+    keys(cx, handle, "escape ctrl-shift-l f2");
+    assert_eq!(focus(cx, handle), "title field");
+    assert_eq!(title_field(cx, handle).as_deref(), Some("Plans"));
+}
+
+#[gpui_kit::test]
+fn ctrl_n_names_the_note_first_and_esc_leaves_nothing(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes = fixture.notes();
+    fs::write(notes.join("Old.md"), "old\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    keys(cx, handle, "ctrl-n");
+    assert_eq!(focus(cx, handle), "title field");
+    assert_eq!(title_field(cx, handle).as_deref(), Some(""));
+    assert_eq!(editor_text(cx, handle), "");
+    keys(cx, handle, "escape");
+    assert_eq!(files(&notes), ["Old.md"]);
+    assert_eq!(editor_text(cx, handle), "old\n");
+    assert_eq!(focus(cx, handle), "editor");
+
+    // A refused title keeps the unnamed note.
+    keys(cx, handle, "ctrl-n");
+    cx.simulate_input(handle, "old");
+    keys(cx, handle, "enter");
+    assert_eq!(message(cx, handle).as_deref(), Some(text::NAME_TAKEN));
+    assert_eq!(title_field(cx, handle).as_deref(), Some("old"));
+    keys(cx, handle, "ctrl-a backspace");
+    cx.simulate_input(handle, "Plans");
+    keys(cx, handle, "enter");
+    assert_eq!(files(&notes), ["Old.md", "Plans.md"]);
+    assert_eq!(focus(cx, handle), "editor");
+    assert_eq!(note_path(cx, handle).as_deref(), Some("Plans"));
+    cx.simulate_input(handle, "text");
+    autosave(cx);
+    assert!(read(&notes.join("Plans.md")).ends_with("---\ntext\n"));
+}
+
+#[gpui_kit::test]
+fn ctrl_n_in_a_tag_view_gives_the_note_that_tag(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes = fixture.notes();
+    fs::write(notes.join("A.md"), "---\ntags: [work]\n---\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-shift-l escape down down down enter");
+    assert_eq!(sidebar(cx, handle), "list #work");
+
+    keys(cx, handle, "ctrl-n");
+    assert_eq!(chips(cx, handle), ["work"]);
+    cx.simulate_input(handle, "Plans");
+    keys(cx, handle, "enter");
+    assert_eq!(fields(&notes.join("Plans.md")).0, ["work"]);
+}
+
+#[gpui_kit::test]
+fn a_click_on_the_text_of_an_unnamed_note_does_nothing(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let handle = open(cx, fixture.startup(None));
+
+    keys(cx, handle, "ctrl-n");
+    let bottom = screen(cx, handle, |window| {
+        window.find("editor").bounds().size.height
+    });
+    cx.update_window(handle, |_, window, cx| {
+        window.click_at(
+            "editor",
+            gpui_kit::point(gpui_kit::px(200.), bottom - gpui_kit::px(20.)),
+            cx,
+        );
+    })
+    .unwrap();
+    settle(cx);
+    assert_eq!(focus(cx, handle), "title field");
+    cx.simulate_input(handle, "x");
+    assert_eq!(editor_text(cx, handle), "");
+    assert_eq!(title_field(cx, handle).as_deref(), Some("x"));
+    assert_eq!(files(&fixture.notes()), Vec::<String>::new());
+}
+
+#[gpui_kit::test]
+fn a_click_between_the_title_and_the_backlinks_opens_no_popup(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes = fixture.notes();
+    fs::write(notes.join("Target.md"), "---\nid: 01T\n---\n").unwrap();
+    fs::write(notes.join("Old.md"), "[t](holm:01T)\n").unwrap();
+    set_time(&notes.join("Target.md"), 200);
+    set_time(&notes.join("Old.md"), 100);
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(backlink_count(cx, handle).as_deref(), Some("← 1 note"));
+
+    let row = bounds_of(cx, handle, "tag-row").unwrap();
+    let title = bounds_of(cx, handle, "note-title").unwrap();
+    let dot = bounds_of(cx, handle, "path-dot").unwrap();
+    let y = title.center().y - row.top();
+    for x in [(title.right() + dot.left()) / 2., dot.center().x] {
+        cx.update_window(handle, |_, window, cx| {
+            window.click_at("tag-row", gpui_kit::point(x - row.left(), y), cx);
+        })
+        .unwrap();
+        settle(cx);
+        assert!(!popup_open(cx, handle));
+    }
+}
+
+#[gpui_kit::test]
+fn the_title_field_opens_in_the_place_of_the_title(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes = fixture.notes();
+    fs::create_dir(notes.join("work")).unwrap();
+    fs::write(notes.join("work/Plans.md"), "").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    let before = bounds_of(cx, handle, "note-path").unwrap();
+    keys(cx, handle, "f2");
+    assert_eq!(focus(cx, handle), "title field");
+    assert_eq!(bounds_of(cx, handle, "note-path"), Some(before));
+}
+
+#[gpui_kit::test]
+fn ctrl_n_after_a_refused_title_starts_clean(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes = fixture.notes();
+    fs::write(notes.join("Target.md"), "---\nid: 01T\n---\n").unwrap();
+    fs::write(notes.join("Old.md"), "[t](holm:01T)\n").unwrap();
+    set_time(&notes.join("Target.md"), 200);
+    set_time(&notes.join("Old.md"), 100);
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(backlink_count(cx, handle).as_deref(), Some("← 1 note"));
+
+    keys(cx, handle, "f2");
+    cx.simulate_input(handle, "old");
+    keys(cx, handle, "enter");
+    assert_eq!(title_field(cx, handle).as_deref(), Some("old"));
+
+    keys(cx, handle, "ctrl-n");
+    assert_eq!(title_field(cx, handle).as_deref(), Some(""));
+    assert_eq!(backlink_count(cx, handle), None);
 }
 
 #[path = "window_speed.rs"]

@@ -183,9 +183,9 @@ impl NotesView {
                     .update(cx, |pane, cx| pane.open(path, Leave::Keep, cx));
             }
             SidebarEvent::FocusEditor => self.focus_home(window, cx),
-            SidebarEvent::EditTitle => self
-                .pane
-                .update(cx, |pane, cx| pane.select_title(window, cx)),
+            SidebarEvent::RenameNote => {
+                self.pane.update(cx, |pane, cx| pane.edit_title(window, cx));
+            }
             SidebarEvent::Delete(target) => self.ask_delete(target.clone(), window, cx),
             SidebarEvent::Move(target) => {
                 let folders = self.sidebar.read(cx).folders().to_vec();
@@ -495,18 +495,11 @@ impl NotesView {
         );
     }
 
+    /// Ctrl+N: an unnamed note in the folder of the view, with its tag.
     fn new_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (folder, tag) = self.sidebar.read(cx).new_note_place();
-        self.write(
-            window,
-            cx,
-            |notes_folder, done, cx| notes_folder.create_note(folder, tag, done, cx),
-            |this, path, window, cx| {
-                this.pane
-                    .update(cx, |pane, cx| pane.open(path, Leave::Keep, cx));
-                this.focus_editor(window, cx);
-            },
-        );
+        self.pane
+            .update(cx, |pane, cx| pane.new_note(folder, tag, window, cx));
     }
 
     /// Ctrl+Shift+N: an empty name field for a new folder in the folder of the view.
@@ -671,6 +664,11 @@ impl NotesView {
             modifiers.alt && !(modifiers.control || modifiers.shift || modifiers.platform);
         if alt_only && keystroke.key == "d" {
             self.pane.update(cx, |pane, cx| pane.open_state(window, cx));
+            cx.stop_propagation();
+            return;
+        }
+        if !modifiers.modified() && keystroke.key == "f2" && self.editor_focused(window, cx) {
+            self.pane.update(cx, |pane, cx| pane.edit_title(window, cx));
             cx.stop_propagation();
             return;
         }
