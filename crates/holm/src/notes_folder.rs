@@ -252,24 +252,24 @@ impl NotesFolder {
         );
     }
 
-    /// Creates the note `title` in `folder`, with `tag` when it has one, and gives its path.
+    /// Creates the note `title` in `folder`, with `tag` when it has one, and gives the note.
     pub(crate) fn create_note(
         &mut self,
         folder: PathBuf,
         title: String,
         tag: Option<String>,
-        done: impl FnOnce(holm_core::Result<PathBuf>, &mut App) + 'static,
+        done: impl FnOnce(holm_core::Result<Note>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
         self.write(
             move |core| {
                 let note = core.create(&folder, &title).result?;
                 match tag {
-                    Some(tag) => core
-                        .add_tag(&note.info.path, &tag)
-                        .result
-                        .map(|info| info.path),
-                    None => Ok(note.info.path),
+                    Some(tag) => {
+                        let info = core.add_tag(&note.info.path, &tag).result?;
+                        core.read(&info.path)
+                    }
+                    None => Ok(note),
                 }
             },
             done,

@@ -12,7 +12,8 @@
 //! itself.
 //!
 //! The title field in the tag row renames the note. Ctrl+N shows a [`NewNote`] in the place of
-//! the editor. Its file comes only with its title.
+//! the editor. Its file comes only with its title. The editor keeps the note from before, so
+//! `Esc` shows it again as it was.
 //!
 //! The tag row before the first line shows the tags, the pin and the path of the note. It
 //! scrolls with the text. The pane writes the changes of the tags and the pin at once. The
@@ -80,6 +81,47 @@ pub(crate) enum Leave {
     Drop,
 }
 
+/// What the pane shows.
+enum Shown {
+    Empty,
+    /// The note at this path, in the editor.
+    Note(PathBuf),
+    /// The note after Ctrl+N, before it has a file, in the place of the editor. The editor
+    /// keeps the note from before, at `kept`.
+    New {
+        note: Entity<NewNote>,
+        kept: Option<PathBuf>,
+        _subscription: Subscription,
+    },
+}
+
+impl Shown {
+    /// The note that the user sees and works on.
+    fn note(&self) -> Option<&PathBuf> {
+        match self {
+            Self::Note(path) => Some(path),
+            Self::Empty | Self::New { .. } => None,
+        }
+    }
+
+    /// The note in the editor, also under a new note. Saves, reloads and moves follow it.
+    fn editor(&self) -> Option<&PathBuf> {
+        match self {
+            Self::Note(path) => Some(path),
+            Self::New { kept, .. } => kept.as_ref(),
+            Self::Empty => None,
+        }
+    }
+
+    fn editor_mut(&mut self) -> Option<&mut PathBuf> {
+        match self {
+            Self::Note(path) => Some(path),
+            Self::New { kept, .. } => kept.as_mut(),
+            Self::Empty => None,
+        }
+    }
+}
+
 pub(crate) struct NotePane {
     notes_folder: Entity<NotesFolder>,
     line: Entity<MessageLine>,
@@ -91,10 +133,7 @@ pub(crate) struct NotePane {
     title: Entity<TitleField<PathBuf>>,
     backlinks: Entity<Backlinks>,
     links: Entity<Links>,
-    /// The path of the open note. With no note and no new note, the pane is empty.
-    path: Option<PathBuf>,
-    /// The note after Ctrl+N, before it has a file.
-    new_note: Option<(Entity<NewNote>, Subscription)>,
+    shown: Shown,
     /// The facts of the open note in the last snapshot that had it. A restore after an
     /// outside delete writes them again.
     last_info: Option<NoteInfo>,
@@ -207,8 +246,7 @@ impl NotePane {
             title,
             backlinks,
             links,
-            path: None,
-            new_note: None,
+            shown: Shown::Empty,
             last_info: None,
             fields_pending: 0,
             ending: LineEnding::Lf,
@@ -241,7 +279,11 @@ impl NotePane {
             editor.text().to_owned()
         });
         let path = note.info.path.clone();
-        self.path = Some(path.clone());
+        if !reload {
+            self.shown = Shown::Note(path.clone());
+        } else if let Some(open) = self.shown.editor_mut() {
+            open.clone_from(&path);
+        }
         self.last_info = Some(note.info);
         if !reload {
             self.fields_pending = 0;
@@ -265,9 +307,8 @@ impl NotePane {
 
     /// Drops the open note and its text, with no save.
     fn drop_note(&mut self, cx: &mut Context<Self>) {
-        self.new_note = None;
         self.title.update(cx, TitleField::close);
-        self.path = None;
+        self.shown = Shown::Empty;
         self.last_info = None;
         self.fields_pending = 0;
         self.autosave = None;
@@ -344,7 +385,7 @@ impl NotePane {
 
     /// Opens the system file picker, and embeds each picked file at the cursor.
     pub(crate) fn link_files(&mut self, cx: &mut Context<Self>) {
-        if self.path.is_none() {
+        if self.shown.note().is_none() {
             return;
         }
         self.links.update(cx, Links::pick_files);
@@ -358,7 +399,7 @@ impl NotePane {
         done: impl FnOnce(LinkStart, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
-        let Some(open_note) = self.path.clone() else {
+        let Some(open_note) = self.shown.note().cloned() else {
             return;
         };
         let link = self.editor.read(cx).link_at_cursor();
@@ -400,7 +441,7 @@ impl NotePane {
         done: impl FnOnce(holm_core::Result<()>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
-        let Some(path) = self.path.clone() else {
+        let Some(path) = self.shown.note().cloned() else {
             cx.defer(move |cx| done(Ok(()), cx));
             return;
         };
@@ -448,7 +489,7 @@ impl NotePane {
     }
 
     fn put_link(&mut self, target: &Target, text: &str, cx: &mut Context<Self>) {
-        if self.path.is_none() {
+        if self.shown.note().is_none() {
             return;
         }
         let replace = self.replace_link;
@@ -462,12 +503,13 @@ impl NotePane {
     /// Shows the tags and the pin of the open note from the snapshot, when no write of them
     /// waits.
     fn show_fields(&mut self, cx: &mut Context<Self>) {
-        let path = self.path.clone();
-        self.title.update(cx, |title, cx| title.show(path, cx));
-        let Some(path) = &self.path else {
+        let path = self.shown.editor().cloned();
+        self.title
+            .update(cx, |title, cx| title.show(path.clone(), cx));
+        let Some(path) = path else {
             return;
         };
-        if let Some(info) = self.notes_folder.read(cx).snapshot().note(path) {
+        if let Some(info) = self.notes_folder.read(cx).snapshot().note(&path) {
             self.last_info = Some(info.clone());
         }
         if self.fields_pending > 0 {
@@ -480,7 +522,7 @@ impl NotePane {
     }
 
     fn change_tag(&mut self, change: TagChange, cx: &mut Context<Self>) {
-        let Some(path) = self.path.clone() else {
+        let Some(path) = self.shown.note().cloned() else {
             return;
         };
         let done = self.field_step(cx);
@@ -491,7 +533,7 @@ impl NotePane {
 
     /// Opens the tag popup. The editor scrolls to it.
     pub(crate) fn focus_tags(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.path.is_none() {
+        if self.shown.note().is_none() {
             return;
         }
         self.tag_row.update(cx, |row, cx| row.enter(window, cx));
@@ -499,7 +541,7 @@ impl NotePane {
 
     /// Ctrl+Shift+B: opens the backlinks list. The editor scrolls to it.
     pub(crate) fn show_backlinks(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.path.is_none() {
+        if self.shown.note().is_none() {
             return;
         }
         self.backlinks
@@ -508,7 +550,7 @@ impl NotePane {
 
     /// Pins or unpins the open note.
     pub(crate) fn toggle_pin(&mut self, cx: &mut Context<Self>) {
-        let Some(path) = self.path.clone() else {
+        let Some(path) = self.shown.note().cloned() else {
             return;
         };
         let pinned = self.tag_row.update(cx, TagRow::toggle_pin);
@@ -582,7 +624,7 @@ impl NotePane {
     /// The editor text of the open note, for a write: a restore after an outside delete,
     /// else a save.
     fn note_text(&self, cx: &App) -> Option<NoteText> {
-        let path = self.path.clone()?;
+        let path = self.shown.editor().cloned()?;
         let body = self
             .ending
             .to_disk(self.editor.read(cx).text())
@@ -629,7 +671,7 @@ impl NotePane {
     }
 
     fn outside_change(&mut self, change: Change, cx: &mut Context<Self>) {
-        let Some(path) = &mut self.path else {
+        let Some(path) = self.shown.editor_mut() else {
             return;
         };
         let unsaved = self.editor.read(cx).text() != self.saved;
@@ -661,7 +703,7 @@ impl NotePane {
     }
 
     fn reload(&mut self, cx: &mut Context<Self>) {
-        let Some(path) = self.path.clone() else {
+        let Some(path) = self.shown.editor().cloned() else {
             return;
         };
         let opening = self.opening;
@@ -695,7 +737,7 @@ impl NotePane {
     /// "Close" after an outside delete: drops the note and its text, and the app opens another
     /// note.
     fn close_deleted(&mut self, cx: &mut Context<Self>) {
-        let Some(path) = self.path.clone() else {
+        let Some(path) = self.shown.editor().cloned() else {
             return;
         };
         self.drop_note(cx);
@@ -714,23 +756,25 @@ impl NotePane {
             .update(cx, |notes_folder, _| notes_folder.quit(last));
     }
 
-    /// The path of the open note, relative to the notes folder.
+    /// The path of the note in the editor, also under a new note, relative to the notes
+    /// folder.
     pub(crate) fn path(&self) -> Option<&Path> {
-        self.path.as_deref()
+        self.shown.editor().map(PathBuf::as_path)
     }
 
     /// Opens the note at `path`, and drops a new note. With [`Leave::Keep`], the pane first
     /// saves the open note. When that save fails, the pane stays on the note.
     pub(crate) fn open(&mut self, path: PathBuf, leave: Leave, cx: &mut Context<Self>) {
-        if leave == Leave::Keep && self.path() == Some(path.as_path()) {
+        if leave == Leave::Keep && self.shown.note() == Some(&path) {
             return;
         }
-        if self.new_note.take().is_some() {
+        if let Shown::New { kept, .. } = &mut self.shown {
+            self.shown = kept.take().map_or(Shown::Empty, Shown::Note);
             cx.notify();
         }
         self.opening += 1;
         let opening = self.opening;
-        if self.path.is_none() || leave == Leave::Drop {
+        if self.shown.editor().is_none() || leave == Leave::Drop {
             self.read_note(path, opening, cx);
             return;
         }
@@ -774,14 +818,14 @@ impl NotePane {
     /// Follows a write that moved the open note, or a folder that holds it. A move to
     /// another folder can change the file links in the note, so the pane reads it again.
     fn follow(&mut self, moves: &[Move], cx: &mut Context<Self>) {
-        let Some(path) = &self.path else {
+        let Some(path) = self.shown.editor_mut() else {
             return;
         };
         let Some(new) = moves.iter().find_map(|one| one.path(path)) else {
             return;
         };
         let other_folder = new.parent() != path.parent();
-        self.path = Some(new.clone());
+        path.clone_from(&new);
         if other_folder {
             let folder = new.parent().map(|parent| self.root.join(parent));
             self.editor
@@ -794,7 +838,7 @@ impl NotePane {
 
     /// F2: opens the title field of the open note.
     pub(crate) fn edit_title(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.path.is_some() {
+        if self.shown.note().is_some() {
             self.title.update(cx, |title, cx| title.open(window, cx));
         }
     }
@@ -807,7 +851,7 @@ impl NotePane {
         cx: &mut Context<Self>,
     ) {
         // With no note, the title field is gone too.
-        let Some(path) = self.path.clone() else {
+        let Some(path) = self.shown.note().cloned() else {
             return;
         };
         self.save(cx);
@@ -826,7 +870,7 @@ impl NotePane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some((note, _)) = &self.new_note {
+        if let Shown::New { note, .. } = &self.shown {
             note.update(cx, |note, cx| note.focus(window, cx));
             return;
         }
@@ -836,12 +880,15 @@ impl NotePane {
             if pane.opening != opening {
                 return;
             }
-            let before = pane.path.clone();
-            pane.drop_note(cx);
+            pane.title.update(cx, TitleField::close);
             let notes_folder = pane.notes_folder.clone();
-            let note = cx.new(|cx| NewNote::new(notes_folder, folder, tag, before, window, cx));
+            let note = cx.new(|cx| NewNote::new(notes_folder, folder, tag, window, cx));
             let subscription = cx.subscribe_in(&note, window, Self::new_note_event);
-            pane.new_note = Some((note, subscription));
+            pane.shown = Shown::New {
+                note,
+                kept: pane.shown.editor().cloned(),
+                _subscription: subscription,
+            };
             cx.notify();
         });
         self.save_then(
@@ -861,17 +908,18 @@ impl NotePane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.new_note = None;
+        let Shown::New { kept, .. } = std::mem::replace(&mut self.shown, Shown::Empty) else {
+            return;
+        };
         window.focus(&self.editor.focus_handle(cx), cx);
         cx.notify();
-        match event {
-            NewNoteEvent::Created(path) => self.open(path.clone(), Leave::Drop, cx),
-            NewNoteEvent::Cancelled {
-                before: Some(before),
-            } => {
-                self.open(before.clone(), Leave::Drop, cx);
+        match (event, kept) {
+            (NewNoteEvent::Created(note), _) => {
+                self.opening += 1;
+                self.opened(Ok(note.clone()), cx);
             }
-            NewNoteEvent::Cancelled { before: None } => self.close(cx),
+            (NewNoteEvent::Cancelled, Some(kept)) => self.shown = Shown::Note(kept),
+            (NewNoteEvent::Cancelled, None) => cx.emit(PaneEvent::Closed),
         }
     }
 }
@@ -898,19 +946,17 @@ impl Focusable for NotePane {
 
 impl Render for NotePane {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let body = if let Some((note, _)) = &self.new_note {
-            note.clone().into_any_element()
-        } else if self.path.is_some() {
-            div()
+        let body = match &self.shown {
+            Shown::New { note, .. } => note.clone().into_any_element(),
+            Shown::Note(_) => div()
                 .flex_1()
                 .min_h_0()
                 .font_family(theme::NOTE_FONT)
                 .text_size(theme::NOTE_SIZE)
                 .line_height(theme::NOTE_LINE)
                 .child(self.editor.clone())
-                .into_any_element()
-        } else {
-            empty_pane(&self.editor.focus_handle(cx), cx).into_any_element()
+                .into_any_element(),
+            Shown::Empty => empty_pane(&self.editor.focus_handle(cx), cx).into_any_element(),
         };
         v_flex()
             .size_full()

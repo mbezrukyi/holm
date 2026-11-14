@@ -2653,6 +2653,53 @@ fn ctrl_n_names_the_note_first_and_esc_leaves_nothing(cx: &mut TestAppContext) {
     assert!(read(&notes.join("Plans.md")).ends_with("---\ntext\n"));
 }
 
+/// Presses `key`, then runs the tasks one at a time. It gives whether a frame between them
+/// shows the empty pane.
+fn empty_pane_in_a_step(
+    cx: &mut TestAppContext,
+    handle: AnyWindowHandle,
+    key: &'static str,
+) -> bool {
+    press(cx, handle, key);
+    let mut shown = empty_pane(cx, handle);
+    while cx.executor().tick() {
+        shown |= empty_pane(cx, handle);
+    }
+    shown
+}
+
+#[gpui_kit::test]
+fn esc_on_a_new_note_keeps_the_note_from_before_with_its_undo(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes = fixture.notes();
+    fs::write(notes.join("Old.md"), "old\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+    cx.simulate_input(handle, "new ");
+    assert_eq!(editor_text(cx, handle), "new old\n");
+
+    keys(cx, handle, "ctrl-n");
+    assert!(!empty_pane_in_a_step(cx, handle, "escape"));
+    assert_eq!(focus(cx, handle), "editor");
+    keys(cx, handle, "ctrl-z");
+    assert_eq!(editor_text(cx, handle), "old\n");
+}
+
+#[gpui_kit::test]
+fn enter_on_a_new_note_shows_it_with_no_empty_pane(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes = fixture.notes();
+    fs::write(notes.join("Old.md"), "old\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    keys(cx, handle, "ctrl-n");
+    cx.simulate_input(handle, "Plans");
+    assert!(!empty_pane_in_a_step(cx, handle, "enter"));
+    assert_eq!(note_path(cx, handle).as_deref(), Some("Plans"));
+    assert_eq!(focus(cx, handle), "editor");
+    cx.simulate_input(handle, "text");
+    assert_eq!(editor_text(cx, handle), "text");
+}
+
 #[gpui_kit::test]
 fn ctrl_n_in_a_tag_view_gives_the_note_that_tag(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();

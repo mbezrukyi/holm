@@ -8,10 +8,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui_kit::{
-    AnyElement, App, AvailableSpace, BorderStyle, Bounds, ContentMask, Corners, ElementId,
+    AnyElement, App, AvailableSpace, BorderStyle, Bounds, ContentMask, Corners, Div, ElementId,
     ElementInputHandler, Entity, FontStyle, FontWeight, GlobalElementId, Hsla, ImgResourceLoader,
-    InspectorElementId, IntoElement, LayoutId, PathBuilder, Pixels, Point, Resource, Style,
-    TextAlign, Window, fill, outline, point, px, relative, size,
+    InspectorElementId, IntoElement, LayoutId, ParentElement as _, PathBuilder, Pixels, Point,
+    Resource, Style, Styled as _, TextAlign, Window, div, fill, outline, point, px, relative, size,
 };
 
 pub(crate) use layout::{Layout, Scroll};
@@ -22,7 +22,7 @@ use crate::Editor;
 use crate::ink;
 use crate::model::{LineKind, Mark, Quote, Run};
 use flow::{ChipPaint, FlowLine, Icon};
-pub use layout::{COLUMN_WIDTH, SIDE_MARGIN};
+use layout::{COLUMN_WIDTH, SIDE_MARGIN};
 use layout::{Content, LaidLine, Shaper, lay_out, run_font};
 
 /// The width of a quote bar.
@@ -39,6 +39,17 @@ impl IntoElement for EditorElement {
     fn into_element(self) -> Self::Element {
         self
     }
+}
+
+/// A view as wide as an editor, with `child` in its text column. So a view in the place of
+/// the editor lines up with the text.
+pub fn text_column(child: impl IntoElement) -> Div {
+    div()
+        .size_full()
+        .flex()
+        .justify_center()
+        .px(SIDE_MARGIN)
+        .child(div().w_full().max_w(COLUMN_WIDTH).child(child))
 }
 
 /// The text column in the middle of `bounds`, with at least [`SIDE_MARGIN`] on each side.

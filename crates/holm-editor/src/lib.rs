@@ -16,7 +16,7 @@ pub use editor::{
     Appearance, Changed, CursorLink, CustomColors, Editor, OpenFile, OpenLink, PasteFiles,
     PastedFile, UpFromStart, WritingHelp,
 };
-pub use element::{COLUMN_WIDTH, SIDE_MARGIN};
+pub use element::text_column;
 
 /// An error from `holm-editor`.
 #[derive(Debug, thiserror::Error)]
