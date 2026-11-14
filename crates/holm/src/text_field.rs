@@ -252,7 +252,6 @@ impl Render for TextField {
             .track_focus(&self.focus)
             .flex_shrink_1()
             .min_w_0()
-            .overflow_hidden()
             .on_key_down(cx.listener(Self::key_down))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_move(cx.listener(Self::mouse_move))
@@ -260,7 +259,7 @@ impl Render for TextField {
                 MouseButton::Left,
                 cx.listener(|field, _, _, _| field.selecting = false),
             )
-            .child(Line(cx.entity()))
+            .child(Line(Source::Field(cx.entity())))
     }
 }
 
@@ -346,8 +345,19 @@ impl EntityInputHandler for TextField {
     }
 }
 
-/// The element that draws the text of a field.
-struct Line(Entity<TextField>);
+/// `text` as a field shows it, with no caret and no keys. So a field that shows its text this
+/// way keeps its width.
+pub(crate) fn label(text: impl Into<SharedString>) -> impl IntoElement {
+    Line(Source::Text(text.into()))
+}
+
+/// The element that draws the text of a field, or a plain text the same way.
+struct Line(Source);
+
+enum Source {
+    Field(Entity<TextField>),
+    Text(SharedString),
+}
 
 impl IntoElement for Line {
     type Element = Self;
@@ -376,12 +386,15 @@ impl Element for Line {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        let field = self.0.read(cx);
         let style = window.text_style();
-        let (text, color) = if field.text.is_empty() {
-            (field.placeholder.clone(), cx.theme().muted_foreground)
-        } else {
-            (SharedString::from(field.text.clone()), style.color)
+        let (text, color) = match &self.0 {
+            Source::Field(field) => match field.read(cx) {
+                field if field.text.is_empty() => {
+                    (field.placeholder.clone(), cx.theme().muted_foreground)
+                }
+                field => (SharedString::from(field.text.clone()), style.color),
+            },
+            Source::Text(text) => (text.clone(), style.color),
         };
         let font_size = style.font_size.to_pixels(window.rem_size());
         let line_height = window.line_height();
@@ -425,9 +438,26 @@ impl Element for Line {
         window: &mut Window,
         cx: &mut App,
     ) {
+        let entity = match &self.0 {
+            Source::Field(entity) => entity.clone(),
+            Source::Text(_) => {
+                shown
+                    .line
+                    .paint(
+                        bounds.origin,
+                        shown.line_height,
+                        TextAlign::Left,
+                        None,
+                        window,
+                        cx,
+                    )
+                    .ok();
+                return;
+            }
+        };
         let theme = cx.theme();
         let (selection_color, caret_color) = (theme.selection, theme.caret);
-        let field = self.0.read(cx);
+        let field = entity.read(cx);
         let focus = field.focus.clone();
         let focused = focus.is_focused(window);
         let selection = field.selection();
@@ -438,12 +468,15 @@ impl Element for Line {
             shown.line.x_for_index(field.head)
         };
         let width = if empty { px(0.) } else { shown.line.width() };
+        // The layout rounds the width of the field to device pixels, so it can be narrower
+        // than its text by less than one. Such a text fits, and must not scroll.
+        let view = bounds.size.width + px(1. / window.scale_factor());
         // The caret stays in view, and the text never scrolls past its end.
         let mut scroll = field.scroll;
-        if caret - scroll > bounds.size.width {
-            scroll = caret - bounds.size.width;
+        if caret - scroll > view {
+            scroll = caret - view;
         }
-        scroll = scroll.min(caret).min(width - bounds.size.width).max(px(0.));
+        scroll = scroll.min(caret).min(width - view).max(px(0.));
         shown.origin = bounds.origin - point(scroll, px(0.));
         let x = |at: usize| shown.line.x_for_index(at);
         let selected = (!empty && !selection.is_empty()).then(|| {
@@ -453,14 +486,14 @@ impl Element for Line {
             )
         });
         let shown = shown.clone();
-        self.0.update(cx, |field, _| {
+        entity.update(cx, |field, _| {
             field.scroll = scroll;
             field.shown = Some(shown.clone());
         });
-        window.handle_input(&focus, ElementInputHandler::new(bounds, self.0.clone()), cx);
+        window.handle_input(&focus, ElementInputHandler::new(bounds, entity), cx);
         // The caret may lie just after the last char.
         let mut mask = bounds;
-        mask.size.width += CARET_WIDTH;
+        mask.size.width = view + CARET_WIDTH;
         window.with_content_mask(Some(ContentMask { bounds: mask }), |window| {
             if let Some(selected) = selected.filter(|_| focused) {
                 window.paint_quad(fill(selected, selection_color));

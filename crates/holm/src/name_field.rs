@@ -24,7 +24,7 @@ use gpui_kit::{
 use crate::error::AppError;
 use crate::message_line::MessageLine;
 use crate::notes_folder::{Step, window_step};
-use crate::text_field::{FieldEvent, TextField};
+use crate::text_field::{self, FieldEvent, TextField};
 
 /// The end of a name write.
 pub(crate) type NameDone = Step<holm_core::Result<()>>;
@@ -171,8 +171,8 @@ impl Render for NameField {
         match &self.pending {
             Some(name) => div()
                 .min_w_0()
-                .truncate()
-                .child(name.clone())
+                .overflow_hidden()
+                .child(text_field::label(name.clone()))
                 .into_any_element(),
             None => self.field.clone().into_any_element(),
         }
