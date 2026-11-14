@@ -61,6 +61,16 @@ struct Shown {
     line_height: Pixels,
 }
 
+impl Shown {
+    /// The box of the glyphs from `start` to `end` on the line. The line paints its glyphs in
+    /// the middle of the line height, so the box fits the text in any line height.
+    fn span(&self, start: Pixels, end: Pixels) -> Bounds<Pixels> {
+        let height = self.line.ascent + self.line.descent;
+        let top = (self.line_height - height) / 2.;
+        Bounds::new(self.origin + point(start, top), size(end - start, height))
+    }
+}
+
 impl TextField {
     /// A field with `text`, all selected. The element gets `id` and the accessible name `label`.
     pub(crate) fn new(
@@ -328,11 +338,9 @@ impl EntityInputHandler for TextField {
     ) -> Option<Bounds<Pixels>> {
         let shown = self.shown.as_ref()?;
         let range = self.range_from_utf16(&range);
-        let start = shown.line.x_for_index(range.start);
-        let end = shown.line.x_for_index(range.end);
-        Some(Bounds::new(
-            shown.origin + point(start, px(0.)),
-            size(end - start, shown.line_height),
+        Some(shown.span(
+            shown.line.x_for_index(range.start),
+            shown.line.x_for_index(range.end),
         ))
     }
 
@@ -482,12 +490,8 @@ impl Element for Line {
         scroll = scroll.min(caret).min(width - view).max(px(0.));
         shown.origin = bounds.origin - point(scroll, px(0.));
         let x = |at: usize| shown.line.x_for_index(at);
-        let selected = (!empty && !selection.is_empty()).then(|| {
-            Bounds::new(
-                shown.origin + point(x(selection.start), px(0.)),
-                size(x(selection.end) - x(selection.start), shown.line_height),
-            )
-        });
+        let selected = (!empty && !selection.is_empty())
+            .then(|| shown.span(x(selection.start), x(selection.end)));
         let shown = shown.clone();
         entity.update(cx, |field, _| {
             field.scroll = scroll;
@@ -510,13 +514,7 @@ impl Element for Line {
                 )
                 .ok();
             if focused && selected.is_none() {
-                window.paint_quad(fill(
-                    Bounds::new(
-                        shown.origin + point(caret, px(0.)),
-                        size(CARET_WIDTH, shown.line_height),
-                    ),
-                    caret_color,
-                ));
+                window.paint_quad(fill(shown.span(caret, caret + CARET_WIDTH), caret_color));
             }
         });
     }

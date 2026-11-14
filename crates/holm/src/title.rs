@@ -28,8 +28,7 @@ const FOLDERS_WIDTH: Pixels = px(240.);
 
 const TEXT_SIZE: Pixels = px(12.);
 
-/// The line height of the path. It is about the height of the font, so the selection of the
-/// field fits the text.
+/// The line height of the path. It sets the place of the path in the middle of the tag row.
 const LINE_HEIGHT: Pixels = px(14.);
 
 pub(crate) struct TitleField<T> {
