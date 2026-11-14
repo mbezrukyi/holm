@@ -22,7 +22,7 @@ use crate::Editor;
 use crate::ink;
 use crate::model::{LineKind, Mark, Quote, Run};
 use flow::{ChipPaint, FlowLine, Icon};
-use layout::{COLUMN_WIDTH, SIDE_MARGIN};
+pub use layout::{COLUMN_WIDTH, SIDE_MARGIN};
 use layout::{Content, LaidLine, Shaper, lay_out, run_font};
 
 /// The width of a quote bar.

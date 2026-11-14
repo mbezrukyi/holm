@@ -93,8 +93,6 @@ pub struct Editor {
     pub(crate) start: Option<AnyView>,
     /// Whether the start view had the focus in the last frame.
     start_focused: bool,
-    /// A locked editor takes no click, key, typed text or drop.
-    locked: bool,
 }
 
 /// A mouse drag after a click. The selection grows by `unit` from `origin`.
@@ -258,7 +256,6 @@ impl Editor {
             custom_colors: Vec::new(),
             start: None,
             start_focused: false,
-            locked: false,
         }
     }
 
@@ -414,12 +411,6 @@ impl Editor {
         }
     }
 
-    /// Locks or unlocks the text. A locked editor takes no click, key, typed text or drop,
-    /// so the text stays as it is. The start view still works.
-    pub fn set_locked(&mut self, locked: bool) {
-        self.locked = locked;
-    }
-
     /// Opens `target`: moves to a heading in this note, or tells the app.
     fn open_link(&mut self, target: Target, cx: &mut Context<Self>) {
         match target {
@@ -501,7 +492,7 @@ impl Editor {
     /// A key down. It returns whether the key stops here.
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) -> bool {
         // A key in the start view, which lies inside the editor.
-        if self.locked || !self.focus.is_focused(window) {
+        if !self.focus.is_focused(window) {
             return false;
         }
         let modifiers = event.keystroke.modifiers;
@@ -854,11 +845,6 @@ impl Editor {
         {
             return;
         }
-        if self.locked {
-            // Else the click would give the editor the focus.
-            window.prevent_default();
-            return;
-        }
         window.focus(&self.focus, cx);
         self.find = None;
         self.color = None;
@@ -953,9 +939,6 @@ impl Editor {
     }
 
     fn drop_files(&mut self, paths: &ExternalPaths, window: &mut Window, cx: &mut Context<Self>) {
-        if self.locked {
-            return;
-        }
         window.focus(&self.focus, cx);
         self.find = None;
         self.color = None;
@@ -1080,9 +1063,6 @@ impl EntityInputHandler for Editor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.locked {
-            return;
-        }
         if let Some(window) = &mut self.color {
             window.push(text);
             cx.notify();

@@ -22,10 +22,10 @@ use crate::model::{Cell, Chip, DisplayLine, Embed, LineKind, Look, Mark, Model, 
 pub(crate) const IMAGE_MARGIN: Pixels = px(4.);
 
 /// The widest the text column gets. A wider editor centers the column.
-pub(crate) const COLUMN_WIDTH: Pixels = px(680.);
+pub const COLUMN_WIDTH: Pixels = px(680.);
 
 /// The least space between the text column and each side of the editor.
-pub(crate) const SIDE_MARGIN: Pixels = px(32.);
+pub const SIDE_MARGIN: Pixels = px(32.);
 
 /// The font of code blocks and inline code.
 pub(crate) const CODE_FONT: &str = "Adwaita Mono";
