@@ -61,6 +61,8 @@ pub(crate) struct Chip {
     pub(crate) range: Range<usize>,
     /// The link target.
     pub(crate) target: String,
+    /// The link text as plain text, with no Markdown escapes.
+    pub(crate) name: String,
 }
 
 /// The screen text of a chip. The layout puts a box in its place.
@@ -85,6 +87,7 @@ pub(crate) fn plain_chip(_target: &str) -> Embed {
 struct ChipLink<'a> {
     start: usize,
     target: &'a str,
+    name: &'a str,
 }
 
 /// A part of the source that the screen shows.
@@ -184,10 +187,14 @@ impl Model {
         let source = self.line_range(line);
         let mut images = Vec::new();
         let mut chips = Vec::new();
-        for (start, target) in self.files_in(&source) {
+        for (start, target, name) in self.files_in(&source) {
             match embed(target) {
                 Embed::Image => images.push(target.to_owned()),
-                Embed::Chip => chips.push(ChipLink { start, target }),
+                Embed::Chip => chips.push(ChipLink {
+                    start,
+                    target,
+                    name,
+                }),
             }
         }
         let chain = self.blocks_of_line(&source);
@@ -539,14 +546,19 @@ impl Model {
     }
 
     /// The start and the target of each embedded file on `line`.
-    fn files_in(&self, line: &Range<usize>) -> Vec<(usize, &str)> {
+    /// The start, the target and the text of each embedded file link in `line`.
+    fn files_in(&self, line: &Range<usize>) -> Vec<(usize, &str, &str)> {
         let links = self.body.links();
         links[links.partition_point(|l| l.range.start < line.start)
             ..links.partition_point(|l| l.range.start < line.end)]
             .iter()
             .filter(|link| link.embedded)
             .filter_map(|link| match &link.target {
-                Target::File(path) => Some((link.range.start, path.as_str())),
+                Target::File(path) => Some((
+                    link.range.start,
+                    path.as_str(),
+                    &self.text[link.text.clone()],
+                )),
                 _ => None,
             })
             .collect()
@@ -607,6 +619,7 @@ impl Shown {
         self.chips.push(Chip {
             range: start..self.text.len(),
             target: chip.target.to_owned(),
+            name: holm_markdown::unescape_text(chip.name),
         });
     }
 
@@ -681,6 +694,23 @@ mod tests {
         let done = model.display_line(5, &mut plain_chip);
         assert_eq!(done.shown.text, "done");
         assert!(matches!(done.mark, Some(Mark::Task { checked: true, .. })));
+    }
+
+    #[test]
+    fn a_chip_has_the_link_text_as_its_name() {
+        let model = model_at(
+            "x\n\n![photo.png](attachments/photo-3fa9c2e1.png) ![](a/b.pdf) ![a\\_b.toml](a_b.toml)\n",
+            0,
+        );
+        let line = model.display_line(2, &mut plain_chip);
+        let names: Vec<_> = line
+            .shown
+            .chips
+            .iter()
+            .map(|chip| chip.name.as_str())
+            .collect();
+        assert_eq!(names, ["photo.png", "", "a_b.toml"]);
+        assert_eq!(line.shown.chips[0].target, "attachments/photo-3fa9c2e1.png");
     }
 
     #[test]

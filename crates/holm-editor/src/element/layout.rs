@@ -659,10 +659,13 @@ impl Shaper<'_> {
                     })
                     .unwrap_or(&detail_run);
                 let kind = self.files.kind(&chip.target);
-                let name = Path::new(&chip.target).file_name().map_or_else(
-                    || chip.target.as_str().into(),
-                    |name| name.to_string_lossy(),
-                );
+                let name = match chip.name.as_str() {
+                    "" => Path::new(&chip.target).file_name().map_or_else(
+                        || chip.target.as_str().into(),
+                        |name| name.to_string_lossy(),
+                    ),
+                    name => name.into(),
+                };
                 let detail = match kind {
                     FileKind::File(bytes) => Some((file_size(bytes), &detail_run)),
                     _ => None,

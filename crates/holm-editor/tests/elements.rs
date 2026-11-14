@@ -126,7 +126,12 @@ fn a_file_link_shows_as_a_chip_in_its_line() {
 #[test]
 fn ctrl_click_on_a_file_chip_sends_open_file() {
     let mut app = app();
-    let (editor, cx) = open(&mut app, "a\n\nSee ![f](report.pdf) now", WIDTH, HEIGHT);
+    let (editor, cx) = open(
+        &mut app,
+        "a\n\nSee ![report.pdf](report.pdf) now",
+        WIDTH,
+        HEIGHT,
+    );
     let opened = opened_files(&editor, cx);
     // "See ", then the chip, with its name after the icon.
     let name = point(column_x(cx, 12.5), LINE_HEIGHT * 2.5);
@@ -138,7 +143,7 @@ fn ctrl_click_on_a_file_chip_sends_open_file() {
     assert_eq!(opened.borrow().len(), 1);
     cx.simulate_keystrokes("ctrl-enter");
     assert_eq!(*opened.borrow(), vec![PathBuf::from("report.pdf"); 2]);
-    assert_eq!(text(&editor, cx), "a\n\nSee ![f](report.pdf) now");
+    assert_eq!(text(&editor, cx), "a\n\nSee ![report.pdf](report.pdf) now");
 }
 
 #[test]

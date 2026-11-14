@@ -40,7 +40,7 @@ pub(crate) struct Theme {
     pub(crate) code_background: Hsla,
     /// Lines of quotes, tables and rules, and the borders of boxes.
     pub(crate) line: Hsla,
-    /// The background of table heads, file cards and loading images.
+    /// The background of table heads, file chips and loading images.
     pub(crate) panel: Hsla,
     pub(crate) callouts: [CalloutColors; 5],
     tokens: [Hsla; 10],
