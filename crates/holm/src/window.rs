@@ -1,4 +1,4 @@
-//! The main window: the notes folder screen, the notes view, and the bars from the start.
+//! The main window: the notes folder screen, the notes view, and the message line under them.
 //!
 //! The first start asks for the notes folder. A notes folder that Holm can't open shows
 //! a screen that offers to pick another one.
@@ -9,16 +9,16 @@ use std::sync::Arc;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Bounds, Context, ElementId, Entity, InteractiveElement as _,
+    AnyElement, App, AppContext as _, Bounds, Context, Entity, InteractiveElement as _,
     IntoElement, ParentElement, PathPromptOptions, Render, Role, SharedString,
     StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _, TitlebarOptions,
     Window, WindowBounds, WindowDecorations, WindowOptions, div, px, size,
 };
 use holm_core::Core;
 
-use crate::bar::{self, Bar};
 use crate::config::{Config, Settings, Theme};
 use crate::error::AppError;
+use crate::message_line::MessageLine;
 use crate::notes::NotesView;
 use crate::{notes_folder, text, theme};
 
@@ -68,7 +68,7 @@ pub(crate) struct HolmWindow {
     index_dir: PathBuf,
     default_folder: PathBuf,
     stage: Stage,
-    notices: Vec<Notice>,
+    line: Entity<MessageLine>,
     _appearance: Subscription,
 }
 
@@ -79,12 +79,6 @@ enum Stage {
     /// Holm can't open the notes folder.
     Failed(SharedString),
     Open(Entity<NotesView>),
-}
-
-/// A bar from the start that the user closes.
-struct Notice {
-    id: &'static str,
-    text: SharedString,
 }
 
 impl HolmWindow {
@@ -102,18 +96,9 @@ impl HolmWindow {
                 theme::apply(Theme::System, window, cx);
             }
         });
-        let mut notices = Vec::new();
+        let line = cx.new(MessageLine::new);
         if let Some(log) = crash_log {
-            notices.push(Notice {
-                id: "crashed",
-                text: text::crashed(&log).into(),
-            });
-        }
-        if config.is_broken() {
-            notices.push(Notice {
-                id: "config-broken",
-                text: text::CONFIG_BROKEN.into(),
-            });
+            line.update(cx, |line, cx| line.show(text::crashed(&log), cx));
         }
         let folder = config.settings().notes_folder.clone();
         let mut this = Self {
@@ -122,7 +107,7 @@ impl HolmWindow {
             index_dir,
             default_folder,
             stage: Stage::Ask,
-            notices,
+            line,
             _appearance: appearance,
         };
         if let Some(folder) = folder {
@@ -144,6 +129,7 @@ impl HolmWindow {
         let index_dir = self.index_dir.clone();
         let open = self.open_core.clone();
         let last = self.config.read(cx).settings().last_note.clone();
+        let line = self.line.clone();
         let job = cx.background_spawn({
             let folder = folder.clone();
             async move { notes_folder::open(&*open, &folder, &index_dir, create, last.as_deref()) }
@@ -155,9 +141,9 @@ impl HolmWindow {
                     Ok((core, note)) => {
                         let folder = folder.clone();
                         let config = this.config.clone();
-                        Stage::Open(
-                            cx.new(|cx| NotesView::new(core, folder, note, config, window, cx)),
-                        )
+                        Stage::Open(cx.new(|cx| {
+                            NotesView::new(core, folder, note, config, line, window, cx)
+                        }))
                     }
                     Err(error) => {
                         tracing::warn!(error = %crate::chain(&error), "cannot open the notes folder");
@@ -191,11 +177,8 @@ impl HolmWindow {
         };
         if let Err(error) = self.config.update(cx, |config, _| config.save(settings)) {
             tracing::warn!(error = %crate::chain(&error), "cannot save the settings");
-            self.notices.retain(|notice| notice.id != "config-write");
-            self.notices.push(Notice {
-                id: "config-write",
-                text: error.message().into(),
-            });
+            self.line
+                .update(cx, |line, cx| line.show(error.message(), cx));
         }
         self.open_folder(folder, create, window, cx);
     }
@@ -226,21 +209,65 @@ impl HolmWindow {
         .detach();
     }
 
+    /// The text under the title when the config file is broken. The path is a code chip.
+    /// The words wrap one by one, as plain text has no place for a chip with a padding.
+    fn config_broken(&self, cx: &App) -> AnyElement {
+        let theme = cx.theme();
+        let path = text::home_path(self.config.read(cx).path());
+        let word = |word: &str| div().child(word.to_owned()).into_any_element();
+        let (mark, after) = mark_after_chip(text::CONFIG_BROKEN_AFTER);
+        // A path wider than the text wraps inside its chip.
+        let chip = h_flex()
+            .max_w_full()
+            .min_w_0()
+            .items_baseline()
+            .child(
+                div()
+                    .min_w_0()
+                    .px(px(5.))
+                    .py(px(1.))
+                    .rounded(px(4.))
+                    .bg(theme.accent)
+                    .font_family(theme.mono_font_family.clone())
+                    .text_size(px(12.5))
+                    .child(path),
+            )
+            .child(word(mark))
+            .into_any_element();
+        h_flex()
+            .flex_wrap()
+            .items_baseline()
+            .gap_x(px(4.))
+            .text_color(theme.muted_foreground)
+            .children(text::CONFIG_BROKEN_BEFORE.split_whitespace().map(word))
+            .child(chip)
+            .children(after.split_whitespace().map(word))
+            .into_any_element()
+    }
+
     fn folder_screen(&self, cx: &mut Context<Self>) -> AnyElement {
         let pick = Button::new("pick-folder")
             .label(text::PICK_FOLDER)
             .on_click(cx.listener(|_, _, window, cx| Self::pick(window, cx)));
+        // A broken config file lost the notes folder, so the screen tells why it asks.
+        let (title, about) = if self.config.read(cx).is_broken() {
+            (text::CONFIG_BROKEN, self.config_broken(cx))
+        } else {
+            (
+                text::ASK_FOLDER,
+                div()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(text::ABOUT_FOLDER)
+                    .into_any_element(),
+            )
+        };
         let (message, content) = match &self.stage {
             Stage::Ask => (
-                SharedString::from(text::ASK_FOLDER),
+                SharedString::from(title),
                 v_flex()
                     .gap_2()
-                    .child(div().text_lg().child(text::ASK_FOLDER))
-                    .child(
-                        div()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(text::ABOUT_FOLDER),
-                    )
+                    .child(div().text_lg().child(title))
+                    .child(about)
                     .child(
                         h_flex()
                             .pt_4()
@@ -270,7 +297,13 @@ impl HolmWindow {
                     .text_color(cx.theme().muted_foreground)
                     .child(text::OPENING),
             ),
-            Stage::Open(pane) => return pane.clone().into_any_element(),
+            Stage::Open(notes) => {
+                return div()
+                    .flex_1()
+                    .min_h_0()
+                    .child(notes.clone())
+                    .into_any_element();
+            }
         };
         div()
             .id("folder-screen")
@@ -289,26 +322,21 @@ impl HolmWindow {
 impl Render for HolmWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
-        let notices = self.notices.iter().map(|notice| {
-            let id = notice.id;
-            Bar::new(id, notice.text.clone()).button(
-                bar::button(ElementId::Name(format!("{id}-close").into()), text::CLOSE).on_click(
-                    cx.listener(move |this, _, _, cx| {
-                        this.notices.retain(|notice| notice.id != id);
-                        cx.notify();
-                    }),
-                ),
-            )
-        });
         v_flex()
             .size_full()
             .bg(theme.background)
             .text_color(theme.foreground)
             .font_family(theme.font_family.clone())
             .text_size(theme.font_size)
-            .children(notices.collect::<Vec<_>>())
             .child(self.folder_screen(cx))
+            .child(self.line.clone())
     }
+}
+
+/// Splits the text after a chip into the mark that stays on the chip, like a comma, and the
+/// rest. The mark keeps no space before it.
+fn mark_after_chip(after: &str) -> (&str, &str) {
+    after.split_at(after.find(char::is_whitespace).unwrap_or(after.len()))
 }
 
 #[cfg(test)]

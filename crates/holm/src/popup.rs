@@ -146,6 +146,18 @@ impl<T: 'static> Dropdown<T> {
         }
     }
 
+    /// Takes the bounds of the opener from `opener`, for an opener that another part draws and
+    /// keeps the bounds of. Without it, [`Self::root`] keeps them.
+    pub(crate) fn with_opener(mut self, opener: Rc<Cell<Bounds<Pixels>>>) -> Self {
+        self.opener = opener;
+        self
+    }
+
+    /// The window bounds of the opener in the last frame.
+    pub(crate) fn opener(&self) -> Bounds<Pixels> {
+        self.opener.get()
+    }
+
     /// The handle that the popup tracks. The owner focuses it, or a part in the popup.
     pub(crate) fn focus_handle(&self) -> &FocusHandle {
         &self.focus
@@ -166,6 +178,11 @@ impl<T: 'static> Dropdown<T> {
     /// The popup panel under the opener, `width` wide. The owner places it to the left or to
     /// the right.
     pub(crate) fn panel(&self, width: Pixels, window: &Window, cx: &Context<T>) -> Div {
+        self.frame(width, window, cx).absolute().top_full().mt_1()
+    }
+
+    /// The popup panel, `width` wide, with no place. The owner places it.
+    pub(crate) fn frame(&self, width: Pixels, window: &Window, cx: &Context<T>) -> Div {
         // GPUI tells about a focus move only after the next frame. This hides the panel in
         // that frame already.
         let left = self.held.get() && !self.focus.contains_focused(window, cx);
@@ -173,9 +190,6 @@ impl<T: 'static> Dropdown<T> {
         let close = self.close;
         panel(width, cx)
             .track_focus(&self.focus)
-            .absolute()
-            .top_full()
-            .mt_1()
             .py_1()
             .occlude()
             .text_size(px(12.))

@@ -15,8 +15,8 @@ pub(crate) const CONFIG_WRITE: &str = "Holm can't save the settings.";
 pub(crate) const LOG: &str = "Holm can't write its log.";
 pub(crate) const WINDOW: &str = "Holm can't open its window.";
 pub(crate) const NO_HOME: &str = "Holm can't find your home folder.";
-pub(crate) const CONFIG_BROKEN: &str =
-    "The config file has an error. Holm uses the default settings and does not change the file.";
+/// The title of the folder screen when the config file is broken.
+pub(crate) const CONFIG_BROKEN: &str = "Holm can't read the config file.";
 
 pub(crate) const TITLE: &str = "Holm";
 pub(crate) const ASK_FOLDER: &str = "Where do your notes live?";
@@ -25,16 +25,34 @@ pub(crate) const USE_DEFAULT: &str = "Use ~/Notes";
 pub(crate) const PICK_FOLDER: &str = "Pick a folder";
 pub(crate) const PICK_PROMPT: &str = "Use this folder";
 pub(crate) const OPENING: &str = "Holm opens the notes folder.";
-pub(crate) const CHANGED_ON_DISK: &str = "Changed on disk. Reload or keep mine?";
+pub(crate) const CHANGED_ON_DISK: &str = "Changed on disk";
 pub(crate) const RELOAD: &str = "Reload";
 pub(crate) const KEEP_MINE: &str = "Keep mine";
-pub(crate) const DELETED_ON_DISK: &str = "Deleted on disk. Keep mine or close?";
+pub(crate) const DELETED_ON_DISK: &str = "Deleted on disk";
+pub(crate) const NOT_SAVED: &str = "Not saved";
+/// The mark before a state in the message line.
+pub(crate) const STATE_MARK: &str = "●";
 pub(crate) const NO_NOTE_OPEN: &str = "No note is open.";
 pub(crate) const NEW_NOTE: &str = "New note";
 pub(crate) const CLOSE: &str = "Close";
 
 pub(crate) fn folder_missing(folder: &Path) -> String {
     format!("Holm can't find the notes folder {}.", folder.display())
+}
+
+/// The words under [`CONFIG_BROKEN`] before the path of the config file.
+pub(crate) const CONFIG_BROKEN_BEFORE: &str =
+    "So Holm doesn't know where your notes live. Fix the error in";
+/// The words after the path.
+pub(crate) const CONFIG_BROKEN_AFTER: &str =
+    ", or pick a folder for now. Holm doesn't change the file, so it asks again at the next start.";
+
+/// `path` with `~` for the home folder.
+pub(crate) fn home_path(path: &Path) -> String {
+    match std::env::home_dir().and_then(|home| path.strip_prefix(home).ok().map(Path::to_owned)) {
+        Some(rest) => Path::new("~").join(rest).display().to_string(),
+        None => path.display().to_string(),
+    }
 }
 
 pub(crate) fn crashed(log: &Path) -> String {
@@ -128,4 +146,19 @@ pub(crate) const LINK_FILE: &str = "Link";
 /// The last row of the link picker, which makes a note.
 pub(crate) fn create_note(title: &str) -> String {
     format!("Create “{title}”")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_path_in_the_home_folder_starts_with_a_tilde() {
+        let home = std::env::home_dir().expect("a home folder");
+        assert_eq!(
+            home_path(&home.join(".config/holm/config.toml")),
+            "~/.config/holm/config.toml"
+        );
+        assert_eq!(home_path(Path::new("/etc/holm.toml")), "/etc/holm.toml");
+    }
 }

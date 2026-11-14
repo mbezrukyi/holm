@@ -3,10 +3,10 @@
 //!
 //! The pane saves a short time after the user stops typing, and when the app quits.
 //! An outside change of the note reloads it quietly when the pane has no unsaved
-//! changes. Else a quiet bar asks to reload or to keep the text in the editor.
-//! When a save fails, a quiet bar shows the error, and the text stays in the editor.
-//! When another tool deletes the note, the app opens another one. With unsaved changes, a quiet
-//! bar first asks to write the note again or to close it.
+//! changes. Else the message line asks to reload or to keep the text in the editor.
+//! When a save fails, the message line shows "Not saved", and the text stays in the editor.
+//! When another tool deletes the note, the app opens another one. With unsaved changes, the
+//! message line first asks to write the note again or to close it.
 //!
 //! When the user opens another note, the pane saves the note and renames the file to match
 //! the title. When the window closes, the pane only saves the note.
@@ -18,6 +18,7 @@
 //! The pane runs the link picker flow. `links` opens the links of the note and reads its
 //! backlinks. The backlinks show in the tag row.
 
+mod disk_menu;
 mod links;
 
 use std::borrow::Cow;
@@ -37,12 +38,13 @@ use holm_editor::{Changed, Editor, UpFromStart};
 use holm_markdown::Target;
 
 use crate::backlinks::{Backlinks, OpenBacklink};
-use crate::bar::{self, Bar};
 use crate::error::AppError;
 use crate::link_picker::{LinkChoice, LinkStart};
+use crate::message_line::{MessageLine, OpenState};
 use crate::notes_folder::{FolderEvent, Move, NoteText, NotesFolder, Step};
 use crate::tags::{TagChange, TagRow};
 use crate::{text, theme};
+use disk_menu::{Answer, Choice, Disk, DiskMenu};
 use links::{Links, LinksEvent};
 
 /// How long the pane waits after the last change before it saves.
@@ -72,6 +74,8 @@ pub(crate) enum Leave {
 
 pub(crate) struct NotePane {
     notes_folder: Entity<NotesFolder>,
+    line: Entity<MessageLine>,
+    disk_menu: Entity<DiskMenu>,
     /// The notes folder on disk, for the file links of the editor.
     root: PathBuf,
     editor: Entity<Editor>,
@@ -90,11 +94,10 @@ pub(crate) struct NotePane {
     /// The editor text that matches the file on disk.
     saved: String,
     autosave: Option<Task<()>>,
-    /// The note changed on disk while the editor had unsaved changes.
-    conflict: bool,
-    /// Another tool deleted the note while the editor had unsaved changes.
-    deleted: bool,
-    error: Option<&'static str>,
+    /// Another tool changed or deleted the note while the editor had unsaved changes.
+    disk: Option<Disk>,
+    /// The reason of the last failed save, until a save works.
+    not_saved: Option<&'static str>,
     /// The number of the last open or drop of a note. A read for an older one is dropped.
     opening: u64,
     /// The heading to show when the note that opens is ready.
@@ -107,6 +110,7 @@ pub(crate) struct NotePane {
 impl NotePane {
     pub(crate) fn new(
         notes_folder: Entity<NotesFolder>,
+        line: Entity<MessageLine>,
         root: PathBuf,
         note: Option<Note>,
         window: &mut Window,
@@ -115,6 +119,8 @@ impl NotePane {
         let editor = cx.new(Editor::new);
         let text = editor.focus_handle(cx);
         let backlinks = cx.new(|cx| Backlinks::new(text.clone(), window, cx));
+        let state = line.read(cx).state_bounds();
+        let disk_menu = cx.new(|cx| DiskMenu::new(text.clone(), state, window, cx));
         let tag_row =
             cx.new(|cx| TagRow::new(notes_folder.clone(), backlinks.clone(), text, window, cx));
         editor.update(cx, |editor, cx| {
@@ -138,6 +144,12 @@ impl NotePane {
                 pane.change_tag(change.clone(), cx);
             }),
             cx.subscribe(&links, Self::links_event),
+            cx.subscribe(&disk_menu, |pane, _, answer: &Answer, cx| {
+                pane.answer_disk(*answer, cx);
+            }),
+            cx.subscribe_in(&line, window, |pane, _, _: &OpenState, window, cx| {
+                pane.open_state(window, cx);
+            }),
             cx.subscribe_in(
                 &backlinks,
                 window,
@@ -157,6 +169,8 @@ impl NotePane {
         editor.update(cx, |editor, cx| editor.set_appearance(appearance, cx));
         let mut pane = Self {
             notes_folder,
+            line,
+            disk_menu,
             root,
             editor,
             tag_row,
@@ -168,9 +182,8 @@ impl NotePane {
             ending: LineEnding::Lf,
             saved: String::new(),
             autosave: None,
-            conflict: false,
-            deleted: false,
-            error: None,
+            disk: None,
+            not_saved: None,
             opening: 0,
             open_heading: None,
             replace_link: false,
@@ -202,9 +215,7 @@ impl NotePane {
             self.fields_pending = 0;
         }
         self.show_fields(cx);
-        self.conflict = false;
-        self.deleted = false;
-        self.error = None;
+        self.settle(cx);
         if !reload && let Some(heading) = self.open_heading.take() {
             self.editor
                 .update(cx, |editor, cx| editor.show_heading(&heading, cx));
@@ -227,9 +238,7 @@ impl NotePane {
         self.fields_pending = 0;
         self.autosave = None;
         self.opening += 1;
-        self.conflict = false;
-        self.deleted = false;
-        self.error = None;
+        self.settle(cx);
         self.editor.update(cx, |editor, cx| editor.set_text("", cx));
         self.saved = String::new();
         self.links.update(cx, |links, cx| links.show(None, cx));
@@ -242,10 +251,59 @@ impl NotePane {
                 self.open_heading.clone_from(heading);
                 self.open(path.clone(), Leave::Keep, cx);
             }
-            LinksEvent::Error(message) => {
-                self.error = Some(message);
-                cx.notify();
-            }
+            LinksEvent::Error(message) => self.answer(message, cx),
+        }
+    }
+
+    /// Shows a one-time error in the message line.
+    fn answer(&self, message: &'static str, cx: &mut Context<Self>) {
+        self.line.update(cx, |line, cx| line.show(message, cx));
+    }
+
+    /// Sets the disk question. A new question closes the menu of the old one.
+    fn set_disk(&mut self, disk: Option<Disk>, cx: &mut Context<Self>) {
+        if self.disk != disk {
+            self.disk = disk;
+            self.disk_menu.update(cx, DiskMenu::close);
+        }
+        self.show_state(cx);
+    }
+
+    /// The editor text matches the file: no disk question, and no "Not saved".
+    fn settle(&mut self, cx: &mut Context<Self>) {
+        self.not_saved = None;
+        self.set_disk(None, cx);
+    }
+
+    /// Shows the state in the message line. A disk question wins over "Not saved".
+    fn show_state(&self, cx: &mut Context<Self>) {
+        let state = match (self.disk, self.not_saved) {
+            (Some(Disk::Changed), _) => Some(text::CHANGED_ON_DISK),
+            (Some(Disk::Deleted), _) => Some(text::DELETED_ON_DISK),
+            (None, Some(_)) => Some(text::NOT_SAVED),
+            (None, None) => None,
+        };
+        self.line
+            .update(cx, |line, cx| line.set_state(state.map(Into::into), cx));
+    }
+
+    /// Alt+D or a click on the state: opens or closes the disk menu, or shows why the note is
+    /// not saved.
+    pub(crate) fn open_state(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(disk) = self.disk {
+            self.disk_menu
+                .update(cx, |menu, cx| menu.toggle(disk, window, cx));
+        } else if let Some(reason) = self.not_saved {
+            self.answer(reason, cx);
+        }
+    }
+
+    fn answer_disk(&mut self, Answer { disk, choice }: Answer, cx: &mut Context<Self>) {
+        match (disk, choice) {
+            (Disk::Changed, Choice::KeepMine) => self.keep_mine(cx),
+            (Disk::Deleted, Choice::KeepMine) => self.keep_deleted(cx),
+            (_, Choice::Reload) => self.reload(cx),
+            (_, Choice::Close) => self.close_deleted(cx),
         }
     }
 
@@ -423,7 +481,7 @@ impl NotePane {
         });
     }
 
-    /// The end of a write of the tags or the pin. An error shows in the quiet bar.
+    /// The end of a write of the tags or the pin. An error shows in the message line.
     fn field_step(&mut self, cx: &Context<Self>) -> Step<holm_core::Result<()>> {
         self.fields_pending += 1;
         step(cx, |pane, result, cx| {
@@ -431,8 +489,7 @@ impl NotePane {
             if let Err(error) = result {
                 let error = AppError::from(error);
                 tracing::warn!(error = %crate::chain(&error), "cannot change the tags or the pin");
-                pane.error = Some(error.message());
-                cx.notify();
+                pane.answer(error.message(), cx);
             }
             pane.show_fields(cx);
         })
@@ -451,7 +508,7 @@ impl NotePane {
 
     /// Saves unsaved changes with no conflict.
     fn autosave(&mut self, cx: &mut Context<Self>) {
-        if !(self.conflict || self.deleted) {
+        if self.disk.is_none() {
             self.save(cx);
         }
     }
@@ -493,7 +550,7 @@ impl NotePane {
             .ending
             .to_disk(self.editor.read(cx).text())
             .into_owned();
-        Some(if self.deleted {
+        Some(if self.disk == Some(Disk::Deleted) {
             let mut info = self.last_info.clone()?;
             info.path = path;
             NoteText::Restore { info, body }
@@ -512,9 +569,7 @@ impl NotePane {
         let done = match result {
             Ok(()) => {
                 self.saved = text;
-                self.conflict = false;
-                self.deleted = false;
-                self.error = None;
+                self.settle(cx);
                 if self.is_dirty(cx) {
                     self.schedule_save(cx);
                 }
@@ -523,7 +578,12 @@ impl NotePane {
             Err(error) => {
                 let error = AppError::from(error);
                 tracing::warn!(error = %crate::chain(&error), "cannot save the note");
-                self.error = Some(error.message());
+                // Only the first fail since the last good save shows the reason.
+                if self.not_saved.is_none() {
+                    self.answer(error.message(), cx);
+                }
+                self.not_saved = Some(error.message());
+                self.show_state(cx);
                 false
             }
         };
@@ -538,11 +598,10 @@ impl NotePane {
         let unsaved = self.editor.read(cx).text() != self.saved;
         match change {
             Change::Changed(info) if info.path == *path => {
-                self.deleted = false;
                 if unsaved {
-                    self.conflict = true;
-                    cx.notify();
+                    self.set_disk(Some(Disk::Changed), cx);
                 } else {
+                    self.set_disk(None, cx);
                     self.reload(cx);
                 }
             }
@@ -553,10 +612,8 @@ impl NotePane {
             }
             Change::Removed(gone) if gone == *path => {
                 if unsaved {
-                    self.conflict = false;
-                    self.deleted = true;
                     self.autosave = None;
-                    cx.notify();
+                    self.set_disk(Some(Disk::Deleted), cx);
                 } else {
                     cx.emit(PaneEvent::Gone(gone));
                 }
@@ -579,8 +636,7 @@ impl NotePane {
                 Err(error) => {
                     let error = AppError::from(error);
                     tracing::warn!(error = %crate::chain(&error), "cannot reload the note");
-                    pane.error = Some(error.message());
-                    cx.notify();
+                    pane.answer(error.message(), cx);
                 }
             }
         });
@@ -589,15 +645,13 @@ impl NotePane {
     }
 
     fn keep_mine(&mut self, cx: &mut Context<Self>) {
-        self.conflict = false;
+        self.set_disk(None, cx);
         self.save(cx);
-        cx.notify();
     }
 
     /// "Keep mine" after an outside delete: writes the note again at its path.
     fn keep_deleted(&mut self, cx: &mut Context<Self>) {
         self.save(cx);
-        cx.notify();
     }
 
     /// "Close" after an outside delete: drops the note and its text, and the app opens another
@@ -684,8 +738,7 @@ impl NotePane {
             Err(error) => {
                 let error = AppError::from(error);
                 tracing::warn!(error = %crate::chain(&error), "cannot open the note");
-                self.error = Some(error.message());
-                cx.notify();
+                self.answer(error.message(), cx);
             }
         }
     }
@@ -743,29 +796,6 @@ impl Focusable for NotePane {
 
 impl Render for NotePane {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let conflict = self.conflict.then(|| {
-            Bar::new("changed-on-disk", text::CHANGED_ON_DISK)
-                .button(
-                    bar::button("reload", text::RELOAD)
-                        .on_click(cx.listener(|pane, _, _, cx| pane.reload(cx))),
-                )
-                .button(
-                    bar::button("keep-mine", text::KEEP_MINE)
-                        .on_click(cx.listener(|pane, _, _, cx| pane.keep_mine(cx))),
-                )
-        });
-        let deleted = self.deleted.then(|| {
-            Bar::new("deleted-on-disk", text::DELETED_ON_DISK)
-                .button(
-                    bar::button("keep-deleted", text::KEEP_MINE)
-                        .on_click(cx.listener(|pane, _, _, cx| pane.keep_deleted(cx))),
-                )
-                .button(
-                    bar::button("close-deleted", text::CLOSE)
-                        .on_click(cx.listener(|pane, _, _, cx| pane.close_deleted(cx))),
-                )
-        });
-        let error = self.error.map(|message| Bar::new("save-error", message));
         let body = if self.path.is_some() {
             div()
                 .flex_1()
@@ -781,10 +811,8 @@ impl Render for NotePane {
         v_flex()
             .size_full()
             .bg(cx.theme().background)
-            .children(conflict)
-            .children(deleted)
-            .children(error)
             .child(body)
+            .child(self.disk_menu.clone())
     }
 }
 

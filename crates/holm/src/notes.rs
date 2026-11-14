@@ -17,11 +17,11 @@ use gpui_kit::{
 use holm_core::model::{Note, Order};
 use holm_core::{Core, Snapshot};
 
-use crate::bar::{self, Bar};
 use crate::config::{Config, SidebarSettings};
 use crate::dialog::{Ask, Dialog, DialogEvent};
 use crate::error::AppError;
 use crate::link_picker::{LinkPicker, LinkPickerEvent, LinkStart};
+use crate::message_line::MessageLine;
 use crate::notes_folder::{NotesFolder, Step};
 use crate::pane::{Leave, NotePane, PaneEvent};
 use crate::picker::{FolderPicker, PickerEvent};
@@ -50,7 +50,7 @@ pub(crate) struct NotesView {
     /// The part that had the focus before quick open or the link picker. It gets the focus
     /// back on `Esc`.
     before_popup: Option<FocusHandle>,
-    error: Option<&'static str>,
+    line: Entity<MessageLine>,
     subscriptions: Vec<Subscription>,
 }
 
@@ -60,13 +60,15 @@ impl NotesView {
         root: PathBuf,
         note: Option<Note>,
         config: Entity<Config>,
+        line: Entity<MessageLine>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let settings = config.read(cx).settings().clone();
         let current = note.as_ref().map(|note| note.info.path.clone());
         let notes_folder = cx.new(|cx| NotesFolder::new(core, cx));
-        let pane = cx.new(|cx| NotePane::new(notes_folder.clone(), root, note, window, cx));
+        let pane =
+            cx.new(|cx| NotePane::new(notes_folder.clone(), line.clone(), root, note, window, cx));
         let sidebar = cx.new(|cx| {
             Sidebar::new(
                 notes_folder.clone(),
@@ -94,7 +96,7 @@ impl NotesView {
             quick_open: None,
             link_picker: None,
             before_popup: None,
-            error: None,
+            line,
             subscriptions,
         };
         this.keep_state(cx);
@@ -516,7 +518,7 @@ impl NotesView {
     }
 
     /// Puts the unsaved text of the pane in the write line, and then the write of `start`.
-    /// `done` gets its value in the update where the write ends. An error shows in a quiet bar.
+    /// `done` gets its value in the update where the write ends. An error shows in the message line.
     fn write<T: 'static>(
         &mut self,
         window: &mut Window,
@@ -551,7 +553,7 @@ impl NotesView {
             .update(cx, |notes_folder, cx| start(notes_folder, done, cx));
     }
 
-    /// Like [`Self::step`], for the result of a file action. An error shows in a quiet bar.
+    /// Like [`Self::step`], for the result of a file action. An error shows in the message line.
     fn then<T: 'static>(
         window: &Window,
         cx: &Context<Self>,
@@ -587,12 +589,12 @@ impl NotesView {
         self.sidebar.update(cx, Sidebar::close_rename);
     }
 
-    /// Shows the error of a file action in a quiet bar.
+    /// Shows the error of a file action as an answer.
     fn fail(&mut self, error: holm_core::Error, cx: &mut Context<Self>) {
         let error = AppError::from(error);
         tracing::warn!(error = %crate::chain(&error), "a file action failed");
-        self.error = Some(error.message());
-        cx.notify();
+        self.line
+            .update(cx, |line, cx| line.show(error.message(), cx));
     }
 
     fn focus_editor(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -653,6 +655,13 @@ impl NotesView {
         }
         let keystroke = &event.keystroke;
         let modifiers = keystroke.modifiers;
+        let alt_only =
+            modifiers.alt && !(modifiers.control || modifiers.shift || modifiers.platform);
+        if alt_only && keystroke.key == "d" {
+            self.pane.update(cx, |pane, cx| pane.open_state(window, cx));
+            cx.stop_propagation();
+            return;
+        }
         if !modifiers.control || modifiers.alt || modifiers.platform {
             return;
         }
@@ -710,8 +719,8 @@ impl NotesView {
     fn save_settings(&mut self, settings: crate::config::Settings, cx: &mut Context<Self>) {
         if let Err(error) = self.config.update(cx, |config, _| config.save(settings)) {
             tracing::warn!(error = %crate::chain(&error), "cannot save the settings");
-            self.error = Some(error.message());
-            cx.notify();
+            self.line
+                .update(cx, |line, cx| line.show(error.message(), cx));
         }
     }
 }
@@ -719,16 +728,6 @@ impl NotesView {
 impl Render for NotesView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
-        let error = self.error.map(|message| {
-            Bar::new("action-error", message).button(
-                bar::button("action-error-close", text::CLOSE).on_click(cx.listener(
-                    |this, _, _, cx| {
-                        this.error = None;
-                        cx.notify();
-                    },
-                )),
-            )
-        });
         // The drag strip lies over the sidebar line, so the rows reach the line.
         let sidebar = (!self.hidden).then(|| {
             div()
@@ -766,7 +765,6 @@ impl Render for NotesView {
             .on_mouse_move(cx.listener(Self::mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::mouse_up))
-            .children(error)
             .child(
                 h_flex()
                     .flex_1()

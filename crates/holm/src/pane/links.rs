@@ -27,7 +27,7 @@ pub(super) enum LinksEvent {
         path: PathBuf,
         heading: Option<String>,
     },
-    /// A message for the quiet bar.
+    /// An answer for the message line.
     Error(&'static str),
 }
 
@@ -203,7 +203,7 @@ impl Links {
     }
 
     /// Embeds a link to each file at the cursor, as `![..](..)`. It shows an image or a file
-    /// chip. An error shows in a quiet bar.
+    /// chip. An error shows in the message line.
     fn insert_file_links(
         &mut self,
         files: Vec<holm_core::Result<PathBuf>>,

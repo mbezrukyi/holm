@@ -130,7 +130,11 @@ impl Config {
         &self.settings
     }
 
-    /// Whether Holm could not read the file. The UI then shows a quiet bar.
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Whether Holm could not read the file. The folder screen then tells why it asks.
     pub(crate) fn is_broken(&self) -> bool {
         self.state == State::Broken
     }

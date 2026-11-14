@@ -12,7 +12,7 @@ use gpui_kit::{AnyWindowHandle, AppContext as _, Role, TestAppContext, Window};
 use holm_core::{Core, Feed};
 use tempfile::TempDir;
 
-use super::{HolmWindow, Startup};
+use super::{HolmWindow, Startup, mark_after_chip};
 use crate::config::Config;
 use crate::sidebar::{Item, View};
 use crate::{notes_folder, text, theme};
@@ -176,15 +176,34 @@ fn editor_text(cx: &mut TestAppContext, handle: AnyWindowHandle) -> String {
     })
 }
 
-/// The text of each quiet bar, from the top.
-fn bars(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
+/// The text on the left of the message line.
+fn message(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
+    label(cx, handle, "message")
+}
+
+/// The state on the right of the message line.
+fn state(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
+    label(cx, handle, "message-state")
+}
+
+/// The rows of the open disk menu. The selected one has `*`.
+fn disk_menu(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
+    labels(cx, handle, "disk-menu", Role::ListBoxOption)
+}
+
+fn label(cx: &mut TestAppContext, handle: AnyWindowHandle, id: &'static str) -> Option<String> {
     screen(cx, handle, |window| {
         window
-            .find_all_by_role(Role::Status)
-            .iter()
-            .filter_map(|bar| bar.label().map(str::to_owned))
-            .collect()
+            .try_find(id)
+            .and_then(|part| part.label().map(str::to_owned))
     })
+}
+
+/// Makes the notes folder read-only, so each new file fails. `false` undoes it.
+fn read_only(dir: &Path, read_only: bool) {
+    let mut permissions = fs::metadata(dir).unwrap().permissions();
+    permissions.set_readonly(read_only);
+    fs::set_permissions(dir, permissions).unwrap();
 }
 
 fn read(path: &Path) -> String {
@@ -273,7 +292,8 @@ fn an_outside_change_reloads_quietly_with_no_unsaved_text(cx: &mut TestAppContex
     fixture.write_outside(cx, "Note.md", "new\n");
 
     assert_eq!(editor_text(cx, handle), "new\n");
-    assert_eq!(bars(cx, handle), Vec::<String>::new());
+    assert_eq!(message(cx, handle), None);
+    assert_eq!(state(cx, handle), None);
 }
 
 #[gpui_kit::test]
@@ -285,42 +305,126 @@ fn an_outside_change_with_unsaved_text_asks_to_reload_or_keep_mine(cx: &mut Test
 
     cx.simulate_input(handle, "mine ");
     fixture.write_outside(cx, "Note.md", "theirs\n");
-    assert_eq!(bars(cx, handle), [text::CHANGED_ON_DISK]);
+    assert_eq!(state(cx, handle).as_deref(), Some(text::CHANGED_ON_DISK));
+    assert_eq!(message(cx, handle), None);
     autosave(cx);
     assert_eq!(read(&note), "theirs\n", "no autosave during the question");
 
-    click(cx, handle, "keep-mine");
+    // The open menu takes every key, and Esc closes only the menu.
+    keys(cx, handle, "alt-d");
+    assert_eq!(disk_menu(cx, handle), ["Keep mine*", "Reload"]);
+    let text = editor_text(cx, handle);
+    keys(cx, handle, "x backspace");
+    assert_eq!(editor_text(cx, handle), text);
+    keys(cx, handle, "escape");
+    assert_eq!(disk_menu(cx, handle), Vec::<String>::new());
+    assert_eq!(state(cx, handle).as_deref(), Some(text::CHANGED_ON_DISK));
+    assert_eq!(focus(cx, handle), "editor");
+
+    // A click outside the menu closes it, and so does a second click on the state.
+    keys(cx, handle, "alt-d");
+    click(cx, handle, "editor");
+    assert_eq!(disk_menu(cx, handle), Vec::<String>::new());
+    assert_eq!(state(cx, handle).as_deref(), Some(text::CHANGED_ON_DISK));
+    click(cx, handle, "message-state");
+    assert_eq!(disk_menu(cx, handle).len(), 2);
+    click(cx, handle, "message-state");
+    assert_eq!(disk_menu(cx, handle), Vec::<String>::new());
+    assert_eq!(focus(cx, handle), "editor");
+
+    keys(cx, handle, "alt-d enter");
     assert!(read(&note).ends_with("\n---\nmine old\n"));
-    assert_eq!(bars(cx, handle), Vec::<String>::new());
+    assert_eq!(state(cx, handle), None);
+    assert_eq!(focus(cx, handle), "editor");
 
     cx.simulate_input(handle, "x");
     fixture.write_outside(cx, "Note.md", "theirs again\n");
-    click(cx, handle, "reload");
+    click(cx, handle, "message-state");
+    assert_eq!(disk_menu(cx, handle), ["Keep mine*", "Reload"]);
+    keys(cx, handle, "down enter");
     assert_eq!(editor_text(cx, handle), "theirs again\n");
-    assert_eq!(bars(cx, handle), Vec::<String>::new());
+    assert_eq!(state(cx, handle), None);
 }
 
 #[gpui_kit::test]
-fn a_broken_config_shows_a_bar_and_stays_as_it_is(cx: &mut TestAppContext) {
+fn a_broken_config_tells_why_the_folder_screen_asks(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     fixture.write_config("version = [broken\n");
-    let handle = open(cx, fixture.startup(None));
-    assert_eq!(bars(cx, handle), [text::CONFIG_BROKEN]);
+    let log = PathBuf::from("/state/holm/holm.log");
+    let handle = open(cx, fixture.startup(Some(log.clone())));
+    assert_eq!(
+        folder_screen(cx, handle).as_deref(),
+        Some(text::CONFIG_BROKEN)
+    );
+    assert_eq!(message(cx, handle), Some(text::crashed(&log)));
 
+    keys(cx, handle, "escape");
+    assert_eq!(message(cx, handle), None);
     click(cx, handle, "use-default");
     assert!(empty_pane(cx, handle));
     assert_eq!(read(&fixture.config()), "version = [broken\n");
-
-    click(cx, handle, "config-broken-close");
-    assert_eq!(bars(cx, handle), Vec::<String>::new());
 }
 
 #[gpui_kit::test]
-fn a_crash_in_the_last_run_shows_the_log_path(cx: &mut TestAppContext) {
+fn an_answer_shows_under_the_note_until_the_next_key(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
+    fs::write(fixture.notes().join("Note.md"), "[gone](holm:01X)\n").unwrap();
     let log = PathBuf::from("/state/holm/holm.log");
     let handle = open(cx, fixture.startup(Some(log.clone())));
-    assert_eq!(bars(cx, handle), [text::crashed(&log)]);
+    assert_eq!(message(cx, handle), Some(text::crashed(&log)));
+    let (line, editor) = screen(cx, handle, |window| {
+        (
+            window.find("message-line").bounds(),
+            window.find("editor").bounds(),
+        )
+    });
+    assert!(line.top() >= editor.bottom(), "the line is under the note");
+
+    keys(cx, handle, "right");
+    assert_eq!(message(cx, handle), None);
+    assert!(
+        screen(cx, handle, |window| window.try_find("message-line")).is_none(),
+        "an empty line does not show"
+    );
+
+    keys(cx, handle, "ctrl-enter");
+    assert_eq!(message(cx, handle).as_deref(), Some(text::NOTE_GONE));
+    keys(cx, handle, "escape");
+    assert_eq!(message(cx, handle), None);
+}
+
+#[gpui_kit::test]
+fn a_failed_save_shows_not_saved_until_a_save_works(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    let note = notes_dir.join("Note.md");
+    fs::write(&note, "old\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    read_only(&notes_dir, true);
+    cx.simulate_input(handle, "a");
+    autosave(cx);
+    assert_eq!(message(cx, handle).as_deref(), Some(text::WRITE));
+    assert_eq!(state(cx, handle).as_deref(), Some(text::NOT_SAVED));
+
+    // A second fail does not show the reason again. Alt+D does.
+    keys(cx, handle, "right");
+    cx.simulate_input(handle, "b");
+    autosave(cx);
+    assert_eq!(message(cx, handle), None);
+    assert_eq!(state(cx, handle).as_deref(), Some(text::NOT_SAVED));
+    keys(cx, handle, "alt-d");
+    assert_eq!(message(cx, handle).as_deref(), Some(text::WRITE));
+    assert_eq!(editor_text(cx, handle), "aobld\n", "Alt+D types nothing");
+
+    // A disk question wins over "Not saved".
+    fixture.write_outside(cx, "Note.md", "theirs\n");
+    assert_eq!(state(cx, handle).as_deref(), Some(text::CHANGED_ON_DISK));
+
+    read_only(&notes_dir, false);
+    keys(cx, handle, "alt-d enter");
+    assert_eq!(state(cx, handle), None);
+    assert!(read(&note).ends_with("aobld\n"));
 }
 
 fn set_time(path: &Path, seconds: u64) {
@@ -1158,7 +1262,12 @@ fn a_failed_folder_rename_shows_the_old_name_and_the_error(cx: &mut TestAppConte
     keys_now(cx, handle, "enter");
     assert_eq!(tree_field(cx, handle), None);
     assert_eq!(tree(cx, handle), ["All notes", "work*"]);
-    assert_eq!(bars(cx, handle).len(), 1);
+    assert!(message(cx, handle).is_some());
+
+    // Esc clears the answer, and the sidebar still gets it.
+    keys(cx, handle, "escape");
+    assert_eq!(message(cx, handle), None);
+    assert_eq!(focus(cx, handle), "editor");
 }
 
 #[gpui_kit::test]
@@ -2009,9 +2118,9 @@ fn links_open_notes_at_headings_and_backlinks_lead_back(cx: &mut TestAppContext)
         Some("X## Ideas")
     );
 
-    // A link to a missing note shows a quiet bar.
+    // A link to a missing note shows an answer.
     keys(cx, handle, "down down ctrl-enter");
-    assert_eq!(bars(cx, handle), [text::NOTE_GONE]);
+    assert_eq!(message(cx, handle).as_deref(), Some(text::NOTE_GONE));
 }
 
 /// The label of the backlink count button, or `None` with no button.
@@ -2215,7 +2324,7 @@ fn an_outside_delete_opens_the_neighbor_or_the_empty_pane(cx: &mut TestAppContex
     fixture.delete_outside(cx, "Top.md");
     assert!(empty_pane(cx, handle));
     assert_eq!(files(&notes_dir), Vec::<String>::new());
-    assert_eq!(bars(cx, handle), Vec::<String>::new());
+    assert_eq!(state(cx, handle), None);
 }
 
 #[gpui_kit::test]
@@ -2228,21 +2337,25 @@ fn an_outside_delete_with_unsaved_text_asks_to_keep_or_close(cx: &mut TestAppCon
     cx.simulate_input(handle, "mine");
 
     fixture.delete_outside(cx, "Plan.md");
-    assert_eq!(bars(cx, handle), [text::DELETED_ON_DISK]);
+    assert_eq!(state(cx, handle).as_deref(), Some(text::DELETED_ON_DISK));
     autosave(cx);
     assert!(!notes_dir.join("Plan.md").exists(), "no autosave");
 
-    click(cx, handle, "keep-deleted");
-    assert_eq!(bars(cx, handle), Vec::<String>::new());
+    keys(cx, handle, "alt-d");
+    assert_eq!(disk_menu(cx, handle), ["Keep mine*", "Close"]);
+    keys(cx, handle, "escape");
+    assert_eq!(state(cx, handle).as_deref(), Some(text::DELETED_ON_DISK));
+    keys(cx, handle, "alt-d enter");
+    assert_eq!(state(cx, handle), None);
     assert!(read(&notes_dir.join("Plan.md")).ends_with("# Plan\nbuy milk\nmine\n"));
 
     cx.simulate_input(handle, "!");
     fixture.delete_outside(cx, "Plan.md");
-    assert_eq!(bars(cx, handle), [text::DELETED_ON_DISK]);
-    click(cx, handle, "close-deleted");
+    assert_eq!(state(cx, handle).as_deref(), Some(text::DELETED_ON_DISK));
+    keys(cx, handle, "alt-d down enter");
     assert_eq!(editor_text(cx, handle), "# Goals\nread more\n");
     assert!(!notes_dir.join("Plan.md").exists());
-    assert_eq!(bars(cx, handle), Vec::<String>::new());
+    assert_eq!(state(cx, handle), None);
 }
 
 #[gpui_kit::test]
@@ -2290,7 +2403,7 @@ fn close_after_an_outside_delete_writes_no_file(cx: &mut TestAppContext) {
     let before = times();
 
     fixture.delete_outside(cx, "Plan.md");
-    click(cx, handle, "close-deleted");
+    keys(cx, handle, "alt-d down enter");
     autosave(cx);
     assert_eq!(editor_text(cx, handle), "# Goals\nread more\n");
     assert_eq!(files(&notes_dir), ["Goals.md", "Top.md"]);
@@ -2345,3 +2458,9 @@ fn a_window_close_keeps_the_name_of_the_open_note(cx: &mut TestAppContext) {
 
 #[path = "window_speed.rs"]
 mod speed;
+
+#[test]
+fn a_comma_after_a_chip_stays_on_it() {
+    assert_eq!(mark_after_chip(", or pick"), (",", " or pick"));
+    assert_eq!(mark_after_chip("."), (".", ""));
+}
