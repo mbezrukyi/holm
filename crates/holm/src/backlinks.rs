@@ -22,6 +22,9 @@ use holm_core::model::NoteInfo;
 use crate::popup::{self, Dropdown};
 use crate::text;
 
+/// The padding on each side of the count, inside its hover background.
+pub(crate) const BUTTON_PAD: Pixels = px(6.);
+
 const LIST_WIDTH: Pixels = px(260.);
 
 /// The list scrolls when it is taller than this.
@@ -121,7 +124,7 @@ impl Backlinks {
             .role(Role::Button)
             .aria_label(label.clone())
             .test_support()
-            .px(px(6.))
+            .px(BUTTON_PAD)
             .rounded(theme.radius)
             .text_size(px(12.))
             .text_color(theme.muted_foreground)

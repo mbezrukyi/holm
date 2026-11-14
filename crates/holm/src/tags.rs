@@ -40,7 +40,7 @@ use gpui_kit::{
 };
 use holm_core::model::Tag;
 
-use crate::backlinks::Backlinks;
+use crate::backlinks::{self, Backlinks};
 use crate::fold::Fold;
 use crate::notes_folder::NotesFolder;
 use crate::popup::{self, Dropdown};
@@ -55,8 +55,7 @@ pub(crate) const CHIP_WIDTH: Pixels = px(200.);
 
 const POPUP_WIDTH: Pixels = px(300.);
 
-/// The gap between the title and the dot before the backlinks count. The count has the same
-/// padding.
+/// The gap on each side of the dot before the backlinks count.
 const TAIL_GAP: Pixels = px(6.);
 
 /// The user added or removed one tag of the note.
@@ -532,14 +531,14 @@ impl Render for TagRow {
                 .child(text::PIN_MARK)
         });
         let add = self.tags.is_empty().then(|| Self::add_chip(cx));
-        // The count has its own padding, so it needs no gap after the dot. Then the dot sits
-        // in the middle between the title and the count text.
+        // The count text starts after its own padding.
         let tail = h_flex()
             .gap(TAIL_GAP)
             .child(self.title.clone())
             .when(has_backlinks, |tail| {
                 tail.child(
                     h_flex()
+                        .gap(TAIL_GAP - backlinks::BUTTON_PAD)
                         .child(
                             div()
                                 .id("path-dot")
