@@ -5,6 +5,8 @@
 //!   clears it, and the key still does its own job.
 //! - The right side shows a state, like "Not saved", after a mark. A click on it sends
 //!   [`OpenState`].
+//! - While a write is late, the right side shows "Writing…" in place of the state. It takes
+//!   no clicks.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -31,6 +33,7 @@ pub(crate) struct OpenState;
 pub(crate) struct MessageLine {
     message: Option<SharedString>,
     state: Option<SharedString>,
+    writing: bool,
     /// The window bounds of the state in the last frame.
     state_bounds: Rc<Cell<Bounds<Pixels>>>,
     _pressed: Subscription,
@@ -48,6 +51,7 @@ impl MessageLine {
         Self {
             message: None,
             state: None,
+            writing: false,
             state_bounds: Rc::default(),
             _pressed: pressed,
         }
@@ -63,6 +67,14 @@ impl MessageLine {
     pub(crate) fn set_state(&mut self, state: Option<SharedString>, cx: &mut Context<Self>) {
         if self.state != state {
             self.state = state;
+            cx.notify();
+        }
+    }
+
+    /// Shows "Writing…" while `writing` is true.
+    pub(crate) fn set_writing(&mut self, writing: bool, cx: &mut Context<Self>) {
+        if self.writing != writing {
+            self.writing = writing;
             cx.notify();
         }
     }
@@ -118,7 +130,7 @@ impl EventEmitter<OpenState> for MessageLine {}
 
 impl Render for MessageLine {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.message.is_none() && self.state.is_none() {
+        if self.message.is_none() && self.state.is_none() && !self.writing {
             return div().into_any_element();
         }
         let theme = cx.theme();
@@ -144,7 +156,28 @@ impl Render for MessageLine {
             .border_t_1()
             .border_color(theme.status_bar_border)
             .child(div().flex_1().min_w_0().children(message))
-            .children(self.state.clone().map(|state| self.state(state, cx)))
+            .children(self.writing.then(|| writing(cx)))
+            .children(
+                (!self.writing)
+                    .then(|| self.state.clone())
+                    .flatten()
+                    .map(|state| self.state(state, cx)),
+            )
             .into_any_element()
     }
+}
+
+/// "Writing…" with the mark of a state, and no button.
+fn writing(cx: &Context<MessageLine>) -> impl IntoElement {
+    let label = SharedString::from(text::WRITING);
+    h_flex()
+        .id("message-state")
+        .role(Role::Status)
+        .aria_label(label.clone())
+        .test_support()
+        .flex_none()
+        .gap_1()
+        .px_2()
+        .child(div().text_color(cx.theme().primary).child(text::STATE_MARK))
+        .child(label)
 }

@@ -36,6 +36,7 @@ pub(crate) const RELOAD: &str = "Reload";
 pub(crate) const KEEP_MINE: &str = "Keep mine";
 pub(crate) const DELETED_ON_DISK: &str = "Deleted on disk";
 pub(crate) const NOT_SAVED: &str = "Not saved";
+pub(crate) const WRITING: &str = "Writing…";
 /// The mark before a state in the message line.
 pub(crate) const STATE_MARK: &str = "●";
 pub(crate) const NO_NOTE_OPEN: &str = "No note is open.";

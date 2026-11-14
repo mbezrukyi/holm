@@ -137,9 +137,6 @@ pub(crate) struct NotePane {
     /// The facts of the open note in the last snapshot that had it. A restore after an
     /// outside delete writes them again.
     last_info: Option<NoteInfo>,
-    /// The writes of the tags or the pin that did not end yet. Until they end, the tag row
-    /// shows its own tags and pin, not the ones of the snapshot.
-    fields_pending: usize,
     ending: LineEnding,
     /// The editor text that matches the file on disk.
     saved: String,
@@ -248,7 +245,6 @@ impl NotePane {
             links,
             shown: Shown::Empty,
             last_info: None,
-            fields_pending: 0,
             ending: LineEnding::Lf,
             saved: String::new(),
             autosave: None,
@@ -285,9 +281,6 @@ impl NotePane {
             open.clone_from(&path);
         }
         self.last_info = Some(note.info);
-        if !reload {
-            self.fields_pending = 0;
-        }
         self.show_fields(cx);
         self.settle(cx);
         if !reload && let Some(heading) = self.open_heading.take() {
@@ -310,7 +303,6 @@ impl NotePane {
         self.title.update(cx, TitleField::close);
         self.shown = Shown::Empty;
         self.last_info = None;
-        self.fields_pending = 0;
         self.autosave = None;
         self.opening += 1;
         self.settle(cx);
@@ -500,8 +492,7 @@ impl NotePane {
         });
     }
 
-    /// Shows the tags and the pin of the open note from the snapshot, when no write of them
-    /// waits.
+    /// Shows the tags and the pin of the open note from the snapshot.
     fn show_fields(&mut self, cx: &mut Context<Self>) {
         let path = self.shown.editor().cloned();
         self.title
@@ -511,9 +502,6 @@ impl NotePane {
         };
         if let Some(info) = self.notes_folder.read(cx).snapshot().note(&path) {
             self.last_info = Some(info.clone());
-        }
-        if self.fields_pending > 0 {
-            return;
         }
         if let Some(info) = &self.last_info {
             self.tag_row
@@ -525,7 +513,7 @@ impl NotePane {
         let Some(path) = self.shown.note().cloned() else {
             return;
         };
-        let done = self.field_step(cx);
+        let done = Self::field_step(cx);
         self.notes_folder.update(cx, |notes_folder, cx| {
             notes_folder.change_tag(path, change, done, cx);
         });
@@ -553,18 +541,16 @@ impl NotePane {
         let Some(path) = self.shown.note().cloned() else {
             return;
         };
-        let pinned = self.tag_row.update(cx, TagRow::toggle_pin);
-        let done = self.field_step(cx);
+        let pinned = !self.last_info.as_ref().is_some_and(|info| info.pinned);
+        let done = Self::field_step(cx);
         self.notes_folder.update(cx, |notes_folder, cx| {
             notes_folder.set_pinned(path, pinned, done, cx);
         });
     }
 
     /// The end of a write of the tags or the pin. An error shows in the message line.
-    fn field_step(&mut self, cx: &Context<Self>) -> Step<holm_core::Result<()>> {
-        self.fields_pending += 1;
+    fn field_step(cx: &Context<Self>) -> Step<holm_core::Result<()>> {
         step(cx, |pane, result, cx| {
-            pane.fields_pending = pane.fields_pending.saturating_sub(1);
             if let Err(error) = result {
                 let error = AppError::from(error);
                 tracing::warn!(error = %crate::chain(&error), "cannot change the tags or the pin");

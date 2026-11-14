@@ -15,8 +15,8 @@ use gpui_kit::{
     InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseMoveEvent, MouseUpEvent,
     ParentElement, Pixels, Render, Styled, Subscription, Window, div, px,
 };
+use holm_core::Snapshot;
 use holm_core::model::{Note, Order};
-use holm_core::{Core, Snapshot};
 
 use crate::config::{Config, SidebarSettings};
 use crate::dialog::{self, Ask, Dialog};
@@ -56,7 +56,7 @@ pub(crate) struct NotesView {
 
 impl NotesView {
     pub(crate) fn new(
-        core: Core,
+        notes_folder: Entity<NotesFolder>,
         root: PathBuf,
         note: Option<Note>,
         config: Entity<Config>,
@@ -66,7 +66,6 @@ impl NotesView {
     ) -> Self {
         let settings = config.read(cx).settings().clone();
         let current = note.as_ref().map(|note| note.info.path.clone());
-        let notes_folder = cx.new(|cx| NotesFolder::new(core, cx));
         let pane =
             cx.new(|cx| NotePane::new(notes_folder.clone(), line.clone(), root, note, window, cx));
         let this = cx.weak_entity();
@@ -88,6 +87,11 @@ impl NotesView {
             )
         });
         let subscriptions = vec![
+            cx.observe(&notes_folder, |this, notes_folder, cx| {
+                let writing = notes_folder.read(cx).writing();
+                this.line
+                    .update(cx, |line, cx| line.set_writing(writing, cx));
+            }),
             cx.subscribe_in(&sidebar, window, Self::sidebar_event),
             cx.subscribe_in(&pane, window, Self::pane_event),
         ];

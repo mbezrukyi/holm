@@ -88,12 +88,15 @@ impl Fixture {
             index_dir: self.dir.path().join("cache"),
             default_folder: self.dir.path().join("Notes"),
             crash_log,
+            write_budget: Duration::from_millis(50),
         }
     }
 }
 
 /// Opens an active window, as the user sees it. An inactive window sends no focus events.
+/// Each write ends within its budget, as a quick disk does.
 fn open(cx: &mut TestAppContext, startup: Startup) -> AnyWindowHandle {
+    cx.executor().set_block_on_ticks(usize::MAX..=usize::MAX);
     let opened = cx.update(|cx| {
         gpui_kit::init(cx);
         theme::init(cx);
@@ -1206,41 +1209,36 @@ fn tree_field(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String
 }
 
 #[gpui_kit::test]
-fn a_folder_rename_locks_the_field_until_the_write_ends(cx: &mut TestAppContext) {
+fn a_late_folder_rename_keeps_the_field_and_shows_writing(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     let notes_dir = fixture.notes();
     fs::create_dir(notes_dir.join("work")).unwrap();
     fs::create_dir(notes_dir.join("work/sub")).unwrap();
     fs::write(notes_dir.join("Top.md"), "# Top\n").unwrap();
-    let handle = open(cx, fixture.startup(None));
+    let startup = Startup {
+        write_budget: Duration::ZERO,
+        ..fixture.startup(None)
+    };
+    let handle = open(cx, startup);
 
     keys(cx, handle, "ctrl-shift-l escape down right");
-    assert_eq!(tree(cx, handle), ["All notes", "work*", "work/sub"]);
     type_new_name(cx, handle, "job");
-    assert_eq!(tree_field(cx, handle).as_deref(), Some("job"));
     press(cx, handle, "enter");
-    // The locked field shows as a plain row with the typed name.
-    assert_eq!(tree_field(cx, handle), None);
-    assert_eq!(tree(cx, handle), ["All notes", "job*", "work/sub"]);
+    assert_eq!(tree_field(cx, handle).as_deref(), Some("job"));
+    assert_eq!(tree(cx, handle), ["All notes", "work*", "work/sub"]);
+    assert_eq!(state(cx, handle).as_deref(), Some(text::WRITING));
 
-    // A key on the locked field does nothing.
+    // The field takes no keys until the write ends.
     press(cx, handle, "escape");
     press(cx, handle, "up");
-    assert_eq!(tree(cx, handle), ["All notes", "job*", "work/sub"]);
+    press(cx, handle, "backspace");
+    assert_eq!(tree_field(cx, handle).as_deref(), Some("job"));
+    assert_eq!(tree(cx, handle), ["All notes", "work*", "work/sub"]);
 
-    assert_eq!(
-        tree_steps(cx, handle),
-        [
-            ["All notes", "job*", "work/sub"],
-            ["All notes", "job*", "job/sub"]
-        ]
-    );
+    cx.run_until_parked();
     assert_eq!(tree_field(cx, handle), None);
-    // The first key after the write goes to the tree.
-    press(cx, handle, "up");
-    assert_eq!(tree(cx, handle), ["All notes*", "job", "job/sub"]);
-    settle(cx);
-    assert_eq!(tree(cx, handle), ["All notes*", "job", "job/sub"]);
+    assert_eq!(tree(cx, handle), ["All notes", "job*", "job/sub"]);
+    assert_eq!(state(cx, handle), None);
     assert!(notes_dir.join("job/sub").is_dir());
 }
 
@@ -1305,8 +1303,8 @@ fn a_tag_rename_shows_the_new_name_after_the_confirm(cx: &mut TestAppContext) {
     type_new_name(cx, handle, "new");
     keys(cx, handle, "enter");
     assert!(question(cx, handle).is_some());
-    assert_eq!(tree_field(cx, handle), None);
-    assert_eq!(tree(cx, handle), ["All notes", "#new*"]);
+    assert_eq!(tree_field(cx, handle).as_deref(), Some("new"));
+    assert_eq!(tree(cx, handle), ["All notes", "#old*"]);
     keys(cx, handle, "escape");
     assert_eq!(tree_field(cx, handle), None);
     assert_eq!(tree(cx, handle), ["All notes", "#old*"]);
@@ -1387,22 +1385,13 @@ fn a_folder_rename_keeps_the_row_selected_in_every_frame(cx: &mut TestAppContext
     assert_eq!(tree(cx, handle), before);
     assert_eq!(
         rename_steps(cx, handle, "job"),
-        [
-            vec![
-                "All notes",
-                "area",
-                "area/bebra",
-                "area/job*",
-                "area/work/sub"
-            ],
-            vec![
-                "All notes",
-                "area",
-                "area/bebra",
-                "area/job*",
-                "area/job/sub"
-            ],
-        ]
+        [vec![
+            "All notes",
+            "area",
+            "area/bebra",
+            "area/job*",
+            "area/job/sub"
+        ],]
     );
 
     // The open note follows the folder, so the next save goes to the new file.
@@ -1439,22 +1428,13 @@ fn a_folder_rename_to_a_taken_name_keeps_the_row_selected_in_every_frame(cx: &mu
     keys(cx, handle, "ctrl-shift-l escape down right down down right");
     assert_eq!(
         rename_steps(cx, handle, "bebra"),
-        [
-            vec![
-                "All notes",
-                "area",
-                "area/bebra",
-                "area/bebra*",
-                "area/work/sub"
-            ],
-            vec![
-                "All notes",
-                "area",
-                "area/bebra",
-                "area/work*",
-                "area/work/sub"
-            ],
-        ]
+        [vec![
+            "All notes",
+            "area",
+            "area/bebra",
+            "area/work*",
+            "area/work/sub"
+        ],]
     );
     assert_eq!(tree_field(cx, handle).as_deref(), Some("bebra"));
 }
@@ -1568,23 +1548,13 @@ fn a_tag_rename_keeps_the_row_selected_in_every_frame(cx: &mut TestAppContext) {
     press(cx, handle, "enter");
     assert_eq!(
         tree_steps(cx, handle),
-        [
-            // The row keeps its place until the write ends.
-            vec![
-                "All notes",
-                "#area",
-                "#area/new",
-                "#area/fresh*",
-                "#area/old/x"
-            ],
-            vec![
-                "All notes",
-                "#area",
-                "#area/fresh*",
-                "#area/fresh/x",
-                "#area/new"
-            ],
-        ]
+        [vec![
+            "All notes",
+            "#area",
+            "#area/fresh*",
+            "#area/fresh/x",
+            "#area/new"
+        ],]
     );
 
     // A rename into a tag that exists merges into its row.
@@ -2652,6 +2622,19 @@ fn ctrl_n_names_the_note_first_and_esc_leaves_nothing(cx: &mut TestAppContext) {
     cx.simulate_input(handle, "text");
     autosave(cx);
     assert!(read(&notes.join("Plans.md")).ends_with("---\ntext\n"));
+}
+
+#[gpui_kit::test]
+fn enter_on_an_empty_title_shows_the_answer_with_no_wait(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    fs::write(fixture.notes().join("Old.md"), "old\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    press(cx, handle, "ctrl-n");
+    press(cx, handle, "enter");
+    assert_eq!(title_field(cx, handle).as_deref(), Some(""));
+    assert_eq!(focus(cx, handle), "title field");
+    assert_eq!(message(cx, handle).as_deref(), Some(text::NAME_EMPTY));
 }
 
 /// Presses `key`, then runs the tasks one at a time. It gives whether a frame between them

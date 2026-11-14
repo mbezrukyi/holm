@@ -34,6 +34,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use config::Config;
 use error::AppError;
@@ -86,6 +87,7 @@ fn start() -> Result<Startup, AppError> {
         index_dir: folder("XDG_CACHE_HOME", ".cache")?,
         default_folder: home()?.join("Notes"),
         crash_log,
+        write_budget: Duration::from_millis(50),
     })
 }
 

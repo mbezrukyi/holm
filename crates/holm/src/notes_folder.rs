@@ -8,13 +8,18 @@
 //! [`FolderEvent::Changed`] with the moves of the write. Then, in the same update, the caller
 //! gets the result. So no frame shows a state between them.
 //!
+//! A call waits on the UI thread for the jobs before it and its own, up to a budget. A job that
+//! ends in time ends in the update of the call, so no frame shows a state between the key and
+//! the end of its write. A late job ends in a later update, and [`NotesFolder::writing`] is true
+//! until then. The save of the editor text never waits.
+//!
 //! Every 100 ms, it looks for changes from outside Holm. At quit, it runs every write that
 //! waits in the line.
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures_channel::oneshot;
 use gpui_kit::{App, AppContext as _, Context, EventEmitter, Task, Window};
@@ -113,21 +118,46 @@ type Job = Box<dyn FnOnce(&Core) -> Option<String> + Send>;
 /// gives the result to the caller.
 type End = Box<dyn FnOnce(&mut Context<NotesFolder>)>;
 
+/// One entry of the line. Its number grows with each entry.
+struct Entry {
+    number: u64,
+    job: Job,
+    end: End,
+}
+
+/// The entry whose job runs.
+struct Turn {
+    number: u64,
+    end: End,
+    /// The snapshot after the job. It is gone when the quit drain ran the job.
+    snapshot: oneshot::Receiver<Snapshot>,
+    /// It ends the turn when the job ends after its call.
+    _wake: Task<()>,
+}
+
 pub(crate) struct NotesFolder {
     core: Core,
     snapshot: Snapshot,
-    line: VecDeque<(Job, End)>,
+    /// How long a call waits for its job.
+    budget: Duration,
+    line: VecDeque<Entry>,
+    next_number: u64,
+    /// The number of the last entry that ended.
+    ended: u64,
+    /// The last entry that is past its budget, until it ends.
+    late: Option<u64>,
     /// The job that left the line. Its thread holds the lock while it runs, so the quit drain
     /// waits for it, or runs it when the thread did not start yet.
     running: Arc<Mutex<Option<Job>>>,
-    turn: Option<Task<()>>,
+    turn: Option<Turn>,
     /// After the quit drain, no job runs.
     closed: bool,
     _poll: Task<()>,
 }
 
 impl NotesFolder {
-    pub(crate) fn new(core: Core, cx: &mut Context<Self>) -> Self {
+    /// A call waits up to `budget` for its job.
+    pub(crate) fn new(core: Core, budget: Duration, cx: &mut Context<Self>) -> Self {
         let changes = core.changes();
         let poll = cx.spawn(async move |folder, cx| {
             loop {
@@ -144,7 +174,11 @@ impl NotesFolder {
         Self {
             snapshot: core.snapshot(),
             core,
+            budget,
             line: VecDeque::new(),
+            next_number: 1,
+            ended: 0,
+            late: None,
             running: Arc::default(),
             turn: None,
             closed: false,
@@ -157,14 +191,20 @@ impl NotesFolder {
         &self.snapshot
     }
 
-    /// Writes the editor text to its note.
+    /// Whether a job is past its budget.
+    pub(crate) fn writing(&self) -> bool {
+        self.late.is_some()
+    }
+
+    /// Writes the editor text to its note. It does not wait for the job.
     pub(crate) fn save_text(
         &mut self,
         text: NoteText,
         done: impl FnOnce(holm_core::Result<()>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.write(move |core| write_text(core, text), done, cx);
+        self.push(move |core| write_text(core, text), |()| Vec::new(), done);
+        self.run(None, cx);
     }
 
     /// At quit: runs every write in the line, then writes `last`. Later writes do not run.
@@ -542,9 +582,9 @@ impl NotesFolder {
         self.queue(job, |_: &T| Vec::new(), done, cx);
     }
 
-    /// Puts `job` in the line. When it ends, the entity sets the snapshot after it and sends
-    /// the event with `moves` of its value. Then `done` gets its result, in the same update.
-    /// When the entity is gone first, `done` never runs.
+    /// Puts `job` in the line, and waits for it up to the budget. When it ends, the entity sets
+    /// the snapshot after it and sends the event with `moves` of its value. Then `done` gets its
+    /// result, in the same update. When the entity is gone first, `done` never runs.
     fn queue<T: Send + 'static>(
         &mut self,
         job: impl FnOnce(&Core) -> holm_core::Result<T> + Send + 'static,
@@ -552,6 +592,17 @@ impl NotesFolder {
         done: impl FnOnce(holm_core::Result<T>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
+        let number = self.push(job, moves, done);
+        self.run(Some(number), cx);
+    }
+
+    /// Puts `job` at the end of the line, and gives the number of its entry.
+    fn push<T: Send + 'static>(
+        &mut self,
+        job: impl FnOnce(&Core) -> holm_core::Result<T> + Send + 'static,
+        moves: impl FnOnce(&T) -> Vec<Move> + 'static,
+        done: impl FnOnce(holm_core::Result<T>, &mut App) + 'static,
+    ) -> u64 {
         let (send, mut receive) = oneshot::channel();
         let job: Job = Box::new(move |core: &Core| {
             let result = job(core);
@@ -568,8 +619,10 @@ impl NotesFolder {
             // A deferred step runs after the views took the event, in the same update.
             cx.defer(move |cx| done(result, cx));
         });
-        self.line.push_back((job, end));
-        self.next(cx);
+        let number = self.next_number;
+        self.next_number += 1;
+        self.line.push_back(Entry { number, job, end });
+        number
     }
 
     /// Runs a read that needs no order, off the UI thread.
@@ -582,36 +635,91 @@ impl NotesFolder {
         cx.background_spawn(async move { job(&core) })
     }
 
-    /// Starts the first job of the line, when no job runs.
-    fn next(&mut self, cx: &mut Context<Self>) {
-        if self.turn.is_some() || self.closed {
-            return;
+    /// Runs the jobs of the line. With `until`, it waits on this thread up to the budget, until
+    /// the entry `until` ends. A job that does not end in time ends later, in its own update.
+    fn run(&mut self, until: Option<u64>, cx: &mut Context<Self>) {
+        let deadline = Instant::now() + self.budget;
+        loop {
+            if self.turn.is_none() && !self.start(cx) {
+                return;
+            }
+            let Some(until) = until.filter(|until| self.ended < *until) else {
+                return;
+            };
+            let left = deadline.saturating_duration_since(Instant::now());
+            let snapshot = match &mut self.turn {
+                Some(turn) if !left.is_zero() => cx
+                    .foreground_executor()
+                    .block_with_timeout(left, &mut turn.snapshot)
+                    .ok(),
+                _ => None,
+            };
+            let Some(snapshot) = snapshot else {
+                if self.late < Some(until) {
+                    self.late = Some(until);
+                    cx.notify();
+                }
+                return;
+            };
+            self.end_turn(snapshot.ok(), cx);
         }
-        let Some((job, end)) = self.line.pop_front() else {
-            return;
+    }
+
+    /// Starts the first job of the line, and gives whether it did.
+    fn start(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.closed {
+            return false;
+        }
+        let Some(Entry { number, job, end }) = self.line.pop_front() else {
+            return false;
         };
         *lock(&self.running) = Some(job);
         let core = self.core.clone();
         let running = self.running.clone();
+        let (send, snapshot) = oneshot::channel();
         let work = cx.background_spawn(async move {
             let mut slot = lock(&running);
-            let job = slot.take()?;
-            job(&core);
-            Some(core.snapshot())
+            if let Some(job) = slot.take() {
+                job(&core);
+                send.send(core.snapshot()).ok();
+            }
         });
-        self.turn = Some(cx.spawn(async move |folder, cx| {
-            let snapshot = work.await;
+        let wake = cx.spawn(async move |folder, cx| {
+            work.await;
             folder
                 .update(cx, |folder, cx| {
-                    folder.turn = None;
-                    if let Some(snapshot) = snapshot {
-                        folder.set(snapshot);
-                        end(cx);
-                    }
-                    folder.next(cx);
+                    let snapshot = folder
+                        .turn
+                        .as_mut()
+                        .and_then(|turn| turn.snapshot.try_recv().ok().flatten());
+                    folder.end_turn(snapshot, cx);
+                    folder.run(None, cx);
                 })
                 .ok();
-        }));
+        });
+        self.turn = Some(Turn {
+            number,
+            end,
+            snapshot,
+            _wake: wake,
+        });
+        true
+    }
+
+    /// Ends the entry whose job ran, with the snapshot after the job.
+    fn end_turn(&mut self, snapshot: Option<Snapshot>, cx: &mut Context<Self>) {
+        let Some(turn) = self.turn.take() else {
+            return;
+        };
+        self.ended = turn.number;
+        if let Some(snapshot) = snapshot {
+            self.set(snapshot);
+            (turn.end)(cx);
+        }
+        if self.late.is_some_and(|late| late <= self.ended) {
+            self.late = None;
+            cx.notify();
+        }
     }
 
     /// Runs every job that waits, and then `last`, on this thread.
@@ -621,7 +729,7 @@ impl NotesFolder {
         let jobs = slot
             .take()
             .into_iter()
-            .chain(self.line.drain(..).map(|(job, _)| job))
+            .chain(self.line.drain(..).map(|entry| entry.job))
             .chain(last);
         for job in jobs {
             if let Some(failure) = job(&self.core) {
@@ -727,7 +835,7 @@ mod tests {
         fs::create_dir(&notes).unwrap();
         fs::write(notes.join("A.md"), "# A\n").unwrap();
         let (core, _) = Core::open_with_feed(&notes, dir.path().join("index")).unwrap();
-        let notes_folder = cx.new(|cx| NotesFolder::new(core, cx));
+        let notes_folder = cx.new(|cx| NotesFolder::new(core, Duration::ZERO, cx));
         (dir, notes_folder)
     }
 

@@ -11,7 +11,8 @@
 //! - `Backspace`, `Delete`, `Ctrl+A`, `Ctrl+C`, `Ctrl+X` and `Ctrl+V` work as usual.
 //! - A click puts the caret, a drag selects, and a double click selects all.
 //!
-//! Typed text comes through the platform input handler. It has no undo.
+//! Typed text comes through the platform input handler. It has no undo. A locked field takes no
+//! keys and no typed text.
 
 use std::ops::Range;
 
@@ -51,6 +52,7 @@ pub(crate) struct TextField {
     /// How far the text scrolls to the left, when the field is narrower than its text.
     scroll: Pixels,
     selecting: bool,
+    locked: bool,
     _blur: Subscription,
 }
 
@@ -93,6 +95,7 @@ impl TextField {
             shown: None,
             scroll: px(0.),
             selecting: false,
+            locked: false,
             _blur: blur,
         }
     }
@@ -105,6 +108,10 @@ impl TextField {
 
     pub(crate) fn text(&self) -> &str {
         &self.text
+    }
+
+    pub(crate) fn set_locked(&mut self, locked: bool) {
+        self.locked = locked;
     }
 
     fn selection(&self) -> Range<usize> {
@@ -149,7 +156,7 @@ impl TextField {
     fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         let keystroke = &event.keystroke;
         let modifiers = keystroke.modifiers;
-        if modifiers.alt || modifiers.platform {
+        if self.locked || modifiers.alt || modifiers.platform {
             return;
         }
         let shift = modifiers.shift;
@@ -314,6 +321,9 @@ impl EntityInputHandler for TextField {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.locked {
+            return;
+        }
         let range = range.map_or_else(|| self.selection(), |range| self.range_from_utf16(&range));
         self.replace(range, text, cx);
     }

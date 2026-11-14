@@ -155,13 +155,6 @@ impl TagRow {
         self.open_at(None, window, cx);
     }
 
-    /// Pins or unpins the note in the row, and gives the new pin.
-    pub(crate) fn toggle_pin(&mut self, cx: &mut Context<Self>) -> bool {
-        self.pinned = !self.pinned;
-        cx.notify();
-        self.pinned
-    }
-
     /// Opens the popup with an empty field and the cursor on `cursor`. It takes the known
     /// tags for the list from the snapshot.
     fn open_at(&mut self, cursor: Option<usize>, window: &mut Window, cx: &mut Context<Self>) {
@@ -259,14 +252,9 @@ impl TagRow {
             None => holm_markdown::normalize_tag(self.typed()).map(Line::Add),
         };
         match line {
-            Some(Line::Tag { name, on: true }) => {
-                self.tags.retain(|tag| *tag != name);
-                cx.emit(TagChange::Remove(name));
-                self.clamp_cursor();
-            }
+            Some(Line::Tag { name, on: true }) => cx.emit(TagChange::Remove(name)),
             Some(Line::Tag { name, on: false } | Line::Add(name)) => {
                 if !self.tags.contains(&name) {
-                    self.tags.push(name.clone());
                     cx.emit(TagChange::Add(name));
                 }
                 self.clear(window, cx);

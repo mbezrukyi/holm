@@ -30,7 +30,7 @@ use holm_core::model::{NoteInfo, Order};
 
 use crate::error::AppError;
 use crate::icons::Icon;
-use crate::name_field::{Look, NameEvent, NameField, NameState, NameWrite};
+use crate::name_field::{Look, NameEvent, NameField, NameWrite};
 use crate::notes_folder::{FolderEvent, Move, NotesFolder, Step};
 use crate::text;
 
@@ -110,15 +110,6 @@ impl Named {
             Self::Tag(tag) => one.tag(tag).map(Self::Tag),
             Self::NewFolder(parent) if parent.as_os_str().is_empty() => None,
             Self::NewFolder(parent) => one.path(parent).map(Self::NewFolder),
-        }
-    }
-
-    /// The item that `typed` asks for.
-    fn typed(&self, typed: &str) -> Item {
-        match self {
-            Self::Folder(path) => Item::Folder(path.with_file_name(typed)),
-            Self::Tag(_) => Item::Tag(typed.to_owned()),
-            Self::NewFolder(parent) => Item::Folder(parent.join(typed)),
         }
     }
 }
@@ -586,18 +577,7 @@ impl Sidebar {
     fn writing(&self, cx: &App) -> bool {
         self.field
             .as_ref()
-            .is_some_and(|naming| *naming.field.read(cx).state() != NameState::Editing)
-    }
-
-    /// The typed name of the name field of `named`, while its write runs.
-    fn pending(&self, named: &Named, cx: &App) -> Option<String> {
-        self.field
-            .as_ref()
-            .filter(|naming| naming.named == *named)
-            .and_then(|naming| match naming.field.read(cx).state() {
-                NameState::Writing(name) => Some(name.clone()),
-                NameState::Editing => None,
-            })
+            .is_some_and(|naming| naming.field.read(cx).writing())
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -800,14 +780,17 @@ impl Sidebar {
             Item::Tag(_) if row.open => Icon::TagsOpen,
             Item::Tag(_) => Icon::Tags,
         };
-        let (name, aria) = self.row_name(row, cx);
+        let name = match &row.item {
+            Item::All => text::ALL_NOTES.into(),
+            _ => SharedString::from(row.name.clone()),
+        };
+        let aria = item_label(&row.item);
         let named = Named::item(&row.item);
         let field = self
             .field
             .as_ref()
             .filter(|naming| Some(&naming.named) == named.as_ref());
-        let editing =
-            field.is_some_and(|naming| *naming.field.read(cx).state() == NameState::Editing);
+        let editing = field.is_some();
         let label = match field {
             Some(naming) => field_label(&naming.field),
             None => div()
@@ -859,40 +842,19 @@ impl Sidebar {
             .into_any_element()
     }
 
-    /// The row of the name field for a new folder. After `Enter`, it shows the typed name until
-    /// the write ends.
+    /// The row of the name field for a new folder.
     fn new_folder_row(&self, depth: usize, cx: &App) -> AnyElement {
         let Some(naming) = &self.field else {
             return div().into_any_element();
         };
-        let pending = self.pending(&naming.named, cx);
-        let aria = match &pending {
-            Some(typed) => item_label(&naming.named.typed(typed)),
-            None => text::NEW_FOLDER.to_owned(),
-        };
-        row_frame(depth, pending.is_none(), cx)
+        row_frame(depth, true, cx)
             .id("new-folder")
             .role(Role::TreeItem)
-            .aria_label(aria)
+            .aria_label(text::NEW_FOLDER)
             .test_support()
             .child(Icon::view(Icon::Folder, cx.theme().muted_foreground))
             .child(field_label(&naming.field))
             .into_any_element()
-    }
-
-    /// The name of a tree row and its accessible name. After `Enter` in the name field, the
-    /// row shows the typed name until the write ends.
-    fn row_name(&self, row: &Row, cx: &App) -> (SharedString, String) {
-        let Some(named) = Named::item(&row.item) else {
-            return (text::ALL_NOTES.into(), item_label(&row.item));
-        };
-        match self.pending(&named, cx) {
-            Some(typed) => {
-                let label = item_label(&named.typed(&typed));
-                (typed.into(), label)
-            }
-            None => (row.name.clone().into(), item_label(&row.item)),
-        }
     }
 
     /// The head of a note list: `‹`, the name of the list, and its count. A click leaves the

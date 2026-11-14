@@ -5,6 +5,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
@@ -20,6 +21,7 @@ use crate::config::{Config, Settings, Theme};
 use crate::error::AppError;
 use crate::message_line::{Answer, MessageLine};
 use crate::notes::NotesView;
+use crate::notes_folder::NotesFolder;
 use crate::{notes_folder, text, theme};
 
 pub(crate) const APP_ID: &str = "io.github.mbezrukyi.Holm";
@@ -36,6 +38,8 @@ pub(crate) struct Startup {
     pub(crate) default_folder: PathBuf,
     /// The log, when the last run ended in a panic.
     pub(crate) crash_log: Option<PathBuf>,
+    /// How long a file action waits for its write before the next frame.
+    pub(crate) write_budget: Duration,
 }
 
 /// Opens the main window. The app quits when it closes.
@@ -67,6 +71,7 @@ pub(crate) struct HolmWindow {
     config: Entity<Config>,
     index_dir: PathBuf,
     default_folder: PathBuf,
+    write_budget: Duration,
     stage: Stage,
     line: Entity<MessageLine>,
     _appearance: Subscription,
@@ -89,6 +94,7 @@ impl HolmWindow {
             index_dir,
             default_folder,
             crash_log,
+            write_budget,
         } = startup;
         theme::apply(config.settings().theme, window, cx);
         let appearance = cx.observe_window_appearance(window, |this, window, cx| {
@@ -106,6 +112,7 @@ impl HolmWindow {
             config: cx.new(|_| config),
             index_dir,
             default_folder,
+            write_budget,
             stage: Stage::Ask,
             line,
             _appearance: appearance,
@@ -130,6 +137,7 @@ impl HolmWindow {
         let open = self.open_core.clone();
         let last = self.config.read(cx).settings().last_note.clone();
         let line = self.line.clone();
+        let budget = self.write_budget;
         let job = cx.background_spawn({
             let folder = folder.clone();
             async move { notes_folder::open(&*open, &folder, &index_dir, create, last.as_deref()) }
@@ -141,8 +149,9 @@ impl HolmWindow {
                     Ok((core, note)) => {
                         let folder = folder.clone();
                         let config = this.config.clone();
+                        let notes_folder = cx.new(|cx| NotesFolder::new(core, budget, cx));
                         Stage::Open(cx.new(|cx| {
-                            NotesView::new(core, folder, note, config, line, window, cx)
+                            NotesView::new(notes_folder, folder, note, config, line, window, cx)
                         }))
                     }
                     Err(error) => {
