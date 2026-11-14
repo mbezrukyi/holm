@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use futures_channel::oneshot;
-use gpui_kit::{App, AppContext as _, Context, EventEmitter, Task};
+use gpui_kit::{App, AppContext as _, Context, EventEmitter, Task, Window};
 use holm_core::model::{Change, DeleteCount, LinkTarget, Note, NoteInfo, Order};
 use holm_core::{Changes, Core, Snapshot};
 use holm_editor::PastedFile;
@@ -78,6 +78,23 @@ impl Move {
 
 /// A step that gets the end of a write, on the UI thread.
 pub(crate) type Step<R> = Box<dyn FnOnce(R, &mut App)>;
+
+/// A step that runs `step` on the entity of `cx` with its window, while both still exist.
+pub(crate) fn window_step<V: 'static, R: 'static>(
+    window: &Window,
+    cx: &Context<V>,
+    step: impl FnOnce(&mut V, R, &mut Window, &mut Context<V>) + 'static,
+) -> Step<R> {
+    let entity = cx.weak_entity();
+    let window = window.window_handle();
+    Box::new(move |result, cx| {
+        window
+            .update(cx, |_, window, cx| {
+                entity.update(cx, |entity, cx| step(entity, result, window, cx))
+            })
+            .ok();
+    })
+}
 
 /// The editor text of a note, for a write.
 #[derive(Clone, Debug)]

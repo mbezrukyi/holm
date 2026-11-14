@@ -1102,10 +1102,7 @@ fn tags_rename_and_delete_in_all_notes_after_the_dialog(cx: &mut TestAppContext)
     keys(cx, handle, "ctrl-shift-l escape down down");
     assert_eq!(sidebar(cx, handle), "tree #work");
     keys(cx, handle, "f2");
-    cx.update_window(handle, |_, window, cx| {
-        window.dispatch_action(Box::new(gpui_kit::component::input::SelectAll), cx);
-    })
-    .unwrap();
+    keys(cx, handle, "ctrl-a");
     cx.simulate_input(handle, "job");
     keys(cx, handle, "enter");
     assert_eq!(
@@ -1117,10 +1114,7 @@ fn tags_rename_and_delete_in_all_notes_after_the_dialog(cx: &mut TestAppContext)
     assert_eq!(fields(&a).0, ["work"]);
 
     keys(cx, handle, "f2");
-    cx.update_window(handle, |_, window, cx| {
-        window.dispatch_action(Box::new(gpui_kit::component::input::SelectAll), cx);
-    })
-    .unwrap();
+    keys(cx, handle, "ctrl-a");
     cx.simulate_input(handle, "job");
     keys(cx, handle, "enter");
     keys(cx, handle, "enter");
@@ -1186,10 +1180,7 @@ fn tree(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
 /// Starts the name field on the selected row and types `name` over the old name.
 fn type_new_name(cx: &mut TestAppContext, handle: AnyWindowHandle, name: &str) {
     keys(cx, handle, "f2");
-    cx.update_window(handle, |_, window, cx| {
-        window.dispatch_action(Box::new(gpui_kit::component::input::SelectAll), cx);
-    })
-    .unwrap();
+    keys(cx, handle, "ctrl-a");
     cx.simulate_input(handle, name);
 }
 
@@ -1272,10 +1263,7 @@ fn a_folder_rename_to_a_taken_name_keeps_the_field_and_shows_the_answer(cx: &mut
     assert_eq!(folder_names(&notes_dir), ["Top.md", "job", "work"]);
 
     // The field takes a new name, and the write works.
-    cx.update_window(handle, |_, window, cx| {
-        window.dispatch_action(Box::new(gpui_kit::component::input::SelectAll), cx);
-    })
-    .unwrap();
+    keys(cx, handle, "ctrl-a");
     cx.simulate_input(handle, "Work");
     keys(cx, handle, "enter");
     assert_eq!(tree_field(cx, handle), None);
@@ -1600,10 +1588,7 @@ fn a_tag_rename_keeps_the_row_selected_in_every_frame(cx: &mut TestAppContext) {
 
     // A rename into a tag that exists merges into its row.
     keys(cx, handle, "f2");
-    cx.update_window(handle, |_, window, cx| {
-        window.dispatch_action(Box::new(gpui_kit::component::input::SelectAll), cx);
-    })
-    .unwrap();
+    keys(cx, handle, "ctrl-a");
     cx.simulate_input(handle, "area/new");
     keys(cx, handle, "enter");
     press(cx, handle, "enter");
@@ -1680,10 +1665,7 @@ fn f2_in_the_tag_popup_renames_the_tag_in_the_sidebar(cx: &mut TestAppContext) {
     assert_eq!(sidebar(cx, handle), "tree #work/holm");
     assert_eq!(name_field(cx, handle).as_deref(), Some("work/holm"));
 
-    cx.update_window(handle, |_, window, cx| {
-        window.dispatch_action(Box::new(gpui_kit::component::input::SelectAll), cx);
-    })
-    .unwrap();
+    keys(cx, handle, "ctrl-a");
     cx.simulate_input(handle, "job");
     keys(cx, handle, "enter");
     assert_eq!(
@@ -1713,10 +1695,7 @@ fn a_new_tag_renames_in_all_notes_with_no_wait(cx: &mut TestAppContext) {
     assert_eq!(name_field(cx, handle).as_deref(), Some("fresh"));
     assert_eq!(tree(cx, handle), ["All notes", "#fresh*"]);
     assert_eq!(tree_field(cx, handle).as_deref(), Some("fresh"));
-    cx.update_window(handle, |_, window, cx| {
-        window.dispatch_action(Box::new(gpui_kit::component::input::SelectAll), cx);
-    })
-    .unwrap();
+    keys(cx, handle, "ctrl-a");
     cx.simulate_input(handle, "job");
     keys_now(cx, handle, "enter");
     assert_eq!(
@@ -2385,7 +2364,7 @@ fn an_empty_folder_shows_the_empty_pane_and_makes_no_note(cx: &mut TestAppContex
 
     keys(cx, handle, "ctrl-n");
     assert!(!empty_pane(cx, handle));
-    assert_eq!(editor_text(cx, handle), "");
+    assert!(new_note_open(cx, handle));
     assert_eq!(focus(cx, handle), "title field");
     assert_eq!(files(&fixture.notes()), Vec::<String>::new());
     cx.simulate_input(handle, "Plans");
@@ -2567,6 +2546,11 @@ fn note_path(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String>
     label(cx, handle, "note-path")
 }
 
+/// Whether the pane shows a new note with no file yet.
+fn new_note_open(cx: &mut TestAppContext, handle: AnyWindowHandle) -> bool {
+    screen(cx, handle, |window| window.try_find("new-note").is_some())
+}
+
 /// The text of the title field, while it is open.
 fn title_field(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
     screen(cx, handle, |window| {
@@ -2645,13 +2629,14 @@ fn ctrl_n_names_the_note_first_and_esc_leaves_nothing(cx: &mut TestAppContext) {
     keys(cx, handle, "ctrl-n");
     assert_eq!(focus(cx, handle), "title field");
     assert_eq!(title_field(cx, handle).as_deref(), Some(""));
-    assert_eq!(editor_text(cx, handle), "");
+    assert!(new_note_open(cx, handle));
     keys(cx, handle, "escape");
+    assert!(!new_note_open(cx, handle));
     assert_eq!(files(&notes), ["Old.md"]);
     assert_eq!(editor_text(cx, handle), "old\n");
     assert_eq!(focus(cx, handle), "editor");
 
-    // A refused title keeps the unnamed note.
+    // A refused title keeps the new note.
     keys(cx, handle, "ctrl-n");
     cx.simulate_input(handle, "old");
     keys(cx, handle, "enter");
@@ -2685,17 +2670,17 @@ fn ctrl_n_in_a_tag_view_gives_the_note_that_tag(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn a_click_on_the_text_of_an_unnamed_note_does_nothing(cx: &mut TestAppContext) {
+fn a_click_under_the_title_field_of_a_new_note_does_nothing(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     let handle = open(cx, fixture.startup(None));
 
     keys(cx, handle, "ctrl-n");
     let bottom = screen(cx, handle, |window| {
-        window.find("editor").bounds().size.height
+        window.find("new-note").bounds().size.height
     });
     cx.update_window(handle, |_, window, cx| {
         window.click_at(
-            "editor",
+            "new-note",
             gpui_kit::point(gpui_kit::px(200.), bottom - gpui_kit::px(20.)),
             cx,
         );
@@ -2704,7 +2689,6 @@ fn a_click_on_the_text_of_an_unnamed_note_does_nothing(cx: &mut TestAppContext) 
     settle(cx);
     assert_eq!(focus(cx, handle), "title field");
     cx.simulate_input(handle, "x");
-    assert_eq!(editor_text(cx, handle), "");
     assert_eq!(title_field(cx, handle).as_deref(), Some("x"));
     assert_eq!(files(&fixture.notes()), Vec::<String>::new());
 }
@@ -2746,6 +2730,44 @@ fn the_title_field_opens_in_the_place_of_the_title(cx: &mut TestAppContext) {
     keys(cx, handle, "f2");
     assert_eq!(focus(cx, handle), "title field");
     assert_eq!(bounds_of(cx, handle, "note-path"), Some(before));
+}
+
+#[gpui_kit::test]
+fn a_click_on_the_dot_or_the_count_does_not_reach_the_open_title_field(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes = fixture.notes();
+    fs::write(notes.join("Target.md"), "---\nid: 01T\n---\n").unwrap();
+    fs::write(notes.join("Old.md"), "[t](holm:01T)\n").unwrap();
+    set_time(&notes.join("Target.md"), 200);
+    set_time(&notes.join("Old.md"), 100);
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "f2");
+
+    let row = bounds_of(cx, handle, "tag-row").unwrap();
+    let click = |cx: &mut TestAppContext, id: &'static str| {
+        let at = bounds_of(cx, handle, id).unwrap();
+        let y = at.center().y - row.top();
+        cx.update_window(handle, |_, window, cx| {
+            window.click_at(
+                "tag-row",
+                gpui_kit::point(at.center().x - row.left(), y),
+                cx,
+            );
+        })
+        .unwrap();
+        settle(cx);
+    };
+    click(cx, "path-dot");
+    assert!(!popup_open(cx, handle));
+    assert_eq!(focus(cx, handle), "title field");
+    // The click put no caret in the field, so the title is still all selected.
+    cx.simulate_input(handle, "Goal");
+    assert_eq!(title_field(cx, handle).as_deref(), Some("Goal"));
+
+    click(cx, "backlinks-button");
+    assert_eq!(backlinks(cx, handle), ["Old*"]);
+    assert_eq!(title_field(cx, handle), None);
+    assert_eq!(files(&notes), ["Old.md", "Target.md"]);
 }
 
 #[gpui_kit::test]

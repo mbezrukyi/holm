@@ -90,6 +90,8 @@ pub(crate) const RENAME: &str = "Rename";
 pub(crate) const FOLDERS: &str = "FOLDERS";
 pub(crate) const TAGS: &str = "TAGS";
 pub(crate) const NEW_FOLDER: &str = "New folder";
+/// The accessible name of a name field in the tree.
+pub(crate) const NAME_FIELD: &str = "Name";
 pub(crate) const ROOT_FOLDER: &str = "Notes folder";
 pub(crate) const MOVE_TO: &str = "Move to";
 pub(crate) const DELETE: &str = "Delete";

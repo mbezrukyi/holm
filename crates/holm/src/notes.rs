@@ -7,6 +7,7 @@
 //! the sidebar list. With no note left, it shows the empty pane.
 
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::{
@@ -22,11 +23,12 @@ use crate::dialog::{Ask, Dialog, DialogEvent};
 use crate::error::AppError;
 use crate::link_picker::{LinkPicker, LinkPickerEvent, LinkStart};
 use crate::message_line::MessageLine;
-use crate::notes_folder::{NotesFolder, Step};
+use crate::name_field::NameDone;
+use crate::notes_folder::{NotesFolder, Step, window_step};
 use crate::pane::{Leave, NotePane, PaneEvent};
 use crate::picker::{FolderPicker, PickerEvent};
 use crate::quick_open::{QuickOpen, QuickOpenEvent};
-use crate::sidebar::{Item, Sidebar, SidebarEvent, Target};
+use crate::sidebar::{Item, Named, Sidebar, SidebarEvent, SidebarWrite, Target};
 use crate::tags::RenameTag;
 
 const MIN_WIDTH: f32 = 160.;
@@ -49,6 +51,8 @@ pub(crate) struct NotesView {
     /// The part that had the focus before quick open or the link picker. It gets the focus
     /// back on `Esc`.
     before_popup: Option<FocusHandle>,
+    /// The end of the tag rename in the name field, while its dialog shows.
+    tag_rename: Option<NameDone>,
     line: Entity<MessageLine>,
     subscriptions: Vec<Subscription>,
 }
@@ -68,12 +72,21 @@ impl NotesView {
         let notes_folder = cx.new(|cx| NotesFolder::new(core, cx));
         let pane =
             cx.new(|cx| NotePane::new(notes_folder.clone(), line.clone(), root, note, window, cx));
+        let this = cx.weak_entity();
+        let write: SidebarWrite = Rc::new(move |named, name, done, window, cx| {
+            this.update(cx, |this, cx| {
+                this.name_write(named, name, done, window, cx);
+            })
+            .ok();
+        });
         let sidebar = cx.new(|cx| {
             Sidebar::new(
                 notes_folder.clone(),
                 settings.note_order,
                 settings.sidebar.view.clone(),
                 current,
+                write,
+                line.clone(),
                 window,
                 cx,
             )
@@ -95,6 +108,7 @@ impl NotesView {
             quick_open: None,
             link_picker: None,
             before_popup: None,
+            tag_rename: None,
             line,
             subscriptions,
         };
@@ -196,45 +210,6 @@ impl NotesView {
                 self.picker = Some(picker);
                 cx.notify();
             }
-            SidebarEvent::RenameFolder { folder, name } => {
-                let (folder, name) = (folder.clone(), name.clone());
-                self.rename_write(
-                    window,
-                    cx,
-                    |notes_folder, done, cx| notes_folder.rename_folder(folder, name, done, cx),
-                    |this, _, _, cx| {
-                        this.close_name_field(cx);
-                        this.keep_state(cx);
-                    },
-                );
-            }
-            SidebarEvent::CreateFolder { parent, name } => {
-                let (parent, name) = (parent.clone(), name.clone());
-                self.rename_write(
-                    window,
-                    cx,
-                    |notes_folder, done, cx| notes_folder.create_folder(parent, name, done, cx),
-                    |this, folder, window, cx| {
-                        this.close_name_field(cx);
-                        this.show_folder(folder, window, cx);
-                        this.keep_state(cx);
-                    },
-                );
-            }
-            SidebarEvent::RenameTag { from, to } => {
-                let (from, to) = (from.clone(), to.clone());
-                self.rename_write(
-                    window,
-                    cx,
-                    {
-                        let (from, to) = (from.clone(), to.clone());
-                        |notes_folder, done, cx| notes_folder.tag_rename_count(from, to, done, cx)
-                    },
-                    move |this, notes, window, cx| {
-                        this.ask(Ask::RenameTag { from, to, notes }, window, cx);
-                    },
-                );
-            }
             SidebarEvent::DeleteTag(tag) => {
                 let tag = tag.clone();
                 self.write(
@@ -310,7 +285,7 @@ impl NotesView {
 
     /// Ctrl+K: opens the link picker.
     fn open_link_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let done = Self::step(window, cx, Self::show_link_picker);
+        let done = window_step(window, cx, Self::show_link_picker);
         self.pane.update(cx, |pane, cx| pane.start_link(done, cx));
     }
 
@@ -437,8 +412,10 @@ impl NotesView {
         let (ask, do_not_ask) = match event.clone() {
             DialogEvent::Confirm { ask, do_not_ask } => (ask, do_not_ask),
             DialogEvent::Cancel(ask) => {
-                if matches!(ask, Ask::RenameTag { .. }) {
-                    self.close_name_field(cx);
+                if matches!(ask, Ask::RenameTag { .. })
+                    && let Some(done) = self.tag_rename.take()
+                {
+                    done(Ok(()), cx);
                 }
                 return;
             }
@@ -454,12 +431,22 @@ impl NotesView {
     fn confirmed(&mut self, ask: Ask, window: &mut Window, cx: &mut Context<Self>) {
         match ask {
             Ask::Delete { target, .. } => self.delete(target, window, cx),
-            Ask::RenameTag { from, to, .. } => self.rename_write(
-                window,
-                cx,
-                |notes_folder, done, cx| notes_folder.rename_tag(from, to, done, cx),
-                |this, _, _, cx| this.close_name_field(cx),
-            ),
+            Ask::RenameTag { from, to, .. } => {
+                let done = self.tag_rename.take();
+                self.pane.update(cx, NotePane::save);
+                self.notes_folder.update(cx, |notes_folder, cx| {
+                    notes_folder.rename_tag(
+                        from,
+                        to,
+                        move |renamed, cx| {
+                            if let Some(done) = done {
+                                done(renamed.map(drop), cx);
+                            }
+                        },
+                        cx,
+                    );
+                });
+            }
             Ask::DeleteTag { tag, .. } => {
                 self.write(
                     window,
@@ -495,7 +482,7 @@ impl NotesView {
         );
     }
 
-    /// Ctrl+N: an unnamed note in the folder of the view, with its tag.
+    /// Ctrl+N: a new note in the folder of the view, with its tag.
     fn new_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (folder, tag) = self.sidebar.read(cx).new_note_place();
         self.pane
@@ -529,69 +516,92 @@ impl NotesView {
             .update(cx, |notes_folder, cx| start(notes_folder, done, cx));
     }
 
-    /// Like [`Self::write`], for a write from the name field of the sidebar. A refused name
-    /// opens the field again with its text. Another fail closes it.
-    fn rename_write<T: 'static>(
+    /// Writes `name` from the name field of `named` in the sidebar, after the unsaved text of
+    /// the pane. A tag rename first asks with the dialog.
+    fn name_write(
         &mut self,
+        named: Named,
+        name: String,
+        done: NameDone,
         window: &mut Window,
         cx: &mut Context<Self>,
-        start: impl FnOnce(&mut NotesFolder, Step<holm_core::Result<T>>, &mut Context<NotesFolder>),
-        done: impl FnOnce(&mut Self, T, &mut Window, &mut Context<Self>) + 'static,
     ) {
         self.pane.update(cx, NotePane::save);
-        let done = Self::step(window, cx, move |this, result, window, cx| match result {
-            Ok(value) => done(this, value, window, cx),
-            Err(error) => {
-                if matches!(
-                    error,
-                    holm_core::Error::NameTaken { .. } | holm_core::Error::BadName { .. }
-                ) {
-                    this.sidebar
-                        .update(cx, |sidebar, cx| sidebar.unlock_name_field(window, cx));
-                } else {
-                    this.close_name_field(cx);
-                }
-                this.fail(error, cx);
+        match named {
+            Named::Item(Item::Folder(folder)) => {
+                let kept = window_step(
+                    window,
+                    cx,
+                    |this: &mut Self, renamed: holm_core::Result<PathBuf>, _, cx| {
+                        if renamed.is_ok() {
+                            this.keep_state(cx);
+                        }
+                        done(renamed.map(drop), cx);
+                    },
+                );
+                self.notes_folder.update(cx, |notes_folder, cx| {
+                    notes_folder.rename_folder(folder, name, kept, cx);
+                });
             }
-        });
-        self.notes_folder
-            .update(cx, |notes_folder, cx| start(notes_folder, done, cx));
+            Named::NewFolder(parent) => {
+                let shown = window_step(
+                    window,
+                    cx,
+                    |this: &mut Self, created: holm_core::Result<PathBuf>, window, cx| {
+                        let shown = created.map(|folder| {
+                            this.show_folder(folder, window, cx);
+                            this.keep_state(cx);
+                        });
+                        done(shown, cx);
+                    },
+                );
+                self.notes_folder.update(cx, |notes_folder, cx| {
+                    notes_folder.create_folder(parent, name, shown, cx);
+                });
+            }
+            Named::Item(Item::Tag(from)) if !name.is_empty() => {
+                let (counted_from, counted_to) = (from.clone(), name.clone());
+                let asked =
+                    window_step(
+                        window,
+                        cx,
+                        move |this: &mut Self, count, window, cx| match count {
+                            Ok(notes) => {
+                                this.tag_rename = Some(done);
+                                this.ask(
+                                    Ask::RenameTag {
+                                        from,
+                                        to: name,
+                                        notes,
+                                    },
+                                    window,
+                                    cx,
+                                );
+                            }
+                            Err(error) => done(Err(error), cx),
+                        },
+                    );
+                self.notes_folder.update(cx, |notes_folder, cx| {
+                    notes_folder.tag_rename_count(counted_from, counted_to, asked, cx);
+                });
+            }
+            Named::Item(Item::Tag(_) | Item::All) => done(Ok(()), cx),
+        }
     }
 
-    /// Like [`Self::step`], for the result of a file action. An error shows in the message line.
+    /// A step for the result of a file action. An error shows in the message line.
     fn then<T: 'static>(
         window: &Window,
         cx: &Context<Self>,
         done: impl FnOnce(&mut Self, T, &mut Window, &mut Context<Self>) + 'static,
     ) -> Step<holm_core::Result<T>> {
-        Self::step(window, cx, move |this, result, window, cx| match result {
-            Ok(value) => done(this, value, window, cx),
-            Err(error) => this.fail(error, cx),
+        window_step(window, cx, move |this, result, window, cx| {
+            match result {
+                Ok(value) => done(this, value, window, cx),
+                Err(error) => this.fail(error, cx),
+            }
+            cx.notify();
         })
-    }
-
-    /// A `done` step for the notes folder or the pane: it runs `done` on the view.
-    fn step<R: 'static>(
-        window: &Window,
-        cx: &Context<Self>,
-        done: impl FnOnce(&mut Self, R, &mut Window, &mut Context<Self>) + 'static,
-    ) -> Step<R> {
-        let this = cx.weak_entity();
-        let window = window.window_handle();
-        Box::new(move |value, cx| {
-            window
-                .update(cx, |_, window, cx| {
-                    this.update(cx, |this, cx| {
-                        done(this, value, window, cx);
-                        cx.notify();
-                    })
-                })
-                .ok();
-        })
-    }
-
-    fn close_name_field(&self, cx: &mut Context<Self>) {
-        self.sidebar.update(cx, Sidebar::close_name_field);
     }
 
     /// Shows the error of a file action as an answer.

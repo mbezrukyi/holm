@@ -21,7 +21,8 @@
 //! [`TitleField`]. The row always shows. A note with no tags has a quiet "+ Tag" chip, and a
 //! click on it opens the popup as a click on the row does.
 //!
-//! A locked row opens no popup, so only its title field works.
+//! A note with no file yet shows [`new_note_row`]: the same row with its tag and its title
+//! field, and no popup.
 
 use std::ops::Range;
 
@@ -31,10 +32,10 @@ use gpui_kit::component::input::{
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Action, AnyElement, AppContext as _, Context, CursorStyle, ElementId, Entity, EventEmitter,
-    FocusHandle, InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, ParentElement,
-    Pixels, Render, Role, StatefulInteractiveElement, Styled, Subscription, TestSupportExt as _,
-    Toggled, Window, div, px,
+    Action, AnyElement, App, AppContext as _, Context, CursorStyle, ElementId, Entity,
+    EventEmitter, FocusHandle, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
+    ParentElement, Pixels, Render, Role, StatefulInteractiveElement, Styled, Subscription,
+    TestSupportExt as _, Toggled, Window, div, px,
 };
 use holm_core::model::Tag;
 
@@ -55,7 +56,7 @@ const POPUP_WIDTH: Pixels = px(300.);
 
 /// The gap between the title and the dot before the backlinks count. The count has the same
 /// padding.
-pub(crate) const TAIL_GAP: Pixels = px(6.);
+const TAIL_GAP: Pixels = px(6.);
 
 /// The user added or removed one tag of the note.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -85,7 +86,6 @@ pub(crate) struct TagRow {
     pinned: bool,
     title: Entity<TitleField>,
     backlinks: Entity<Backlinks>,
-    locked: bool,
     /// Every tag name in the notes folder, for the list.
     known: Vec<String>,
     /// Whether the popup is open.
@@ -130,7 +130,6 @@ impl TagRow {
             pinned: false,
             title,
             backlinks,
-            locked: false,
             known: Vec::new(),
             open: false,
             cursor: None,
@@ -151,14 +150,6 @@ impl TagRow {
         }
     }
 
-    /// Locks or unlocks the row.
-    pub(crate) fn set_locked(&mut self, locked: bool, cx: &mut Context<Self>) {
-        if self.locked != locked {
-            self.locked = locked;
-            cx.notify();
-        }
-    }
-
     /// Opens the popup with an empty field and no cursor.
     pub(crate) fn enter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open_at(None, window, cx);
@@ -174,9 +165,6 @@ impl TagRow {
     /// Opens the popup with an empty field and the cursor on `cursor`. It takes the known
     /// tags for the list from the snapshot.
     fn open_at(&mut self, cursor: Option<usize>, window: &mut Window, cx: &mut Context<Self>) {
-        if self.locked {
-            return;
-        }
         self.open = true;
         self.clear(window, cx);
         self.cursor = cursor.filter(|at| *at < self.tags.len());
@@ -352,28 +340,14 @@ impl TagRow {
     }
 
     fn row_chip(at: usize, tag: &str, cx: &Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
-        div()
-            .id(ElementId::NamedInteger("tag-chip".into(), at as u64))
-            .role(Role::ListItem)
-            .aria_label(tag.to_owned())
-            .max_w(CHIP_WIDTH)
-            .truncate()
-            .px_2()
-            .rounded(theme.radius)
-            .text_size(px(12.))
-            .bg(theme.secondary)
-            .text_color(theme.secondary_foreground)
-            .child(format!("#{tag}"))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |row, _, window, cx| {
-                    row.open_at(Some(at), window, cx);
-                    // The row and the editor would take the focus after this.
-                    window.prevent_default();
-                }),
-            )
-            .test_support()
+        chip(at, tag, cx).on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |row, _, window, cx| {
+                row.open_at(Some(at), window, cx);
+                // The row and the editor would take the focus after this.
+                window.prevent_default();
+            }),
+        )
     }
 
     /// The list under the field, while it has lines.
@@ -488,6 +462,50 @@ impl TagRow {
     }
 }
 
+/// The frame of the tag row.
+fn frame() -> impl StatefulInteractiveElement + ParentElement + Styled + IntoElement {
+    h_flex()
+        .id("tag-row")
+        .role(Role::List)
+        .aria_label(text::TAGS_LABEL)
+        .test_support()
+        .w_full()
+        .h(px(40.))
+        .pt_3()
+        .pb_1()
+        .items_center()
+}
+
+/// The chip of `tag`, the tag at `at` in the row.
+fn chip(at: usize, tag: &str, cx: &App) -> impl InteractiveElement + IntoElement + use<> {
+    let theme = cx.theme();
+    div()
+        .id(ElementId::NamedInteger("tag-chip".into(), at as u64))
+        .role(Role::ListItem)
+        .aria_label(tag.to_owned())
+        .test_support()
+        .max_w(CHIP_WIDTH)
+        .truncate()
+        .px_2()
+        .rounded(theme.radius)
+        .text_size(px(12.))
+        .bg(theme.secondary)
+        .text_color(theme.secondary_foreground)
+        .child(format!("#{tag}"))
+}
+
+/// The tag row of a note with no file yet: its tag, and `title` at the right end.
+pub(crate) fn new_note_row(
+    tag: Option<&str>,
+    title: Entity<TitleField>,
+    cx: &App,
+) -> impl IntoElement + use<> {
+    let chips = tag.map(|tag| chip(0, tag, cx).into_any_element());
+    frame().font_family(cx.theme().font_family.clone()).child(
+        Fold::new(px(6.), chips, |_| div().into_any_element()).tail(Some(title.into_any_element())),
+    )
+}
+
 /// Every tag name in the tree, parents first.
 fn flatten(tags: &[Tag], names: &mut Vec<String>) {
     for tag in tags {
@@ -512,7 +530,7 @@ impl Render for TagRow {
                 .text_color(theme.primary)
                 .child(text::PIN_MARK)
         });
-        let add = (self.tags.is_empty() && !self.locked).then(|| Self::add_chip(cx));
+        let add = self.tags.is_empty().then(|| Self::add_chip(cx));
         // The count has its own padding, so it needs no gap after the dot. Then the dot sits
         // in the middle between the title and the count text.
         let tail = h_flex()
@@ -536,11 +554,7 @@ impl Render for TagRow {
             .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default());
         let lead = (pin.is_some() || add.is_some())
             .then(|| h_flex().gap(px(6.)).children(pin).children(add));
-        let row = h_flex()
-            .id("tag-row")
-            .role(Role::List)
-            .aria_label(text::TAGS_LABEL)
-            .test_support()
+        let row = frame()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|row, _, window, cx| {
@@ -551,11 +565,6 @@ impl Render for TagRow {
                     }
                 }),
             )
-            .w_full()
-            .h(px(40.))
-            .pt_3()
-            .pb_1()
-            .items_center()
             .child(
                 Fold::new(
                     px(6.),
