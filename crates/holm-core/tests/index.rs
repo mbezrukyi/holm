@@ -9,8 +9,8 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::path::PathBuf;
 
 use common::Folder;
-use holm_core::model::{Link, LinkTarget, NoteInfo, Order, Tag};
 use holm_core::Core;
+use holm_core::model::{Link, LinkTarget, NoteInfo, Order, Tag};
 
 fn paths(notes: Vec<NoteInfo>) -> Vec<String> {
     common::paths(notes.into_iter().map(|n| n.path))
