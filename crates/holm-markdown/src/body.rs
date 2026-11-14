@@ -9,7 +9,7 @@ use pulldown_cmark::{
     Parser, Tag, TagEnd,
 };
 
-pub use link::{Target, escape_text};
+pub use link::{Target, escape_text, unescape_text};
 
 use crate::inline::{Defs, Destination, Kind, Leaf, Node, Scratch};
 
@@ -227,12 +227,14 @@ impl std::fmt::Display for Color {
 pub struct Link {
     /// The whole link source, like `[text](target)`.
     pub range: Range<usize>,
+    /// The link text between `[` and `]`, as written.
+    pub text: Range<usize>,
     /// Where the link points.
     pub target: Target,
     /// The target as written, with its `< >`. It is `None` for a reference link,
     /// because the target is in its definition line.
     pub target_range: Option<Range<usize>>,
-    /// Whether it is `![..](..)`: an image or a file card.
+    /// Whether it is `![..](..)`: an image or a file chip.
     pub embedded: bool,
 }
 
@@ -466,6 +468,7 @@ impl Moves for Link {
 
     fn shift(&mut self, to: &impl Fn(usize) -> usize) {
         self.range.shift(to);
+        self.text.shift(to);
         if let Some(range) = &mut self.target_range {
             range.shift(to);
         }
@@ -944,11 +947,11 @@ impl<'a> Walker<'a> {
                 }
                 Kind::Image(dest) => {
                     self.hide_inline(node.source.clone());
-                    self.push_link(node.source, *dest, true);
+                    self.push_link(node.source, node.content, *dest, true);
                     continue;
                 }
                 Kind::Link(dest) => {
-                    self.push_link(node.source.clone(), *dest, false);
+                    self.push_link(node.source.clone(), node.content.clone(), *dest, false);
                     if node.content.is_empty() {
                         continue;
                     }
@@ -982,10 +985,17 @@ impl<'a> Walker<'a> {
         }
     }
 
-    fn push_link(&mut self, range: Range<usize>, dest: Destination, embedded: bool) {
+    fn push_link(
+        &mut self,
+        range: Range<usize>,
+        text: Range<usize>,
+        dest: Destination,
+        embedded: bool,
+    ) {
         if let Some(target) = dest.target {
             self.body.links.push(Link {
                 range,
+                text,
                 target,
                 target_range: dest.range,
                 embedded,

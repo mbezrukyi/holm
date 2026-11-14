@@ -93,6 +93,29 @@ pub fn escape_text(text: &str) -> String {
     out
 }
 
+/// Markdown inline text as plain text: a `\` before ASCII punctuation goes away.
+///
+/// ```
+/// assert_eq!(holm_markdown::unescape_text(r"\[\*draft\*\] a\b"), r"[*draft*] a\b");
+/// ```
+#[must_use]
+pub fn unescape_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\'
+            && let Some(&next) = chars.peek()
+            && next.is_ascii_punctuation()
+        {
+            out.push(next);
+            chars.next();
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// The target of a link destination, or `None` when it is empty.
 pub(crate) fn target(dest: &str) -> Option<Target> {
     if dest.is_empty() {
