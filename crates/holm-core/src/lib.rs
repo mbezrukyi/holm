@@ -278,12 +278,12 @@ impl Core {
 
     /// Creates an empty note with a new id in `folder`, and returns it.
     ///
-    /// The file is `<title>.md`. Holm uses `title` as it is and never adds a number.
+    /// The file is `<title>.md`, with no spaces around `title`. Holm never adds a number.
     ///
     /// # Errors
     ///
-    /// - [`Error::BadName`] when `title` breaks a rule of [`Core::create_folder`], or is too
-    ///   long with `.md`.
+    /// - [`Error::BadName`] when `title` is empty, holds `/`, starts with `.`, or is too long
+    ///   with `.md`.
     /// - [`Error::NameTaken`] when something in `folder` has the file name, also with other
     ///   capital letters.
     /// - [`Error::BadPath`] when `folder` is not a plain folder path inside the notes folder.
@@ -315,7 +315,7 @@ impl Core {
         self.inner.write(|draft| {
             Store::check_note(path)?;
             let folder = folder_of(path);
-            let name = store::check_title(folder, title)?;
+            let name = store::check_title(title)?;
             let new = self
                 .inner
                 .store
@@ -638,7 +638,7 @@ impl Core {
             return Err(read_error(std::io::ErrorKind::IsADirectory.into()));
         }
         let stem =
-            holm_markdown::file_stem(&file.file_stem().unwrap_or_default().to_string_lossy());
+            store::file_stem(&file.file_stem().unwrap_or_default().to_string_lossy());
         let ext = file
             .extension()
             .map(|ext| format!(".{}", ext.to_string_lossy()))
@@ -661,7 +661,7 @@ impl Core {
         extension: &str,
         bytes: &[u8],
     ) -> Result<PathBuf> {
-        let ext = format!(".{}", holm_markdown::file_stem(extension));
+        let ext = format!(".{}", store::file_stem(extension));
         self.attach(note.as_ref(), OsStr::new(PASTED_IMAGE), &ext, bytes)
     }
 

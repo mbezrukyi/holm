@@ -21,6 +21,9 @@ pub(crate) const ATTACHMENTS: &str = "attachments";
 const NOTE_EXT: &str = ".md";
 /// The longest file name that Linux file systems take.
 const MAX_NAME_BYTES: usize = 255;
+/// Longest file stem in bytes. It leaves room for the hash and the extension of an
+/// attachment under [`MAX_NAME_BYTES`].
+const MAX_STEM_BYTES: usize = 240;
 /// The bytes of the content hash in an attachment name: 8 hex digits.
 const HASH_BYTES: usize = 4;
 /// A new file gets these bits before the umask.
@@ -228,7 +231,7 @@ impl Store {
     /// something in `folder` has the name.
     pub(crate) fn create(&self, folder: &Path, title: &str) -> Result<(Note, Stamp)> {
         let folder = plain_path(folder)?;
-        let rel = folder.join(check_title(folder, title)?);
+        let rel = folder.join(check_title(title)?);
         self.check_free(&rel, None)?;
         let dir = self.root.join(folder);
         let path = self.root.join(&rel);
@@ -585,42 +588,62 @@ fn folder_abs(path: &Path) -> &Path {
     path.parent().unwrap_or(Path::new("/"))
 }
 
-/// Checks a typed name for a new entry in `parent`, and returns it as it is.
+/// Checks a typed folder name for a new entry in `parent`, and returns it as it is.
 pub(crate) fn check_name<'a>(parent: &Path, name: &'a str) -> Result<&'a str> {
-    let problem = if name.trim().is_empty() {
-        Some(NameProblem::Empty)
-    } else if name.contains('/') {
-        Some(NameProblem::Slash)
-    } else if name.starts_with('.') {
-        Some(NameProblem::Dot)
-    } else if parent.as_os_str().is_empty() && name.eq_ignore_ascii_case(ATTACHMENTS) {
-        Some(NameProblem::Attachments)
-    } else if name.len() > MAX_NAME_BYTES {
-        Some(NameProblem::TooLong)
-    } else {
-        None
-    };
-    match problem {
-        Some(problem) => Err(Error::BadName {
-            name: name.to_owned(),
-            problem,
-        }),
-        None => Ok(name),
-    }
-}
-
-/// Checks a typed title for a new note in `parent`, and returns its file name.
-/// The rules are those of [`check_name`], for the name with `.md`.
-pub(crate) fn check_title(parent: &Path, title: &str) -> Result<String> {
-    check_name(parent, title)?;
-    let name = format!("{title}{NOTE_EXT}");
-    if name.len() > MAX_NAME_BYTES {
+    if parent.as_os_str().is_empty() && name.eq_ignore_ascii_case(ATTACHMENTS) {
         return Err(Error::BadName {
-            name: title.to_owned(),
-            problem: NameProblem::TooLong,
+            name: name.to_owned(),
+            problem: NameProblem::Attachments,
         });
     }
+    check_file_name(name, name)?;
     Ok(name)
+}
+
+/// Checks a typed title, trimmed, and returns its file name `<title>.md`.
+pub(crate) fn check_title(title: &str) -> Result<String> {
+    let title = title.trim();
+    let name = format!("{title}{NOTE_EXT}");
+    check_file_name(title, &name)?;
+    Ok(name)
+}
+
+/// Checks the rules for every typed name. `file_name` is the name on disk for `typed`.
+fn check_file_name(typed: &str, file_name: &str) -> Result<()> {
+    let problem = if typed.trim().is_empty() {
+        NameProblem::Empty
+    } else if typed.contains('/') {
+        NameProblem::Slash
+    } else if typed.starts_with('.') {
+        NameProblem::Dot
+    } else if file_name.len() > MAX_NAME_BYTES {
+        NameProblem::TooLong
+    } else {
+        return Ok(());
+    };
+    Err(Error::BadName {
+        name: typed.to_owned(),
+        problem,
+    })
+}
+
+/// A file stem from any text, like the name of a pasted file.
+///
+/// It keeps the text as it is, but replaces `/` and a leading `.` with `-`.
+/// It also cuts a very long text to [`MAX_STEM_BYTES`].
+pub(crate) fn file_stem(text: &str) -> String {
+    let mut stem = text.replace('/', "-");
+    if stem.starts_with('.') {
+        stem.replace_range(..1, "-");
+    }
+    if stem.len() > MAX_STEM_BYTES {
+        let mut end = MAX_STEM_BYTES;
+        while !stem.is_char_boundary(end) {
+            end -= 1;
+        }
+        stem.truncate(end);
+    }
+    stem
 }
 
 /// A reader that hashes what it reads.
@@ -771,6 +794,22 @@ mod tests {
             .collect();
         names.sort();
         names
+    }
+
+    #[test]
+    fn file_stems() {
+        assert_eq!(file_stem("Plans for 2026"), "Plans for 2026");
+        assert_eq!(file_stem("a/b/c"), "a-b-c");
+        assert_eq!(file_stem("..dots"), "-.dots");
+        assert_eq!(file_stem("Ünïcode: ok?"), "Ünïcode: ok?");
+    }
+
+    #[test]
+    fn a_long_file_stem_stops_at_a_char() {
+        let text = "é".repeat(200);
+        let stem = file_stem(&text);
+        assert_eq!(stem.len(), MAX_STEM_BYTES);
+        assert!(text.starts_with(&stem));
     }
 
     #[test]

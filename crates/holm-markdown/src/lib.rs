@@ -6,7 +6,6 @@
 mod body;
 mod frontmatter;
 pub mod inline;
-mod name;
 mod note;
 mod preview;
 mod tag;
@@ -16,7 +15,6 @@ pub use body::{
     Alignment, Block, BlockKind, Body, CalloutKind, Color, Heading, Link, Span, Style, Target,
     Task, escape_text, unescape_text,
 };
-pub use name::file_stem;
 pub use note::{LineEnding, Note};
 pub use tag::normalize_tag;
 

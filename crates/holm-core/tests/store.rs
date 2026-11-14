@@ -340,6 +340,18 @@ fn create_refuses_a_taken_or_bad_title_and_writes_nothing() {
 }
 
 #[test]
+fn create_trims_the_title_and_takes_attachments_at_the_root() {
+    let folder = Folder::new(&[]);
+
+    let plans = folder.core.create("", "  Plans  ").result.unwrap();
+    let attachments = folder.core.create("", "attachments").result.unwrap();
+
+    assert_eq!(plans.info.path, Path::new("Plans.md"));
+    assert_eq!(plans.info.title, "Plans");
+    assert_eq!(attachments.info.path, Path::new("attachments.md"));
+}
+
+#[test]
 fn create_fails_in_a_missing_or_hidden_folder() {
     let folder = Folder::new(&[]);
 
