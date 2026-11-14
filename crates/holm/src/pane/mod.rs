@@ -355,7 +355,7 @@ impl NotePane {
             .update(cx, |line, cx| line.set_state(state.map(Into::into), cx));
     }
 
-    /// Alt+D or a click on the state: opens or closes the disk menu, or shows why the note is
+    /// Ctrl+Shift+D or a click on the state: opens or closes the disk menu, or shows why the note is
     /// not saved.
     pub(crate) fn open_state(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(disk) = self.disk {

@@ -19,6 +19,7 @@ mod notes_folder;
 mod pane;
 mod picker;
 mod popup;
+mod problem_list;
 mod quick_open;
 mod sidebar;
 mod tags;
@@ -74,11 +75,11 @@ fn fail(error: &AppError) -> ExitCode {
 /// Starts the log and the panic hook, and reads the config.
 fn start() -> Result<Startup, AppError> {
     let state = folder("XDG_STATE_HOME", ".local/state")?;
-    let log = log::start(&state)?;
+    let log = log::start(&state);
     crash::install(&state);
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "Holm starts");
 
-    let crash_log = crash::take_mark(&state).then_some(log);
+    let crashed = crash::take_mark(&state);
     let config = Config::load(folder("XDG_CONFIG_HOME", ".config")?.join("config.toml"));
     tracing::debug!(settings = ?config.settings(), "settings");
     Ok(Startup {
@@ -86,7 +87,8 @@ fn start() -> Result<Startup, AppError> {
         config,
         index_dir: folder("XDG_CACHE_HOME", ".cache")?,
         default_folder: home()?.join("Notes"),
-        crash_log,
+        crashed,
+        log,
         write_budget: Duration::from_millis(50),
     })
 }

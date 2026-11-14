@@ -19,6 +19,7 @@ use holm_core::Core;
 
 use crate::config::{Config, Settings, Theme};
 use crate::error::AppError;
+use crate::log::Log;
 use crate::message_line::{Answer, MessageLine};
 use crate::notes::NotesView;
 use crate::notes_folder::NotesFolder;
@@ -36,8 +37,9 @@ pub(crate) struct Startup {
     pub(crate) index_dir: PathBuf,
     /// `~/Notes`.
     pub(crate) default_folder: PathBuf,
-    /// The log, when the last run ended in a panic.
-    pub(crate) crash_log: Option<PathBuf>,
+    /// Whether the last run ended in a panic.
+    pub(crate) crashed: bool,
+    pub(crate) log: Log,
     /// How long a file action waits for its write before the next frame.
     pub(crate) write_budget: Duration,
 }
@@ -69,12 +71,13 @@ pub(crate) fn open(startup: Startup, cx: &mut App) -> Result<(), AppError> {
 pub(crate) struct HolmWindow {
     open_core: OpenCore,
     config: Entity<Config>,
+    log: Log,
     index_dir: PathBuf,
     default_folder: PathBuf,
     write_budget: Duration,
     stage: Stage,
     line: Entity<MessageLine>,
-    _appearance: Subscription,
+    _subscriptions: [Subscription; 2],
 }
 
 enum Stage {
@@ -93,7 +96,8 @@ impl HolmWindow {
             config,
             index_dir,
             default_folder,
-            crash_log,
+            crashed,
+            log,
             write_budget,
         } = startup;
         theme::apply(config.settings().theme, window, cx);
@@ -103,24 +107,40 @@ impl HolmWindow {
             }
         });
         let line = cx.new(MessageLine::new);
-        if let Some(log) = crash_log {
-            line.update(cx, |line, cx| line.show(text::crashed(&log), cx));
+        // Without a log file, the crash notice has no log to point to.
+        if let Some(file) = log.file().filter(|_| crashed) {
+            line.update(cx, |line, cx| line.show(text::crashed(file), cx));
         }
         let folder = config.settings().notes_folder.clone();
+        let config = cx.new(|_| config);
+        let config_changed = cx.observe(&config, |this, _, cx| this.show_problems(cx));
         let mut this = Self {
             open_core,
-            config: cx.new(|_| config),
+            config,
+            log,
             index_dir,
             default_folder,
             write_budget,
             stage: Stage::Ask,
             line,
-            _appearance: appearance,
+            _subscriptions: [appearance, config_changed],
         };
+        this.show_problems(cx);
         if let Some(folder) = folder {
             this.open_folder(folder, false, window, cx);
         }
         this
+    }
+
+    /// Shows the problems of the settings and the log in the message line.
+    fn show_problems(&self, cx: &mut Context<Self>) {
+        let problems = [self.config.read(cx).problem(), self.log.problem()]
+            .into_iter()
+            .flatten()
+            .map(SharedString::from)
+            .collect();
+        self.line
+            .update(cx, |line, cx| line.set_problems(problems, cx));
     }
 
     /// Opens the notes folder and its last changed note. `create` makes the folder first.
@@ -184,11 +204,10 @@ impl HolmWindow {
             last_note: None,
             ..self.config.read(cx).settings().clone()
         };
-        if let Err(error) = self.config.update(cx, |config, _| config.save(settings)) {
-            tracing::warn!(error = %crate::chain(&error), "cannot save the settings");
-            self.line
-                .update(cx, |line, cx| line.show(error.message(), cx));
-        }
+        self.config.update(cx, |config, cx| {
+            config.save(settings);
+            cx.notify();
+        });
         self.open_folder(folder, create, window, cx);
     }
 
@@ -218,65 +237,21 @@ impl HolmWindow {
         .detach();
     }
 
-    /// The text under the title when the config file is broken. The path is a code chip.
-    /// The words wrap one by one, as plain text has no place for a chip with a padding.
-    fn config_broken(&self, cx: &App) -> AnyElement {
-        let theme = cx.theme();
-        let path = text::home_path(self.config.read(cx).path());
-        let word = |word: &str| div().child(word.to_owned()).into_any_element();
-        let (mark, after) = mark_after_chip(text::CONFIG_BROKEN_AFTER);
-        // A path wider than the text wraps inside its chip.
-        let chip = h_flex()
-            .max_w_full()
-            .min_w_0()
-            .items_baseline()
-            .child(
-                div()
-                    .min_w_0()
-                    .px(px(5.))
-                    .py(px(1.))
-                    .rounded(px(4.))
-                    .bg(theme.accent)
-                    .font_family(theme.mono_font_family.clone())
-                    .text_size(px(12.5))
-                    .child(path),
-            )
-            .child(word(mark))
-            .into_any_element();
-        h_flex()
-            .flex_wrap()
-            .items_baseline()
-            .gap_x(px(4.))
-            .text_color(theme.muted_foreground)
-            .children(text::CONFIG_BROKEN_BEFORE.split_whitespace().map(word))
-            .child(chip)
-            .children(after.split_whitespace().map(word))
-            .into_any_element()
-    }
-
     fn folder_screen(&self, cx: &mut Context<Self>) -> AnyElement {
         let pick = Button::new("pick-folder")
             .label(text::PICK_FOLDER)
             .on_click(cx.listener(|_, _, window, cx| Self::pick(window, cx)));
-        // A broken config file lost the notes folder, so the screen tells why it asks.
-        let (title, about) = if self.config.read(cx).is_broken() {
-            (text::CONFIG_BROKEN, self.config_broken(cx))
-        } else {
-            (
-                text::ASK_FOLDER,
-                div()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(text::ABOUT_FOLDER)
-                    .into_any_element(),
-            )
-        };
         let (message, content) = match &self.stage {
             Stage::Ask => (
-                SharedString::from(title),
+                SharedString::from(text::ASK_FOLDER),
                 v_flex()
                     .gap_2()
-                    .child(div().text_lg().child(title))
-                    .child(about)
+                    .child(div().text_lg().child(text::ASK_FOLDER))
+                    .child(
+                        div()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(text::ABOUT_FOLDER),
+                    )
                     .child(
                         h_flex()
                             .pt_4()
@@ -343,12 +318,6 @@ impl Render for HolmWindow {
             .child(self.folder_screen(cx))
             .child(self.line.clone())
     }
-}
-
-/// Splits the text after a chip into the mark that stays on the chip, like a comma, and the
-/// rest. The mark keeps no space before it.
-fn mark_after_chip(after: &str) -> (&str, &str) {
-    after.split_at(after.find(char::is_whitespace).unwrap_or(after.len()))
 }
 
 #[cfg(test)]

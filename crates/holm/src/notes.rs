@@ -665,13 +665,6 @@ impl NotesView {
         }
         let keystroke = &event.keystroke;
         let modifiers = keystroke.modifiers;
-        let alt_only =
-            modifiers.alt && !(modifiers.control || modifiers.shift || modifiers.platform);
-        if alt_only && keystroke.key == "d" {
-            self.pane.update(cx, |pane, cx| pane.open_state(window, cx));
-            cx.stop_propagation();
-            return;
-        }
         if !modifiers.modified() && keystroke.key == "f2" && self.editor_focused(window, cx) {
             self.pane.update(cx, |pane, cx| pane.edit_title(window, cx));
             cx.stop_propagation();
@@ -682,6 +675,7 @@ impl NotesView {
         }
         let in_editor = self.editor_focused(window, cx);
         match (modifiers.shift, keystroke.key.as_str()) {
+            (true, "d") => self.pane.update(cx, |pane, cx| pane.open_state(window, cx)),
             (true, "l") => self.toggle_sidebar(window, cx),
             (true, "f") => self.focus_search(window, cx),
             (true, "o") => self.open_quick_open(window, cx),
@@ -732,11 +726,10 @@ impl NotesView {
     }
 
     fn save_settings(&mut self, settings: crate::config::Settings, cx: &mut Context<Self>) {
-        if let Err(error) = self.config.update(cx, |config, _| config.save(settings)) {
-            tracing::warn!(error = %crate::chain(&error), "cannot save the settings");
-            self.line
-                .update(cx, |line, cx| line.show(error.message(), cx));
-        }
+        self.config.update(cx, |config, cx| {
+            config.save(settings);
+            cx.notify();
+        });
     }
 }
 

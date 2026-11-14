@@ -1,8 +1,5 @@
 //! The app error. It wraps the library errors, and each case has one line of UI text.
 
-use std::io;
-use std::path::PathBuf;
-
 use holm_core::NameProblem;
 
 use crate::text;
@@ -15,13 +12,6 @@ pub(crate) enum AppError {
     Markdown(#[from] holm_markdown::Error),
     #[error(transparent)]
     Editor(#[from] holm_editor::Error),
-    #[error("cannot write the config file {path}")]
-    ConfigWrite { path: PathBuf, source: io::Error },
-    #[error("cannot start the log in {path}")]
-    Log {
-        path: PathBuf,
-        source: Box<dyn std::error::Error + Send + Sync>,
-    },
     #[error("cannot find the home folder")]
     NoHome,
     #[error("cannot open the window: {0}")]
@@ -51,8 +41,6 @@ impl AppError {
                 _ => text::UNKNOWN,
             },
             Self::Markdown(_) | Self::Editor(_) => text::UNKNOWN,
-            Self::ConfigWrite { .. } => text::CONFIG_WRITE,
-            Self::Log { .. } => text::LOG,
             Self::NoHome => text::NO_HOME,
             Self::Window(_) => text::WINDOW,
         }

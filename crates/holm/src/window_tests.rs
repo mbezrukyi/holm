@@ -12,8 +12,9 @@ use gpui_kit::{AnyWindowHandle, AppContext as _, Role, TestAppContext, Window};
 use holm_core::{Core, Feed};
 use tempfile::TempDir;
 
-use super::{HolmWindow, Startup, mark_after_chip};
+use super::{HolmWindow, Startup};
 use crate::config::Config;
+use crate::log::Log;
 use crate::sidebar::{Item, View};
 use crate::{notes_folder, text, theme};
 
@@ -76,6 +77,7 @@ impl Fixture {
         self
     }
 
+    /// A start with a log file. `crash_log` is that file after a crash.
     fn startup(&self, crash_log: Option<PathBuf>) -> Startup {
         let feed = self.feed.clone();
         Startup {
@@ -87,7 +89,8 @@ impl Fixture {
             config: Config::load(self.config()),
             index_dir: self.dir.path().join("cache"),
             default_folder: self.dir.path().join("Notes"),
-            crash_log,
+            crashed: crash_log.is_some(),
+            log: Log::at(crash_log.unwrap_or_else(|| PathBuf::from("/state/holm/holm.log"))),
             write_budget: Duration::from_millis(50),
         }
     }
@@ -187,6 +190,16 @@ fn message(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
 /// The state on the right of the message line.
 fn state(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
     label(cx, handle, "message-state")
+}
+
+/// The gray mark with the count of the problems.
+fn problem_mark(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
+    label(cx, handle, "problem-mark")
+}
+
+/// The rows of the open problem list. The selected one has `*`.
+fn problem_list(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
+    labels(cx, handle, "problem-list", Role::ListBoxOption)
 }
 
 /// The rows of the open disk menu. The selected one has `*`.
@@ -324,7 +337,7 @@ fn an_outside_change_with_unsaved_text_asks_to_reload_or_keep_mine(cx: &mut Test
     assert_eq!(read(&note), "theirs\n", "no autosave during the question");
 
     // The open menu takes every key, and Esc closes only the menu.
-    keys(cx, handle, "alt-d");
+    keys(cx, handle, "ctrl-shift-d");
     assert_eq!(disk_menu(cx, handle), ["Keep mine*", "Reload"]);
     let text = editor_text(cx, handle);
     keys(cx, handle, "x backspace");
@@ -335,7 +348,7 @@ fn an_outside_change_with_unsaved_text_asks_to_reload_or_keep_mine(cx: &mut Test
     assert_eq!(focus(cx, handle), "editor");
 
     // A click outside the menu closes it, and so does a second click on the state.
-    keys(cx, handle, "alt-d");
+    keys(cx, handle, "ctrl-shift-d");
     click(cx, handle, "editor");
     assert_eq!(disk_menu(cx, handle), Vec::<String>::new());
     assert_eq!(state(cx, handle).as_deref(), Some(text::CHANGED_ON_DISK));
@@ -346,14 +359,14 @@ fn an_outside_change_with_unsaved_text_asks_to_reload_or_keep_mine(cx: &mut Test
     assert_eq!(focus(cx, handle), "editor");
 
     // The menu is as wide as the state, right above it.
-    keys(cx, handle, "alt-d");
+    keys(cx, handle, "ctrl-shift-d");
     let menu = bounds_of(cx, handle, "disk-menu").unwrap();
     let opener = bounds_of(cx, handle, "message-state").unwrap();
     assert_eq!((menu.left(), menu.right()), (opener.left(), opener.right()));
     assert!(menu.bottom() <= opener.top());
     keys(cx, handle, "escape");
 
-    keys(cx, handle, "alt-d enter");
+    keys(cx, handle, "ctrl-shift-d enter");
     assert!(read(&note).ends_with("\n---\nmine old\n"));
     assert_eq!(state(cx, handle), None);
     assert_eq!(focus(cx, handle), "editor");
@@ -368,22 +381,33 @@ fn an_outside_change_with_unsaved_text_asks_to_reload_or_keep_mine(cx: &mut Test
 }
 
 #[gpui_kit::test]
-fn a_broken_config_tells_why_the_folder_screen_asks(cx: &mut TestAppContext) {
+fn a_broken_config_is_a_problem_in_the_message_line(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     fixture.write_config("version = [broken\n");
     let log = PathBuf::from("/state/holm/holm.log");
     let handle = open(cx, fixture.startup(Some(log.clone())));
-    assert_eq!(
-        folder_screen(cx, handle).as_deref(),
-        Some(text::CONFIG_BROKEN)
-    );
+    assert_eq!(folder_screen(cx, handle).as_deref(), Some(text::ASK_FOLDER));
     assert_eq!(message(cx, handle), Some(text::crashed(&log)));
+    assert_eq!(problem_mark(cx, handle), Some(text::problem_mark(1)));
 
+    keys(cx, handle, "ctrl-shift-e");
+    assert_eq!(
+        problem_list(cx, handle),
+        [format!("{}*", text::CONFIG_WRITE)]
+    );
+    keys(cx, handle, "down up");
+    assert_eq!(problem_list(cx, handle).len(), 1);
     keys(cx, handle, "escape");
-    assert_eq!(message(cx, handle), None);
+    assert_eq!(problem_list(cx, handle), Vec::<String>::new());
+    click(cx, handle, "problem-mark");
+    assert_eq!(problem_list(cx, handle).len(), 1);
+    click(cx, handle, "problem-mark");
+    assert_eq!(problem_list(cx, handle), Vec::<String>::new());
+
     click(cx, handle, "use-default");
     assert!(empty_pane(cx, handle));
     assert_eq!(read(&fixture.config()), "version = [broken\n");
+    assert_eq!(problem_mark(cx, handle), Some(text::problem_mark(1)));
 }
 
 #[gpui_kit::test]
@@ -428,22 +452,26 @@ fn a_failed_save_shows_not_saved_until_a_save_works(cx: &mut TestAppContext) {
     assert_eq!(message(cx, handle).as_deref(), Some(text::WRITE));
     assert_eq!(state(cx, handle).as_deref(), Some(text::NOT_SAVED));
 
-    // A second fail does not show the reason again. Alt+D does.
+    // A second fail does not show the reason again. Ctrl+Shift+D does.
     keys(cx, handle, "right");
     cx.simulate_input(handle, "b");
     autosave(cx);
     assert_eq!(message(cx, handle), None);
     assert_eq!(state(cx, handle).as_deref(), Some(text::NOT_SAVED));
-    keys(cx, handle, "alt-d");
+    keys(cx, handle, "ctrl-shift-d");
     assert_eq!(message(cx, handle).as_deref(), Some(text::WRITE));
-    assert_eq!(editor_text(cx, handle), "aobld\n", "Alt+D types nothing");
+    assert_eq!(
+        editor_text(cx, handle),
+        "aobld\n",
+        "Ctrl+Shift+D types nothing"
+    );
 
     // A disk question wins over "Not saved".
     fixture.write_outside(cx, "Note.md", "theirs\n");
     assert_eq!(state(cx, handle).as_deref(), Some(text::CHANGED_ON_DISK));
 
     read_only(&notes_dir, false);
-    keys(cx, handle, "alt-d enter");
+    keys(cx, handle, "ctrl-shift-d enter");
     assert_eq!(state(cx, handle), None);
     assert!(read(&note).ends_with("aobld\n"));
 }
@@ -2391,18 +2419,18 @@ fn an_outside_delete_with_unsaved_text_asks_to_keep_or_close(cx: &mut TestAppCon
     autosave(cx);
     assert!(!notes_dir.join("Plan.md").exists(), "no autosave");
 
-    keys(cx, handle, "alt-d");
+    keys(cx, handle, "ctrl-shift-d");
     assert_eq!(disk_menu(cx, handle), ["Keep mine*", "Close"]);
     keys(cx, handle, "escape");
     assert_eq!(state(cx, handle).as_deref(), Some(text::DELETED_ON_DISK));
-    keys(cx, handle, "alt-d enter");
+    keys(cx, handle, "ctrl-shift-d enter");
     assert_eq!(state(cx, handle), None);
     assert!(read(&notes_dir.join("Plan.md")).ends_with("# Plan\nbuy milk\nmine\n"));
 
     cx.simulate_input(handle, "!");
     fixture.delete_outside(cx, "Plan.md");
     assert_eq!(state(cx, handle).as_deref(), Some(text::DELETED_ON_DISK));
-    keys(cx, handle, "alt-d down enter");
+    keys(cx, handle, "ctrl-shift-d down enter");
     assert_eq!(editor_text(cx, handle), "# Goals\nread more\n");
     assert!(!notes_dir.join("Plan.md").exists());
     assert_eq!(state(cx, handle), None);
@@ -2453,7 +2481,7 @@ fn close_after_an_outside_delete_writes_no_file(cx: &mut TestAppContext) {
     let before = times();
 
     fixture.delete_outside(cx, "Plan.md");
-    keys(cx, handle, "alt-d down enter");
+    keys(cx, handle, "ctrl-shift-d down enter");
     autosave(cx);
     assert_eq!(editor_text(cx, handle), "# Goals\nread more\n");
     assert_eq!(files(&notes_dir), ["Goals.md", "Top.md"]);
@@ -2824,9 +2852,3 @@ fn ctrl_n_after_a_refused_title_starts_clean(cx: &mut TestAppContext) {
 
 #[path = "window_speed.rs"]
 mod speed;
-
-#[test]
-fn a_comma_after_a_chip_stays_on_it() {
-    assert_eq!(mark_after_chip(", or pick"), (",", " or pick"));
-    assert_eq!(mark_after_chip("."), (".", ""));
-}

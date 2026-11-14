@@ -20,8 +20,6 @@ pub(crate) const CONFIG_WRITE: &str = "Holm can't save the settings.";
 pub(crate) const LOG: &str = "Holm can't write its log.";
 pub(crate) const WINDOW: &str = "Holm can't open its window.";
 pub(crate) const NO_HOME: &str = "Holm can't find your home folder.";
-/// The title of the folder screen when the config file is broken.
-pub(crate) const CONFIG_BROKEN: &str = "Holm can't read the config file.";
 
 pub(crate) const TITLE: &str = "Holm";
 pub(crate) const ASK_FOLDER: &str = "Where do your notes live?";
@@ -38,6 +36,12 @@ pub(crate) const NOT_SAVED: &str = "Not saved";
 pub(crate) const WRITING: &str = "Writing…";
 /// The mark before a state in the message line.
 pub(crate) const STATE_MARK: &str = "●";
+
+/// The gray mark in the message line with the count of the problems.
+pub(crate) fn problem_mark(count: usize) -> String {
+    format!("⚠ {count}")
+}
+
 pub(crate) const NO_NOTE_OPEN: &str = "No note is open.";
 pub(crate) const NEW_NOTE: &str = "New note";
 pub(crate) const CLOSE: &str = "Close";
@@ -45,13 +49,6 @@ pub(crate) const CLOSE: &str = "Close";
 pub(crate) fn folder_missing(folder: &Path) -> String {
     format!("Holm can't find the notes folder {}.", home_path(folder))
 }
-
-/// The words under [`CONFIG_BROKEN`] before the path of the config file.
-pub(crate) const CONFIG_BROKEN_BEFORE: &str =
-    "So Holm doesn't know where your notes live. Fix the error in";
-/// The words after the path.
-pub(crate) const CONFIG_BROKEN_AFTER: &str =
-    ", or pick a folder for now. Holm doesn't change the file, so it asks again at the next start.";
 
 /// `path` with `~` for the home folder.
 pub(crate) fn home_path(path: &Path) -> String {

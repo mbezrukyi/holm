@@ -14,8 +14,8 @@ use holm_editor::WritingHelp;
 use holm_markdown::Color;
 use toml_edit::{Array, DocumentMut, Item, Table, Value};
 
-use crate::error::AppError;
 use crate::sidebar::{Item as SidebarItem, View};
+use crate::text;
 
 const VERSION: i64 = 1;
 
@@ -91,6 +91,8 @@ pub(crate) struct Config {
     document: DocumentMut,
     settings: Settings,
     state: State,
+    /// Whether the last write of the file failed.
+    save_failed: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -123,6 +125,7 @@ impl Config {
             document,
             settings,
             state,
+            save_failed: false,
         }
     }
 
@@ -130,34 +133,34 @@ impl Config {
         &self.settings
     }
 
-    pub(crate) fn path(&self) -> &Path {
-        &self.path
-    }
-
-    /// Whether Holm could not read the file. The folder screen then tells why it asks.
-    pub(crate) fn is_broken(&self) -> bool {
-        self.state == State::Broken
+    /// The problem of the settings: Holm can't read the file, or the last save failed.
+    /// A good save ends it.
+    pub(crate) fn problem(&self) -> Option<&'static str> {
+        (self.state == State::Broken || self.save_failed).then_some(text::CONFIG_WRITE)
     }
 
     /// Keeps `settings` and writes them to the file. It does not write a broken file or a file
     /// with a newer version. A folder path that is not UTF-8 stays out of the file.
-    pub(crate) fn save(&mut self, settings: Settings) -> Result<(), AppError> {
+    pub(crate) fn save(&mut self, settings: Settings) {
         self.settings = settings;
         if self.state != State::Writable {
             tracing::info!(path = %self.path.display(), "the config file stays as it is");
-            return Ok(());
+            return;
         }
         write(&mut self.document, &self.settings);
-        let error = |source| AppError::ConfigWrite {
-            path: self.path.clone(),
-            source,
-        };
+        let written = self.write_file();
+        if let Err(error) = &written {
+            tracing::warn!(%error, path = %self.path.display(), "cannot write the config file");
+        }
+        self.save_failed = written.is_err();
+    }
+
+    fn write_file(&self) -> io::Result<()> {
         let dir = self.path.parent().unwrap_or(Path::new("."));
-        fs::create_dir_all(dir).map_err(error)?;
-        let mut file = tempfile::NamedTempFile::new_in(dir).map_err(error)?;
-        file.write_all(self.document.to_string().as_bytes())
-            .map_err(error)?;
-        file.persist(&self.path).map_err(|e| error(e.error))?;
+        fs::create_dir_all(dir)?;
+        let mut file = tempfile::NamedTempFile::new_in(dir)?;
+        file.write_all(self.document.to_string().as_bytes())?;
+        file.persist(&self.path).map_err(|e| e.error)?;
         Ok(())
     }
 }
@@ -465,7 +468,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut config = Config::load(dir.path().join("holm").join("config.toml"));
         assert_eq!(config.settings(), &Settings::default());
-        assert!(!config.is_broken());
+        assert_eq!(config.problem(), None);
 
         let settings = Settings {
             notes_folder: Some(PathBuf::from("/home/me/Notes")),
@@ -488,7 +491,7 @@ mod tests {
             },
             last_note: Some(PathBuf::from("work/Plans.md")),
         };
-        config.save(settings.clone()).unwrap();
+        config.save(settings.clone());
 
         assert!(file(&config).starts_with("version = 1\n"));
         assert_eq!(Config::load(config.path.clone()).settings(), &settings);
@@ -499,7 +502,7 @@ mod tests {
         let (_dir, mut config) = load("# My settings\ntheme = \"dark\"\n");
         assert_eq!(config.settings().theme, Theme::Dark);
 
-        config.save(config.settings().clone()).unwrap();
+        config.save(config.settings().clone());
 
         let text = file(&config);
         assert!(text.starts_with("version = 1\n"), "{text}");
@@ -514,7 +517,7 @@ mod tests {
 
         let mut settings = config.settings().clone();
         settings.theme = Theme::Light;
-        config.save(settings).unwrap();
+        config.save(settings);
 
         let text = file(&config);
         for line in [
@@ -545,21 +548,21 @@ mod tests {
         let (_dir, config) = load("version = 1\ntheme = \"blue\"\nnote_order = \"title\"\n");
         assert_eq!(config.settings().theme, Theme::System);
         assert_eq!(config.settings().note_order, Order::Title);
-        assert!(!config.is_broken());
+        assert_eq!(config.problem(), None);
     }
 
     #[test]
     fn a_broken_file_gives_the_defaults_and_stays_as_it_is() {
         let text = "version = 1\ntheme = \"dark\n";
         let (_dir, mut config) = load(text);
-        assert!(config.is_broken());
+        assert_eq!(config.problem(), Some(text::CONFIG_WRITE));
         assert_eq!(config.settings(), &Settings::default());
 
         let settings = Settings {
             theme: Theme::Light,
             ..Settings::default()
         };
-        config.save(settings.clone()).unwrap();
+        config.save(settings.clone());
 
         assert_eq!(config.settings(), &settings);
         assert_eq!(file(&config), text);
@@ -569,10 +572,25 @@ mod tests {
     fn a_newer_version_is_read_but_not_written() {
         let text = "version = 2\ntheme = \"dark\"\n";
         let (_dir, mut config) = load(text);
-        assert!(!config.is_broken());
+        assert_eq!(config.problem(), None);
         assert_eq!(config.settings().theme, Theme::Dark);
 
-        config.save(Settings::default()).unwrap();
+        config.save(Settings::default());
         assert_eq!(file(&config), text);
+    }
+
+    #[test]
+    fn a_failed_save_is_a_problem_until_a_save_works() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("holm");
+        let mut config = Config::load(folder.join("config.toml"));
+        fs::write(&folder, "").unwrap();
+
+        config.save(Settings::default());
+        assert_eq!(config.problem(), Some(text::CONFIG_WRITE));
+
+        fs::remove_file(&folder).unwrap();
+        config.save(Settings::default());
+        assert_eq!(config.problem(), None);
     }
 }
