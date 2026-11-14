@@ -348,7 +348,7 @@ impl Core {
 
     /// Creates the folder `name` in `parent`, and returns its path.
     ///
-    /// Holm uses `name` as it is and never adds a number.
+    /// Holm trims `name`, and never adds a number.
     ///
     /// # Errors
     ///

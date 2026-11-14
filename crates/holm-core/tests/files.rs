@@ -239,7 +239,7 @@ fn move_note_to_a_missing_folder_fails_and_keeps_the_note() {
 }
 
 #[test]
-fn create_folder_keeps_the_typed_name() {
+fn create_folder_keeps_the_typed_name_trimmed() {
     let folder = Folder::new(&[("work/a.md", "")]);
 
     let core = &folder.core;
@@ -250,6 +250,10 @@ fn create_folder_keeps_the_typed_name() {
     assert_eq!(
         core.create_folder("work", "attachments").result.unwrap(),
         Path::new("work/attachments")
+    );
+    assert_eq!(
+        core.create_folder("", "  Plans  ").result.unwrap(),
+        Path::new("Plans")
     );
     assert!(matches!(
         core.create_folder("missing", "x").result,
@@ -262,7 +266,7 @@ fn create_folder_keeps_the_typed_name() {
                 .map(Path::to_path_buf)
                 .collect::<Vec<_>>()
         ),
-        ["Ideas: 2026?", "work", "work/attachments"]
+        ["Ideas: 2026?", "Plans", "work", "work/attachments"]
     );
 }
 

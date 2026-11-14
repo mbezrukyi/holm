@@ -592,8 +592,9 @@ fn folder_abs(path: &Path) -> &Path {
     path.parent().unwrap_or(Path::new("/"))
 }
 
-/// Checks a typed folder name for a new entry in `parent`, and returns it as it is.
+/// Checks a typed folder name, trimmed, for a new entry in `parent`, and returns it.
 pub(crate) fn check_name<'a>(parent: &Path, name: &'a str) -> Result<&'a str> {
+    let name = name.trim();
     if parent.as_os_str().is_empty() && name.eq_ignore_ascii_case(ATTACHMENTS) {
         return Err(Error::BadName {
             name: name.to_owned(),
@@ -612,9 +613,9 @@ pub(crate) fn check_title(title: &str) -> Result<String> {
     Ok(name)
 }
 
-/// Checks the rules for every typed name. `file_name` is the name on disk for `typed`.
+/// Checks the rules for every trimmed typed name. `file_name` is the name on disk for `typed`.
 fn check_file_name(typed: &str, file_name: &str) -> Result<()> {
-    let problem = if typed.trim().is_empty() {
+    let problem = if typed.is_empty() {
         NameProblem::Empty
     } else if typed.contains('/') {
         NameProblem::Slash
