@@ -1320,6 +1320,7 @@ fn a_tag_rename_shows_the_new_name_after_the_confirm(cx: &mut TestAppContext) {
     assert_eq!(tree_steps(cx, handle), [["All notes", "#new*"]]);
     settle(cx);
     assert_eq!(tree(cx, handle), ["All notes", "#new*"]);
+    assert_eq!(fields(&notes_dir.join("A.md")).0, ["new"]);
 }
 
 #[gpui_kit::test]

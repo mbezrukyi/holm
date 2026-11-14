@@ -19,7 +19,7 @@ use holm_core::model::{Note, Order};
 use holm_core::{Core, Snapshot};
 
 use crate::config::{Config, SidebarSettings};
-use crate::dialog::{Ask, Dialog, DialogEvent};
+use crate::dialog::{self, Ask, Dialog};
 use crate::error::AppError;
 use crate::link_picker::{LinkPicker, LinkPickerEvent, LinkStart};
 use crate::message_line::MessageLine;
@@ -50,8 +50,6 @@ pub(crate) struct NotesView {
     /// The part that had the focus before quick open or the link picker. It gets the focus
     /// back on `Esc`.
     before_popup: Option<FocusHandle>,
-    /// The end of the tag rename in the name field, while its dialog shows.
-    tag_rename: Option<Step<holm_core::Result<()>>>,
     line: Entity<MessageLine>,
     subscriptions: Vec<Subscription>,
 }
@@ -106,7 +104,6 @@ impl NotesView {
             quick_open: None,
             link_picker: None,
             before_popup: None,
-            tag_rename: None,
             line,
             subscriptions,
         };
@@ -218,7 +215,20 @@ impl NotesView {
                         |notes_folder, done, cx| notes_folder.tag_delete_count(tag, done, cx)
                     },
                     move |this, notes, window, cx| {
-                        this.ask(Ask::DeleteTag { tag, notes }, window, cx);
+                        let ask = Ask::DeleteTag {
+                            tag: tag.clone(),
+                            notes,
+                        };
+                        this.ask(ask, window, cx, move |this, confirmed, window, cx| {
+                            if confirmed {
+                                this.write(
+                                    window,
+                                    cx,
+                                    |notes_folder, done, cx| notes_folder.delete_tag(tag, done, cx),
+                                    |_, _, _, _| {},
+                                );
+                            }
+                        });
                     },
                 );
             }
@@ -226,16 +236,35 @@ impl NotesView {
         }
     }
 
-    /// Shows the dialog for `ask`, or deletes at once after "Do not show again".
-    fn ask(&mut self, ask: Ask, window: &mut Window, cx: &mut Context<Self>) {
+    /// Shows the dialog for `ask`, and gives `then` whether the user confirmed. After
+    /// "Do not show again", a delete confirms with no dialog.
+    fn ask(
+        &mut self,
+        ask: Ask,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        then: impl FnOnce(&mut Self, bool, &mut Window, &mut Context<Self>) + 'static,
+    ) {
         if ask.can_skip() && !self.config.read(cx).settings().ask_before_delete {
-            self.confirmed(ask, window, cx);
+            then(self, true, window, cx);
             return;
         }
-        let dialog = cx.new(|cx| Dialog::new(ask, window, cx));
-        self.subscriptions
-            .push(cx.subscribe_in(&dialog, window, Self::dialog_event));
-        self.dialog = Some(dialog);
+        let answered = window_step(
+            window,
+            cx,
+            move |this: &mut Self, answer: dialog::Answer, window, cx| {
+                this.dialog = None;
+                this.focus_sidebar(window, cx);
+                cx.notify();
+                if answer.confirm && answer.do_not_ask {
+                    let mut settings = this.config.read(cx).settings().clone();
+                    settings.ask_before_delete = false;
+                    this.save_settings(settings, cx);
+                }
+                then(this, answer.confirm, window, cx);
+            },
+        );
+        self.dialog = Some(cx.new(|cx| Dialog::new(ask, answered, window, cx)));
         cx.notify();
     }
 
@@ -385,75 +414,17 @@ impl NotesView {
                         .into_owned(),
                 };
                 this.ask(
-                    Ask::Delete {
-                        target,
-                        name,
-                        count,
-                    },
+                    Ask::Delete { name, count },
                     window,
                     cx,
+                    move |this, confirmed, window, cx| {
+                        if confirmed {
+                            this.delete(target, window, cx);
+                        }
+                    },
                 );
             },
         );
-    }
-
-    fn dialog_event(
-        &mut self,
-        _: &Entity<Dialog>,
-        event: &DialogEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.dialog = None;
-        self.focus_sidebar(window, cx);
-        cx.notify();
-        let (ask, do_not_ask) = match event.clone() {
-            DialogEvent::Confirm { ask, do_not_ask } => (ask, do_not_ask),
-            DialogEvent::Cancel(ask) => {
-                if matches!(ask, Ask::RenameTag { .. })
-                    && let Some(done) = self.tag_rename.take()
-                {
-                    done(Ok(()), cx);
-                }
-                return;
-            }
-        };
-        if do_not_ask {
-            let mut settings = self.config.read(cx).settings().clone();
-            settings.ask_before_delete = false;
-            self.save_settings(settings, cx);
-        }
-        self.confirmed(ask, window, cx);
-    }
-
-    fn confirmed(&mut self, ask: Ask, window: &mut Window, cx: &mut Context<Self>) {
-        match ask {
-            Ask::Delete { target, .. } => self.delete(target, window, cx),
-            Ask::RenameTag { from, to, .. } => {
-                let done = self.tag_rename.take();
-                self.pane.update(cx, NotePane::save);
-                self.notes_folder.update(cx, |notes_folder, cx| {
-                    notes_folder.rename_tag(
-                        from,
-                        to,
-                        move |renamed, cx| {
-                            if let Some(done) = done {
-                                done(renamed.map(drop), cx);
-                            }
-                        },
-                        cx,
-                    );
-                });
-            }
-            Ask::DeleteTag { tag, .. } => {
-                self.write(
-                    window,
-                    cx,
-                    |notes_folder, done, cx| notes_folder.delete_tag(tag, done, cx),
-                    |_, _, _, _| {},
-                );
-            }
-        }
     }
 
     fn delete(&mut self, target: Target, window: &mut Window, cx: &mut Context<Self>) {
@@ -564,18 +535,7 @@ impl NotesView {
                         window,
                         cx,
                         move |this: &mut Self, count, window, cx| match count {
-                            Ok(notes) => {
-                                this.tag_rename = Some(done);
-                                this.ask(
-                                    Ask::RenameTag {
-                                        from,
-                                        to: name,
-                                        notes,
-                                    },
-                                    window,
-                                    cx,
-                                );
-                            }
+                            Ok(notes) => this.ask_tag_rename(from, name, notes, done, window, cx),
                             Err(error) => done(Err(error), cx),
                         },
                     );
@@ -585,6 +545,39 @@ impl NotesView {
             }
             Named::Item(Item::Tag(_) | Item::All) => done(Ok(()), cx),
         }
+    }
+
+    /// Asks before the rename of the tag `from` to `to` in `notes` notes, and then renames it.
+    /// `done` gets the end of the rename, or nothing after "cancel".
+    fn ask_tag_rename(
+        &mut self,
+        from: String,
+        to: String,
+        notes: usize,
+        done: Step<holm_core::Result<()>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let ask = Ask::RenameTag {
+            from: from.clone(),
+            to: to.clone(),
+            notes,
+        };
+        self.ask(ask, window, cx, move |this, confirmed, _, cx| {
+            if !confirmed {
+                done(Ok(()), cx);
+                return;
+            }
+            this.pane.update(cx, NotePane::save);
+            this.notes_folder.update(cx, |notes_folder, cx| {
+                notes_folder.rename_tag(
+                    from,
+                    to,
+                    move |renamed, cx| done(renamed.map(drop), cx),
+                    cx,
+                );
+            });
+        });
     }
 
     /// A step for the result of a file action. An error shows in the message line.

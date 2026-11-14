@@ -1,4 +1,6 @@
 //! The dialog before a change that has no undo. It says how many notes the change touches.
+//! It gives its answer to the step of its owner, once. A dialog that closes with no answer
+//! gives "cancel".
 //!
 //! `Enter` confirms and `Esc` cancels. Before a delete of notes, `Space` turns the
 //! "Do not show again" switch on and off. The tag dialogs always show, because their count of
@@ -8,24 +10,20 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex};
 use gpui_kit::{
-    App, Context, EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement,
-    KeyDownEvent, ParentElement, Render, Role, StatefulInteractiveElement as _, Styled,
-    TestSupportExt as _, Window, div, px,
+    App, Context, FocusHandle, Focusable, InteractiveElement as _, IntoElement, KeyDownEvent,
+    ParentElement, Render, Role, StatefulInteractiveElement as _, Styled, TestSupportExt as _,
+    Window, div, px,
 };
 use holm_core::model::DeleteCount;
 
-use crate::sidebar::Target;
+use crate::notes_folder::Step;
 use crate::{popup, text};
 
 /// The change that the dialog asks about.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Ask {
     /// Delete a note or a folder. `name` is the title of the note, or the name of the folder.
-    Delete {
-        target: Target,
-        name: String,
-        count: DeleteCount,
-    },
+    Delete { name: String, count: DeleteCount },
     /// Rename a tag in all notes.
     RenameTag {
         from: String,
@@ -37,26 +35,36 @@ pub(crate) enum Ask {
 }
 
 /// The answer of the dialog.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum DialogEvent {
-    Confirm { ask: Ask, do_not_ask: bool },
-    Cancel(Ask),
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Answer {
+    pub(crate) confirm: bool,
+    pub(crate) do_not_ask: bool,
 }
 
 pub(crate) struct Dialog {
     ask: Ask,
     do_not_ask: bool,
     focus: FocusHandle,
+    /// It gets the answer. It is gone after the answer.
+    answer: Option<Step<Answer>>,
 }
 
 impl Dialog {
-    pub(crate) fn new(ask: Ask, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(
+        ask: Ask,
+        answer: Step<Answer>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
+        cx.on_release(|dialog: &mut Self, cx| dialog.answer(false, cx))
+            .detach();
         Self {
             ask,
             do_not_ask: false,
             focus,
+            answer: Some(answer),
         }
     }
 
@@ -71,15 +79,16 @@ impl Dialog {
         }
     }
 
-    fn answer(&mut self, confirm: bool, cx: &mut Context<Self>) {
-        cx.emit(if confirm {
-            DialogEvent::Confirm {
-                ask: self.ask.clone(),
-                do_not_ask: self.do_not_ask,
-            }
-        } else {
-            DialogEvent::Cancel(self.ask.clone())
-        });
+    fn answer(&mut self, confirm: bool, cx: &mut App) {
+        let Some(step) = self.answer.take() else {
+            return;
+        };
+        let answer = Answer {
+            confirm,
+            do_not_ask: self.do_not_ask,
+        };
+        // The step updates the owner, which may hold this dialog in its own update.
+        cx.defer(move |cx| step(answer, cx));
     }
 
     fn toggle(&mut self, cx: &mut Context<Self>) {
@@ -110,8 +119,6 @@ impl Ask {
         matches!(self, Self::Delete { .. })
     }
 }
-
-impl EventEmitter<DialogEvent> for Dialog {}
 
 impl Focusable for Dialog {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
