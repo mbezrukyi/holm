@@ -3,7 +3,8 @@
 //! are only text.
 //!
 //! The title field takes the place of the title. It is a [`NameField`] with the write of the
-//! owner, and it is as wide as its text. So the path does not move when the field opens.
+//! owner. The title, the field and the name of a running write share one text element, so the
+//! path does not move when the field opens or closes.
 //! The field closes after [`NameEvent::Done`] and [`NameEvent::Escape`], and it sends each
 //! [`NameEvent`] on to the owner. The owner decides what a blur does.
 
@@ -13,14 +14,15 @@ use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::h_flex;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, InteractiveElement as _,
-    IntoElement, MouseButton, ParentElement, Pixels, Render, Role, SharedString,
-    StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _, Window, div, px,
+    AppContext as _, Context, Entity, EventEmitter, FocusHandle, InteractiveElement as _,
+    IntoElement, MouseButton, ParentElement, Pixels, Render, Role, StatefulInteractiveElement as _,
+    Styled, Subscription, TestSupportExt as _, Window, div, px,
 };
 
 use crate::message_line::MessageLine;
 use crate::name_field::{Look, NameEvent, NameField, NameWrite};
 use crate::text;
+use crate::text_field;
 
 /// The widest the folders get. More folders are cut from the left.
 const FOLDERS_WIDTH: Pixels = px(240.);
@@ -103,7 +105,7 @@ impl TitleField {
 impl EventEmitter<NameEvent> for TitleField {}
 
 impl Render for TitleField {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let folders: Vec<String> = self
             .path
@@ -149,10 +151,8 @@ impl Render for TitleField {
                 .aria_label(title.clone())
                 .test_support()
                 .flex_none()
-                .w(text_width(&title.clone().into(), window, cx))
-                .whitespace_nowrap()
                 .text_color(theme.foreground)
-                .child(title)
+                .child(text_field::label(title))
                 .into_any_element(),
         };
         h_flex()
@@ -167,16 +167,4 @@ impl Render for TitleField {
             // The tag row would open the tag popup.
             .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
     }
-}
-
-/// The width of `text` in the path. The field shapes its text the same way, so the title and
-/// the field lay out the same at any scale.
-fn text_width(text: &SharedString, window: &Window, cx: &App) -> Pixels {
-    let mut style = window.text_style();
-    style.font_family = cx.theme().font_family.clone();
-    let run = style.to_run(text.len());
-    window
-        .text_system()
-        .shape_line(text.clone(), TEXT_SIZE, &[run], None)
-        .width()
 }

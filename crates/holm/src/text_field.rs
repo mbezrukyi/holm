@@ -1,7 +1,8 @@
 //! A one-line text field that draws its own text, selection and caret.
 //!
 //! The field has no frame and no padding. It takes the text style of its parent, and it is as
-//! wide as its text. In a narrower parent it shrinks and scrolls, so the caret stays in view.
+//! wide as its text and the caret. In a narrower parent it shrinks and scrolls, so the caret
+//! stays in view.
 //! So the field lays out its text like any other text of the same style.
 //!
 //! - `Enter` sends [`FieldEvent::Enter`], and `Esc` sends [`FieldEvent::Escape`].
@@ -345,8 +346,8 @@ impl EntityInputHandler for TextField {
     }
 }
 
-/// `text` as a field shows it, with no caret and no keys. So a field that shows its text this
-/// way keeps its width.
+/// `text` as a field shows it, with no caret and no keys. It is as wide as a field with the same
+/// text, so a field and its text can take turns in one place.
 pub(crate) fn label(text: impl Into<SharedString>) -> impl IntoElement {
     Line(Source::Text(text.into()))
 }
@@ -403,8 +404,12 @@ impl Element for Line {
         let line = window
             .text_system()
             .shape_line(text, font_size, &[run], None);
+        // The room after the text holds the caret. Rounding up keeps the text in the bounds
+        // that the layout rounds to device pixels.
+        let scale = window.scale_factor();
+        let width = px((f32::from(line.width()) * scale).ceil() / scale) + CARET_WIDTH;
         let mut layout = Style::default();
-        layout.size.width = line.width().into();
+        layout.size.width = width.into();
         layout.size.height = line_height.into();
         layout.min_size.width = px(0.).into();
         layout.flex_shrink = 1.;
@@ -468,9 +473,7 @@ impl Element for Line {
             shown.line.x_for_index(field.head)
         };
         let width = if empty { px(0.) } else { shown.line.width() };
-        // The layout rounds the width of the field to device pixels, so it can be narrower
-        // than its text by less than one. Such a text fits, and must not scroll.
-        let view = bounds.size.width + px(1. / window.scale_factor());
+        let view = bounds.size.width - CARET_WIDTH;
         // The caret stays in view, and the text never scrolls past its end.
         let mut scroll = field.scroll;
         if caret - scroll > view {
@@ -491,10 +494,7 @@ impl Element for Line {
             field.shown = Some(shown.clone());
         });
         window.handle_input(&focus, ElementInputHandler::new(bounds, entity), cx);
-        // The caret may lie just after the last char.
-        let mut mask = bounds;
-        mask.size.width = view + CARET_WIDTH;
-        window.with_content_mask(Some(ContentMask { bounds: mask }), |window| {
+        window.with_content_mask(Some(ContentMask { bounds }), |window| {
             if let Some(selected) = selected.filter(|_| focused) {
                 window.paint_quad(fill(selected, selection_color));
             }
