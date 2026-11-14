@@ -88,17 +88,37 @@ struct Naming {
 /// What a name field names.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Named {
-    Item(Item),
+    Folder(PathBuf),
+    Tag(String),
     /// A new folder in this parent folder. It exists only after `Enter`.
     NewFolder(PathBuf),
 }
 
 impl Named {
+    /// What a rename of `item` names. "All notes" has no name.
+    fn item(item: &Item) -> Option<Self> {
+        match item {
+            Item::All => None,
+            Item::Folder(path) => Some(Self::Folder(path.clone())),
+            Item::Tag(tag) => Some(Self::Tag(tag.clone())),
+        }
+    }
+
     fn moved(&self, one: &Move) -> Option<Self> {
         match self {
-            Self::Item(item) => item.moved(one).map(Self::Item),
+            Self::Folder(path) => one.path(path).map(Self::Folder),
+            Self::Tag(tag) => one.tag(tag).map(Self::Tag),
             Self::NewFolder(parent) if parent.as_os_str().is_empty() => None,
             Self::NewFolder(parent) => one.path(parent).map(Self::NewFolder),
+        }
+    }
+
+    /// The item that `typed` asks for.
+    fn typed(&self, typed: &str) -> Item {
+        match self {
+            Self::Folder(path) => Item::Folder(path.with_file_name(typed)),
+            Self::Tag(_) => Item::Tag(typed.to_owned()),
+            Self::NewFolder(parent) => Item::Folder(parent.join(typed)),
         }
     }
 }
@@ -480,12 +500,14 @@ impl Sidebar {
     /// name, so a rename can also move the tag under another parent. It does nothing while
     /// the write of a name field runs.
     pub(crate) fn rename(&mut self, item: Item, window: &mut Window, cx: &mut Context<Self>) {
-        let name = match &item {
-            Item::All => return,
-            Item::Folder(_) => item.name(),
-            Item::Tag(tag) => tag.clone(),
+        let Some(named) = Named::item(&item) else {
+            return;
         };
-        self.open_name_field(Named::Item(item.clone()), Some(&name), item, window, cx);
+        let name = match &named {
+            Named::Tag(tag) => tag.clone(),
+            Named::Folder(_) | Named::NewFolder(_) => item.name(),
+        };
+        self.open_name_field(named, Some(&name), item, window, cx);
     }
 
     /// Starts an empty name field for a new folder in `parent`, as its first child row.
@@ -779,9 +801,13 @@ impl Sidebar {
             Item::Tag(_) => Icon::Tags,
         };
         let (name, aria) = self.row_name(row, cx);
-        let named = Named::Item(row.item.clone());
-        let field = self.field.as_ref().filter(|naming| naming.named == named);
-        let editing = field.is_some() && self.pending(&named, cx).is_none();
+        let named = Named::item(&row.item);
+        let field = self
+            .field
+            .as_ref()
+            .filter(|naming| Some(&naming.named) == named.as_ref());
+        let editing =
+            field.is_some_and(|naming| *naming.field.read(cx).state() == NameState::Editing);
         let label = match field {
             Some(naming) => field_label(&naming.field),
             None => div()
@@ -840,11 +866,9 @@ impl Sidebar {
             return div().into_any_element();
         };
         let pending = self.pending(&naming.named, cx);
-        let aria = match (&naming.named, &pending) {
-            (Named::NewFolder(parent), Some(typed)) => {
-                item_label(&Item::Folder(parent.join(typed)))
-            }
-            _ => text::NEW_FOLDER.to_owned(),
+        let aria = match &pending {
+            Some(typed) => item_label(&naming.named.typed(typed)),
+            None => text::NEW_FOLDER.to_owned(),
         };
         row_frame(depth, pending.is_none(), cx)
             .id("new-folder")
@@ -859,14 +883,15 @@ impl Sidebar {
     /// The name of a tree row and its accessible name. After `Enter` in the name field, the
     /// row shows the typed name until the write ends.
     fn row_name(&self, row: &Row, cx: &App) -> (SharedString, String) {
-        let typed = self.pending(&Named::Item(row.item.clone()), cx);
-        match (&row.item, typed) {
-            (Item::All, _) => (text::ALL_NOTES.into(), item_label(&row.item)),
-            (item, Some(typed)) => {
-                let label = item_label(&typed_item(item, &typed));
+        let Some(named) = Named::item(&row.item) else {
+            return (text::ALL_NOTES.into(), item_label(&row.item));
+        };
+        match self.pending(&named, cx) {
+            Some(typed) => {
+                let label = item_label(&named.typed(&typed));
                 (typed.into(), label)
             }
-            (item, None) => (row.name.clone().into(), item_label(item)),
+            None => (row.name.clone().into(), item_label(&row.item)),
         }
     }
 
@@ -1023,15 +1048,6 @@ fn field_label(field: &Entity<NameField<()>>) -> AnyElement {
         .flex()
         .child(field.clone())
         .into_any_element()
-}
-
-/// The item that a rename of `item` to `typed` asks for.
-fn typed_item(item: &Item, typed: &str) -> Item {
-    match item {
-        Item::All => Item::All,
-        Item::Folder(path) => Item::Folder(path.with_file_name(typed)),
-        Item::Tag(_) => Item::Tag(typed.to_owned()),
-    }
 }
 
 impl EventEmitter<SidebarEvent> for Sidebar {}

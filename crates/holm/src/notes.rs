@@ -497,7 +497,7 @@ impl NotesView {
     ) {
         self.pane.update(cx, NotePane::save);
         match named {
-            Named::Item(Item::Folder(folder)) => {
+            Named::Folder(folder) => {
                 let kept = window_step(
                     window,
                     cx,
@@ -528,7 +528,7 @@ impl NotesView {
                     notes_folder.create_folder(parent, name, shown, cx);
                 });
             }
-            Named::Item(Item::Tag(from)) if !name.trim().is_empty() => {
+            Named::Tag(from) if !name.trim().is_empty() => {
                 let (counted_from, counted_to) = (from.clone(), name.clone());
                 let asked =
                     window_step(
@@ -543,7 +543,7 @@ impl NotesView {
                     notes_folder.tag_rename_count(counted_from, counted_to, asked, cx);
                 });
             }
-            Named::Item(Item::Tag(_) | Item::All) => done(Ok(()), cx),
+            Named::Tag(_) => done(Ok(()), cx),
         }
     }
 
