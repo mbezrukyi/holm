@@ -18,7 +18,7 @@ use gpui_kit::component::input::{Enter, Escape, Input, InputEvent, InputState, M
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, ClickEvent, Context, ElementId, Entity, EventEmitter,
+    AnyElement, App, AppContext as _, ClickEvent, Context, Div, ElementId, Entity, EventEmitter,
     FocusHandle, Focusable, FontWeight, InteractiveElement as _, IntoElement, KeyDownEvent,
     ParentElement, Render, Role, ScrollStrategy, SharedString, StatefulInteractiveElement as _,
     Styled, Subscription, Task, TestSupportExt as _, UniformListScrollHandle, Window, div, px,
@@ -42,6 +42,8 @@ const NOTE_ROW: f32 = 52.;
 enum Entry {
     Label(&'static str),
     Row(usize),
+    /// The name field of a new folder, at this depth.
+    NewFolder(usize),
 }
 
 /// A note or a folder, for a delete or a move.
@@ -67,6 +69,10 @@ pub(crate) enum SidebarEvent {
         folder: PathBuf,
         name: String,
     },
+    CreateFolder {
+        parent: PathBuf,
+        name: String,
+    },
     /// Rename a tag in all notes, with the dialog.
     RenameTag {
         from: String,
@@ -78,13 +84,31 @@ pub(crate) enum SidebarEvent {
     ViewChanged,
 }
 
-/// A name field for a folder or a tag in the tree, after `F2`.
-struct Rename {
-    item: Item,
+/// A name field in the tree: for a folder or a tag after `F2`, or for a new folder.
+struct NameField {
+    named: Named,
     input: Entity<InputState>,
-    /// After `Enter`, the field stays locked until the app ends the rename.
+    /// After `Enter`, the field stays locked until the app ends the write.
     locked: bool,
     _subscription: Subscription,
+}
+
+/// What a name field names.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Named {
+    Item(Item),
+    /// A new folder in this parent folder. It exists only after `Enter`.
+    NewFolder(PathBuf),
+}
+
+impl Named {
+    fn moved(&self, one: &Move) -> Option<Self> {
+        match self {
+            Self::Item(item) => item.moved(one).map(Self::Item),
+            Self::NewFolder(parent) if parent.as_os_str().is_empty() => None,
+            Self::NewFolder(parent) => one.path(parent).map(Self::NewFolder),
+        }
+    }
 }
 
 pub(crate) struct Sidebar {
@@ -104,7 +128,7 @@ pub(crate) struct Sidebar {
     /// The note in the editor after it is gone from the notes folder, with its neighbor in the
     /// list before.
     left: Option<(PathBuf, PathBuf)>,
-    rename: Option<Rename>,
+    field: Option<NameField>,
     search: Entity<InputState>,
     /// The trimmed text of the search field. With text, the list shows `found`.
     query: String,
@@ -152,7 +176,7 @@ impl Sidebar {
             list: Vec::new(),
             current,
             left: None,
-            rename: None,
+            field: None,
             search,
             query: String::new(),
             found: Vec::new(),
@@ -202,10 +226,10 @@ impl Sidebar {
             .drain()
             .map(|item| item.moved(one).unwrap_or(item))
             .collect();
-        if let Some(rename) = &mut self.rename
-            && let Some(item) = rename.item.moved(one)
+        if let Some(field) = &mut self.field
+            && let Some(named) = field.named.moved(one)
         {
-            rename.item = item;
+            field.named = named;
         }
         if let Some(current) = &mut self.current
             && let Some(path) = one.path(current)
@@ -323,6 +347,9 @@ impl Sidebar {
             }
             self.entries.push(Entry::Row(at));
         }
+        if let Some(Named::NewFolder(parent)) = self.field.as_ref().map(|field| &field.named) {
+            self.add_new_folder_entry(&parent.clone());
+        }
         let list: Vec<NoteInfo> = if self.searching() {
             self.found.clone()
         } else {
@@ -339,6 +366,32 @@ impl Sidebar {
             self.left = Some((current.clone(), next));
         }
         self.list = list;
+    }
+
+    /// Puts the field of a new folder in `parent` as its first child row. A new folder at the
+    /// root comes first under the folder label.
+    fn add_new_folder_entry(&mut self, parent: &Path) {
+        let depth = parent.components().count();
+        let label = self
+            .entries
+            .iter()
+            .position(|entry| matches!(entry, Entry::Label(text::FOLDERS)));
+        let at = if parent.as_os_str().is_empty() {
+            label.map(|at| at + 1)
+        } else {
+            let item = Item::Folder(parent.to_owned());
+            self.entries
+                .iter()
+                .position(|entry| matches!(entry, Entry::Row(at) if self.rows[*at].item == item))
+                .map(|at| at + 1)
+        };
+        if let Some(at) = at {
+            self.entries.insert(at, Entry::NewFolder(depth));
+        } else {
+            // With no folders, the label comes after "All notes".
+            self.entries.insert(1, Entry::NewFolder(depth));
+            self.entries.insert(1, Entry::Label(text::FOLDERS));
+        }
     }
 
     /// Marks the note in the editor.
@@ -399,9 +452,19 @@ impl Sidebar {
         self.set_view(View::Tree(item), cx);
     }
 
-    /// Closes the locked name field when the app ends its rename.
-    pub(crate) fn close_rename(&mut self, cx: &mut Context<Self>) {
-        if self.rename.take_if(|rename| rename.locked).is_some() {
+    /// Closes the locked name field when the app ends its write.
+    pub(crate) fn close_name_field(&mut self, cx: &mut Context<Self>) {
+        if self.field.take_if(|field| field.locked).is_some() {
+            self.rebuild();
+            cx.notify();
+        }
+    }
+
+    /// Opens the locked name field again with its text, after the app refused the name.
+    pub(crate) fn unlock_name_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(field) = self.field.as_mut().filter(|field| field.locked) {
+            field.locked = false;
+            field.input.update(cx, |input, cx| input.focus(window, cx));
             cx.notify();
         }
     }
@@ -444,14 +507,43 @@ impl Sidebar {
             Item::Folder(_) => item.name(),
             Item::Tag(tag) => tag.clone(),
         };
-        if self.rename.as_ref().is_some_and(|rename| rename.locked) {
+        self.open_name_field(Named::Item(item.clone()), &name, item, window, cx);
+    }
+
+    /// Starts an empty name field for a new folder in `parent`, as its first child row.
+    /// `Enter` locks the field and sends the create. Nothing is on disk before that.
+    pub(crate) fn new_folder(
+        &mut self,
+        parent: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let item = if parent.as_os_str().is_empty() {
+            Item::All
+        } else {
+            let item = Item::Folder(parent.clone());
+            self.open.insert(item.clone());
+            item
+        };
+        self.open_name_field(Named::NewFolder(parent), "", item, window, cx);
+    }
+
+    /// Opens the name field for `named` with `text`, and shows `item` selected in the tree.
+    fn open_name_field(
+        &mut self,
+        named: Named,
+        text: &str,
+        item: Item,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.field.as_ref().is_some_and(|field| field.locked) {
             return;
         }
         if self.searching() {
             self.clear_search(window, cx);
         }
-        self.show_in_tree(item.clone(), cx);
-        let input = cx.new(|cx| InputState::new(window, cx).default_value(name));
+        let input = cx.new(|cx| InputState::new(window, cx).default_value(text.to_owned()));
         let subscription =
             cx.subscribe_in(
                 &input,
@@ -459,34 +551,41 @@ impl Sidebar {
                 |sidebar, input, event, window, cx| match event {
                     InputEvent::PressEnter { .. } => {
                         let name = input.read(cx).value().trim().to_owned();
-                        let Some(rename) = sidebar.rename.as_mut().filter(|rename| !rename.locked)
+                        let Some(field) = sidebar.field.as_mut().filter(|field| !field.locked)
                         else {
                             return;
                         };
-                        let event = match &rename.item {
-                            _ if name.is_empty() => None,
-                            Item::Folder(folder) => Some(SidebarEvent::RenameFolder {
+                        let event = match &field.named {
+                            Named::Item(Item::Folder(folder)) => Some(SidebarEvent::RenameFolder {
                                 folder: folder.clone(),
                                 name,
                             }),
-                            Item::Tag(from) if *from != name => Some(SidebarEvent::RenameTag {
-                                from: from.clone(),
-                                to: name,
+                            Named::Item(Item::Tag(from)) if !name.is_empty() && *from != name => {
+                                Some(SidebarEvent::RenameTag {
+                                    from: from.clone(),
+                                    to: name,
+                                })
+                            }
+                            Named::NewFolder(parent) => Some(SidebarEvent::CreateFolder {
+                                parent: parent.clone(),
+                                name,
                             }),
-                            Item::Tag(_) | Item::All => None,
+                            Named::Item(Item::Tag(_) | Item::All) => None,
                         };
                         if let Some(event) = event {
-                            rename.locked = true;
+                            field.locked = true;
                             cx.emit(event);
                         } else {
-                            sidebar.rename = None;
+                            sidebar.field = None;
+                            sidebar.rebuild();
                         }
                         window.focus(&sidebar.focus, cx);
                         cx.notify();
                     }
                     InputEvent::Blur => {
-                        if !sidebar.rename.as_ref().is_some_and(|rename| rename.locked) {
-                            sidebar.rename = None;
+                        if !sidebar.field.as_ref().is_some_and(|field| field.locked) {
+                            sidebar.field = None;
+                            sidebar.rebuild();
                             cx.notify();
                         }
                     }
@@ -497,21 +596,22 @@ impl Sidebar {
             input.focus(window, cx);
             input.select_all(window, cx);
         });
-        self.rename = Some(Rename {
-            item,
+        self.field = Some(NameField {
+            named,
             input,
             locked: false,
             _subscription: subscription,
         });
-        cx.notify();
+        self.show_in_tree(item, cx);
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let keystroke = &event.keystroke;
         let modifiers = keystroke.modifiers;
-        if let Some(rename) = &self.rename {
-            if keystroke.key == "escape" && !rename.locked {
-                self.rename = None;
+        if let Some(field) = &self.field {
+            if keystroke.key == "escape" && !field.locked {
+                self.field = None;
+                self.rebuild();
                 window.focus(&self.focus, cx);
                 cx.notify();
                 cx.stop_propagation();
@@ -695,6 +795,7 @@ impl Sidebar {
                     .child(label)
                     .into_any_element(),
                 Entry::Row(at) => self.tree_row(at, cx),
+                Entry::NewFolder(depth) => self.new_folder_row(depth, cx),
             })
             .collect()
     }
@@ -713,19 +814,11 @@ impl Sidebar {
         };
         let (name, aria) = self.row_name(row, cx);
         let field = self
-            .rename
+            .field
             .as_ref()
-            .filter(|rename| rename.item == row.item && !rename.locked);
+            .filter(|field| field.named == Named::Item(row.item.clone()) && !field.locked);
         let label = match field {
-            Some(rename) => Input::new(&rename.input)
-                .appearance(false)
-                .small()
-                .flex_1()
-                .min_w_0()
-                .px_0()
-                .py_0()
-                .text_size(theme.font_size)
-                .into_any_element(),
+            Some(field) => field_input(&field.input, cx),
             None => div()
                 .flex_1()
                 .min_w_0()
@@ -749,10 +842,8 @@ impl Sidebar {
                     cx.stop_propagation();
                 }
             }));
-        let editing = field.is_some();
-        let depth = f32::from(u16::try_from(row.depth).unwrap_or(u16::MAX));
         let item = row.item.clone();
-        h_flex()
+        row_frame(row.depth, field.is_some(), cx)
             .id(ElementId::NamedInteger("tree-row".into(), at as u64))
             .role(Role::TreeItem)
             .aria_label(aria)
@@ -761,23 +852,7 @@ impl Sidebar {
                 row_element.aria_expanded(row.open)
             })
             .test_support()
-            .w_full()
-            .h(px(TREE_ROW))
-            .pr_3()
-            .pl(px(12. + 16. * depth))
-            .gap_2()
             .when(selected, |row| row.bg(theme.selection))
-            .when(editing, |row| {
-                row.relative().child(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .top_0()
-                        .bottom_0()
-                        .w(px(2.))
-                        .bg(theme.ring),
-                )
-            })
             .child(toggle)
             .child(label)
             .child(
@@ -793,14 +868,46 @@ impl Sidebar {
             .into_any_element()
     }
 
+    /// The row of the name field for a new folder. After `Enter`, it shows the typed name until
+    /// the write ends.
+    fn new_folder_row(&self, depth: usize, cx: &App) -> AnyElement {
+        let Some(field) = &self.field else {
+            return div().into_any_element();
+        };
+        let (label, aria) = match &field.named {
+            Named::NewFolder(parent) if field.locked => {
+                let typed = field.input.read(cx).value().trim().to_owned();
+                let aria = item_label(&Item::Folder(parent.join(&typed)));
+                (
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .child(typed)
+                        .into_any_element(),
+                    aria,
+                )
+            }
+            _ => (field_input(&field.input, cx), text::NEW_FOLDER.to_owned()),
+        };
+        row_frame(depth, !field.locked, cx)
+            .id("new-folder")
+            .role(Role::TreeItem)
+            .aria_label(aria)
+            .test_support()
+            .child(Icon::view(Icon::Folder, cx.theme().muted_foreground))
+            .child(label)
+            .into_any_element()
+    }
+
     /// The name of a tree row and its accessible name. After `Enter` in the name field, the
     /// row shows the typed name until the write ends.
     fn row_name(&self, row: &Row, cx: &App) -> (SharedString, String) {
         let typed = self
-            .rename
+            .field
             .as_ref()
-            .filter(|rename| rename.item == row.item && rename.locked)
-            .map(|rename| rename.input.read(cx).value().trim().to_owned());
+            .filter(|field| field.named == Named::Item(row.item.clone()) && field.locked)
+            .map(|field| field.input.read(cx).value().trim().to_owned());
         match (&row.item, typed) {
             (Item::All, _) => (text::ALL_NOTES.into(), item_label(&row.item)),
             (item, Some(typed)) => {
@@ -931,6 +1038,42 @@ fn item_label(item: &Item) -> String {
         Item::Folder(path) => path.display().to_string(),
         Item::Tag(name) => format!("#{name}"),
     }
+}
+
+/// The frame of a tree row: its height, its indent, and the bar of an open name field.
+fn row_frame(depth: usize, editing: bool, cx: &App) -> Div {
+    let theme = cx.theme();
+    let depth = f32::from(u16::try_from(depth).unwrap_or(u16::MAX));
+    h_flex()
+        .w_full()
+        .h(px(TREE_ROW))
+        .pr_3()
+        .pl(px(12. + 16. * depth))
+        .gap_2()
+        .when(editing, |row| {
+            row.relative().child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .top_0()
+                    .bottom_0()
+                    .w(px(2.))
+                    .bg(theme.ring),
+            )
+        })
+}
+
+/// The text input of a name field in a tree row.
+fn field_input(input: &Entity<InputState>, cx: &App) -> AnyElement {
+    Input::new(input)
+        .appearance(false)
+        .small()
+        .flex_1()
+        .min_w_0()
+        .px_0()
+        .py_0()
+        .text_size(cx.theme().font_size)
+        .into_any_element()
 }
 
 /// The item that a rename of `item` to `typed` asks for.

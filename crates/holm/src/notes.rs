@@ -28,7 +28,6 @@ use crate::picker::{FolderPicker, PickerEvent};
 use crate::quick_open::{QuickOpen, QuickOpenEvent};
 use crate::sidebar::{Item, Sidebar, SidebarEvent, Target};
 use crate::tags::RenameTag;
-use crate::text;
 
 const MIN_WIDTH: f32 = 160.;
 const MAX_WIDTH: f32 = 600.;
@@ -204,7 +203,20 @@ impl NotesView {
                     cx,
                     |notes_folder, done, cx| notes_folder.rename_folder(folder, name, done, cx),
                     |this, _, _, cx| {
-                        this.close_rename(cx);
+                        this.close_name_field(cx);
+                        this.keep_state(cx);
+                    },
+                );
+            }
+            SidebarEvent::CreateFolder { parent, name } => {
+                let (parent, name) = (parent.clone(), name.clone());
+                self.rename_write(
+                    window,
+                    cx,
+                    |notes_folder, done, cx| notes_folder.create_folder(parent, name, done, cx),
+                    |this, folder, window, cx| {
+                        this.close_name_field(cx);
+                        this.show_folder(folder, window, cx);
                         this.keep_state(cx);
                     },
                 );
@@ -426,7 +438,7 @@ impl NotesView {
             DialogEvent::Confirm { ask, do_not_ask } => (ask, do_not_ask),
             DialogEvent::Cancel(ask) => {
                 if matches!(ask, Ask::RenameTag { .. }) {
-                    self.close_rename(cx);
+                    self.close_name_field(cx);
                 }
                 return;
             }
@@ -446,7 +458,7 @@ impl NotesView {
                 window,
                 cx,
                 |notes_folder, done, cx| notes_folder.rename_tag(from, to, done, cx),
-                |this, _, _, cx| this.close_rename(cx),
+                |this, _, _, cx| this.close_name_field(cx),
             ),
             Ask::DeleteTag { tag, .. } => {
                 self.write(
@@ -497,24 +509,16 @@ impl NotesView {
         );
     }
 
+    /// Ctrl+Shift+N: an empty name field for a new folder in the folder of the view.
     fn new_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let parent = match self.sidebar.read(cx).view().item() {
             Item::Folder(folder) => folder.clone(),
             Item::All | Item::Tag(_) => PathBuf::new(),
         };
-        self.write(
-            window,
-            cx,
-            |notes_folder, done, cx| {
-                notes_folder.create_folder(parent, text::NEW_FOLDER, done, cx);
-            },
-            |this, folder, window, cx| {
-                this.hidden = false;
-                this.sidebar.update(cx, |sidebar, cx| {
-                    sidebar.rename(Item::Folder(folder), window, cx);
-                });
-            },
-        );
+        self.hidden = false;
+        self.sidebar
+            .update(cx, |sidebar, cx| sidebar.new_folder(parent, window, cx));
+        cx.notify();
     }
 
     /// Puts the unsaved text of the pane in the write line, and then the write of `start`.
@@ -532,8 +536,8 @@ impl NotesView {
             .update(cx, |notes_folder, cx| start(notes_folder, done, cx));
     }
 
-    /// Like [`Self::write`], for a step of a rename. A fail also closes the name field of the
-    /// sidebar.
+    /// Like [`Self::write`], for a write from the name field of the sidebar. A refused name
+    /// opens the field again with its text. Another fail closes it.
     fn rename_write<T: 'static>(
         &mut self,
         window: &mut Window,
@@ -545,7 +549,15 @@ impl NotesView {
         let done = Self::step(window, cx, move |this, result, window, cx| match result {
             Ok(value) => done(this, value, window, cx),
             Err(error) => {
-                this.close_rename(cx);
+                if matches!(
+                    error,
+                    holm_core::Error::NameTaken { .. } | holm_core::Error::BadName { .. }
+                ) {
+                    this.sidebar
+                        .update(cx, |sidebar, cx| sidebar.unlock_name_field(window, cx));
+                } else {
+                    this.close_name_field(cx);
+                }
                 this.fail(error, cx);
             }
         });
@@ -585,8 +597,8 @@ impl NotesView {
         })
     }
 
-    fn close_rename(&self, cx: &mut Context<Self>) {
-        self.sidebar.update(cx, Sidebar::close_rename);
+    fn close_name_field(&self, cx: &mut Context<Self>) {
+        self.sidebar.update(cx, Sidebar::close_name_field);
     }
 
     /// Shows the error of a file action as an answer.

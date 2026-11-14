@@ -10,6 +10,12 @@ pub(crate) const WRITE: &str =
 pub(crate) const INDEX: &str = "Holm can't use its search index.";
 pub(crate) const BAD_PATH: &str = "Holm can't use this name or place.";
 pub(crate) const BAD_TAG: &str = "This is not a tag name.";
+pub(crate) const NAME_TAKEN: &str = "This folder already has something with this name.";
+pub(crate) const NAME_EMPTY: &str = "Type a name.";
+pub(crate) const NAME_SLASH: &str = "A name can't hold “/”.";
+pub(crate) const NAME_DOT: &str = "A name can't start with “.”.";
+pub(crate) const NAME_ATTACHMENTS: &str = "The name “attachments” is for attached files.";
+pub(crate) const NAME_TOO_LONG: &str = "This name is too long.";
 pub(crate) const UNKNOWN: &str = "Something went wrong. The log has the details.";
 pub(crate) const CONFIG_WRITE: &str = "Holm can't save the settings.";
 pub(crate) const LOG: &str = "Holm can't write its log.";
@@ -142,6 +148,8 @@ pub(crate) fn backlink_count(count: usize) -> String {
     }
 }
 pub(crate) const LINK_FILE: &str = "Link";
+/// The link text of a pasted image, before its extension.
+pub(crate) const PASTED_IMAGE: &str = "Pasted image";
 
 /// The last row of the link picker, which makes a note.
 pub(crate) fn create_note(title: &str) -> String {

@@ -5,7 +5,7 @@
 //! folder, it reads the backlinks again and tells the editor which note links are broken.
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, PathPromptOptions, Subscription, Task,
@@ -106,6 +106,7 @@ impl Links {
                 }
                 _ => return,
             };
+            let names = files.iter().map(|file| file_name(file)).collect();
             let Ok(paths) = links.update(cx, |links, cx| {
                 links.notes_folder.read(cx).file_links(note, files, cx)
             }) else {
@@ -113,7 +114,7 @@ impl Links {
             };
             let paths = paths.await;
             links
-                .update(cx, |links, cx| links.insert_file_links(paths, cx))
+                .update(cx, |links, cx| links.insert_file_links(names, paths, cx))
                 .ok();
         })
         .detach();
@@ -187,6 +188,15 @@ impl Links {
         let Some(note) = self.note.clone() else {
             return;
         };
+        let names = files
+            .iter()
+            .map(|file| match file {
+                PastedFile::Path(path) => file_name(path),
+                PastedFile::Image { extension, .. } => {
+                    format!("{}.{extension}", text::PASTED_IMAGE)
+                }
+            })
+            .collect();
         let links = cx.weak_entity();
         self.notes_folder.update(cx, |notes_folder, cx| {
             notes_folder.attach(
@@ -194,7 +204,7 @@ impl Links {
                 files,
                 move |copies, cx| {
                     links
-                        .update(cx, |links, cx| links.insert_file_links(copies, cx))
+                        .update(cx, |links, cx| links.insert_file_links(names, copies, cx))
                         .ok();
                 },
                 cx,
@@ -202,20 +212,17 @@ impl Links {
         });
     }
 
-    /// Embeds a link to each file at the cursor, as `![..](..)`. It shows an image or a file
+    /// Embeds a link to each file at the cursor, as `![name](..)`. It shows an image or a file
     /// chip. An error shows in the message line.
     fn insert_file_links(
         &mut self,
+        names: Vec<String>,
         files: Vec<holm_core::Result<PathBuf>>,
         cx: &mut Context<Self>,
     ) {
-        for file in files {
+        for (name, file) in names.into_iter().zip(files) {
             match file {
                 Ok(path) => {
-                    let name = path
-                        .file_name()
-                        .map(|name| name.to_string_lossy().into_owned())
-                        .unwrap_or_default();
                     let target = Target::File(path.to_string_lossy().into_owned());
                     self.editor.update(cx, |editor, cx| {
                         editor.insert_link(&name, &target, true, cx);
@@ -232,6 +239,13 @@ impl Links {
 }
 
 impl EventEmitter<LinksEvent> for Links {}
+
+/// The file name of `path`, for the text of a link to it.
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
 
 /// The editor target of a broken link from the core.
 fn target(link: LinkTarget) -> Option<Target> {

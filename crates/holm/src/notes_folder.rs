@@ -343,12 +343,12 @@ impl NotesFolder {
     pub(crate) fn create_folder(
         &mut self,
         parent: PathBuf,
-        name: &'static str,
+        name: String,
         done: impl FnOnce(holm_core::Result<PathBuf>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
         self.write(
-            move |core| core.create_folder(&parent, name).result,
+            move |core| core.create_folder(&parent, &name).result,
             done,
             cx,
         );
@@ -728,7 +728,7 @@ mod tests {
                 }
             };
             notes_folder.rename_folder("gone".into(), "x".into(), step("after the fail"), cx);
-            notes_folder.create_folder(PathBuf::new(), "B", step("after the folder"), cx);
+            notes_folder.create_folder(PathBuf::new(), "B".into(), step("after the folder"), cx);
         });
         cx.run_until_parked();
 
@@ -765,7 +765,7 @@ mod tests {
                     steps.borrow_mut().push(format!("{name} {end}"));
                 }
             };
-            notes_folder.create_folder(PathBuf::new(), "work", step("create"), cx);
+            notes_folder.create_folder(PathBuf::new(), "work".into(), step("create"), cx);
             notes_folder.rename_folder("work".into(), "job".into(), step("rename"), cx);
             notes_folder.rename_folder("gone".into(), "x".into(), step("fail"), cx);
         });
@@ -795,7 +795,7 @@ mod tests {
         notes_folder.update(cx, |notes_folder, cx| {
             notes_folder.save_text(text("# A\n\nfirst\n"), |_, _| {}, cx);
             notes_folder.change_tag(path.clone(), TagChange::Add("work".into()), |_, _| {}, cx);
-            notes_folder.create_folder(PathBuf::new(), "B", |_, _| {}, cx);
+            notes_folder.create_folder(PathBuf::new(), "B".into(), |_, _| {}, cx);
             notes_folder.quit(Some(text("# A\n\nlast\n")));
         });
 

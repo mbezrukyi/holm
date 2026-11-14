@@ -3,6 +3,8 @@
 use std::io;
 use std::path::PathBuf;
 
+use holm_core::NameProblem;
+
 use crate::text;
 
 #[derive(Debug, thiserror::Error)]
@@ -38,6 +40,15 @@ impl AppError {
                 holm_core::Error::Index { .. } => text::INDEX,
                 holm_core::Error::BadPath { .. } => text::BAD_PATH,
                 holm_core::Error::BadTag { .. } => text::BAD_TAG,
+                holm_core::Error::NameTaken { .. } => text::NAME_TAKEN,
+                holm_core::Error::BadName { problem, .. } => match problem {
+                    NameProblem::Empty => text::NAME_EMPTY,
+                    NameProblem::Slash => text::NAME_SLASH,
+                    NameProblem::Dot => text::NAME_DOT,
+                    NameProblem::Attachments => text::NAME_ATTACHMENTS,
+                    NameProblem::TooLong => text::NAME_TOO_LONG,
+                    _ => text::BAD_PATH,
+                },
                 _ => text::UNKNOWN,
             },
             Self::Markdown(_) | Self::Editor(_) => text::UNKNOWN,

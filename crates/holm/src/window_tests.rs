@@ -206,6 +206,16 @@ fn read_only(dir: &Path, read_only: bool) {
     fs::set_permissions(dir, permissions).unwrap();
 }
 
+/// The sorted names in the folder `dir`.
+fn folder_names(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
 fn read(path: &Path) -> String {
     fs::read_to_string(path).unwrap()
 }
@@ -695,14 +705,14 @@ fn keys_make_rename_and_move_notes_and_folders(cx: &mut TestAppContext) {
     let handle = open(cx, fixture.startup(None));
 
     keys(cx, handle, "ctrl-shift-n");
-    assert!(notes_dir.join(text::NEW_FOLDER).is_dir());
-    assert_eq!(tree(cx, handle), ["All notes", "New folder*"]);
-    assert_eq!(tree_field(cx, handle).as_deref(), Some(text::NEW_FOLDER));
+    assert_eq!(tree(cx, handle), ["All notes*", text::NEW_FOLDER]);
+    assert_eq!(tree_field(cx, handle).as_deref(), Some(""));
+    assert_eq!(folder_names(&notes_dir), ["Top.md"]);
     cx.simulate_input(handle, "work");
     keys(cx, handle, "enter");
     assert!(notes_dir.join("work").is_dir());
-    assert!(!notes_dir.join(text::NEW_FOLDER).exists());
     assert_eq!(sidebar(cx, handle), "tree work");
+    assert_eq!(tree(cx, handle), ["All notes", "work*"]);
 
     keys(cx, handle, "enter ctrl-n");
     assert!(notes_dir.join("work/Untitled.md").is_file());
@@ -1238,7 +1248,7 @@ fn a_folder_rename_locks_the_field_until_the_write_ends(cx: &mut TestAppContext)
 }
 
 #[gpui_kit::test]
-fn a_folder_rename_on_a_clash_shows_the_name_on_disk(cx: &mut TestAppContext) {
+fn a_folder_rename_to_a_taken_name_keeps_the_field_and_shows_the_answer(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     let notes_dir = fixture.notes();
     fs::create_dir(notes_dir.join("job")).unwrap();
@@ -1248,12 +1258,23 @@ fn a_folder_rename_on_a_clash_shows_the_name_on_disk(cx: &mut TestAppContext) {
 
     keys(cx, handle, "ctrl-shift-l escape down down");
     assert_eq!(tree(cx, handle), ["All notes", "job", "work*"]);
-    type_new_name(cx, handle, "job");
-    keys_now(cx, handle, "enter");
-    assert_eq!(tree(cx, handle), ["All notes", "job", "job 2*"]);
-    settle(cx);
-    assert_eq!(tree(cx, handle), ["All notes", "job", "job 2*"]);
-    assert!(notes_dir.join("job 2").is_dir());
+    type_new_name(cx, handle, "Job");
+    keys(cx, handle, "enter");
+    assert_eq!(tree(cx, handle), ["All notes", "job", "work*"]);
+    assert_eq!(tree_field(cx, handle).as_deref(), Some("Job"));
+    assert_eq!(message(cx, handle).as_deref(), Some(text::NAME_TAKEN));
+    assert_eq!(folder_names(&notes_dir), ["Top.md", "job", "work"]);
+
+    // The field takes a new name, and the write works.
+    cx.update_window(handle, |_, window, cx| {
+        window.dispatch_action(Box::new(gpui_kit::component::input::SelectAll), cx);
+    })
+    .unwrap();
+    cx.simulate_input(handle, "Work");
+    keys(cx, handle, "enter");
+    assert_eq!(tree_field(cx, handle), None);
+    assert_eq!(tree(cx, handle), ["All notes", "Work*", "job"]);
+    assert_eq!(folder_names(&notes_dir), ["Top.md", "Work", "job"]);
 }
 
 #[gpui_kit::test]
@@ -1435,11 +1456,72 @@ fn a_folder_rename_to_a_taken_name_keeps_the_row_selected_in_every_frame(cx: &mu
                 "All notes",
                 "area",
                 "area/bebra",
-                "area/bebra 2*",
-                "area/bebra 2/sub"
+                "area/work*",
+                "area/work/sub"
             ],
         ]
     );
+    assert_eq!(tree_field(cx, handle).as_deref(), Some("bebra"));
+}
+
+#[gpui_kit::test]
+fn a_new_folder_with_a_taken_name_keeps_the_field_and_esc_leaves_nothing(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    nested_folders(&fixture);
+    let notes_dir = fixture.notes();
+    let handle = open(cx, fixture.startup(None));
+
+    keys(cx, handle, "ctrl-shift-l escape down");
+    assert_eq!(sidebar(cx, handle), "tree area");
+    keys(cx, handle, "ctrl-shift-n");
+    assert_eq!(
+        tree(cx, handle),
+        [
+            "All notes",
+            "area*",
+            text::NEW_FOLDER,
+            "area/bebra",
+            "area/work"
+        ]
+    );
+    cx.simulate_input(handle, "Bebra");
+    keys(cx, handle, "enter");
+    assert_eq!(tree_field(cx, handle).as_deref(), Some("Bebra"));
+    assert_eq!(message(cx, handle).as_deref(), Some(text::NAME_TAKEN));
+    // The field has the focus again.
+    cx.simulate_input(handle, " 2");
+    assert_eq!(tree_field(cx, handle).as_deref(), Some("Bebra 2"));
+
+    keys(cx, handle, "escape");
+    assert_eq!(tree_field(cx, handle), None);
+    assert_eq!(
+        tree(cx, handle),
+        ["All notes", "area*", "area/bebra", "area/work"]
+    );
+    assert_eq!(folder_names(&notes_dir.join("area")), ["bebra", "work"]);
+
+    // An empty name gets an answer too.
+    keys(cx, handle, "ctrl-shift-n enter");
+    assert_eq!(tree_field(cx, handle).as_deref(), Some(""));
+    assert_eq!(message(cx, handle).as_deref(), Some(text::NAME_EMPTY));
+}
+
+#[gpui_kit::test]
+fn a_move_into_a_clash_shows_the_answer_and_moves_nothing(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    fs::create_dir(notes_dir.join("work")).unwrap();
+    fs::write(notes_dir.join("Top.md"), "# Top\n").unwrap();
+    fs::write(notes_dir.join("work/top.md"), "# Other\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    assert_eq!(editor_text(cx, handle), "# Top\n");
+    keys(cx, handle, "ctrl-shift-l");
+    keys(cx, handle, "ctrl-shift-m");
+    keys(cx, handle, "down enter");
+    assert_eq!(message(cx, handle).as_deref(), Some(text::NAME_TAKEN));
+    assert_eq!(read(&notes_dir.join("Top.md")), "# Top\n");
+    assert_eq!(read(&notes_dir.join("work/top.md")), "# Other\n");
 }
 
 #[gpui_kit::test]
