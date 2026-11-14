@@ -21,6 +21,7 @@ use std::time::Duration;
 
 pub use error::{Error, NameProblem, Result};
 pub use snapshot::Snapshot;
+pub use store::title_of;
 pub use watch::Feed;
 
 use index::Index;
@@ -637,8 +638,7 @@ impl Core {
         if !source.metadata().map_err(read_error)?.is_file() {
             return Err(read_error(std::io::ErrorKind::IsADirectory.into()));
         }
-        let stem =
-            store::file_stem(&file.file_stem().unwrap_or_default().to_string_lossy());
+        let stem = store::file_stem(&file.file_stem().unwrap_or_default().to_string_lossy());
         let ext = file
             .extension()
             .map(|ext| format!(".{}", ext.to_string_lossy()))

@@ -566,10 +566,7 @@ fn note(rel: &Path, text: &Text, stamp: Stamp) -> Note {
         info: NoteInfo {
             path: rel.to_owned(),
             id: text.id().map(NoteId::from_field),
-            title: rel
-                .file_stem()
-                .map(|stem| stem.to_string_lossy().into_owned())
-                .unwrap_or_default(),
+            title: title_of(rel),
             preview: text.preview(),
             tags: text.tags(),
             pinned: text.pinned(),
@@ -577,6 +574,13 @@ fn note(rel: &Path, text: &Text, stamp: Stamp) -> Note {
         },
         body: text.body().to_owned(),
     }
+}
+
+/// The title of the note at `path`: its file name without `.md`.
+pub fn title_of(path: &Path) -> String {
+    path.file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// The folder of a note or folder path. The root folder is the empty path.
