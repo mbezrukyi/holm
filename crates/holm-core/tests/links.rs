@@ -27,15 +27,14 @@ fn note_with_id_finds_the_note_or_none() {
 }
 
 #[test]
-fn headings_leave_out_the_title() {
+fn headings_list_every_heading_also_the_first() {
     let body = "# Plans\n\n## Bug list\n\ntext\n\n### Later *ideas*\n\n# Second\n";
-    let folder = Folder::new(&[("a.md", body), ("b.md", "text\n\n# Not a title\n")]);
+    let folder = Folder::new(&[("a.md", body)]);
 
     assert_eq!(
         folder.core.headings("a.md").unwrap(),
-        ["Bug list", "Later ideas", "Second"]
+        ["Plans", "Bug list", "Later ideas", "Second"]
     );
-    assert_eq!(folder.core.headings("b.md").unwrap(), ["Not a title"]);
     assert!(matches!(
         folder.core.headings("gone.md"),
         Err(Error::Read { .. })

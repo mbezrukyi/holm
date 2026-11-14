@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use common::Folder;
 use holm_core::model::Order;
-use holm_core::{Core, Error};
+use holm_core::{Core, Error, NameProblem};
 
 fn paths(items: impl IntoIterator<Item = PathBuf>) -> Vec<String> {
     let mut paths = common::paths(items);
@@ -104,15 +104,22 @@ fn read_gives_the_fields_and_the_body() {
 
     assert_eq!(note.info.path, Path::new("work/Plans.md"));
     assert_eq!(note.info.id.unwrap().as_str(), "01JC3X");
-    assert_eq!(note.info.title, "Big plans");
+    assert_eq!(note.info.title, "Plans");
     assert_eq!(note.info.tags, ["work", "work/holm"]);
     assert!(note.info.pinned);
     assert_eq!(note.body, "# Big plans\n\nText.\n");
 }
 
 #[test]
-fn read_takes_the_title_from_the_file_name_with_no_heading() {
-    let folder = Folder::new(&[("Shopping list.md", "milk\n")]);
+fn the_title_is_the_file_name_and_never_the_heading() {
+    let folder = Folder::new(&[
+        ("Plans.md", "# Spring plans\n\nText.\n"),
+        ("Shopping list.md", "milk\n"),
+    ]);
+
+    let plans = folder.core.read("Plans.md").unwrap();
+    assert_eq!(plans.info.title, "Plans");
+    assert_eq!(plans.info.preview, "Spring plans");
 
     let note = folder.core.read("Shopping list.md").unwrap();
 
@@ -297,23 +304,39 @@ fn restore_saves_the_body_over_a_file_that_is_back() {
 }
 
 #[test]
-fn create_makes_untitled_notes_with_a_number_on_a_clash() {
-    let folder = Folder::new(&[("Untitled 2.md", "taken\n"), ("work/x.md", "")]);
+fn create_writes_the_title_as_the_file_name() {
+    let folder = Folder::new(&[("work/x.md", "")]);
 
-    let first = folder.core.create("").result.unwrap();
-    let second = folder.core.create("").result.unwrap();
-    let nested = folder.core.create("work").result.unwrap();
+    let first = folder.core.create("", "Plans").result.unwrap();
+    let nested = folder.core.create("work", "Plans").result.unwrap();
 
-    assert_eq!(first.info.path, Path::new("Untitled.md"));
-    assert_eq!(second.info.path, Path::new("Untitled 3.md"));
-    assert_eq!(nested.info.path, Path::new("work/Untitled.md"));
-    assert_eq!(folder.text("Untitled 2.md"), "taken\n");
-
+    assert_eq!(first.info.path, Path::new("Plans.md"));
+    assert_eq!(nested.info.path, Path::new("work/Plans.md"));
     let id = first.info.id.unwrap();
-    assert_ne!(Some(&id), second.info.id.as_ref());
-    assert_eq!(folder.text("Untitled.md"), format!("---\nid: {id}\n---\n"));
-    assert_eq!(first.info.title, "Untitled");
+    assert_ne!(Some(&id), nested.info.id.as_ref());
+    assert_eq!(folder.text("Plans.md"), format!("---\nid: {id}\n---\n"));
+    assert_eq!(first.info.title, "Plans");
     assert_eq!(first.body, "");
+}
+
+#[test]
+fn create_refuses_a_taken_or_bad_title_and_writes_nothing() {
+    let folder = Folder::new(&[("Plans.md", "taken\n")]);
+    let problem = |title: &str| match folder.core.create("", title).result {
+        Err(Error::BadName { problem, .. }) => Some(problem),
+        _ => None,
+    };
+
+    assert!(matches!(
+        folder.core.create("", "plans").result,
+        Err(Error::NameTaken { .. })
+    ));
+    assert_eq!(problem(""), Some(NameProblem::Empty));
+    assert_eq!(problem("a/b"), Some(NameProblem::Slash));
+    assert_eq!(problem(".hidden"), Some(NameProblem::Dot));
+    assert_eq!(problem(&"x".repeat(253)), Some(NameProblem::TooLong));
+    assert_eq!(folder.files(), ["Plans.md"]);
+    assert!(folder.core.create("", &"x".repeat(252)).result.is_ok());
 }
 
 #[test]
@@ -321,15 +344,15 @@ fn create_fails_in_a_missing_or_hidden_folder() {
     let folder = Folder::new(&[]);
 
     assert!(matches!(
-        folder.core.create("missing").result,
+        folder.core.create("missing", "a").result,
         Err(Error::Write { .. })
     ));
     assert!(matches!(
-        folder.core.create(".git").result,
+        folder.core.create(".git", "a").result,
         Err(Error::BadPath { .. })
     ));
     assert!(matches!(
-        folder.core.create("../x").result,
+        folder.core.create("../x", "a").result,
         Err(Error::BadPath { .. })
     ));
 }
@@ -339,9 +362,9 @@ fn the_handle_works_from_many_threads() {
     let folder = Folder::new(&[]);
 
     let handles: Vec<_> = (0..8)
-        .map(|_| {
+        .map(|n| {
             let core = folder.core.clone();
-            std::thread::spawn(move || core.create("").result.unwrap().info.path)
+            std::thread::spawn(move || core.create("", &n.to_string()).result.unwrap().info.path)
         })
         .collect();
     let mut created: Vec<PathBuf> = handles.into_iter().map(|h| h.join().unwrap()).collect();

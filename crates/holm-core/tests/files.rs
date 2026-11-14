@@ -49,75 +49,80 @@ fn file_links(folder: &Folder, path: &str) -> Vec<PathBuf> {
 }
 
 #[test]
-fn rename_to_title_renames_the_file_and_keeps_its_text_and_time() {
+fn rename_note_renames_the_file_and_keeps_its_text_and_time() {
     let text = note("A", "# Holm ideas\n\nText\n");
     let mut folder = Folder::new(&[("work/Untitled.md", &text)]);
     let time = folder.set_time("work/Untitled.md", 1_000);
 
     let info = folder
         .core
-        .rename_to_title("work/Untitled.md")
+        .rename_note("work/Untitled.md", "Plans")
         .result
         .unwrap();
 
-    assert_eq!(info.path, Path::new("work/Holm ideas.md"));
+    assert_eq!(info.path, Path::new("work/Plans.md"));
+    assert_eq!(info.title, "Plans");
     assert_eq!(info.modified, time);
-    assert_eq!(folder.text("work/Holm ideas.md"), text);
+    assert_eq!(folder.text("work/Plans.md"), text);
     assert!(!folder.path("work/Untitled.md").exists());
-    assert_index_matches_files(&mut folder, &["work/Holm ideas.md"]);
+    assert_index_matches_files(&mut folder, &["work/Plans.md"]);
 }
 
 #[test]
-fn rename_to_title_replaces_only_a_slash_and_a_leading_dot() {
-    let folder = Folder::new(&[
-        ("a.md", "# Plans 1/2: *big*?\n"),
-        ("b.md", "# .config notes\n"),
-    ]);
+fn rename_note_refuses_a_taken_or_bad_title_and_moves_nothing() {
+    let folder = Folder::new(&[("Plans.md", "# Plans\n"), ("a.md", "# A\n")]);
+    let problem = |title: &str| match folder.core.rename_note("a.md", title).result {
+        Err(Error::BadName { problem, .. }) => Some(problem),
+        _ => None,
+    };
 
-    assert_eq!(
-        folder.core.rename_to_title("a.md").result.unwrap().path,
-        Path::new("Plans 1-2: big?.md")
-    );
-    assert_eq!(
-        folder.core.rename_to_title("b.md").result.unwrap().path,
-        Path::new("-config notes.md")
-    );
+    assert!(matches!(
+        folder.core.rename_note("a.md", "plans").result,
+        Err(Error::NameTaken { .. })
+    ));
+    assert_eq!(problem("  "), Some(NameProblem::Empty));
+    assert_eq!(problem("a/b"), Some(NameProblem::Slash));
+    assert_eq!(problem(".a"), Some(NameProblem::Dot));
+    assert_eq!(folder.files(), ["Plans.md", "a.md"]);
 }
 
 #[test]
-fn rename_to_title_adds_a_number_on_a_clash() {
-    let folder = Folder::new(&[
-        ("Plans.md", "# Plans\n"),
-        ("a.md", "# Plans\n"),
-        ("b.md", "# Plans\n"),
-    ]);
+fn rename_note_takes_its_own_name_with_other_capital_letters() {
+    let folder = Folder::new(&[("Plans.md", "# Plans\n")]);
 
     assert_eq!(
-        folder.core.rename_to_title("a.md").result.unwrap().path,
-        Path::new("Plans 2.md")
+        folder
+            .core
+            .rename_note("Plans.md", "Plans")
+            .result
+            .unwrap()
+            .path,
+        Path::new("Plans.md")
     );
     assert_eq!(
-        folder.core.rename_to_title("b.md").result.unwrap().path,
-        Path::new("Plans 3.md")
+        folder
+            .core
+            .rename_note("Plans.md", "plans")
+            .result
+            .unwrap()
+            .path,
+        Path::new("plans.md")
     );
-    assert_eq!(all(&folder), ["Plans 2.md", "Plans 3.md", "Plans.md"]);
+    assert_eq!(folder.files(), ["plans.md"]);
 }
 
 #[test]
-fn a_note_whose_name_matches_its_title_stays() {
-    let folder = Folder::new(&[
-        ("Plans.md", "# Plans\n"),
-        ("Plans 2.md", "# Plans\n"),
-        ("Notes.md", "No title\n"),
-    ]);
+fn a_save_never_renames_the_note() {
+    let folder = Folder::new(&[("Plans.md", "# Plans\n")]);
 
-    for path in ["Plans.md", "Plans 2.md", "Notes.md"] {
-        assert_eq!(
-            folder.core.rename_to_title(path).result.unwrap().path,
-            Path::new(path)
-        );
-    }
-    assert_eq!(folder.files(), ["Notes.md", "Plans 2.md", "Plans.md"]);
+    folder
+        .core
+        .save("Plans.md", "# Spring plans\n\nText\n")
+        .result
+        .unwrap();
+
+    assert_eq!(folder.files(), ["Plans.md"]);
+    assert_eq!(all(&folder), ["Plans.md"]);
 }
 
 #[test]
@@ -127,7 +132,7 @@ fn a_renamed_note_keeps_its_id_and_its_backlinks() {
         ("b.md", &note("B", "[x](holm:A)\n")),
     ]);
 
-    folder.core.rename_to_title("a.md").result.unwrap();
+    folder.core.rename_note("a.md", "Target").result.unwrap();
 
     let backlinks = folder.core.snapshot().backlinks("Target.md", Order::Title);
     assert_eq!(paths(backlinks), ["b.md"]);

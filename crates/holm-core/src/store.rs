@@ -1,6 +1,6 @@
 //! Note files on disk: listing, reading, safe writes and new ids.
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
 use std::fs::{self, File, Metadata, Permissions};
 use std::io;
 use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
@@ -18,7 +18,7 @@ use crate::relink::{Moved, relink};
 
 /// The folder for pasted files at the root. The folder list skips it.
 pub(crate) const ATTACHMENTS: &str = "attachments";
-const NEW_NOTE: &str = "Untitled";
+const NOTE_EXT: &str = ".md";
 /// The longest file name that Linux file systems take.
 const MAX_NAME_BYTES: usize = 255;
 /// The bytes of the content hash in an attachment name: 8 hex digits.
@@ -222,16 +222,28 @@ impl Store {
         self.save(&note.info.path, &note.body)
     }
 
-    /// Creates an empty note with a new id as `Untitled.md` in `folder`.
-    /// On a clash, the name gets a number: `Untitled 2.md`.
-    pub(crate) fn create(&self, folder: &Path) -> Result<(Note, Stamp)> {
-        let dir = self.root.join(plain_path(folder)?);
+    /// Creates an empty note with a new id as `<title>.md` in `folder`.
+    ///
+    /// `title` follows the rules of [`check_title`]. It fails with [`Error::NameTaken`] when
+    /// something in `folder` has the name.
+    pub(crate) fn create(&self, folder: &Path, title: &str) -> Result<(Note, Stamp)> {
+        let folder = plain_path(folder)?;
+        let rel = folder.join(check_title(folder, title)?);
+        self.check_free(&rel, None)?;
+        let dir = self.root.join(folder);
+        let path = self.root.join(&rel);
         let mut text = Text::parse("");
         text.set_id(Some(NoteId::generate().as_str()));
         let file = temp_file(&dir, text.to_string().as_bytes(), None, None)
             .map_err(|source| write_error(&dir, source))?;
-        let name = persist_new(file, &dir, OsStr::new(NEW_NOTE), ".md")?;
-        self.read(&folder.join(name))
+        match file.persist_noclobber(&path) {
+            Ok(_) => sync_dir(&dir).map_err(|source| write_error(&path, source))?,
+            Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => {
+                return Err(Error::NameTaken { path });
+            }
+            Err(e) => return Err(write_error(&path, e.error)),
+        }
+        self.read(&rel)
     }
 
     /// Copies `content` into `attachments/` at the root as `<stem>-<hash>` + `ext`, and returns
@@ -547,16 +559,14 @@ enum Kind {
 }
 
 fn note(rel: &Path, text: &Text, stamp: Stamp) -> Note {
-    let title = text.title().unwrap_or_else(|| {
-        rel.file_stem()
-            .map(|stem| stem.to_string_lossy().into_owned())
-            .unwrap_or_default()
-    });
     Note {
         info: NoteInfo {
             path: rel.to_owned(),
             id: text.id().map(NoteId::from_field),
-            title,
+            title: rel
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned())
+                .unwrap_or_default(),
             preview: text.preview(),
             tags: text.tags(),
             pinned: text.pinned(),
@@ -573,35 +583,6 @@ pub(crate) fn folder_of(rel: &Path) -> &Path {
 
 fn folder_abs(path: &Path) -> &Path {
     path.parent().unwrap_or(Path::new("/"))
-}
-
-/// `stem` + `ext`, then `stem 2` + `ext`, `stem 3` + `ext` and so on.
-pub(crate) fn numbered(stem: &OsStr, ext: &str) -> impl Iterator<Item = OsString> {
-    (1_u32..).map(move |n| {
-        let mut name = stem.to_owned();
-        if n > 1 {
-            name.push(format!(" {n}"));
-        }
-        name.push(ext);
-        name
-    })
-}
-
-/// Gives `file` the first free name in `dir`: `stem` + `ext`, then `stem 2` + `ext` and so on.
-/// It never replaces a file, and it returns the name.
-fn persist_new(mut file: NamedTempFile, dir: &Path, stem: &OsStr, ext: &str) -> Result<OsString> {
-    for name in numbered(stem, ext) {
-        let path = dir.join(&name);
-        match file.persist_noclobber(&path) {
-            Ok(_) => {
-                sync_dir(dir).map_err(|source| write_error(&path, source))?;
-                return Ok(name);
-            }
-            Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => file = e.file,
-            Err(e) => return Err(write_error(&path, e.error)),
-        }
-    }
-    Err(write_error(dir, io::ErrorKind::StorageFull.into()))
 }
 
 /// Checks a typed name for a new entry in `parent`, and returns it as it is.
@@ -626,6 +607,20 @@ pub(crate) fn check_name<'a>(parent: &Path, name: &'a str) -> Result<&'a str> {
         }),
         None => Ok(name),
     }
+}
+
+/// Checks a typed title for a new note in `parent`, and returns its file name.
+/// The rules are those of [`check_name`], for the name with `.md`.
+pub(crate) fn check_title(parent: &Path, title: &str) -> Result<String> {
+    check_name(parent, title)?;
+    let name = format!("{title}{NOTE_EXT}");
+    if name.len() > MAX_NAME_BYTES {
+        return Err(Error::BadName {
+            name: title.to_owned(),
+            problem: NameProblem::TooLong,
+        });
+    }
+    Ok(name)
 }
 
 /// A reader that hashes what it reads.

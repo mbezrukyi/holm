@@ -54,11 +54,7 @@ fn notes_come_last_change_first_with_pinned_notes_on_top() {
 
 #[test]
 fn title_order_ignores_capital_letters() {
-    let folder = Folder::new(&[
-        ("a.md", "# banana\n"),
-        ("b.md", "# Apple\n"),
-        ("c.md", "# cherry\n"),
-    ]);
+    let folder = Folder::new(&[("banana.md", ""), ("Apple.md", ""), ("cherry.md", "")]);
 
     let titles: Vec<String> = folder
         .core
@@ -100,8 +96,7 @@ fn a_folder_lists_only_its_own_notes() {
 
 #[test]
 fn notes_keep_their_fields_in_the_index() {
-    let text =
-        "---\nid: 01A\ntags: [work/holm, home]\npinned: true\n---\n# Plans\n\n- Buy *milk*\n";
+    let text = "---\nid: 01A\ntags: [work/holm, home]\npinned: true\n---\n\n- Buy *milk*\n";
     let folder = Folder::new(&[("a.md", text)]);
 
     let listed = folder.core.snapshot().notes(Order::LastChange);
@@ -254,7 +249,7 @@ fn save_and_create_update_the_index() {
     folder.core.add_tag("a.md", "food").result.unwrap();
 
     let saved = folder.core.save("a.md", "# A\nPotatoes\n").result.unwrap();
-    let created = folder.core.create("").result.unwrap();
+    let created = folder.core.create("", "New").result.unwrap();
 
     assert_eq!(
         paths(folder.core.search("potato", Order::Title).unwrap()),
@@ -285,7 +280,7 @@ fn open_picks_up_changes_made_while_holm_was_closed() {
         paths(folder.core.search("words", Order::Title).unwrap()),
         ["edited.md"]
     );
-    assert_eq!(folder.core.read("edited.md").unwrap().info.title, "After");
+    assert_eq!(folder.core.read("edited.md").unwrap().info.preview, "After");
     assert_eq!(folder.core.snapshot().tags(), [tag("new", 1, vec![])]);
 }
 
@@ -300,7 +295,7 @@ fn open_sees_a_change_that_keeps_the_size_and_the_time() {
     folder.reopen();
 
     let listed = folder.core.snapshot().notes(Order::Title);
-    assert_eq!(listed[0].title, "Bbbb");
+    assert_eq!(listed[0].preview, "Bbbb");
     assert_eq!(listed[0].modified, time);
 }
 

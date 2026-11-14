@@ -67,15 +67,15 @@ fn note(id: &str, extra: &str, body: &str) -> String {
     format!("---\nid: {id}\n{extra}---\n{body}")
 }
 
-fn titles(core: &Core) -> Vec<String> {
-    let mut titles: Vec<String> = core
+fn previews(core: &Core) -> Vec<String> {
+    let mut previews: Vec<String> = core
         .snapshot()
         .notes(Order::Title)
         .into_iter()
-        .map(|n| n.title)
+        .map(|n| n.preview)
         .collect();
-    titles.sort();
-    titles
+    previews.sort();
+    previews
 }
 
 #[test]
@@ -86,7 +86,7 @@ fn an_outside_edit_updates_the_index_and_sends_a_change() {
     fed.feed.changed(["a.md"]).unwrap();
 
     assert_eq!(fed.take(), [Change::Changed(fed.info("a.md"))]);
-    assert_eq!(titles(&fed.core), ["New words"]);
+    assert_eq!(previews(&fed.core), ["New words"]);
     assert_eq!(fed.core.search("words", Order::Title).unwrap().len(), 1);
 }
 
@@ -98,7 +98,7 @@ fn a_new_file_is_added() {
     fed.feed.changed(["b.md"]).unwrap();
 
     assert_eq!(fed.take(), [Change::Added(fed.info("b.md"))]);
-    assert_eq!(titles(&fed.core), ["B"]);
+    assert_eq!(previews(&fed.core), ["B"]);
 }
 
 #[test]
@@ -126,7 +126,7 @@ fn a_deleted_file_is_removed() {
     fed.feed.changed(["a.md"]).unwrap();
 
     assert_eq!(fed.take(), [Change::Removed("a.md".into())]);
-    assert_eq!(titles(&fed.core), ["B"]);
+    assert_eq!(previews(&fed.core), ["B"]);
 }
 
 #[test]
@@ -177,7 +177,7 @@ fn holm_s_own_saves_and_new_notes_do_not_come_back() {
 
     fed.core.save("a.md", "# A\n\nMore.\n").result.unwrap();
     fed.core.add_tag("a.md", "work").result.unwrap();
-    let new = fed.core.create("").result.unwrap();
+    let new = fed.core.create("", "New").result.unwrap();
     fed.feed
         .changed([PathBuf::from("a.md"), new.info.path])
         .unwrap();
@@ -248,7 +248,7 @@ fn a_deleted_folder_removes_its_notes() {
             Change::Folders,
         ]
     );
-    assert_eq!(titles(&fed.core), ["C"]);
+    assert_eq!(previews(&fed.core), ["C"]);
 }
 
 #[test]
@@ -284,7 +284,7 @@ fn hidden_paths_and_other_files_send_nothing() {
     fed.feed.changed(["picture.png"]).unwrap();
 
     assert_eq!(fed.take(), []);
-    assert_eq!(titles(&fed.core), Vec::<String>::new());
+    assert_eq!(previews(&fed.core), Vec::<String>::new());
 }
 
 #[test]
@@ -453,7 +453,7 @@ fn the_revision_grows_with_own_writes_and_outside_changes() {
         "reads change nothing"
     );
 
-    fed.core.create("").result.unwrap();
+    fed.core.create("", "New").result.unwrap();
     let created = fed.core.snapshot().revision();
     assert!(created > start);
 

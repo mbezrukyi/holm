@@ -22,8 +22,9 @@ use crate::snapshot::{Delta, sort};
 use crate::store::{ATTACHMENTS, Stamp, Store, folder_of, time};
 
 const FILE: &str = "index.sqlite";
-/// Change this number with each change to [`SCHEMA`]. An index with another number is rebuilt.
-const SHAPE: i32 = 2;
+/// Change this number with each change to [`SCHEMA`] or to what a column holds.
+/// An index with another number is rebuilt.
+const SHAPE: i32 = 3;
 
 const SCHEMA: &str = "
 CREATE TABLE notes (

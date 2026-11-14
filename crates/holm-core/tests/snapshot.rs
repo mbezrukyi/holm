@@ -58,7 +58,7 @@ fn note_writes_show_in_the_snapshot_after_them() {
     ]);
     let core = &folder.core;
 
-    let (note, snapshot) = one_step(core, |core| core.create("work"));
+    let (note, snapshot) = one_step(core, |core| core.create("work", "Untitled"));
     assert_eq!(
         paths(snapshot.notes_in("work", Order::Title)),
         ["work/Untitled.md"]
@@ -67,13 +67,13 @@ fn note_writes_show_in_the_snapshot_after_them() {
     let (_, snapshot) = one_step(core, |core| {
         core.save(&note.info.path, "# Ideas\n[plans](holm:P)\n")
     });
-    assert_eq!(titles(&snapshot), ["Ideas", "Plans"]);
+    assert_eq!(titles(&snapshot), ["Plans", "Untitled"]);
     assert_eq!(
         paths(snapshot.backlinks("Plans.md", Order::Title)),
         ["work/Untitled.md"]
     );
 
-    let (info, snapshot) = one_step(core, |core| core.rename_to_title("work/Untitled.md"));
+    let (info, snapshot) = one_step(core, |core| core.rename_note("work/Untitled.md", "Ideas"));
     assert_eq!(info.path, Path::new("work/Ideas.md"));
     assert_eq!(
         paths(snapshot.notes_in("work", Order::Title)),
@@ -153,7 +153,7 @@ fn folder_writes_show_in_the_snapshot_after_them() {
 
     let ((), snapshot) = one_step(core, |core| core.delete_folder("Home"));
     assert_eq!(folders(&snapshot), ["job"]);
-    assert_eq!(titles(&snapshot), ["A"]);
+    assert_eq!(titles(&snapshot), ["a"]);
 }
 
 #[test]
@@ -166,7 +166,7 @@ fn a_change_through_the_feed_shows_in_the_snapshot() {
 
     let snapshot = folder.core.snapshot();
     assert_eq!(snapshot.revision(), before + 1);
-    assert_eq!(titles(&snapshot), ["A", "B"]);
+    assert_eq!(titles(&snapshot), ["a", "b"]);
     assert_eq!(folders(&snapshot), ["work"]);
     assert_eq!(tag_names(&snapshot), ["home"]);
 }
@@ -195,7 +195,7 @@ fn a_save_with_the_same_text_keeps_the_revision() {
     no_step(&folder.core, |core| core.remove_tag("A.md", "y"))
         .result
         .unwrap();
-    no_step(&folder.core, |core| core.rename_to_title("A.md"))
+    no_step(&folder.core, |core| core.rename_note("A.md", "A"))
         .result
         .unwrap();
 }
@@ -214,11 +214,11 @@ fn a_failed_write_keeps_the_revision() {
 
 #[test]
 fn an_old_snapshot_stays_as_it_was() {
-    let folder = Folder::new(&[("a.md", "# A\n")]);
+    let folder = Folder::new(&[("A.md", "")]);
     let old = folder.core.snapshot();
 
-    folder.core.create("").result.unwrap();
+    folder.core.create("", "B").result.unwrap();
 
     assert_eq!(titles(&old), ["A"]);
-    assert_eq!(titles(&folder.core.snapshot()), ["A", "Untitled"]);
+    assert_eq!(titles(&folder.core.snapshot()), ["A", "B"]);
 }

@@ -151,11 +151,12 @@ fn pick(folder: &Folder, note: usize) -> Option<PathBuf> {
 fn apply(folder: &mut Folder, edit: &Edit, copies: &mut usize) {
     match edit {
         Edit::Create { in_work } => {
-            folder
-                .core
-                .create(if *in_work { "work" } else { "" })
-                .result
+            let place = if *in_work { "work" } else { "" };
+            let free = (1..=folder.core.snapshot().notes(Order::Title).len() + 1)
+                .map(|n| format!("Note {n}"))
+                .find(|title| !folder.path(place).join(format!("{title}.md")).exists())
                 .unwrap();
+            folder.core.create(place, &free).result.unwrap();
         }
         Edit::Save {
             note,

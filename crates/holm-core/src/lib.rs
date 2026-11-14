@@ -144,23 +144,17 @@ impl Core {
         self.inner.index.search(&self.inner.store, text, order)
     }
 
-    /// The text of each heading in the note at `path`, in order, without the title.
+    /// The text of each heading in the note at `path`, in order.
     ///
     /// # Errors
     ///
     /// As in [`Core::read`].
     pub fn headings(&self, path: impl AsRef<Path>) -> Result<Vec<String>> {
         let body = self.read(path)?.body;
-        let title = holm_markdown::title_range(&body);
         let parsed = holm_markdown::Body::parse(&body);
         Ok(parsed
             .headings()
             .iter()
-            .filter(|heading| {
-                !title.as_ref().is_some_and(|title| {
-                    heading.range.start <= title.start && title.start <= heading.range.end
-                })
-            })
             .map(|heading| heading.text.clone())
             .collect())
     }
@@ -198,20 +192,12 @@ impl Core {
         Ok(broken)
     }
 
-    /// Every heading of the note with `id`, the title too, or `None` with no such note.
+    /// Every heading of the note with `id`, or `None` with no such note.
     fn all_headings(&self, snapshot: &Snapshot, id: &NoteId) -> Result<Option<Vec<String>>> {
-        let Some(info) = snapshot.note_with_id(id.as_str()) else {
-            return Ok(None);
-        };
-        let body = self.read(&info.path)?.body;
-        let parsed = holm_markdown::Body::parse(&body);
-        Ok(Some(
-            parsed
-                .headings()
-                .iter()
-                .map(|heading| heading.text.clone())
-                .collect(),
-        ))
+        match snapshot.note_with_id(id.as_str()) {
+            Some(info) => self.headings(&info.path).map(Some),
+            None => Ok(None),
+        }
     }
 
     /// The path for a link from the note at `note` to `file`, with no copy. A file inside the
@@ -292,51 +278,49 @@ impl Core {
 
     /// Creates an empty note with a new id in `folder`, and returns it.
     ///
-    /// The file is `Untitled.md`, or `Untitled 2.md`, `Untitled 3.md` and so on when the name is taken.
+    /// The file is `<title>.md`. Holm uses `title` as it is and never adds a number.
     ///
     /// # Errors
     ///
+    /// - [`Error::BadName`] when `title` breaks a rule of [`Core::create_folder`], or is too
+    ///   long with `.md`.
+    /// - [`Error::NameTaken`] when something in `folder` has the file name, also with other
+    ///   capital letters.
     /// - [`Error::BadPath`] when `folder` is not a plain folder path inside the notes folder.
     /// - [`Error::Write`] when the file can't be written, for example when the folder is missing.
     /// - [`Error::Index`] as in [`Core::save`].
-    pub fn create(&self, folder: impl AsRef<Path>) -> Written<Note> {
+    pub fn create(&self, folder: impl AsRef<Path>, title: &str) -> Written<Note> {
         self.inner.write(|draft| {
-            let (note, stamp) = self.inner.store.create(folder.as_ref())?;
+            let (note, stamp) = self.inner.store.create(folder.as_ref(), title)?;
             self.inner.update(draft, &note, stamp)
         })
     }
 
-    /// Renames the note file to match its title, and returns the note at its new path.
+    /// Gives the note the title `title`: its file becomes `<title>.md` in the same folder.
+    /// It returns the note at its new path.
     ///
-    /// The name keeps the title as it is. Only `/` and a leading `.` become `-`.
-    /// When the name is taken, it gets a number: `Plans 2.md`.
-    /// A note whose name already matches stays as it is.
-    ///
+    /// Titles work as in [`Core::create`]. A change of only the capital letters works.
+    /// The note keeps its text and its modification time.
     /// No other note changes, because note links use the id.
     ///
     /// # Errors
     ///
+    /// - [`Error::BadName`] and [`Error::NameTaken`] as in [`Core::create`]. Nothing moves.
     /// - [`Error::BadPath`] as in [`Core::read`].
     /// - [`Error::Read`] or [`Error::NotUtf8`] when the file can't be read as text.
     /// - [`Error::Write`] when the file can't be moved. The note then stays where it was.
     /// - [`Error::Index`] as in [`Core::save`].
-    pub fn rename_to_title(&self, path: impl AsRef<Path>) -> Written<NoteInfo> {
+    pub fn rename_note(&self, path: impl AsRef<Path>, title: &str) -> Written<NoteInfo> {
         let path = path.as_ref();
         self.inner.write(|draft| {
-            let (note, _) = self.inner.store.read(path)?;
-            let stem = holm_markdown::file_stem(&note.info.title);
+            Store::check_note(path)?;
             let folder = folder_of(path);
-            for name in store::numbered(OsStr::new(&stem), ".md") {
-                match self.inner.store.move_note(path, folder, &name) {
-                    Err(Error::NameTaken { .. }) => {}
-                    Err(error) => return Err(error),
-                    Ok(new) => return self.inner.settle(draft, path, &new),
-                }
-            }
-            Err(Error::Write {
-                path: self.inner.store.root().join(path),
-                source: std::io::ErrorKind::StorageFull.into(),
-            })
+            let name = store::check_title(folder, title)?;
+            let new = self
+                .inner
+                .store
+                .move_note(path, folder, OsStr::new(&name))?;
+            self.inner.settle(draft, path, &new)
         })
     }
 
@@ -350,7 +334,7 @@ impl Core {
     /// - [`Error::NameTaken`] when something in `folder` has the file name, also with other
     ///   capital letters. Nothing moves.
     /// - [`Error::BadPath`] when `path` is not a note path, or `folder` is not a folder path.
-    /// - Else as in [`Core::rename_to_title`].
+    /// - Else as in [`Core::rename_note`].
     pub fn move_note(&self, path: impl AsRef<Path>, folder: impl AsRef<Path>) -> Written<NoteInfo> {
         let path = path.as_ref();
         self.inner.write(|draft| {

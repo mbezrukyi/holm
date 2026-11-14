@@ -39,9 +39,9 @@ pub struct NoteInfo {
     pub path: PathBuf,
     /// The `id:` field. A note that Holm never wrote can have none.
     pub id: Option<NoteId>,
-    /// The first `# heading` of the body, or the file name without `.md`.
+    /// The file name without `.md`.
     pub title: String,
-    /// The first line of text after the title, with no Markdown syntax. It can be empty.
+    /// The first line of text of the body, with no Markdown syntax. It can be empty.
     pub preview: String,
     /// The `tags:` field, normalized, with no repeats.
     pub tags: Vec<String>,
