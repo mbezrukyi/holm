@@ -1,9 +1,9 @@
 //! The sidebar: one panel that shows the folder tree or the note list of one tree item.
 //!
 //! The tree has "All notes", then the folders, then the tags. In a list, `↑` and `↓` open each
-//! note at once. The sidebar changes no files itself. It sends a [`SidebarEvent`], or a name
-//! from a name field to the [`SidebarWrite`] of the app. The app saves the open note before
-//! each change.
+//! note at once. A name field writes its name through the notes folder. A tag rename first
+//! asks with the [`Confirm`] of the app. For other changes, the sidebar sends a
+//! [`SidebarEvent`].
 //!
 //! The search field sits at the top. While it holds text, the note list shows the notes that
 //! match it, and `Esc` clears it and shows the last view again.
@@ -29,6 +29,7 @@ use gpui_kit::{
 };
 use holm_core::model::{Change, NoteInfo, Order};
 
+use crate::dialog::{Ask, Confirm};
 use crate::error::AppError;
 use crate::icons::Icon;
 use crate::name_field::{Look, NameEvent, NameField, NameWrite};
@@ -72,15 +73,12 @@ pub(crate) enum SidebarEvent {
     Move(Target),
     /// Remove a tag from all notes, with the dialog.
     DeleteTag(String),
-    /// The view changed. The app keeps it in the config.
+    /// The view changed, or a folder rename moved the open note. The app keeps both in the
+    /// config.
     ViewChanged,
     /// Show this answer in the message line.
     Answer(&'static str),
 }
-
-/// Writes a name from a name field of the tree. It must end with `done`.
-pub(crate) type SidebarWrite =
-    Rc<dyn Fn(Named, String, Step<holm_core::Result<()>>, &mut Window, &mut App)>;
 
 /// A name field in the tree: for a folder or a tag after `F2`, or for a new folder.
 struct Naming {
@@ -134,7 +132,7 @@ pub(crate) struct Sidebar {
     /// list before.
     left: Option<(PathBuf, PathBuf)>,
     field: Option<Naming>,
-    write: SidebarWrite,
+    confirm: Confirm,
     search: Entity<InputState>,
     /// The trimmed text of the search field. With text, the list shows `found`.
     query: String,
@@ -151,7 +149,7 @@ impl Sidebar {
         order: Order,
         view: View,
         current: Option<PathBuf>,
-        write: SidebarWrite,
+        confirm: Confirm,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -180,7 +178,7 @@ impl Sidebar {
             current,
             left: None,
             field: None,
-            write,
+            confirm,
             search,
             query: String::new(),
             found: NoteList::default(),
@@ -549,19 +547,16 @@ impl Sidebar {
             placeholder: SharedString::default(),
         };
         let sidebar = cx.weak_entity();
-        let sidebar_write = self.write.clone();
         // The name field follows moves, so the write takes what it names at `Enter`.
         let write: NameWrite<()> = Rc::new(move |name, done, window, cx| {
-            let named = sidebar
-                .read_with(cx, |sidebar, _| {
-                    sidebar.field.as_ref().map(|naming| naming.named.clone())
+            sidebar
+                .update(cx, |sidebar, cx| {
+                    match sidebar.field.as_ref().map(|naming| naming.named.clone()) {
+                        Some(named) => sidebar.name_write(named, name, done, window, cx),
+                        None => done(Ok(()), cx),
+                    }
                 })
-                .ok()
-                .flatten();
-            match named {
-                Some(named) => sidebar_write(named, name, done, window, cx),
-                None => done(Ok(()), cx),
-            }
+                .ok();
         });
         let home = self.focus.clone();
         let field = match text {
@@ -579,6 +574,86 @@ impl Sidebar {
             _subscription: subscription,
         });
         self.show_in_tree(item, cx);
+    }
+
+    /// Writes `name` from the name field of `named`, and gives its end to `done`. A tag rename
+    /// first asks with the dialog.
+    fn name_write(
+        &mut self,
+        named: Named,
+        name: String,
+        done: Step<holm_core::Result<()>>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let sidebar = cx.weak_entity();
+        match named {
+            Named::Folder(folder) => {
+                let renamed = move |renamed: holm_core::Result<PathBuf>, cx: &mut App| {
+                    if renamed.is_ok() {
+                        sidebar
+                            .update(cx, |_, cx| cx.emit(SidebarEvent::ViewChanged))
+                            .ok();
+                    }
+                    done(renamed.map(drop), cx);
+                };
+                self.notes_folder.update(cx, |notes_folder, cx| {
+                    notes_folder.rename_folder(folder, name, renamed, cx);
+                });
+            }
+            Named::NewFolder(parent) => {
+                let created = move |created: holm_core::Result<PathBuf>, cx: &mut App| {
+                    let shown = created.map(|folder| {
+                        sidebar
+                            .update(cx, |sidebar, cx| {
+                                sidebar.show_in_tree(Item::Folder(folder), cx);
+                            })
+                            .ok();
+                    });
+                    done(shown, cx);
+                };
+                self.notes_folder.update(cx, |notes_folder, cx| {
+                    notes_folder.create_folder(parent, name, created, cx);
+                });
+            }
+            Named::Tag(from) if !name.trim().is_empty() => {
+                let confirm = self.confirm.clone();
+                let window = window.window_handle();
+                let notes_folder = self.notes_folder.clone();
+                let (counted_from, counted_to) = (from.clone(), name.clone());
+                let asked = move |count: holm_core::Result<usize>, cx: &mut App| match count {
+                    Ok(notes) => {
+                        let ask = Ask::RenameTag {
+                            from: from.clone(),
+                            to: name.clone(),
+                            notes,
+                        };
+                        let answered: Step<bool> = Box::new(move |confirmed, cx| {
+                            if !confirmed {
+                                done(Ok(()), cx);
+                                return;
+                            }
+                            notes_folder.update(cx, |notes_folder, cx| {
+                                notes_folder.rename_tag(
+                                    from,
+                                    name,
+                                    move |renamed, cx| done(renamed.map(drop), cx),
+                                    cx,
+                                );
+                            });
+                        });
+                        window
+                            .update(cx, |_, window, cx| confirm(ask, answered, window, cx))
+                            .ok();
+                    }
+                    Err(error) => done(Err(error), cx),
+                };
+                self.notes_folder.update(cx, |notes_folder, cx| {
+                    notes_folder.tag_rename_count(counted_from, counted_to, asked, cx);
+                });
+            }
+            Named::Tag(_) => done(Ok(()), cx),
+        }
     }
 
     /// Whether the write of a name field runs.

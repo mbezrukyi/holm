@@ -1,7 +1,7 @@
 //! The open notes folder: the sidebar, the editor pane, and the file actions between them.
 //!
-//! Each file action goes in the write line of the notes folder, after the unsaved text of the
-//! pane. The sidebar shows each new snapshot by itself.
+//! Each file action goes in the write line of the notes folder. The line writes the unsaved
+//! text of the pane first. The sidebar shows each new snapshot by itself.
 //!
 //! Holm makes no note by itself. When the open note is gone, the pane opens its neighbor in
 //! the sidebar list. With no note left, it shows the empty pane.
@@ -19,7 +19,7 @@ use holm_core::Snapshot;
 use holm_core::model::{Note, Order};
 
 use crate::config::{Config, SidebarSettings};
-use crate::dialog::{self, Ask, Dialog};
+use crate::dialog::{self, Ask, Confirm, Dialog};
 use crate::error::AppError;
 use crate::link_picker::{LinkPicker, LinkPickerEvent, LinkStart};
 use crate::message_line::MessageLine;
@@ -27,7 +27,7 @@ use crate::notes_folder::{NotesFolder, Step, window_step};
 use crate::pane::{Leave, NotePane, PaneEvent, Pick};
 use crate::picker::{FolderPicker, PickerEvent};
 use crate::quick_open::{QuickOpen, QuickOpenEvent};
-use crate::sidebar::{Item, Named, Sidebar, SidebarEvent, SidebarWrite, Target};
+use crate::sidebar::{Item, Sidebar, SidebarEvent, Target};
 use crate::tags::RenameTag;
 
 const MIN_WIDTH: f32 = 160.;
@@ -69,9 +69,11 @@ impl NotesView {
         let pane =
             cx.new(|cx| NotePane::new(notes_folder.clone(), line.clone(), root, note, window, cx));
         let this = cx.weak_entity();
-        let write: SidebarWrite = Rc::new(move |named, name, done, window, cx| {
+        let confirm: Confirm = Rc::new(move |ask, answered, window, cx| {
             this.update(cx, |this, cx| {
-                this.name_write(named, name, done, window, cx);
+                this.ask(ask, window, cx, move |_, confirmed, _, cx| {
+                    answered(confirmed, cx);
+                });
             })
             .ok();
         });
@@ -81,7 +83,7 @@ impl NotesView {
                 settings.note_order,
                 settings.sidebar.view.clone(),
                 current,
-                write,
+                confirm,
                 window,
                 cx,
             )
@@ -483,8 +485,8 @@ impl NotesView {
         self.pane.update(cx, |pane, cx| pane.may_close(window, cx))
     }
 
-    /// Puts the unsaved text of the pane in the write line, and then the write of `start`.
-    /// `done` gets its value in the update where the write ends. An error shows in the message line.
+    /// Puts the write of `start` in the line. `done` gets its value in the update where the
+    /// write ends. An error shows in the message line.
     fn write<T: 'static>(
         &mut self,
         window: &mut Window,
@@ -492,105 +494,9 @@ impl NotesView {
         start: impl FnOnce(&mut NotesFolder, Step<holm_core::Result<T>>, &mut Context<NotesFolder>),
         done: impl FnOnce(&mut Self, T, &mut Window, &mut Context<Self>) + 'static,
     ) {
-        self.pane.update(cx, NotePane::save);
         let done = Self::then(window, cx, done);
         self.notes_folder
             .update(cx, |notes_folder, cx| start(notes_folder, done, cx));
-    }
-
-    /// Writes `name` from the name field of `named` in the sidebar, after the unsaved text of
-    /// the pane. A tag rename first asks with the dialog.
-    fn name_write(
-        &mut self,
-        named: Named,
-        name: String,
-        done: Step<holm_core::Result<()>>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.pane.update(cx, NotePane::save);
-        match named {
-            Named::Folder(folder) => {
-                let kept = window_step(
-                    window,
-                    cx,
-                    |this: &mut Self, renamed: holm_core::Result<PathBuf>, _, cx| {
-                        if renamed.is_ok() {
-                            this.keep_state(cx);
-                        }
-                        done(renamed.map(drop), cx);
-                    },
-                );
-                self.notes_folder.update(cx, |notes_folder, cx| {
-                    notes_folder.rename_folder(folder, name, kept, cx);
-                });
-            }
-            Named::NewFolder(parent) => {
-                let shown = window_step(
-                    window,
-                    cx,
-                    |this: &mut Self, created: holm_core::Result<PathBuf>, window, cx| {
-                        let shown = created.map(|folder| {
-                            this.show_folder(folder, window, cx);
-                            this.keep_state(cx);
-                        });
-                        done(shown, cx);
-                    },
-                );
-                self.notes_folder.update(cx, |notes_folder, cx| {
-                    notes_folder.create_folder(parent, name, shown, cx);
-                });
-            }
-            Named::Tag(from) if !name.trim().is_empty() => {
-                let (counted_from, counted_to) = (from.clone(), name.clone());
-                let asked =
-                    window_step(
-                        window,
-                        cx,
-                        move |this: &mut Self, count, window, cx| match count {
-                            Ok(notes) => this.ask_tag_rename(from, name, notes, done, window, cx),
-                            Err(error) => done(Err(error), cx),
-                        },
-                    );
-                self.notes_folder.update(cx, |notes_folder, cx| {
-                    notes_folder.tag_rename_count(counted_from, counted_to, asked, cx);
-                });
-            }
-            Named::Tag(_) => done(Ok(()), cx),
-        }
-    }
-
-    /// Asks before the rename of the tag `from` to `to` in `notes` notes, and then renames it.
-    /// `done` gets the end of the rename, or nothing after "cancel".
-    fn ask_tag_rename(
-        &mut self,
-        from: String,
-        to: String,
-        notes: usize,
-        done: Step<holm_core::Result<()>>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let ask = Ask::RenameTag {
-            from: from.clone(),
-            to: to.clone(),
-            notes,
-        };
-        self.ask(ask, window, cx, move |this, confirmed, _, cx| {
-            if !confirmed {
-                done(Ok(()), cx);
-                return;
-            }
-            this.pane.update(cx, NotePane::save);
-            this.notes_folder.update(cx, |notes_folder, cx| {
-                notes_folder.rename_tag(
-                    from,
-                    to,
-                    move |renamed, cx| done(renamed.map(drop), cx),
-                    cx,
-                );
-            });
-        });
     }
 
     /// A step for the result of a file action. An error shows in the message line.

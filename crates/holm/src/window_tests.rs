@@ -529,6 +529,134 @@ fn a_close_saves_the_typed_text_first(cx: &mut TestAppContext) {
     assert!(read(&note).ends_with("aold\n"));
 }
 
+/// Types `text` in the editor. The keys after it run no autosave, so the text is not saved yet.
+fn type_unsaved(cx: &mut TestAppContext, handle: AnyWindowHandle, text: &str) {
+    assert_eq!(focus(cx, handle), "editor");
+    cx.simulate_input(handle, text);
+}
+
+#[gpui_kit::test]
+fn each_pane_action_sees_the_typed_text(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes = fixture.notes();
+    fs::write(notes.join("A.md"), "# A\n").unwrap();
+    fs::write(notes.join("B.md"), "# B\n").unwrap();
+    set_time(&notes.join("A.md"), 200);
+    set_time(&notes.join("B.md"), 100);
+    let handle = open(cx, fixture.startup(None));
+    let alpha = notes.join("Alpha.md");
+
+    type_unsaved(cx, handle, "one ");
+    keys_now(cx, handle, "f2");
+    cx.simulate_input(handle, "Alpha");
+    keys_now(cx, handle, "enter");
+    assert!(read(&alpha).ends_with("one # A\n"), "the rename");
+
+    type_unsaved(cx, handle, "two ");
+    keys_now(cx, handle, "ctrl-n");
+    assert!(new_note_open(cx, handle));
+    assert!(read(&alpha).ends_with("one two # A\n"), "Ctrl+N");
+    keys_now(cx, handle, "escape");
+
+    // The link picker finds the heading that is not saved yet.
+    keys_now(cx, handle, "ctrl-end");
+    type_unsaved(cx, handle, "## Fresh");
+    keys_now(cx, handle, "ctrl-k");
+    cx.simulate_input(handle, "#fr");
+    cx.run_until_parked();
+    let options = labels(cx, handle, "link-picker", Role::ListBoxOption);
+    assert_eq!(options, ["Fresh*"], "Ctrl+K");
+    assert!(read(&alpha).ends_with("## Fresh\n"));
+    keys_now(cx, handle, "escape");
+
+    type_unsaved(cx, handle, " three");
+    keys_now(cx, handle, "ctrl-k");
+    cx.simulate_input(handle, "B");
+    cx.run_until_parked();
+    keys_now(cx, handle, "enter");
+    assert!(read(&alpha).ends_with("## Fresh three\n"), "a link");
+
+    type_unsaved(cx, handle, " four");
+    keys_now(cx, handle, "ctrl-shift-o");
+    cx.simulate_input(handle, "B");
+    cx.run_until_parked();
+    keys_now(cx, handle, "enter");
+    assert_eq!(editor_text(cx, handle), "# B\n");
+    assert!(read(&alpha).ends_with(" four\n"), "an open of another note");
+}
+
+#[gpui_kit::test]
+fn each_sidebar_action_sees_the_typed_text(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes = fixture.notes();
+    fs::create_dir_all(notes.join("attachments")).unwrap();
+    fs::write(notes.join("attachments/x.png"), "png").unwrap();
+    fs::create_dir(notes.join("work")).unwrap();
+    fs::write(notes.join("work/A.md"), "---\ntags:\n  - old\n---\n# A\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+    keys_now(cx, handle, "ctrl-end");
+
+    type_unsaved(cx, handle, "one");
+    keys_now(cx, handle, "ctrl-shift-l escape down");
+    assert_eq!(tree(cx, handle), ["All notes", "work*", "#old"]);
+    keys_now(cx, handle, "f2 ctrl-a");
+    cx.simulate_input(handle, "area");
+    keys_now(cx, handle, "enter");
+    let note = notes.join("area/A.md");
+    assert!(read(&note).ends_with("# A\none\n"), "a folder rename");
+
+    keys_now(cx, handle, "escape");
+    type_unsaved(cx, handle, " two");
+    keys_now(cx, handle, "ctrl-shift-n");
+    cx.simulate_input(handle, "new");
+    keys_now(cx, handle, "enter");
+    assert!(read(&note).ends_with(" two\n"), "a new folder");
+
+    keys_now(cx, handle, "escape");
+    type_unsaved(cx, handle, " three");
+    keys_now(cx, handle, "ctrl-shift-l down");
+    assert_eq!(tree(cx, handle), ["All notes", "area", "new", "#old*"]);
+    keys_now(cx, handle, "f2 ctrl-a");
+    cx.simulate_input(handle, "job");
+    keys_now(cx, handle, "enter");
+    assert!(
+        read(&note).ends_with(" three\n"),
+        "the count of a tag rename"
+    );
+    keys_now(cx, handle, "enter");
+    assert_eq!(fields(&note).0, ["job"]);
+
+    keys_now(cx, handle, "escape");
+    type_unsaved(cx, handle, " ![](../attachments/x.png)");
+    keys_now(cx, handle, "ctrl-shift-l up up enter");
+    assert_eq!(sidebar(cx, handle), "list area");
+    keys_now(cx, handle, "delete");
+    assert_eq!(
+        question(cx, handle).as_deref(),
+        Some("Delete “A”? This deletes 1 note and 1 file forever."),
+        "the count of a delete"
+    );
+    keys_now(cx, handle, "escape");
+
+    keys_now(cx, handle, "enter");
+    type_unsaved(cx, handle, " four");
+    keys_now(cx, handle, "ctrl-shift-l ctrl-shift-m enter");
+    let note = notes.join("A.md");
+    assert!(read(&note).ends_with(" four\n"), "a note move");
+
+    keys_now(cx, handle, "enter");
+    type_unsaved(cx, handle, " five");
+    keys_now(cx, handle, "ctrl-shift-l escape down down down");
+    assert_eq!(sidebar(cx, handle), "tree #job");
+    keys_now(cx, handle, "delete");
+    assert!(
+        read(&note).ends_with(" five\n"),
+        "the count of a tag delete"
+    );
+    keys_now(cx, handle, "enter");
+    assert_eq!(fields(&note).0, Vec::<String>::new());
+}
+
 #[gpui_kit::test]
 fn a_close_with_a_note_that_cannot_be_saved_asks_for_a_second_close(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();

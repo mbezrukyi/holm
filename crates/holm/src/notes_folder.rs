@@ -11,10 +11,14 @@
 //! A call waits on the UI thread for the jobs before it and its own, up to a budget. A job that
 //! ends in time ends in the update of the call, so no frame shows a state between the key and
 //! the end of its write. A late job ends in a later update, and [`NotesFolder::writing`] is true
-//! until then. The save of the editor text never waits.
+//! until then.
+//!
+//! It holds one draft: the unsaved editor text of the open note. Before each job, the line
+//! writes the draft. So no job sees a note file older than the editor text. A draft and its
+//! save never wait.
 //!
 //! Every 100 ms, it looks for changes from outside Holm. At quit, it runs every write that
-//! waits in the line.
+//! waits in the line, and then writes the draft.
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -72,6 +76,12 @@ pub(crate) enum NoteText {
     Restore { info: NoteInfo, body: String },
 }
 
+/// The unsaved editor text of the open note, and the step that gets the end of its save.
+pub(crate) struct Draft {
+    pub(crate) text: NoteText,
+    pub(crate) done: Step<holm_core::Result<()>>,
+}
+
 /// The work of one entry of the line. It runs off the UI thread, and gives the error of a
 /// failed job for the log at quit.
 type Job = Box<dyn FnOnce(&Core) -> Option<String> + Send>;
@@ -115,6 +125,7 @@ pub(crate) struct NotesFolder {
     /// waits for it, or runs it when the thread did not start yet.
     running: Arc<Mutex<Option<Job>>>,
     turn: Option<Turn>,
+    draft: Option<Draft>,
     /// After the quit drain, no job runs.
     closed: bool,
     _poll: Task<()>,
@@ -131,7 +142,7 @@ impl NotesFolder {
                 }
             }
         });
-        cx.on_release(|folder, _| folder.drain(None)).detach();
+        cx.on_release(|folder, _| folder.drain()).detach();
         Self {
             changes: core.changes(),
             later: Vec::new(),
@@ -144,6 +155,7 @@ impl NotesFolder {
             late: None,
             running: Arc::default(),
             turn: None,
+            draft: None,
             closed: false,
             _poll: poll,
         }
@@ -159,28 +171,22 @@ impl NotesFolder {
         self.late.is_some()
     }
 
-    /// Writes the editor text to its note. It does not wait for the job.
-    pub(crate) fn save_text(
-        &mut self,
-        text: NoteText,
-        done: impl FnOnce(holm_core::Result<()>, &mut App) + 'static,
-        cx: &mut Context<Self>,
-    ) {
-        self.push(move |core| write_text(core, text), done);
+    /// Keeps `draft` in the place of the last draft, whose step then never runs. It writes
+    /// nothing yet.
+    pub(crate) fn set_draft(&mut self, draft: Option<Draft>) {
+        self.draft = draft;
+    }
+
+    /// Puts the draft in the line now. It does not wait for the job.
+    pub(crate) fn save_draft(&mut self, cx: &mut Context<Self>) {
+        self.push_draft();
         self.run(None, cx);
     }
 
-    /// At quit: runs every write in the line, then writes `last`. Later writes do not run.
+    /// At quit: runs every write in the line, then writes the draft. Later writes do not run.
     /// It works on the UI thread, because no task runs after the window is gone.
-    pub(crate) fn quit(&mut self, last: Option<NoteText>) {
-        let last: Option<Job> = last.map(|text| {
-            Box::new(move |core: &Core| {
-                write_text(core, text)
-                    .err()
-                    .map(|error| crate::chain(&error))
-            }) as Job
-        });
-        self.drain(last);
+    pub(crate) fn quit(&mut self) {
+        self.drain();
     }
 
     /// Reads the note at `path`, after the writes before it.
@@ -507,8 +513,15 @@ impl NotesFolder {
         done: impl FnOnce(holm_core::Result<T>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
+        self.push_draft();
         let number = self.push(job, done);
         self.run(Some(number), cx);
+    }
+
+    fn push_draft(&mut self) {
+        if let Some(Draft { text, done }) = self.draft.take() {
+            self.push(move |core| write_text(core, text), done);
+        }
     }
 
     /// Puts `job` at the end of the line, and gives the number of its entry.
@@ -635,15 +648,22 @@ impl NotesFolder {
         }
     }
 
-    /// Runs every job that waits, and then `last`, on this thread.
-    fn drain(&mut self, last: Option<Job>) {
+    /// Runs every job that waits, and then writes the draft, on this thread.
+    fn drain(&mut self) {
         self.closed = true;
+        let draft: Option<Job> = self.draft.take().map(|Draft { text, .. }| {
+            Box::new(move |core: &Core| {
+                write_text(core, text)
+                    .err()
+                    .map(|error| crate::chain(&error))
+            }) as Job
+        });
         let mut slot = lock(&self.running);
         let jobs = slot
             .take()
             .into_iter()
             .chain(self.line.drain(..).map(|entry| entry.job))
-            .chain(last);
+            .chain(draft);
         for job in jobs {
             if let Some(failure) = job(&self.core) {
                 tracing::warn!(error = %failure, "a write at quit failed");
@@ -826,19 +846,25 @@ mod tests {
         );
     }
 
+    fn draft(body: &str) -> Draft {
+        Draft {
+            text: NoteText::Save {
+                path: "A.md".into(),
+                body: body.to_owned(),
+            },
+            done: Box::new(|_, _| {}),
+        }
+    }
+
     #[gpui_kit::test]
-    fn the_writes_in_the_line_reach_the_files_at_quit_with_the_text_last(cx: &mut TestAppContext) {
+    fn the_writes_in_the_line_reach_the_files_at_quit_with_the_draft_last(cx: &mut TestAppContext) {
         let (dir, notes_folder) = notes_folder(cx);
-        let path = PathBuf::from("A.md");
-        let text = |body: &str| NoteText::Save {
-            path: path.clone(),
-            body: body.to_owned(),
-        };
         notes_folder.update(cx, |notes_folder, cx| {
-            notes_folder.save_text(text("# A\n\nfirst\n"), |_, _| {}, cx);
-            notes_folder.change_tag(path.clone(), TagChange::Add("work".into()), |_, _| {}, cx);
+            notes_folder.set_draft(Some(draft("# A\n\nfirst\n")));
+            notes_folder.change_tag("A.md".into(), TagChange::Add("work".into()), |_, _| {}, cx);
             notes_folder.create_folder(PathBuf::new(), "B".into(), |_, _| {}, cx);
-            notes_folder.quit(Some(text("# A\n\nlast\n")));
+            notes_folder.set_draft(Some(draft("# A\n\nlast\n")));
+            notes_folder.quit();
         });
 
         let file = fs::read_to_string(dir.path().join("notes/A.md")).unwrap();
@@ -848,17 +874,43 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn a_job_sees_the_draft_and_a_newer_draft_waits_for_the_next_job(cx: &mut TestAppContext) {
+        let (_dir, notes_folder) = notes_folder(cx);
+        let bodies = Rc::new(RefCell::new(Vec::new()));
+        let read = |notes_folder: &mut NotesFolder, cx: &mut Context<NotesFolder>| {
+            let bodies = bodies.clone();
+            notes_folder.read(
+                "A.md".into(),
+                move |note, _| bodies.borrow_mut().push(note.unwrap().body),
+                cx,
+            );
+        };
+        notes_folder.update(cx, |notes_folder, cx| {
+            notes_folder.set_draft(Some(draft("# A\n\nold\n")));
+            notes_folder.set_draft(Some(draft("# A\n\nnew\n")));
+            read(notes_folder, cx);
+            read(notes_folder, cx);
+            notes_folder.set_draft(Some(draft("# A\n\nlater\n")));
+        });
+        cx.run_until_parked();
+        notes_folder.update(cx, |notes_folder, cx| read(notes_folder, cx));
+        cx.run_until_parked();
+
+        assert_eq!(
+            *bodies.borrow(),
+            ["# A\n\nnew\n", "# A\n\nnew\n", "# A\n\nlater\n"]
+        );
+    }
+
+    #[gpui_kit::test]
     fn a_save_keeps_a_tag_from_another_tool(cx: &mut TestAppContext) {
         let (dir, notes_folder) = notes_folder(cx);
         let file = dir.path().join("notes/A.md");
         fs::write(&file, "---\ntags: [theirs]\n---\n# A\n").unwrap();
 
         notes_folder.update(cx, |notes_folder, cx| {
-            let text = NoteText::Save {
-                path: "A.md".into(),
-                body: "# A\n\nmine\n".into(),
-            };
-            notes_folder.save_text(text, |_, _| {}, cx);
+            notes_folder.set_draft(Some(draft("# A\n\nmine\n")));
+            notes_folder.save_draft(cx);
         });
         cx.run_until_parked();
 
