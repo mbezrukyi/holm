@@ -115,6 +115,11 @@ impl HolmWindow {
         let folder = config.settings().notes_folder.clone();
         let config = cx.new(|_| config);
         let config_changed = cx.observe(&config, |this, _, cx| this.show_problems(cx));
+        let this = cx.weak_entity();
+        window.on_window_should_close(cx, move |window, cx| {
+            this.update(cx, |this, cx| this.may_close(window, cx))
+                .unwrap_or(true)
+        });
         let mut this = Self {
             open_core,
             config,
@@ -142,6 +147,15 @@ impl HolmWindow {
             .collect();
         self.line
             .update(cx, |line, cx| line.set_problems(problems, cx));
+    }
+
+    /// A close of the window: gives whether it may close now. The open notes folder may keep it
+    /// open for unsaved text.
+    fn may_close(&self, window: &Window, cx: &mut Context<Self>) -> bool {
+        match &self.stage {
+            Stage::Open(notes) => notes.update(cx, |notes, cx| notes.may_close(window, cx)),
+            _ => true,
+        }
     }
 
     /// Opens the notes folder and its last changed note. `create` makes the folder first.

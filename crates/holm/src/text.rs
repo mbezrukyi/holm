@@ -33,6 +33,8 @@ pub(crate) const RELOAD: &str = "Reload";
 pub(crate) const KEEP_MINE: &str = "Keep mine";
 pub(crate) const DELETED_ON_DISK: &str = "Deleted on disk";
 pub(crate) const NOT_SAVED: &str = "Not saved";
+/// The answer when a close finds text that is not saved.
+pub(crate) const CLOSE_AGAIN: &str = "Not saved. Close again.";
 pub(crate) const WRITING: &str = "Writing…";
 /// The mark before a state in the message line.
 pub(crate) const STATE_MARK: &str = "●";

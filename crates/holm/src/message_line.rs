@@ -90,6 +90,11 @@ impl MessageLine {
         cx.notify();
     }
 
+    /// The answer or start message on the left.
+    pub(crate) fn message(&self) -> Option<&str> {
+        self.message.as_deref()
+    }
+
     /// Shows `state` on the right, or no state with `None`.
     pub(crate) fn set_state(&mut self, state: Option<SharedString>, cx: &mut Context<Self>) {
         if self.state != state {

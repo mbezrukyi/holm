@@ -2,6 +2,8 @@
 //! empty pane.
 //!
 //! The pane saves a short time after the user stops typing, and when the app quits.
+//! A close of the window saves first. When that save fails, the window stays open until a
+//! second close.
 //! An outside change of the note reloads it quietly when the pane has no unsaved
 //! changes. Else the message line asks to reload or to keep the text in the editor.
 //! When a save fails, the message line shows "Not saved", and the text stays in the editor.
@@ -151,6 +153,8 @@ pub(crate) struct NotePane {
     open_heading: Option<String>,
     /// Whether the link picker changes the link at the cursor, not inserts a new one.
     replace_link: bool,
+    /// A save for a close of the window runs.
+    closing: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -253,6 +257,7 @@ impl NotePane {
             opening: 0,
             open_heading: None,
             replace_link: false,
+            closing: false,
             _subscriptions: subscriptions,
         };
         if let Some(note) = note {
@@ -605,6 +610,34 @@ impl NotePane {
         self.notes_folder.update(cx, |notes_folder, cx| {
             notes_folder.save_text(text, done, cx);
         });
+    }
+
+    /// A close of the window: gives whether the window may close now. With unsaved text, the
+    /// pane saves first and closes the window when the save works. When it fails, the answer
+    /// asks for a second close. A close while that answer shows gives `true`.
+    pub(crate) fn may_close(&mut self, window: &Window, cx: &mut Context<Self>) -> bool {
+        if self.closing {
+            return false;
+        }
+        if !self.is_dirty(cx) || self.line.read(cx).message() == Some(text::CLOSE_AGAIN) {
+            return true;
+        }
+        self.closing = true;
+        let window = window.window_handle();
+        self.save_then(
+            move |pane, saved, cx| {
+                pane.closing = false;
+                if saved {
+                    window
+                        .update(cx, |_, window, _| window.remove_window())
+                        .ok();
+                } else {
+                    pane.answer(text::CLOSE_AGAIN, cx);
+                }
+            },
+            cx,
+        );
+        false
     }
 
     /// The editor text of the open note, for a write: a restore after an outside delete,

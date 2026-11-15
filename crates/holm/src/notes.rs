@@ -477,6 +477,12 @@ impl NotesView {
         cx.notify();
     }
 
+    /// A close of the window: gives whether the window may close now. See
+    /// [`NotePane::may_close`].
+    pub(crate) fn may_close(&self, window: &Window, cx: &mut Context<Self>) -> bool {
+        self.pane.update(cx, |pane, cx| pane.may_close(window, cx))
+    }
+
     /// Puts the unsaved text of the pane in the write line, and then the write of `start`.
     /// `done` gets its value in the update where the write ends. An error shows in the message line.
     fn write<T: 'static>(

@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use gpui_kit::test::{TestQueryExt as _, TestWindowExt as _};
-use gpui_kit::{AnyWindowHandle, AppContext as _, Role, TestAppContext, Window};
+use gpui_kit::{AnyWindowHandle, AppContext as _, Role, TestAppContext, VisualTestContext, Window};
 use holm_core::{Core, Feed};
 use tempfile::TempDir;
 
@@ -494,6 +494,61 @@ fn a_failed_save_shows_not_saved_until_a_save_works(cx: &mut TestAppContext) {
     keys(cx, handle, "ctrl-shift-d enter");
     assert_eq!(state(cx, handle), None);
     assert!(read(&note).ends_with("aobld\n"));
+}
+
+/// Asks to close the window, as the title bar does, and gives whether it is still open.
+fn close(cx: &mut TestAppContext, handle: AnyWindowHandle) -> bool {
+    if VisualTestContext::from_window(handle, cx).simulate_close() {
+        cx.update_window(handle, |_, window, _| window.remove_window())
+            .unwrap();
+    }
+    cx.run_until_parked();
+    cx.update_window(handle, |_, _, _| ()).is_ok()
+}
+
+#[gpui_kit::test]
+fn a_close_with_a_saved_note_quits_at_once(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    fs::write(fixture.notes().join("Note.md"), "old\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    cx.simulate_input(handle, "a");
+    autosave(cx);
+    assert!(!close(cx, handle));
+}
+
+#[gpui_kit::test]
+fn a_close_saves_the_typed_text_first(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let note = fixture.notes().join("Note.md");
+    fs::write(&note, "old\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    cx.simulate_input(handle, "a");
+    assert!(!close(cx, handle));
+    assert!(read(&note).ends_with("aold\n"));
+}
+
+#[gpui_kit::test]
+fn a_close_with_a_note_that_cannot_be_saved_asks_for_a_second_close(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    fs::write(notes_dir.join("Note.md"), "old\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    read_only(&notes_dir, true);
+    cx.simulate_input(handle, "a");
+    assert!(close(cx, handle));
+    assert_eq!(message(cx, handle).as_deref(), Some(text::CLOSE_AGAIN));
+    assert_eq!(state(cx, handle).as_deref(), Some(text::NOT_SAVED));
+
+    // A key clears the answer, so the next close tries to save again.
+    keys(cx, handle, "right");
+    assert!(close(cx, handle));
+    assert_eq!(message(cx, handle).as_deref(), Some(text::CLOSE_AGAIN));
+
+    assert!(!close(cx, handle));
+    read_only(&notes_dir, false);
 }
 
 fn set_time(path: &Path, seconds: u64) {
