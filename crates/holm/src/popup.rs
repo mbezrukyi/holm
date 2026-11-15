@@ -1,21 +1,25 @@
 //! The look of a small window over the notes: a dim layer over the whole window, a panel in
-//! its middle, and the rows of a list in the panel. Also [`Dropdown`], a popup under a part of
-//! a row.
+//! its middle, and [`PickList`], a list with a search field in the panel. Also [`Dropdown`], a
+//! popup under a part of a row.
 
 use std::cell::Cell;
 use std::path::Path;
 use std::rc::Rc;
 
-use gpui_kit::component::command::CommandItem;
+use gpui_kit::component::input::{Enter, Escape, Input, InputEvent, InputState, MoveDown, MoveUp};
+use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, Bounds, Context, CursorStyle, Div, ElementId, FocusHandle, InteractiveElement as _,
-    MouseButton, MouseDownEvent, ParentElement as _, Pixels, Role, SharedString, Stateful,
-    StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _, Window, div, phi,
-    px,
+    App, AppContext as _, Bounds, ClickEvent, Context, CursorStyle, Div, ElementId, Entity,
+    EventEmitter, FocusHandle, InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent,
+    ParentElement as _, Pixels, Render, Role, ScrollStrategy, SharedString, Stateful,
+    StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _,
+    UniformListScrollHandle, Window, div, phi, px, transparent_black, uniform_list,
 };
 use holm_core::model::NoteInfo;
+
+use crate::icons::Icon;
 
 /// A layer over the whole window that centers its child. The parts under it get no mouse
 /// input.
@@ -41,47 +45,284 @@ pub(crate) fn panel(width: Pixels, cx: &App) -> Div {
         .rounded(theme.radius)
 }
 
-/// The row that a list in the panel shows when it has no rows.
-pub(crate) fn empty(message: &'static str, cx: &App) -> Div {
-    div()
-        .px_3()
-        .py_2()
-        .text_color(cx.theme().muted_foreground)
-        .child(message)
+/// The height of a [`PickList`] row.
+const ROW_HEIGHT: Pixels = px(30.);
+/// The inset of the rows from the edges of the list.
+const LIST_INSET: Pixels = px(4.);
+/// The most height of the rows of a [`PickList`]. A longer list scrolls.
+const LIST_HEIGHT: Pixels = px(300.);
+
+/// A row of a [`PickList`]: a label, and some detail on the right in a muted color. A long
+/// label or detail ends in "…".
+#[derive(Clone)]
+pub(crate) struct PickRow {
+    label: SharedString,
+    detail: Option<SharedString>,
+    icon: Option<Icon>,
 }
 
-/// A row of a list in the panel.
-pub(crate) fn item(label: impl Into<SharedString>, cx: &App) -> CommandItem {
-    row(label.into(), None, cx)
-}
+impl PickRow {
+    pub(crate) fn new(label: impl Into<SharedString>) -> Self {
+        Self {
+            label: label.into(),
+            detail: None,
+            icon: None,
+        }
+    }
 
-/// The row of a note: its title, and its folder on the right. A note in the root folder shows
-/// no folder.
-pub(crate) fn note_item(note: &NoteInfo, cx: &App) -> CommandItem {
-    row(note.title.clone().into(), folder(&note.path), cx)
-}
+    /// The row of a note: its title, and its folder as the detail. A note in the root folder
+    /// has no detail.
+    pub(crate) fn note(note: &NoteInfo) -> Self {
+        Self {
+            detail: folder(&note.path),
+            ..Self::new(note.title.clone())
+        }
+    }
 
-fn row(label: SharedString, folder: Option<SharedString>, cx: &App) -> CommandItem {
-    let shown = label.clone();
-    let muted = cx.theme().muted_foreground;
-    CommandItem::new().label(label).child(move |_, _| {
+    pub(crate) fn icon(mut self, icon: Icon) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
+    fn view(&self, at: usize, selected: bool, cx: &App) -> Stateful<Div> {
+        let theme = cx.theme();
         h_flex()
-            .flex_1()
-            .min_w_0()
+            .id(ElementId::NamedInteger("row".into(), at as u64))
+            .role(Role::ListBoxOption)
+            .aria_label(self.label.clone())
+            .aria_selected(selected)
+            .h(ROW_HEIGHT)
+            .w_full()
+            .px_2()
             .gap_2()
-            .child(div().truncate().child(shown.clone()))
-            .children(folder.clone().map(|folder| {
+            .text_sm()
+            .rounded(theme.radius)
+            .cursor_default()
+            .when(selected, |row| {
+                row.bg(theme.accent).text_color(theme.accent_foreground)
+            })
+            .children(
+                self.icon
+                    .map(|icon| Icon::view(icon, theme.muted_foreground)),
+            )
+            .child(div().min_w(px(48.)).truncate().child(self.label.clone()))
+            .children(self.detail.clone().map(|detail| {
                 div()
                     .id("folder")
                     .role(Role::Label)
-                    .aria_label(folder.clone())
+                    .aria_label(detail.clone())
                     .test_support()
                     .ml_auto()
-                    .flex_none()
-                    .text_color(muted)
-                    .child(folder)
+                    .min_w_0()
+                    // The detail gets short before the label does.
+                    .flex_shrink(4.)
+                    .truncate()
+                    .text_color(theme.muted_foreground)
+                    .child(detail)
             }))
-    })
+    }
+}
+
+fn folder(note: &Path) -> Option<SharedString> {
+    note.parent()
+        .filter(|folder| !folder.as_os_str().is_empty())
+        .map(|folder| folder.display().to_string().into())
+}
+
+/// What a [`PickList`] tells its owner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PickEvent {
+    /// The text of the field changed. The owner gives new rows with [`PickList::set_rows`].
+    Query,
+    /// The user picked the row at this place, with `Enter` or a click.
+    Pick(usize),
+    /// The user pressed `Esc`.
+    Close,
+}
+
+/// A search field over a list of rows, for the panel of a small window.
+///
+/// `↑` and `↓` select a row. A row under the mouse gets selected too. A list that is too long
+/// for the panel scrolls, and its scrollbar takes a lane on the right of the rows.
+pub(crate) struct PickList {
+    field: Entity<InputState>,
+    rows: Rc<[PickRow]>,
+    selected: usize,
+    empty: &'static str,
+    scroll: UniformListScrollHandle,
+    _field: Subscription,
+}
+
+impl PickList {
+    /// An empty list. The field shows `placeholder` and gets the focus. A list with no rows
+    /// shows `empty`.
+    pub(crate) fn new(
+        placeholder: impl Into<SharedString>,
+        empty: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let field = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
+        field.update(cx, |field, cx| field.focus(window, cx));
+        let subscription = cx.subscribe(&field, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.emit(PickEvent::Query);
+            }
+        });
+        Self {
+            field,
+            rows: Rc::from([]),
+            selected: 0,
+            empty,
+            scroll: UniformListScrollHandle::new(),
+            _field: subscription,
+        }
+    }
+
+    /// The text of the field.
+    pub(crate) fn query(&self, cx: &App) -> SharedString {
+        self.field.read(cx).value()
+    }
+
+    /// Puts `query` in the field. It sends no [`PickEvent::Query`].
+    pub(crate) fn set_query(&self, query: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.field
+            .update(cx, |field, cx| field.set_value(query, window, cx));
+    }
+
+    /// Shows `rows`, with the first one selected.
+    pub(crate) fn set_rows(&mut self, rows: Vec<PickRow>, cx: &mut Context<Self>) {
+        self.rows = rows.into();
+        self.selected = 0;
+        self.scroll.scroll_to_item(0, ScrollStrategy::Top);
+        cx.notify();
+    }
+
+    /// The place of the selected row, or `None` when the list has no rows.
+    pub(crate) fn selected(&self) -> Option<usize> {
+        (self.selected < self.rows.len()).then_some(self.selected)
+    }
+
+    fn step(&mut self, down: bool, cx: &mut Context<Self>) {
+        let last = self.rows.len().saturating_sub(1);
+        self.selected = if down {
+            (self.selected + 1).min(last)
+        } else {
+            self.selected.saturating_sub(1)
+        };
+        self.scroll
+            .scroll_to_item(self.selected, ScrollStrategy::Nearest);
+        cx.notify();
+    }
+
+    fn list(&self, cx: &Context<Self>) -> Stateful<Div> {
+        let count = self.rows.len();
+        #[allow(clippy::cast_precision_loss, reason = "far fewer rows than 2^24")]
+        let full = ROW_HEIGHT * count as f32 + LIST_INSET * 2.;
+        let scrolls = full > LIST_HEIGHT;
+        let rows = uniform_list(
+            "rows",
+            count,
+            cx.processor(|list, range: std::ops::Range<usize>, _, cx| {
+                range
+                    .filter_map(|at| list.rows.get(at).map(|row| (at, row)))
+                    .map(|(at, row)| {
+                        row.view(at, at == list.selected, cx)
+                            .on_hover(cx.listener(move |list, hovered: &bool, _, cx| {
+                                if *hovered && list.selected != at {
+                                    list.selected = at;
+                                    cx.notify();
+                                }
+                            }))
+                            .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
+                                cx.emit(PickEvent::Pick(at));
+                            }))
+                            .test_support()
+                    })
+                    .collect::<Vec<_>>()
+            }),
+        )
+        .track_scroll(&self.scroll)
+        .size_full()
+        .p(LIST_INSET)
+        // The lane keeps the rows clear of the expanded thumb by the same inset.
+        .when(scrolls, Styled::pr_0);
+        div()
+            .id("list")
+            .role(Role::ListBox)
+            .relative()
+            .h(full.min(LIST_HEIGHT))
+            .when(scrolls, |list| list.pr(Scrollbar::width()))
+            .child(rows)
+            .when(scrolls, |list| {
+                // The scrollbar fills its parent and draws its track at the right edge, which
+                // is the lane of the right padding.
+                list.child(
+                    div().absolute().inset_0().child(
+                        Scrollbar::vertical(&self.scroll)
+                            .mode(ScrollbarMode::Always)
+                            .viewport_from_layout()
+                            .styles(|styles| styles.track(|track| track.bg(transparent_black()))),
+                    ),
+                )
+            })
+    }
+}
+
+impl EventEmitter<PickEvent> for PickList {}
+
+impl Render for PickList {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        v_flex()
+            .w_full()
+            .capture_action(cx.listener(|list, _: &MoveUp, _, cx| {
+                list.step(false, cx);
+                cx.stop_propagation();
+            }))
+            .capture_action(cx.listener(|list, _: &MoveDown, _, cx| {
+                list.step(true, cx);
+                cx.stop_propagation();
+            }))
+            .capture_action(cx.listener(|list, _: &Enter, _, cx| {
+                if let Some(at) = list.selected() {
+                    cx.emit(PickEvent::Pick(at));
+                }
+                cx.stop_propagation();
+            }))
+            .capture_action(cx.listener(|_, _: &Escape, _, cx| {
+                cx.emit(PickEvent::Close);
+                cx.stop_propagation();
+            }))
+            .child(
+                div()
+                    .flex_none()
+                    .px_3()
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .child(
+                        Input::new(&self.field)
+                            .prefix(Icon::view(Icon::Search, theme.muted_foreground))
+                            .appearance(false)
+                            .p_0(),
+                    ),
+            )
+            .map(|this| {
+                if self.rows.is_empty() {
+                    this.child(
+                        div().p_1().child(
+                            div()
+                                .px_3()
+                                .py_2()
+                                .text_color(theme.muted_foreground)
+                                .child(self.empty),
+                        ),
+                    )
+                } else {
+                    this.child(self.list(cx))
+                }
+            })
+    }
 }
 
 /// The rows of a [`Dropdown`] list, inset from the panel by the same space on every side.
@@ -104,12 +345,6 @@ pub(crate) fn option(id: impl Into<ElementId>, current: bool, cx: &App) -> State
         .cursor(CursorStyle::PointingHand)
         .when(current, |row| row.bg(theme.selection))
         .when(!current, |row| row.hover(|row| row.bg(theme.secondary)))
-}
-
-fn folder(note: &Path) -> Option<SharedString> {
-    note.parent()
-        .filter(|folder| !folder.as_os_str().is_empty())
-        .map(|folder| folder.display().to_string().into())
 }
 
 /// A popup under a part of a row, the opener. Its owner `T` decides when it is open.

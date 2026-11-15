@@ -7,19 +7,18 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-use gpui_kit::base::actions::Cancel;
-use gpui_kit::component::IndexPath;
-use gpui_kit::component::command::{Command, CommandItem, CommandState};
 use gpui_kit::component::input::IndentInline;
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _, IntoElement,
-    ParentElement, Render, Role, StatefulInteractiveElement as _, TestSupportExt as _, Window, px,
+    ParentElement, Render, Role, StatefulInteractiveElement as _, Subscription,
+    TestSupportExt as _, Window, px,
 };
 use holm_core::model::NoteInfo;
 
 use crate::link_rows::{self, Query, Row};
 use crate::notes_folder::NotesFolder;
-use crate::{popup, text};
+use crate::popup::{self, PickEvent, PickList, PickRow};
+use crate::text;
 
 /// What the link picker starts with.
 pub(crate) struct LinkStart {
@@ -57,13 +56,14 @@ pub(crate) struct LinkPicker {
     notes_folder: Entity<NotesFolder>,
     notes: Vec<NoteInfo>,
     open_note: PathBuf,
-    state: Entity<CommandState>,
+    list: Entity<PickList>,
     rows: Vec<Row>,
     /// The note of the heading rows, or `None` for the open note.
     heading_note: Option<usize>,
     /// The headings of each note that the field named.
     headings: HashMap<PathBuf, Vec<String>>,
     loading: HashSet<PathBuf>,
+    _list: Subscription,
 }
 
 impl LinkPicker {
@@ -74,27 +74,33 @@ impl LinkPicker {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let state = cx.new(|cx| CommandState::new(window, cx));
-        state.update(cx, |state, cx| {
-            state.focus(window, cx);
-            state.set_query(start.query, window, cx);
+        let list = cx.new(|cx| {
+            let list = PickList::new(text::LINK_TO_NOTE, text::NO_HEADING, window, cx);
+            list.set_query(start.query, window, cx);
+            list
+        });
+        let subscription = cx.subscribe(&list, |this, _, event: &PickEvent, cx| match event {
+            PickEvent::Query => this.query_changed(cx),
+            PickEvent::Pick(at) => this.pick(*at, cx),
+            PickEvent::Close => cx.emit(LinkPickerEvent::Close),
         });
         let mut this = Self {
             notes_folder,
             notes: start.notes,
             open_note: start.open_note,
-            state,
+            list,
             rows: Vec::new(),
             heading_note: None,
             headings: HashMap::new(),
             loading: HashSet::new(),
+            _list: subscription,
         };
         this.query_changed(cx);
         this
     }
 
-    fn pick(&mut self, at: IndexPath, cx: &mut Context<Self>) {
-        if let Some(choice) = self.choice(at.row) {
+    fn pick(&mut self, at: usize, cx: &mut Context<Self>) {
+        if let Some(choice) = self.choice(at) {
             cx.emit(LinkPickerEvent::Pick(choice));
         }
     }
@@ -127,7 +133,7 @@ impl LinkPicker {
 
     /// Finds the rows for the new text. It loads the headings of a note the first time.
     fn query_changed(&mut self, cx: &mut Context<Self>) {
-        let text = self.state.read(cx).query(cx).to_string();
+        let text = self.list.read(cx).query(cx).to_string();
         let query = Query::parse(&text, &self.notes);
         let headings = match query {
             Query::Titles(_) => None,
@@ -149,7 +155,8 @@ impl LinkPicker {
             None => &[],
         };
         self.rows = link_rows::rows(query, &self.notes, shown);
-        cx.notify();
+        let shown = self.shown_rows();
+        self.list.update(cx, |list, cx| list.set_rows(shown, cx));
     }
 
     fn headings_loaded(&mut self, path: PathBuf, headings: Vec<String>, cx: &mut Context<Self>) {
@@ -161,27 +168,24 @@ impl LinkPicker {
     /// Tab fills in the title of the selected note and adds `#`.
     fn fill_title(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         cx.stop_propagation();
-        let selected = self.state.read(cx).selected_index();
-        let Some(Row::Note(at)) = selected.and_then(|at| self.rows.get(at.row)) else {
+        let selected = self.list.read(cx).selected();
+        let Some(Row::Note(at)) = selected.and_then(|at| self.rows.get(at)) else {
             return;
         };
         let query = format!("{}#", self.notes[*at].title);
-        self.state
-            .update(cx, |state, cx| state.set_query(query, window, cx));
+        self.list
+            .update(cx, |list, cx| list.set_query(query, window, cx));
         self.query_changed(cx);
     }
 
-    fn items(&self, cx: &Context<Self>) -> Vec<CommandItem> {
+    fn shown_rows(&self) -> Vec<PickRow> {
         self.rows
             .iter()
             .filter_map(|row| {
                 Some(match row {
-                    Row::Note(at) => {
-                        let note = self.notes.get(*at)?;
-                        popup::note_item(note, cx)
-                    }
-                    Row::Heading(heading) => popup::item(heading.clone(), cx),
-                    Row::Create(title) => popup::item(text::create_note(title), cx),
+                    Row::Note(at) => PickRow::note(self.notes.get(*at)?),
+                    Row::Heading(heading) => PickRow::new(heading.clone()),
+                    Row::Create(title) => PickRow::new(text::create_note(title)),
                 })
             })
             .collect()
@@ -206,39 +210,18 @@ impl EventEmitter<LinkPickerEvent> for LinkPicker {}
 
 impl Render for LinkPicker {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let this = cx.entity().downgrade();
-        let command = Command::new(&self.state)
-            .items(self.items(cx))
-            .placeholder(text::LINK_TO_NOTE)
-            .bordered(false)
-            .filterable(false)
-            .empty(|_, _, cx| popup::empty(text::NO_HEADING, cx))
-            .on_confirm({
-                let this = this.clone();
-                move |at, _, cx| {
-                    this.update(cx, |this, cx| this.pick(at, cx)).ok();
-                }
-            })
-            .on_query(move |_, _, cx| {
-                this.update(cx, LinkPicker::query_changed).ok();
-            });
         popup::layer(cx)
             .id("link-picker")
             .role(Role::Dialog)
             .aria_label(text::LINK_TO_NOTE)
             .test_support()
-            // The palette clears its text on the first `Esc`. The window closes at once.
-            .capture_action(cx.listener(|_, _: &Cancel, _, cx| {
-                cx.emit(LinkPickerEvent::Close);
-                cx.stop_propagation();
-            }))
             .capture_action(cx.listener(|this, _: &IndentInline, window, cx| {
                 this.fill_title(window, cx);
             }))
             .child(
                 popup::panel(px(480.), cx)
                     .on_mouse_down_out(cx.listener(|_, _, _, cx| cx.emit(LinkPickerEvent::Close)))
-                    .child(command),
+                    .child(self.list.clone()),
             )
     }
 }

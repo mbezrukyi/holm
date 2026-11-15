@@ -6,16 +6,15 @@
 
 use std::path::PathBuf;
 
-use gpui_kit::base::actions::Cancel;
-use gpui_kit::component::IndexPath;
-use gpui_kit::component::command::{Command, CommandState};
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _, IntoElement,
-    ParentElement, Render, Role, StatefulInteractiveElement as _, TestSupportExt as _, Window, px,
+    ParentElement, Render, Role, StatefulInteractiveElement as _, Subscription,
+    TestSupportExt as _, Window, px,
 };
 use holm_core::model::NoteInfo;
 
-use crate::{popup, text};
+use crate::popup::{self, PickEvent, PickList, PickRow};
+use crate::text;
 
 /// The answer of the window.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -24,36 +23,52 @@ pub(crate) enum QuickOpenEvent {
     Close,
 }
 
-/// The most rows the window shows. The list lays out each row it has, so more rows cost time
-/// with each key.
+/// The most rows the window shows.
 const MAX_ROWS: usize = 50;
 
 pub(crate) struct QuickOpen {
     notes: Vec<NoteInfo>,
-    state: Entity<CommandState>,
+    list: Entity<PickList>,
     /// The place in `notes` of each row.
     rows: Vec<usize>,
+    _list: Subscription,
 }
 
 impl QuickOpen {
     /// Quick open over `notes`, in their order. The field gets the focus.
     pub(crate) fn new(notes: Vec<NoteInfo>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let state = cx.new(|cx| CommandState::new(window, cx));
-        state.update(cx, |state, cx| state.focus(window, cx));
-        let rows = rows("", &notes);
-        Self { notes, state, rows }
+        let list = cx.new(|cx| PickList::new(text::QUICK_OPEN, text::NO_MATCH, window, cx));
+        let subscription = cx.subscribe(&list, |this, _, event: &PickEvent, cx| match event {
+            PickEvent::Query => this.query_changed(cx),
+            PickEvent::Pick(at) => this.open(*at, cx),
+            PickEvent::Close => cx.emit(QuickOpenEvent::Close),
+        });
+        let mut this = Self {
+            notes,
+            list,
+            rows: Vec::new(),
+            _list: subscription,
+        };
+        this.query_changed(cx);
+        this
     }
 
-    fn open(&mut self, at: IndexPath, cx: &mut Context<Self>) {
-        if let Some(note) = self.rows.get(at.row).and_then(|at| self.notes.get(*at)) {
+    fn open(&mut self, at: usize, cx: &mut Context<Self>) {
+        if let Some(note) = self.rows.get(at).and_then(|at| self.notes.get(*at)) {
             cx.emit(QuickOpenEvent::Open(note.path.clone()));
         }
     }
 
     fn query_changed(&mut self, cx: &mut Context<Self>) {
-        let query = self.state.read(cx).query(cx);
+        let query = self.list.read(cx).query(cx);
         self.rows = rows(&query, &self.notes);
-        cx.notify();
+        let shown = self
+            .rows
+            .iter()
+            .filter_map(|at| self.notes.get(*at))
+            .map(PickRow::note)
+            .collect();
+        self.list.update(cx, |list, cx| list.set_rows(shown, cx));
     }
 }
 
@@ -74,41 +89,15 @@ impl EventEmitter<QuickOpenEvent> for QuickOpen {}
 
 impl Render for QuickOpen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let this = cx.entity().downgrade();
-        let items = self
-            .rows
-            .iter()
-            .filter_map(|at| self.notes.get(*at))
-            .map(|note| popup::note_item(note, cx));
-        let command = Command::new(&self.state)
-            .items(items.collect::<Vec<_>>())
-            .placeholder(text::QUICK_OPEN)
-            .bordered(false)
-            .filterable(false)
-            .empty(|_, _, cx| popup::empty(text::NO_MATCH, cx))
-            .on_confirm({
-                let this = this.clone();
-                move |at, _, cx| {
-                    this.update(cx, |this, cx| this.open(at, cx)).ok();
-                }
-            })
-            .on_query(move |_, _, cx| {
-                this.update(cx, QuickOpen::query_changed).ok();
-            });
         popup::layer(cx)
             .id("quick-open")
             .role(Role::Dialog)
             .aria_label(text::QUICK_OPEN)
             .test_support()
-            // The palette clears its text on the first `Esc`. The window closes at once.
-            .capture_action(cx.listener(|_, _: &Cancel, _, cx| {
-                cx.emit(QuickOpenEvent::Close);
-                cx.stop_propagation();
-            }))
             .child(
                 popup::panel(px(480.), cx)
                     .on_mouse_down_out(cx.listener(|_, _, _, cx| cx.emit(QuickOpenEvent::Close)))
-                    .child(command),
+                    .child(self.list.clone()),
             )
     }
 }
