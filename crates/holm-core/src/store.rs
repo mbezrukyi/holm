@@ -38,7 +38,7 @@ pub(crate) struct Store {
 /// What tells two versions of a file apart without a read: times and size.
 ///
 /// The change time moves on every write, also when Holm keeps the old modification time.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct Stamp {
     pub(crate) modified: i64,
     pub(crate) changed: i64,

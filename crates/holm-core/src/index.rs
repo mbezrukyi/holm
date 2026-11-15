@@ -347,14 +347,33 @@ fn sync(conn: &mut Connection, store: &Store, scopes: &[PathBuf]) -> Result<Refr
     for scope in scopes {
         known.extend(known_in(&tx, scope)?);
     }
-    let mut gone = Vec::new();
     let on_disk: HashSet<&Path> = files.iter().map(|(rel, _)| rel.as_path()).collect();
-    for rel in known.keys().filter(|rel| !on_disk.contains(rel.as_path())) {
+    let left: Vec<(&Path, Stamp)> = known
+        .iter()
+        .filter(|(rel, _)| !on_disk.contains(rel.as_path()))
+        .map(|(rel, stamp)| (rel.as_path(), *stamp))
+        .collect();
+    let joined: Vec<(&Path, Stamp)> = files
+        .iter()
+        .filter(|(rel, _)| !known.contains_key(rel))
+        .map(|(rel, stamp)| (rel.as_path(), *stamp))
+        .collect();
+    let mut moves = Vec::new();
+    let mut done = HashSet::new();
+    for (from, to) in pairs(&left, &joined) {
+        if let Some(note) = shift(&tx, from, to)? {
+            done.insert(from);
+            done.insert(to);
+            moves.push((from.to_owned(), note));
+        }
+    }
+    let mut gone = Vec::new();
+    for (rel, _) in left.iter().filter(|(rel, _)| !done.contains(rel)) {
         gone.extend(delete(&tx, rel)?);
     }
     let mut todo: Vec<(bool, &Path)> = files
         .iter()
-        .filter(|(rel, stamp)| known.get(rel) != Some(stamp))
+        .filter(|(rel, stamp)| known.get(rel) != Some(stamp) && !done.contains(rel.as_path()))
         .map(|(rel, _)| (!known.contains_key(rel), rel.as_path()))
         .collect();
     todo.sort_unstable();
@@ -375,14 +394,80 @@ fn sync(conn: &mut Connection, store: &Store, scopes: &[PathBuf]) -> Result<Refr
         }
     }
     tx.commit()?;
+    let mut removed: Vec<PathBuf> = gone.iter().map(|gone| gone.path.clone()).collect();
+    for (from, (info, links)) in &moves {
+        removed.push(from.clone());
+        put_in.push((info.clone(), links.clone()));
+    }
     let delta = Delta {
-        removed: gone.iter().map(|gone| gone.path.clone()).collect(),
+        removed,
         put: put_in,
     };
+    let moves = moves.into_iter().map(|(from, (info, _))| (from, info));
     Ok(Refresh {
         delta,
-        ..refresh(written, gone)
+        ..refresh(written, moves, gone)
     })
+}
+
+/// The gone paths and new paths that are one file at a new place: the same file name
+/// and stamp, with no other gone or new path that has both.
+///
+/// A folder rename keeps the stamps of the files inside it.
+fn pairs<'a>(
+    left: &[(&'a Path, Stamp)],
+    joined: &[(&'a Path, Stamp)],
+) -> Vec<(&'a Path, &'a Path)> {
+    type Key<'a> = (Option<&'a std::ffi::OsStr>, Stamp);
+    let mut sides: HashMap<Key<'a>, (Vec<&'a Path>, Vec<&'a Path>)> = HashMap::new();
+    for (rel, stamp) in left {
+        sides
+            .entry((rel.file_name(), *stamp))
+            .or_default()
+            .0
+            .push(rel);
+    }
+    for (rel, stamp) in joined {
+        if let Some(side) = sides.get_mut(&(rel.file_name(), *stamp)) {
+            side.1.push(rel);
+        }
+    }
+    sides
+        .into_values()
+        .filter_map(|(from, to)| match (from.as_slice(), to.as_slice()) {
+            (&[from], &[to]) => Some((from, to)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Moves the index row of the note at `from` to `to`, when the note has no file link.
+/// Its key stays, so its text, tags and links stay too. It returns the moved note.
+///
+/// A relative file link points to another file after a move, so such a note must be
+/// read again. The index does not keep whether a link was relative, so this
+/// skips every note with a file link.
+fn shift(conn: &Connection, from: &Path, to: &Path) -> Result<Option<(NoteInfo, Vec<Link>)>, Fail> {
+    let count = conn
+        .prepare_cached(
+            "UPDATE notes SET path = ?2, folder = ?3 WHERE path = ?1
+            AND NOT EXISTS (SELECT 1 FROM links WHERE links.note = notes.key AND kind = 'file')",
+        )?
+        .execute(params![bytes(from), bytes(to), bytes(folder_of(to))])?;
+    if count == 0 {
+        return Ok(None);
+    }
+    let info = conn
+        .prepare_cached(&format!("{NOTE_INFO} WHERE path = ?1"))?
+        .query_row([bytes(to)], note_info)?;
+    let mut statement = conn.prepare_cached(
+        "SELECT kind, target, heading, embedded FROM links
+        JOIN notes ON notes.key = links.note WHERE notes.path = ?1 ORDER BY pos",
+    )?;
+    let links = statement
+        .query_map([bytes(to)], link)?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(Some((info, links)))
 }
 
 /// The stamps of the known notes at or below `scope`.
@@ -416,9 +501,23 @@ struct Gone {
 
 /// Turns the notes that `sync` wrote and removed into changes.
 ///
-/// A removed note and a new note with the same id are one move.
-fn refresh(written: Vec<(NoteInfo, Option<Vec<String>>)>, mut gone: Vec<Gone>) -> Refresh {
+/// A removed note and a new note with the same id are one move. A shifted row without an id
+/// is a removed note and a new one, as a read would find it.
+fn refresh(
+    written: Vec<(NoteInfo, Option<Vec<String>>)>,
+    moves: impl Iterator<Item = (PathBuf, NoteInfo)>,
+    mut gone: Vec<Gone>,
+) -> Refresh {
     let mut out = Refresh::default();
+    for (from, note) in moves {
+        if note.id.is_some() {
+            out.notes.push(Change::Moved { from, note });
+        } else {
+            out.tags |= !note.tags.is_empty();
+            out.notes.push(Change::Removed(from));
+            out.notes.push(Change::Added(note));
+        }
+    }
     for (note, old_tags) in written {
         let from = match (&old_tags, &note.id) {
             (None, Some(id)) => gone

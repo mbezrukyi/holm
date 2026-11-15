@@ -9,7 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use holm_core::model::{Change, NoteId, NoteInfo, Order};
+use holm_core::model::{Change, LinkTarget, NoteId, NoteInfo, Order};
 use holm_core::{Changes, Core, Error, Feed};
 use tempfile::TempDir;
 
@@ -249,6 +249,62 @@ fn a_deleted_folder_removes_its_notes() {
         ]
     );
     assert_eq!(previews(&fed.core), ["C"]);
+}
+
+#[test]
+fn a_renamed_folder_keeps_search_links_and_file_links_of_its_notes() {
+    let fed = Fed::new(&[
+        (
+            "work/a.md",
+            &note("A", "tags: [food]\n", "# A\nPotatoes [c](holm:C)\n"),
+        ),
+        ("work/pic.md", &note("P", "", "# Pic\n![p](pic.png)\n")),
+        ("work/plain.md", "# Plain\nCarrots\n"),
+        ("b.md", &note("B", "", "[a](holm:A)\n")),
+        ("c.md", &note("C", "", "# C\n")),
+    ]);
+    let links = fed.core.snapshot().links("work/a.md").to_vec();
+    fed.take();
+
+    fs::rename(fed.path("work"), fed.path("job")).unwrap();
+    fed.feed.changed(["work", "job"]).unwrap();
+
+    assert_eq!(
+        fed.take(),
+        [
+            Change::Moved {
+                from: "work/a.md".into(),
+                note: fed.info("job/a.md"),
+            },
+            Change::Moved {
+                from: "work/pic.md".into(),
+                note: fed.info("job/pic.md"),
+            },
+            Change::Added(fed.info("job/plain.md")),
+            Change::Removed("work/plain.md".into()),
+            Change::Folders,
+        ]
+    );
+    let snapshot = fed.core.snapshot();
+    let found = |text| fed.core.search(text).unwrap();
+    assert_eq!(found("potatoes"), [PathBuf::from("job/a.md")]);
+    assert_eq!(found("carrots"), [PathBuf::from("job/plain.md")]);
+    assert_eq!(found("food"), [PathBuf::from("job/a.md")]);
+    assert_eq!(snapshot.links("job/a.md"), links);
+    let back = |path| -> Vec<PathBuf> {
+        let notes = snapshot.backlinks(path, Order::Title);
+        notes.into_iter().map(|n| n.path).collect()
+    };
+    assert_eq!(back("job/a.md"), [PathBuf::from("b.md")]);
+    assert_eq!(back("c.md"), [PathBuf::from("job/a.md")]);
+    assert_eq!(
+        snapshot.links("job/pic.md")[0].target,
+        LinkTarget::File("job/pic.png".into())
+    );
+    assert_eq!(
+        snapshot.notes_with_tag("food", Order::Title)[0].path,
+        PathBuf::from("job/a.md")
+    );
 }
 
 #[test]
