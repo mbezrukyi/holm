@@ -25,7 +25,7 @@ pub use store::title_of;
 pub use watch::Feed;
 
 use index::Index;
-use model::{Change, DeleteCount, LinkTarget, Note, NoteId, NoteInfo, Order};
+use model::{Change, ChangeList, DeleteCount, LinkTarget, Note, NoteId, NoteInfo, Order};
 use retag::TagEdit;
 use snapshot::Delta;
 use store::{Store, folder_of};
@@ -55,7 +55,7 @@ struct Inner {
     writing: Mutex<()>,
     /// Changes only under `writing`.
     snapshot: Mutex<Snapshot>,
-    listeners: Mutex<Vec<Sender<Change>>>,
+    listeners: Mutex<Vec<Sender<ChangeList>>>,
     _watcher: Option<watch::Watcher>,
 }
 
@@ -63,7 +63,7 @@ impl Core {
     /// Opens the notes folder and brings the index in `index_dir` up to date with the files.
     ///
     /// Then it watches the notes folder. Changes from other tools update the index
-    /// and go to each [`Changes`]. When the watch can't start, the core works without it,
+    /// and the snapshot, and go to each [`Changes`]. When the watch can't start, the core works without it,
     /// with a log line.
     ///
     /// Then it keeps the facts of the notes folder in memory, as a [`Snapshot`].
@@ -124,11 +124,12 @@ impl Core {
         self.inner.snapshot()
     }
 
-    /// A new stream of the changes that come from outside Holm.
+    /// A new stream of the change lists, for writes of Holm and for changes from other tools.
     ///
-    /// Each stream gets every change from the time it was made.
-    /// A change list is short and comes once for each batch of file events:
-    /// first the note changes in path order, then [`Change::Folders`] and [`Change::Tags`].
+    /// Each stream gets every list from the time it was made. A list comes for each new
+    /// revision that has a change, before [`Core::snapshot`] shows that revision.
+    /// A batch of outside changes gives the note changes in path order, then
+    /// [`Change::Folders`] and [`Change::Tags`]. A write gives the moves it made.
     pub fn changes(&self) -> Changes {
         let (send, receive) = mpsc::channel();
         lock(&self.inner.listeners).push(send);
@@ -687,6 +688,10 @@ impl Core {
         self.inner.write(|draft| {
             let new = self.inner.store.move_folder(folder, parent, name)?;
             if new != folder {
+                draft.changes.push(Change::FolderMoved {
+                    from: folder.to_owned(),
+                    to: new.clone(),
+                });
                 self.inner
                     .refresh(draft, vec![folder.to_owned(), new.clone()])?;
                 draft.folders(folder)?;
@@ -738,6 +743,8 @@ struct Draft<'a> {
     store: &'a Store,
     next: Snapshot,
     changed: bool,
+    /// The change list of the next revision.
+    changes: Vec<Change>,
 }
 
 impl Draft<'_> {
@@ -761,17 +768,28 @@ impl Inner {
 
     /// Runs `op` under the write lock, with a draft of the next snapshot.
     /// When a fact changed, the draft gets the next revision and replaces the snapshot.
+    /// The change list goes out first, so a reader that sees the revision already has its list.
     fn write<T>(&self, op: impl FnOnce(&mut Draft<'_>) -> Result<T>) -> Written<T> {
         let _writing = lock(&self.writing);
         let mut draft = Draft {
             store: &self.store,
             next: self.snapshot(),
             changed: false,
+            changes: Vec::new(),
         };
         let result = op(&mut draft);
         let mut snapshot = draft.next;
         if draft.changed {
             snapshot = snapshot.next_revision();
+        }
+        if !draft.changes.is_empty() {
+            let list = ChangeList {
+                revision: snapshot.revision(),
+                changes: draft.changes,
+            };
+            lock(&self.listeners).retain(|listener| listener.send(list.clone()).is_ok());
+        }
+        if draft.changed {
             *lock(&self.snapshot) = snapshot.clone();
         }
         Written { result, snapshot }
@@ -818,6 +836,15 @@ impl Inner {
                 }
             }
         }
+        if changed > 0
+            && let TagEdit::Rename { from, to } = edit
+            && from != to
+        {
+            draft.changes.push(Change::TagMoved {
+                from: (*from).to_owned(),
+                to: to.clone(),
+            });
+        }
         first_error.map_or(Ok(changed), Err)
     }
 
@@ -860,14 +887,20 @@ impl Inner {
 
     /// Updates the index and the draft after a note moved from `from` to `to`, and returns the note.
     fn settle(&self, draft: &mut Draft<'_>, from: &Path, to: &Path) -> Result<NoteInfo> {
-        if from != to {
-            self.refresh(draft, vec![from.to_owned(), to.to_owned()])?;
+        if from == to {
+            return self.store.read(to).map(|(note, _)| note.info);
         }
-        self.store.read(to).map(|(note, _)| note.info)
+        self.refresh(draft, vec![from.to_owned(), to.to_owned()])?;
+        let info = self.store.read(to)?.0.info;
+        draft.changes.push(Change::Moved {
+            from: from.to_owned(),
+            note: info.clone(),
+        });
+        Ok(info)
     }
 
     /// Updates the index and the draft at each path after Holm's own change.
-    /// No change goes to [`Changes`].
+    /// It adds no change to the list, so the write adds its own moves.
     fn refresh(&self, draft: &mut Draft<'_>, mut paths: Vec<PathBuf>) -> Result<()> {
         paths.sort();
         let refresh = self.index.refresh(&self.store, &outer(paths))?;
@@ -875,8 +908,8 @@ impl Inner {
         Ok(())
     }
 
-    /// Checks the disk at each path of `batch`, updates the index and the snapshot,
-    /// and sends the changes.
+    /// Checks the disk at each path of `batch`, and updates the index, the snapshot and the
+    /// change list.
     fn apply(&self, batch: Batch) -> Result<()> {
         // The batch is sorted.
         let scopes = outer(
@@ -894,19 +927,12 @@ impl Inner {
             for scope in &scopes {
                 folders |= draft.folders(scope)?;
             }
-            let mut changes = refresh.notes;
+            draft.changes.extend(refresh.notes);
             if folders {
-                changes.push(Change::Folders);
+                draft.changes.push(Change::Folders);
             }
             if refresh.tags {
-                changes.push(Change::Tags);
-            }
-            if !changes.is_empty() {
-                lock(&self.listeners).retain(|listener| {
-                    changes
-                        .iter()
-                        .all(|change| listener.send(change.clone()).is_ok())
-                });
+                draft.changes.push(Change::Tags);
             }
             Ok(())
         })
@@ -914,27 +940,27 @@ impl Inner {
     }
 }
 
-/// A stream of the changes that come from outside Holm. [`Core::changes`] makes it.
+/// A stream of change lists. [`Core::changes`] makes it.
 ///
-/// As an [`Iterator`], it waits for each change. It ends when every [`Core`] handle is gone.
+/// As an [`Iterator`], it waits for each list. It ends when every [`Core`] handle is gone.
 #[derive(Debug)]
 pub struct Changes {
-    receive: Receiver<Change>,
+    receive: Receiver<ChangeList>,
 }
 
 impl Changes {
-    /// Waits up to `timeout` for the next change.
+    /// Waits up to `timeout` for the next change list.
     ///
-    /// It returns `None` when no change came in time, or when every [`Core`] handle is gone.
-    pub fn recv_timeout(&self, timeout: Duration) -> Option<Change> {
+    /// It returns `None` when no list came in time, or when every [`Core`] handle is gone.
+    pub fn recv_timeout(&self, timeout: Duration) -> Option<ChangeList> {
         self.receive.recv_timeout(timeout).ok()
     }
 }
 
 impl Iterator for Changes {
-    type Item = Change;
+    type Item = ChangeList;
 
-    fn next(&mut self) -> Option<Change> {
+    fn next(&mut self) -> Option<ChangeList> {
         self.receive.recv().ok()
     }
 }

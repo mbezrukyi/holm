@@ -5,7 +5,7 @@
 //! the UI asked for them. A failed write does not stop the line.
 //!
 //! Each write ends in one update. The entity sets the snapshot after it and sends one
-//! [`FolderEvent::Changed`] with the moves of the write. Then, in the same update, the caller
+//! [`FolderEvent`] with the changes up to that snapshot. Then, in the same update, the caller
 //! gets the result. So no frame shows a state between them.
 //!
 //! A call waits on the UI thread for the jobs before it and its own, up to a budget. A job that
@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 
 use futures_channel::oneshot;
 use gpui_kit::{App, AppContext as _, Context, EventEmitter, Task, Window};
-use holm_core::model::{Change, DeleteCount, LinkTarget, Note, NoteInfo, Order};
+use holm_core::model::{Change, ChangeList, DeleteCount, LinkTarget, Note, NoteInfo, Order};
 use holm_core::{Changes, Core, Snapshot};
 use holm_editor::PastedFile;
 
@@ -34,51 +34,13 @@ use crate::tags::TagChange;
 /// batch them.
 pub(crate) const POLL: Duration = Duration::from_millis(100);
 
-/// What the notes folder tells the views.
+/// What the notes folder tells the views: a write of Holm ended, or changes from outside came
+/// in. Each write sends one, also a failed write.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum FolderEvent {
-    /// A write of Holm ended, or changes from outside came in. [`NotesFolder::snapshot`] has
-    /// the snapshot after them, which can be the one before. It names the moves of the write.
-    /// Each write sends one, also a failed write.
-    Changed(Vec<Move>),
-    /// A change from outside Holm. The snapshot already shows it.
-    Outside(Change),
-}
-
-/// A move that a write made.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Move {
-    /// A note or a folder. A folder takes everything below it.
-    Path { from: PathBuf, to: PathBuf },
-    /// A tag. It takes its child tags.
-    Tag { from: String, to: String },
-}
-
-impl Move {
-    /// `path` after the move, when it is the moved path or below it.
-    pub(crate) fn path(&self, path: &Path) -> Option<PathBuf> {
-        let Self::Path { from, to } = self else {
-            return None;
-        };
-        let rest = path.strip_prefix(from).ok()?;
-        Some(if rest.as_os_str().is_empty() {
-            to.clone()
-        } else {
-            to.join(rest)
-        })
-    }
-
-    /// `tag` after the move, when it is the moved tag or one of its child tags.
-    pub(crate) fn tag(&self, tag: &str) -> Option<String> {
-        let Self::Tag { from, to } = self else {
-            return None;
-        };
-        if tag == from {
-            return Some(to.clone());
-        }
-        let rest = tag.strip_prefix(from.as_str())?.strip_prefix('/')?;
-        Some(format!("{to}/{rest}"))
-    }
+pub(crate) struct FolderEvent {
+    /// The changes of every revision up to [`NotesFolder::snapshot`], for every cause. It can
+    /// be empty.
+    pub(crate) changes: Vec<Change>,
 }
 
 /// A step that gets the end of a write, on the UI thread.
@@ -114,8 +76,8 @@ pub(crate) enum NoteText {
 /// failed job for the log at quit.
 type Job = Box<dyn FnOnce(&Core) -> Option<String> + Send>;
 
-/// The end of one entry of the line, on the UI thread after its job: it sends the event and
-/// gives the result to the caller.
+/// The end of one entry of the line, on the UI thread after its job and its event: it gives
+/// the result to the caller.
 type End = Box<dyn FnOnce(&mut Context<NotesFolder>)>;
 
 /// One entry of the line. Its number grows with each entry.
@@ -138,6 +100,9 @@ struct Turn {
 pub(crate) struct NotesFolder {
     core: Core,
     snapshot: Snapshot,
+    changes: Changes,
+    /// The change lists of revisions newer than `snapshot`.
+    later: Vec<ChangeList>,
     /// How long a call waits for its job.
     budget: Duration,
     line: VecDeque<Entry>,
@@ -158,20 +123,18 @@ pub(crate) struct NotesFolder {
 impl NotesFolder {
     /// A call waits up to `budget` for its job.
     pub(crate) fn new(core: Core, budget: Duration, cx: &mut Context<Self>) -> Self {
-        let changes = core.changes();
         let poll = cx.spawn(async move |folder, cx| {
             loop {
                 cx.background_executor().timer(POLL).await;
-                if folder
-                    .update(cx, |folder, cx| folder.poll(&changes, cx))
-                    .is_err()
-                {
+                if folder.update(cx, NotesFolder::poll).is_err() {
                     break;
                 }
             }
         });
         cx.on_release(|folder, _| folder.drain(None)).detach();
         Self {
+            changes: core.changes(),
+            later: Vec::new(),
             snapshot: core.snapshot(),
             core,
             budget,
@@ -203,7 +166,7 @@ impl NotesFolder {
         done: impl FnOnce(holm_core::Result<()>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.push(move |core| write_text(core, text), |()| Vec::new(), done);
+        self.push(move |core| write_text(core, text), done);
         self.run(None, cx);
     }
 
@@ -247,10 +210,8 @@ impl NotesFolder {
         done: impl FnOnce(holm_core::Result<PathBuf>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
-        let from = path.clone();
-        self.queue(
+        self.write(
             move |core| core.rename_note(&path, &title).result.map(|info| info.path),
-            move |to: &PathBuf| moved(from, to),
             done,
             cx,
         );
@@ -356,10 +317,8 @@ impl NotesFolder {
         done: impl FnOnce(holm_core::Result<PathBuf>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
-        let from = path.clone();
-        self.queue(
+        self.write(
             move |core| core.move_note(&path, &folder).result.map(|info| info.path),
-            move |to: &PathBuf| moved(from, to),
             done,
             cx,
         );
@@ -372,10 +331,8 @@ impl NotesFolder {
         done: impl FnOnce(holm_core::Result<PathBuf>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
-        let from = path.clone();
-        self.queue(
+        self.write(
             move |core| core.move_folder(&path, &folder).result,
-            move |to: &PathBuf| moved(from, to),
             done,
             cx,
         );
@@ -388,10 +345,8 @@ impl NotesFolder {
         done: impl FnOnce(holm_core::Result<PathBuf>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
-        let from = folder.clone();
-        self.queue(
+        self.write(
             move |core| core.rename_folder(&folder, &name).result,
-            move |to: &PathBuf| moved(from, to),
             done,
             cx,
         );
@@ -457,19 +412,7 @@ impl NotesFolder {
         done: impl FnOnce(holm_core::Result<usize>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
-        let moves = holm_markdown::normalize_tag(&to)
-            .map(|to| Move::Tag {
-                from: from.clone(),
-                to,
-            })
-            .into_iter()
-            .collect();
-        self.queue(
-            move |core| core.rename_tag(&from, &to).result,
-            move |_: &usize| moves,
-            done,
-            cx,
-        );
+        self.write(move |core| core.rename_tag(&from, &to).result, done, cx);
     }
 
     /// The number of notes that a tag rename changes, after the writes before it.
@@ -567,27 +510,16 @@ impl NotesFolder {
         self.look(move |core| core.broken_links(&path), cx)
     }
 
-    /// Like [`Self::queue`], for a job that moves nothing.
+    /// Puts `job` in the line, and waits for it up to the budget. When it ends, the entity sets
+    /// the snapshot after it and sends the event. Then `done` gets its result, in the same
+    /// update. When the entity is gone first, `done` never runs.
     fn write<T: Send + 'static>(
         &mut self,
         job: impl FnOnce(&Core) -> holm_core::Result<T> + Send + 'static,
         done: impl FnOnce(holm_core::Result<T>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.queue(job, |_: &T| Vec::new(), done, cx);
-    }
-
-    /// Puts `job` in the line, and waits for it up to the budget. When it ends, the entity sets
-    /// the snapshot after it and sends the event with `moves` of its value. Then `done` gets its
-    /// result, in the same update. When the entity is gone first, `done` never runs.
-    fn queue<T: Send + 'static>(
-        &mut self,
-        job: impl FnOnce(&Core) -> holm_core::Result<T> + Send + 'static,
-        moves: impl FnOnce(&T) -> Vec<Move> + 'static,
-        done: impl FnOnce(holm_core::Result<T>, &mut App) + 'static,
-        cx: &mut Context<Self>,
-    ) {
-        let number = self.push(job, moves, done);
+        let number = self.push(job, done);
         self.run(Some(number), cx);
     }
 
@@ -595,7 +527,6 @@ impl NotesFolder {
     fn push<T: Send + 'static>(
         &mut self,
         job: impl FnOnce(&Core) -> holm_core::Result<T> + Send + 'static,
-        moves: impl FnOnce(&T) -> Vec<Move> + 'static,
         done: impl FnOnce(holm_core::Result<T>, &mut App) + 'static,
     ) -> u64 {
         let (send, mut receive) = oneshot::channel();
@@ -606,13 +537,10 @@ impl NotesFolder {
             failure
         });
         let end: End = Box::new(move |cx: &mut Context<Self>| {
-            let Ok(Some(result)) = receive.try_recv() else {
-                return;
-            };
-            let moves = result.as_ref().map(moves).unwrap_or_default();
-            cx.emit(FolderEvent::Changed(moves));
-            // A deferred step runs after the views took the event, in the same update.
-            cx.defer(move |cx| done(result, cx));
+            if let Ok(Some(result)) = receive.try_recv() {
+                // A deferred step runs after the views took the event, in the same update.
+                cx.defer(move |cx| done(result, cx));
+            }
         });
         let number = self.next_number;
         self.next_number += 1;
@@ -709,6 +637,8 @@ impl NotesFolder {
         self.ended = turn.number;
         if let Some(snapshot) = snapshot {
             self.set(snapshot);
+            let changes = self.take_changes();
+            cx.emit(FolderEvent { changes });
             (turn.end)(cx);
         }
         if self.late.is_some_and(|late| late <= self.ended) {
@@ -735,16 +665,31 @@ impl NotesFolder {
 
     /// Takes the changes from outside Holm. While a job runs, it waits: the core can have the
     /// snapshot of the job before its event.
-    fn poll(&mut self, changes: &Changes, cx: &mut Context<Self>) {
+    fn poll(&mut self, cx: &mut Context<Self>) {
         if self.turn.is_some() {
             return;
         }
-        if self.set(self.core.snapshot()) {
-            cx.emit(FolderEvent::Changed(Vec::new()));
+        let newer = self.set(self.core.snapshot());
+        let changes = self.take_changes();
+        if newer || !changes.is_empty() {
+            cx.emit(FolderEvent { changes });
         }
-        while let Some(change) = changes.recv_timeout(Duration::ZERO) {
-            cx.emit(FolderEvent::Outside(change));
-        }
+    }
+
+    /// The changes of the revisions up to the snapshot. The core sends a list before its
+    /// snapshot, so a list of a newer revision waits for that snapshot.
+    fn take_changes(&mut self) -> Vec<Change> {
+        self.later.extend(std::iter::from_fn(|| {
+            self.changes.recv_timeout(Duration::ZERO)
+        }));
+        let revision = self.snapshot.revision();
+        let (now, later) = std::mem::take(&mut self.later)
+            .into_iter()
+            .partition(|list| list.revision <= revision);
+        self.later = later;
+        now.into_iter()
+            .flat_map(|list: ChangeList| list.changes)
+            .collect()
     }
 
     /// Keeps `snapshot` when it is newer, and gives whether it did.
@@ -755,17 +700,6 @@ impl NotesFolder {
         }
         newer
     }
-}
-
-/// The move from `from` to `to`, when they differ.
-fn moved(from: PathBuf, to: &Path) -> Vec<Move> {
-    if from == to {
-        return Vec::new();
-    }
-    vec![Move::Path {
-        from,
-        to: to.to_owned(),
-    }]
 }
 
 impl EventEmitter<FolderEvent> for NotesFolder {}
@@ -870,10 +804,10 @@ mod tests {
         let steps = Rc::new(RefCell::new(Vec::new()));
         cx.update(|cx| {
             let steps = steps.clone();
-            cx.subscribe(&notes_folder, move |_, event, _| {
-                if let FolderEvent::Changed(moves) = event {
-                    steps.borrow_mut().push(format!("event {moves:?}"));
-                }
+            cx.subscribe(&notes_folder, move |_, event: &FolderEvent, _| {
+                steps
+                    .borrow_mut()
+                    .push(format!("event {:?}", event.changes));
             })
             .detach();
         });
@@ -896,7 +830,7 @@ mod tests {
             [
                 "event []",
                 "create ok",
-                r#"event [Path { from: "work", to: "job" }]"#,
+                r#"event [FolderMoved { from: "work", to: "job" }]"#,
                 "rename ok",
                 "event []",
                 "fail failed",

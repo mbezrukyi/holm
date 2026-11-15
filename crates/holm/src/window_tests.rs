@@ -1727,6 +1727,28 @@ fn an_outside_folder_rename_selects_the_parent(cx: &mut TestAppContext) {
     );
 }
 
+#[gpui_kit::test]
+fn an_outside_rename_of_the_open_note_keeps_it_selected(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    fs::write(notes_dir.join("A.md"), "---\nid: 01A\n---\n# A\n").unwrap();
+    fs::write(notes_dir.join("B.md"), "---\nid: 01B\n---\n# B\n").unwrap();
+    set_time(&notes_dir.join("A.md"), 200);
+    set_time(&notes_dir.join("B.md"), 100);
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-shift-l");
+    assert_eq!(notes_list(cx, handle), ["A*", "B"]);
+
+    fs::rename(notes_dir.join("A.md"), notes_dir.join("C.md")).unwrap();
+    let feed = fixture.feed.lock().unwrap();
+    feed.as_ref().unwrap().changed(["A.md", "C.md"]).unwrap();
+    drop(feed);
+    settle(cx);
+
+    assert_eq!(notes_list(cx, handle), ["C*", "B"]);
+    assert_eq!(note_path(cx, handle).as_deref(), Some("C"));
+}
+
 /// The text of the name field in the sidebar, while it has the focus.
 fn name_field(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
     screen(cx, handle, |window| {

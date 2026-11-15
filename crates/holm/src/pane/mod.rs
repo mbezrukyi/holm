@@ -50,7 +50,7 @@ use crate::error::AppError;
 use crate::link_picker::{LinkChoice, LinkStart};
 use crate::message_line::{MessageLine, OpenState};
 use crate::name_field::{NameEvent, NameWrite};
-use crate::notes_folder::{FolderEvent, Move, NoteText, NotesFolder, Step, window_step};
+use crate::notes_folder::{FolderEvent, NoteText, NotesFolder, Step, window_step};
 use crate::tags::{TagChange, TagRow};
 use crate::title::TitleField;
 use crate::{text, theme};
@@ -195,12 +195,12 @@ impl NotePane {
         let links =
             cx.new(|cx| Links::new(notes_folder.clone(), editor.clone(), backlinks.clone(), cx));
         let subscriptions = vec![
-            cx.subscribe(&notes_folder, |pane, _, event, cx| match event {
-                FolderEvent::Changed(moves) => {
-                    pane.follow(moves, cx);
-                    pane.show_fields(cx);
+            cx.subscribe(&notes_folder, |pane, _, event: &FolderEvent, cx| {
+                pane.follow(&event.changes, cx);
+                for change in &event.changes {
+                    pane.outside_change(change, cx);
                 }
-                FolderEvent::Outside(change) => pane.outside_change(change.clone(), cx),
+                pane.show_fields(cx);
             }),
             cx.subscribe(&editor, |pane, _, _: &Changed, cx| pane.schedule_save(cx)),
             cx.subscribe_in(&editor, window, |pane, _, _: &UpFromStart, window, cx| {
@@ -690,11 +690,12 @@ impl NotePane {
         done
     }
 
-    fn outside_change(&mut self, change: Change, cx: &mut Context<Self>) {
-        let Some(path) = self.shown.editor_mut() else {
+    /// Takes a change of the open note by another tool. [`Self::follow`] takes the moves.
+    fn outside_change(&mut self, change: &Change, cx: &mut Context<Self>) {
+        let Some(path) = self.shown.editor() else {
             return;
         };
-        let unsaved = self.editor.read(cx).text() != self.saved;
+        let unsaved = self.is_dirty(cx);
         match change {
             Change::Changed(info) if info.path == *path => {
                 if unsaved {
@@ -704,18 +705,12 @@ impl NotePane {
                     self.reload(cx);
                 }
             }
-            Change::Moved { from, note } if from == *path => {
-                path.clone_from(&note.path);
-                self.links
-                    .update(cx, |links, cx| links.show(Some(note.path), cx));
-                self.show_fields(cx);
-            }
-            Change::Removed(gone) if gone == *path => {
+            Change::Removed(gone) if gone == path => {
                 if unsaved {
                     self.autosave = None;
                     self.set_disk(Some(Disk::Deleted), cx);
                 } else {
-                    cx.emit(PaneEvent::Gone(gone));
+                    cx.emit(PaneEvent::Gone(gone.clone()));
                 }
             }
             _ => {}
@@ -835,13 +830,15 @@ impl NotePane {
         }
     }
 
-    /// Follows a write that moved the open note, or a folder that holds it. A move to
-    /// another folder can change the file links in the note, so the pane reads it again.
-    fn follow(&mut self, moves: &[Move], cx: &mut Context<Self>) {
+    /// Follows a move of the open note, or of a folder that holds it. A move to another
+    /// folder can change the file links in the note, so the pane reads it again when it has
+    /// no unsaved text.
+    fn follow(&mut self, changes: &[Change], cx: &mut Context<Self>) {
+        let unsaved = self.is_dirty(cx);
         let Some(path) = self.shown.editor_mut() else {
             return;
         };
-        let Some(new) = moves.iter().find_map(|one| one.path(path)) else {
+        let Some(new) = changes.iter().find_map(|change| change.path_after(path)) else {
             return;
         };
         let other_folder = new.parent() != path.parent();
@@ -850,6 +847,8 @@ impl NotePane {
             let folder = new.parent().map(|parent| self.root.join(parent));
             self.editor
                 .update(cx, |editor, cx| editor.set_folder(folder, cx));
+        }
+        if other_folder && !unsaved {
             self.reload(cx);
         } else {
             self.links.update(cx, |links, cx| links.show(Some(new), cx));

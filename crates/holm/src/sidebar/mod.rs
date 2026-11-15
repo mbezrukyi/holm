@@ -27,12 +27,12 @@ use gpui_kit::{
     Styled, Subscription, Task, TestSupportExt as _, UniformListScrollHandle, Window, div, px,
     uniform_list,
 };
-use holm_core::model::{NoteInfo, Order};
+use holm_core::model::{Change, NoteInfo, Order};
 
 use crate::error::AppError;
 use crate::icons::Icon;
 use crate::name_field::{Look, NameEvent, NameField, NameWrite};
-use crate::notes_folder::{FolderEvent, Move, NotesFolder, Step};
+use crate::notes_folder::{FolderEvent, NotesFolder, Step};
 use crate::text;
 
 use list::NoteList;
@@ -108,12 +108,12 @@ impl Named {
         }
     }
 
-    fn moved(&self, one: &Move) -> Option<Self> {
+    fn moved(&self, change: &Change) -> Option<Self> {
         match self {
-            Self::Folder(path) => one.path(path).map(Self::Folder),
-            Self::Tag(tag) => one.tag(tag).map(Self::Tag),
+            Self::Folder(path) => change.path_after(path).map(Self::Folder),
+            Self::Tag(tag) => change.tag_after(tag).map(Self::Tag),
             Self::NewFolder(parent) if parent.as_os_str().is_empty() => None,
-            Self::NewFolder(parent) => one.path(parent).map(Self::NewFolder),
+            Self::NewFolder(parent) => change.path_after(parent).map(Self::NewFolder),
         }
     }
 }
@@ -157,10 +157,8 @@ impl Sidebar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let changed = cx.subscribe(&notes_folder, |sidebar, _, event, cx| {
-            if let FolderEvent::Changed(moves) = event {
-                sidebar.changed(moves, cx);
-            }
+        let changed = cx.subscribe(&notes_folder, |sidebar, _, event: &FolderEvent, cx| {
+            sidebar.changed(&event.changes, cx);
         });
         let search = cx.new(|cx| InputState::new(window, cx).placeholder(text::SEARCH));
         let search_changed = cx.subscribe(&search, |sidebar, input, event, cx| {
@@ -204,14 +202,14 @@ impl Sidebar {
 
     /// Takes the end of a write or of outside changes: it follows the moves, and then shows
     /// the snapshot.
-    fn changed(&mut self, moves: &[Move], cx: &mut Context<Self>) {
+    fn changed(&mut self, changes: &[Change], cx: &mut Context<Self>) {
         let revision = self.notes_folder.read(cx).snapshot().revision();
-        if moves.is_empty() && revision == self.revision {
+        if changes.is_empty() && revision == self.revision {
             return;
         }
         let view = self.view.clone();
-        for one in moves {
-            self.follow(one, cx);
+        for change in changes {
+            self.follow(change, cx);
         }
         self.refresh(cx);
         if self.view != view {
@@ -219,11 +217,12 @@ impl Sidebar {
         }
     }
 
-    /// Moves the view, the open items, the name field and the note in the editor with `one`.
-    fn follow(&mut self, one: &Move, cx: &mut Context<Self>) {
+    /// Moves the view, the open items, the name field and the note in the editor with
+    /// `change`, when it is a move.
+    fn follow(&mut self, change: &Change, cx: &mut Context<Self>) {
         let view = match &self.view {
-            View::Tree(item) => item.moved(one).map(View::Tree),
-            View::List(item) => item.moved(one).map(View::List),
+            View::Tree(item) => item.moved(change).map(View::Tree),
+            View::List(item) => item.moved(change).map(View::List),
         };
         if let Some(view) = view {
             self.view = view;
@@ -232,15 +231,15 @@ impl Sidebar {
         self.open = self
             .open
             .drain()
-            .map(|item| item.moved(one).unwrap_or(item))
+            .map(|item| item.moved(change).unwrap_or(item))
             .collect();
         if let Some(naming) = &mut self.field
-            && let Some(named) = naming.named.moved(one)
+            && let Some(named) = naming.named.moved(change)
         {
             naming.named = named;
         }
         if let Some(current) = &mut self.current
-            && let Some(path) = one.path(current)
+            && let Some(path) = change.path_after(current)
         {
             *current = path;
         }

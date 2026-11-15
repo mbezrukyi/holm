@@ -9,7 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use holm_core::model::{Change, LinkTarget, NoteId, NoteInfo, Order};
+use holm_core::model::{Change, ChangeList, LinkTarget, NoteId, NoteInfo, Order};
 use holm_core::{Changes, Core, Error, Feed};
 use tempfile::TempDir;
 
@@ -48,8 +48,16 @@ impl Fed {
         write(&self.path(path), text);
     }
 
-    /// Every change that is waiting now.
+    /// Every change that is waiting now, from all change lists.
     fn take(&self) -> Vec<Change> {
+        self.lists()
+            .into_iter()
+            .flat_map(|list| list.changes)
+            .collect()
+    }
+
+    /// Every change list that is waiting now.
+    fn lists(&self) -> Vec<ChangeList> {
         std::iter::from_fn(|| self.changes.recv_timeout(Duration::ZERO)).collect()
     }
 
@@ -186,17 +194,86 @@ fn holm_s_own_saves_and_new_notes_do_not_come_back() {
 }
 
 #[test]
-fn holm_s_own_tag_pin_and_attachment_changes_do_not_come_back() {
-    let fed = Fed::new(&[("a.md", "---\ntags: [work]\n---\n# A\n")]);
+fn holm_s_own_pin_and_attachment_changes_do_not_come_back() {
+    let fed = Fed::new(&[("a.md", "# A\n")]);
 
     fed.core.set_pinned("a.md", true).result.unwrap();
-    fed.core.rename_tag("work", "job").result.unwrap();
     let image = fed.core.paste_image("a.md", "png", b"png").unwrap();
     fed.feed
         .changed([PathBuf::from("a.md"), PathBuf::from("attachments"), image])
         .unwrap();
 
     assert_eq!(fed.take(), []);
+}
+
+#[test]
+fn each_own_move_comes_as_one_list_with_its_revision() {
+    let fed = Fed::new(&[
+        ("a.md", "---\ntags: [work/holm]\n---\n# A\n"),
+        ("area/b.md", "# B\n"),
+    ]);
+
+    let note = fed.core.rename_note("a.md", "C").result.unwrap();
+    let note_revision = fed.core.snapshot().revision();
+    fed.core.rename_folder("area", "zone").result.unwrap();
+    let folder_revision = fed.core.snapshot().revision();
+    fed.core.rename_tag("work", " Job ").result.unwrap();
+    fed.core.rename_tag("gone", "x").result.unwrap();
+    fed.core.rename_folder("zone", "zone").result.unwrap();
+
+    assert_eq!(
+        fed.lists(),
+        [
+            ChangeList {
+                revision: note_revision,
+                changes: vec![Change::Moved {
+                    from: "a.md".into(),
+                    note,
+                }],
+            },
+            ChangeList {
+                revision: folder_revision,
+                changes: vec![Change::FolderMoved {
+                    from: "area".into(),
+                    to: "zone".into(),
+                }],
+            },
+            ChangeList {
+                revision: fed.core.snapshot().revision(),
+                changes: vec![Change::TagMoved {
+                    from: "work".into(),
+                    to: "Job".into(),
+                }],
+            },
+        ]
+    );
+    fed.feed.changed(["C.md", "zone"]).unwrap();
+    assert_eq!(fed.take(), []);
+}
+
+#[test]
+fn a_move_rule_follows_paths_below_a_folder_and_child_tags() {
+    let folder = Change::FolderMoved {
+        from: "work".into(),
+        to: "job".into(),
+    };
+    let after = |change: &Change, path: &str| change.path_after(Path::new(path));
+    assert_eq!(after(&folder, "work"), Some("job".into()));
+    assert_eq!(
+        after(&folder, "work/deep/a.md"),
+        Some("job/deep/a.md".into())
+    );
+    assert_eq!(after(&folder, "workshop"), None);
+    assert_eq!(folder.tag_after("work"), None);
+
+    let tag = Change::TagMoved {
+        from: "work".into(),
+        to: "home/job".into(),
+    };
+    assert_eq!(tag.tag_after("work"), Some("home/job".into()));
+    assert_eq!(tag.tag_after("work/holm"), Some("home/job/holm".into()));
+    assert_eq!(tag.tag_after("workshop"), None);
+    assert_eq!(after(&tag, "work"), None);
 }
 
 #[test]
@@ -389,7 +466,8 @@ fn every_stream_gets_each_change() {
 
     let added = Change::Added(fed.info("a.md"));
     assert_eq!(fed.take(), std::slice::from_ref(&added));
-    assert_eq!(second.recv_timeout(Duration::ZERO), Some(added));
+    let list = second.recv_timeout(Duration::ZERO).unwrap();
+    assert_eq!(list.changes, [added]);
 }
 
 #[test]
@@ -433,8 +511,8 @@ mod real_events {
         (dir, cache, core, changes)
     }
 
-    fn next(changes: &Changes) -> Change {
-        changes.recv_timeout(WAIT).unwrap()
+    fn next(changes: &Changes) -> Vec<Change> {
+        changes.recv_timeout(WAIT).unwrap().changes
     }
 
     #[test]
@@ -445,7 +523,7 @@ mod real_events {
 
         assert_eq!(
             next(&changes),
-            Change::Changed(core.read("a.md").unwrap().info)
+            [Change::Changed(core.read("a.md").unwrap().info)]
         );
     }
 
@@ -458,7 +536,7 @@ mod real_events {
 
         assert_eq!(
             next(&changes),
-            Change::Added(core.read("b.md").unwrap().info)
+            [Change::Added(core.read("b.md").unwrap().info)]
         );
     }
 
@@ -470,10 +548,10 @@ mod real_events {
 
         assert_eq!(
             next(&changes),
-            Change::Moved {
+            [Change::Moved {
                 from: "a.md".into(),
                 note: core.read("b.md").unwrap().info,
-            }
+            }]
         );
     }
 
@@ -483,7 +561,7 @@ mod real_events {
         // A folder that moves in comes as one event, so the core walks it in one batch.
         write(&cache.path().join("work/b.md"), &note("B", "", "# B\n"));
         fs::rename(cache.path().join("work"), dir.path().join("work")).unwrap();
-        while next(&changes) != Change::Folders {}
+        while !next(&changes).contains(&Change::Folders) {}
         std::thread::sleep(Duration::from_millis(300));
         let start = core.snapshot().revision();
 

@@ -1,7 +1,7 @@
 //! The types that the [`Core`](crate::Core) handle takes and gives.
 
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 /// The stable id of a note. It lives in the `id:` field of the frontmatter.
@@ -118,27 +118,86 @@ pub struct DeleteCount {
     pub attachments: usize,
 }
 
-/// One change to the notes folder that came from outside Holm, from [`Changes`](crate::Changes).
+/// One change to the notes folder, in a [`ChangeList`].
 ///
-/// Saves through [`Core`](crate::Core) never come back as changes.
+/// A write through [`Core`](crate::Core) gives only the moves it makes: [`Change::Moved`],
+/// [`Change::FolderMoved`] and [`Change::TagMoved`]. Its other changes show only in the
+/// snapshot.
+///
+/// The core finds no folder moves from other tools. Each note of a moved folder comes as
+/// [`Change::Moved`] or as [`Change::Removed`] and [`Change::Added`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Change {
-    /// A new note file.
+    /// A new note file from another tool.
     Added(NoteInfo),
-    /// A note file whose text or info changed.
+    /// A note file whose text or info another tool changed.
     Changed(NoteInfo),
     /// A note file that is gone. The path is where it was.
     Removed(PathBuf),
-    /// A note file with an id that is now at another path.
+    /// A note that is now at another path. From another tool, only a note with an id moves.
     Moved {
         /// The old path.
         from: PathBuf,
         /// The note at its new path.
         note: NoteInfo,
     },
+    /// A folder that Holm moved, with everything below it.
+    FolderMoved {
+        /// The old path.
+        from: PathBuf,
+        /// The new path.
+        to: PathBuf,
+    },
+    /// A tag that Holm renamed, with its child tags.
+    TagMoved {
+        /// The old name.
+        from: String,
+        /// The new name.
+        to: String,
+    },
     /// The list from [`Snapshot::folders`](crate::Snapshot::folders) changed.
     Folders,
     /// The tag tree from [`Snapshot::tags`](crate::Snapshot::tags) changed.
     Tags,
+}
+
+impl Change {
+    /// Where the note or folder at `path` is after this change, when the change moves it.
+    pub fn path_after(&self, path: &Path) -> Option<PathBuf> {
+        match self {
+            Self::Moved { from, note } if from == path => Some(note.path.clone()),
+            Self::FolderMoved { from, to } => {
+                let rest = path.strip_prefix(from).ok()?;
+                Some(if rest.as_os_str().is_empty() {
+                    to.clone()
+                } else {
+                    to.join(rest)
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// The name of `tag` after this change, when the change renames it or a parent tag.
+    pub fn tag_after(&self, tag: &str) -> Option<String> {
+        let Self::TagMoved { from, to } = self else {
+            return None;
+        };
+        if tag == from {
+            return Some(to.clone());
+        }
+        let rest = tag.strip_prefix(from.as_str())?.strip_prefix('/')?;
+        Some(format!("{to}/{rest}"))
+    }
+}
+
+/// The changes that made one revision of the snapshot, from [`Changes`](crate::Changes).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChangeList {
+    /// The revision of the first snapshot that shows the changes.
+    pub revision: u64,
+    /// The changes in order: first the note and folder changes, then [`Change::Folders`] and
+    /// [`Change::Tags`]. It is never empty.
+    pub changes: Vec<Change>,
 }

@@ -59,9 +59,8 @@ impl Links {
         cx: &mut Context<Self>,
     ) -> Self {
         let subscriptions = vec![
-            cx.subscribe(&notes_folder, |links, notes_folder, event, cx| {
-                let revision = notes_folder.read(cx).snapshot().revision();
-                if matches!(event, FolderEvent::Changed(_)) && revision != links.revision {
+            cx.subscribe(&notes_folder, |links, notes_folder, _: &FolderEvent, cx| {
+                if notes_folder.read(cx).snapshot().revision() != links.revision {
                     links.read(cx);
                 }
             }),

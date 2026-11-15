@@ -5,10 +5,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use holm_core::Snapshot;
-use holm_core::model::{NoteInfo, Order, Tag};
+use holm_core::model::{Change, NoteInfo, Order, Tag};
 
 use super::list::NoteList;
-use crate::notes_folder::Move;
 
 /// An item of the folder tree. Each item has a note list.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -56,12 +55,12 @@ impl Item {
         }
     }
 
-    /// This item after `one`, when `one` moves it.
-    pub(crate) fn moved(&self, one: &Move) -> Option<Self> {
+    /// This item after `change`, when it moves the item.
+    pub(crate) fn moved(&self, change: &Change) -> Option<Self> {
         match self {
             Self::All => None,
-            Self::Folder(path) => one.path(path).map(Self::Folder),
-            Self::Tag(name) => one.tag(name).map(Self::Tag),
+            Self::Folder(path) => change.path_after(path).map(Self::Folder),
+            Self::Tag(name) => change.tag_after(name).map(Self::Tag),
         }
     }
 }
@@ -363,7 +362,7 @@ mod tests {
     fn a_rename_moves_the_item_and_its_children() {
         let folder = |path: &str| Item::Folder(path.into());
         let tag = |name: &str| Item::Tag(name.into());
-        let work = Move::Path {
+        let work = Change::FolderMoved {
             from: "work".into(),
             to: "job".into(),
         };
@@ -372,7 +371,7 @@ mod tests {
         assert_eq!(folder("workshop").moved(&work), None);
         assert_eq!(tag("work").moved(&work), None);
         assert_eq!(Item::All.moved(&work), None);
-        let work = Move::Tag {
+        let work = Change::TagMoved {
             from: "work".into(),
             to: "home/job".into(),
         };
