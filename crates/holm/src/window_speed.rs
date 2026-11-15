@@ -12,7 +12,12 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::{AnyWindowHandle, Keystroke, TestAppContext};
 
-use super::{Fixture, autosave, keys, open, screen, settle, type_new_name};
+use super::Startup;
+
+use super::{
+    Fixture, autosave, keys, new_note_open, note_path, open, press, screen, settle, sidebar,
+    type_new_name,
+};
 
 const NOTES: usize = 5_000;
 const FOLDERS: usize = 50;
@@ -147,4 +152,74 @@ fn window_speed(cx: &mut TestAppContext) {
         settle(cx);
         frame(cx);
     });
+}
+
+/// Presses `key` and runs the tasks one at a time until `shown` is true. It prints the time.
+///
+/// The test runs the background tasks on this thread too, so the time holds a write that runs.
+fn key_until(
+    what: &str,
+    cx: &mut TestAppContext,
+    handle: AnyWindowHandle,
+    key: &'static str,
+    shown: impl Fn(&mut TestAppContext, AnyWindowHandle) -> bool,
+) {
+    let executor = cx.executor();
+    let dispatcher = executor.dispatcher().as_test().unwrap();
+    time(what, || {
+        cx.dispatch_keystroke(handle, Keystroke::parse(key).unwrap());
+        while !shown(cx, handle) {
+            assert!(dispatcher.tick(false), "{what}: it never shows");
+        }
+    });
+}
+
+/// Opens the note with `number` in quick open, until the pane shows it.
+fn quick_open(what: &str, cx: &mut TestAppContext, handle: AnyWindowHandle, number: &'static str) {
+    press(cx, handle, "ctrl-shift-o");
+    for digit in number.split("") {
+        if !digit.is_empty() {
+            press(cx, handle, digit);
+        }
+    }
+    let title = format!("Note {number}");
+    key_until(what, cx, handle, "enter", move |cx, handle| {
+        note_path(cx, handle).is_some_and(|path| path.ends_with(&title))
+    });
+}
+
+/// Ctrl+N and an open of a note, while a tag rename of all notes runs. The write budget is zero,
+/// so the rename does not end in the update of its key.
+#[gpui_kit::test]
+#[ignore = "prints times for a person to read"]
+fn window_speed_during_a_tag_rename(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    many_notes(&fixture.notes());
+    let startup = Startup {
+        write_budget: Duration::ZERO,
+        ..fixture.startup(None)
+    };
+    let handle = open(cx, startup);
+
+    key_until("Ctrl+N, empty line", cx, handle, "ctrl-n", new_note_open);
+    keys(cx, handle, "escape");
+    quick_open("open a note, empty line", cx, handle, "4321");
+
+    // The tree: All notes, the folders, then the tag `area`. Each note has a tag under it.
+    keys(cx, handle, "ctrl-shift-l escape");
+    keys(cx, handle, &["down"; FOLDERS + 1].join(" "));
+    assert_eq!(sidebar(cx, handle), "tree #area");
+    type_new_name(cx, handle, "zone");
+    keys(cx, handle, "enter");
+    press(cx, handle, "enter");
+    key_until("Ctrl+N, tag rename", cx, handle, "ctrl-n", new_note_open);
+    cx.run_until_parked();
+    keys(cx, handle, "escape");
+
+    keys(cx, handle, "ctrl-shift-l");
+    assert_eq!(sidebar(cx, handle), "tree #zone");
+    type_new_name(cx, handle, "area");
+    keys(cx, handle, "enter");
+    press(cx, handle, "enter");
+    quick_open("open a note, tag rename", cx, handle, "1234");
 }
