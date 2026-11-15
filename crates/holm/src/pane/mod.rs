@@ -55,6 +55,7 @@ use crate::tags::{TagChange, TagRow};
 use crate::title::TitleField;
 use crate::{text, theme};
 use disk_menu::{Answer, Choice, Disk, DiskMenu};
+pub(crate) use links::Pick;
 use links::{Links, LinksEvent};
 use new_note::{NewNote, NewNoteEvent};
 
@@ -380,12 +381,12 @@ impl NotePane {
         }
     }
 
-    /// Opens the system file picker, and embeds each picked file at the cursor.
-    pub(crate) fn link_files(&mut self, cx: &mut Context<Self>) {
+    /// Opens the system picker for `pick`, and embeds each picked path at the cursor.
+    pub(crate) fn link_paths(&mut self, pick: Pick, cx: &mut Context<Self>) {
         if self.shown.note().is_none() {
             return;
         }
-        self.links.update(cx, Links::pick_files);
+        self.links.update(cx, |links, cx| links.pick(pick, cx));
     }
 
     /// Ctrl+K: gives `done` what the link picker starts with, after the pane saves the open

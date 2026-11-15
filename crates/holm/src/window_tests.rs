@@ -2484,6 +2484,41 @@ fn ctrl_o_embeds_a_file_where_it_is(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn ctrl_o_asks_for_files_and_ctrl_j_for_folders(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    fs::write(fixture.notes().join("a.md"), "# A\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+    for (key, folders) in [("ctrl-o", false), ("ctrl-j", true)] {
+        keys(cx, handle, key);
+        cx.simulate_path_prompt_response(|options| {
+            assert_eq!(options.files, !folders, "{key}");
+            assert_eq!(options.directories, folders, "{key}");
+            assert!(options.multiple, "{key}");
+            assert_eq!(options.prompt.as_deref(), Some(text::LINK_FILE), "{key}");
+            None
+        });
+        settle(cx);
+    }
+    assert_eq!(editor_text(cx, handle), "# A\n");
+}
+
+#[gpui_kit::test]
+fn ctrl_j_embeds_a_folder_at_the_cursor(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes = fixture.notes();
+    fs::create_dir(notes.join("work")).unwrap();
+    fs::create_dir(notes.join("docs")).unwrap();
+    fs::write(notes.join("work/a.md"), "# A\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-end ctrl-j");
+    let picked = notes.join("docs");
+    cx.simulate_path_prompt_response(move |_| Some(vec![picked]));
+    settle(cx);
+    cx.simulate_input(handle, "!");
+    assert_eq!(editor_text(cx, handle), "# A\n![docs](../docs)!");
+}
+
+#[gpui_kit::test]
 fn an_empty_folder_shows_the_empty_pane_and_makes_no_note(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     let handle = open(cx, fixture.startup(None));
@@ -2587,7 +2622,7 @@ fn the_link_keys_do_nothing_on_the_empty_pane_with_no_sidebar(cx: &mut TestAppCo
     assert_eq!(sidebar(cx, handle), "hidden");
     assert!(empty_pane(cx, handle));
 
-    keys(cx, handle, "ctrl-k ctrl-o");
+    keys(cx, handle, "ctrl-k ctrl-o ctrl-j");
     assert!(!cx.did_prompt_for_paths());
     let picker = screen(cx, handle, |window| {
         window.try_find("link-picker").is_some()

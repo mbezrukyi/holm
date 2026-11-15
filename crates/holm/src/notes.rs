@@ -24,7 +24,7 @@ use crate::error::AppError;
 use crate::link_picker::{LinkPicker, LinkPickerEvent, LinkStart};
 use crate::message_line::MessageLine;
 use crate::notes_folder::{NotesFolder, Step, window_step};
-use crate::pane::{Leave, NotePane, PaneEvent};
+use crate::pane::{Leave, NotePane, PaneEvent, Pick};
 use crate::picker::{FolderPicker, PickerEvent};
 use crate::quick_open::{QuickOpen, QuickOpenEvent};
 use crate::sidebar::{Item, Named, Sidebar, SidebarEvent, SidebarWrite, Target};
@@ -697,7 +697,12 @@ impl NotesView {
             (true, "n") => self.new_folder(window, cx),
             (false, "k") if in_editor => self.open_link_picker(window, cx),
             (false, "o") if in_editor => {
-                self.pane.update(cx, NotePane::link_files);
+                self.pane
+                    .update(cx, |pane, cx| pane.link_paths(Pick::Files, cx));
+            }
+            (false, "j") if in_editor => {
+                self.pane
+                    .update(cx, |pane, cx| pane.link_paths(Pick::Folders, cx));
             }
             _ => return,
         }

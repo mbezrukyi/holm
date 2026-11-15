@@ -31,6 +31,13 @@ pub(super) enum LinksEvent {
     Error(&'static str),
 }
 
+/// What the system picker picks. One picker can't pick files and folders together.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Pick {
+    Files,
+    Folders,
+}
+
 pub(super) struct Links {
     notes_folder: Entity<NotesFolder>,
     editor: Entity<Editor>,
@@ -85,15 +92,15 @@ impl Links {
         self.read(cx);
     }
 
-    /// Opens the system file picker, and embeds each picked file at the cursor, with no copy.
-    /// It shows as an image or a file chip, like a pasted file.
-    pub(super) fn pick_files(&mut self, cx: &mut Context<Self>) {
+    /// Opens the system picker for `pick`, and embeds each picked path at the cursor, with no
+    /// copy. It shows as an image, a file chip or a folder chip, like a pasted path.
+    pub(super) fn pick(&mut self, pick: Pick, cx: &mut Context<Self>) {
         let Some(note) = self.note.clone() else {
             return;
         };
         let picked = cx.prompt_for_paths(PathPromptOptions {
-            files: true,
-            directories: false,
+            files: pick == Pick::Files,
+            directories: pick == Pick::Folders,
             multiple: true,
             prompt: Some(text::LINK_FILE.into()),
         });
