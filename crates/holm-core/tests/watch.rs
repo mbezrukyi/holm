@@ -183,9 +183,9 @@ fn a_move_with_the_new_path_first_is_one_change() {
 fn holm_s_own_saves_and_new_notes_do_not_come_back() {
     let fed = Fed::new(&[("a.md", "# A\n")]);
 
-    fed.core.save("a.md", "# A\n\nMore.\n").result.unwrap();
-    fed.core.add_tag("a.md", "work").result.unwrap();
-    let new = fed.core.create("", "New").result.unwrap();
+    fed.core.save("a.md", "# A\n\nMore.\n").unwrap();
+    fed.core.add_tag("a.md", "work").unwrap();
+    let new = fed.core.create("", "New").unwrap();
     fed.feed
         .changed([PathBuf::from("a.md"), new.info.path])
         .unwrap();
@@ -197,7 +197,7 @@ fn holm_s_own_saves_and_new_notes_do_not_come_back() {
 fn holm_s_own_pin_and_attachment_changes_do_not_come_back() {
     let fed = Fed::new(&[("a.md", "# A\n")]);
 
-    fed.core.set_pinned("a.md", true).result.unwrap();
+    fed.core.set_pinned("a.md", true).unwrap();
     let image = fed.core.paste_image("a.md", "png", b"png").unwrap();
     fed.feed
         .changed([PathBuf::from("a.md"), PathBuf::from("attachments"), image])
@@ -213,13 +213,13 @@ fn each_own_move_comes_as_one_list_with_its_revision() {
         ("area/b.md", "# B\n"),
     ]);
 
-    let note = fed.core.rename_note("a.md", "C").result.unwrap();
+    let note = fed.core.rename_note("a.md", "C").unwrap();
     let note_revision = fed.core.snapshot().revision();
-    fed.core.rename_folder("area", "zone").result.unwrap();
+    fed.core.rename_folder("area", "zone").unwrap();
     let folder_revision = fed.core.snapshot().revision();
-    fed.core.rename_tag("work", " Job ").result.unwrap();
-    fed.core.rename_tag("gone", "x").result.unwrap();
-    fed.core.rename_folder("zone", "zone").result.unwrap();
+    fed.core.rename_tag("work", " Job ").unwrap();
+    fed.core.rename_tag("gone", "x").unwrap();
+    fed.core.rename_folder("zone", "zone").unwrap();
 
     assert_eq!(
         fed.lists(),
@@ -531,7 +531,7 @@ mod real_events {
     fn a_save_does_not_come_back_but_the_next_outside_change_does() {
         let (dir, _cache, core, changes) = open(&[("a.md", "# A\n")]);
 
-        core.save("a.md", "# A\n\nMore.\n").result.unwrap();
+        core.save("a.md", "# A\n\nMore.\n").unwrap();
         fs::write(dir.path().join("b.md"), "# B\n").unwrap();
 
         assert_eq!(
@@ -587,7 +587,7 @@ fn the_revision_grows_with_own_writes_and_outside_changes() {
         "reads change nothing"
     );
 
-    fed.core.create("", "New").result.unwrap();
+    fed.core.create("", "New").unwrap();
     let created = fed.core.snapshot().revision();
     assert!(created > start);
 

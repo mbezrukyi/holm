@@ -159,7 +159,7 @@ fn apply(folder: &mut Folder, edit: &Edit, copies: &mut usize) {
                 .map(|n| format!("Note {n}"))
                 .find(|title| !folder.path(place).join(format!("{title}.md")).exists())
                 .unwrap();
-            folder.core.create(place, &free).result.unwrap();
+            folder.core.create(place, &free).unwrap();
         }
         Edit::Save {
             note,
@@ -170,7 +170,7 @@ fn apply(folder: &mut Folder, edit: &Edit, copies: &mut usize) {
         } => {
             if let Some(path) = pick(folder, *note) {
                 let body = body(folder, words, *link);
-                folder.core.save(&path, &body).result.unwrap();
+                folder.core.save(&path, &body).unwrap();
                 for tag in tags(picks) {
                     let tag = holm_markdown::normalize_tag(&tag).unwrap();
                     let has = folder.core.read(&path).unwrap().info.tags.contains(&tag);
@@ -179,9 +179,9 @@ fn apply(folder: &mut Folder, edit: &Edit, copies: &mut usize) {
                     } else {
                         folder.core.add_tag(&path, &tag)
                     };
-                    info.result.unwrap();
+                    info.unwrap();
                 }
-                folder.core.set_pinned(&path, *pinned).result.unwrap();
+                folder.core.set_pinned(&path, *pinned).unwrap();
             }
         }
         Edit::Outside {

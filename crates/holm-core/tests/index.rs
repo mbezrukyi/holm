@@ -253,10 +253,10 @@ fn backlinks_come_from_id_links_and_file_links() {
 #[test]
 fn save_and_create_update_the_index() {
     let folder = Folder::new(&[("a.md", "# A\n")]);
-    folder.core.add_tag("a.md", "food").result.unwrap();
+    folder.core.add_tag("a.md", "food").unwrap();
 
-    let saved = folder.core.save("a.md", "# A\nPotatoes\n").result.unwrap();
-    let created = folder.core.create("", "New").result.unwrap();
+    let saved = folder.core.save("a.md", "# A\nPotatoes\n").unwrap();
+    let created = folder.core.create("", "New").unwrap();
 
     assert_eq!(found(&folder, "potato"), ["a.md"]);
     assert_eq!(folder.core.snapshot().tags(), [tag("food", 1, vec![])]);
@@ -358,7 +358,7 @@ fn saving_a_note_with_the_id_of_a_deleted_note_keeps_the_id() {
     let folder = Folder::new(&[("a.md", &note("01GONE", "", ""))]);
     fs::remove_file(folder.path("a.md")).unwrap();
     folder.write("b.md", &note("01GONE", "", ""));
-    let saved = folder.core.save("b.md", "Text\n").result.unwrap();
+    let saved = folder.core.save("b.md", "Text\n").unwrap();
 
     assert_eq!(saved.info.id.unwrap().as_str(), "01GONE");
     assert_eq!(paths(folder.core.snapshot().notes(Order::Title)), ["b.md"]);
@@ -401,8 +401,8 @@ fn the_index_lives_in_memory_when_its_folder_cannot_be_written() {
     let saved = core.save("a.md", "new\n");
 
     fs::set_permissions(cache.path(), fs::Permissions::from_mode(0o755)).unwrap();
-    saved.result.unwrap();
-    let preview = &saved.snapshot.note("a.md").unwrap().preview;
+    saved.unwrap();
+    let preview = core.snapshot().note("a.md").unwrap().preview.clone();
     assert_eq!(preview, "new");
     assert!(!cache.path().join("index.sqlite").exists());
 }

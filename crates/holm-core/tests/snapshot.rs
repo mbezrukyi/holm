@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use common::Folder;
 use holm_core::model::{NoteInfo, Order};
-use holm_core::{Core, Snapshot, Written};
+use holm_core::{Core, Result, Snapshot};
 
 fn titles(snapshot: &Snapshot) -> Vec<String> {
     snapshot
@@ -31,23 +31,21 @@ fn tag_names(snapshot: &Snapshot) -> Vec<String> {
     snapshot.tags().into_iter().map(|tag| tag.name).collect()
 }
 
-/// Checks that the write grew the revision by one, and that the core gives out its snapshot.
-fn one_step<T>(core: &Core, write: impl FnOnce(&Core) -> Written<T>) -> (T, Snapshot) {
+/// Checks that the write grew the revision by one, and gives the snapshot after it.
+fn one_step<T>(core: &Core, write: impl FnOnce(&Core) -> Result<T>) -> (T, Snapshot) {
     let before = core.snapshot().revision();
-    let written = write(core);
-    let result = written.result.unwrap();
-    assert_eq!(written.snapshot.revision(), before + 1);
-    assert_eq!(core.snapshot().revision(), before + 1);
-    (result, written.snapshot)
+    let result = write(core).unwrap();
+    let snapshot = core.snapshot();
+    assert_eq!(snapshot.revision(), before + 1);
+    (result, snapshot)
 }
 
 /// Checks that the write left the revision as it was.
-fn no_step<T: std::fmt::Debug>(core: &Core, write: impl FnOnce(&Core) -> Written<T>) -> Written<T> {
+fn no_step<T>(core: &Core, write: impl FnOnce(&Core) -> Result<T>) -> Result<T> {
     let before = core.snapshot().revision();
-    let written = write(core);
-    assert_eq!(written.snapshot.revision(), before);
+    let result = write(core);
     assert_eq!(core.snapshot().revision(), before);
-    written
+    result
 }
 
 #[test]
@@ -188,16 +186,10 @@ fn a_save_with_the_same_text_keeps_the_revision() {
 
     let written = no_step(&folder.core, |core| core.save("A.md", &note.body));
 
-    assert_eq!(written.result.unwrap(), note);
-    no_step(&folder.core, |core| core.add_tag("A.md", "x"))
-        .result
-        .unwrap();
-    no_step(&folder.core, |core| core.remove_tag("A.md", "y"))
-        .result
-        .unwrap();
-    no_step(&folder.core, |core| core.rename_note("A.md", "A"))
-        .result
-        .unwrap();
+    assert_eq!(written.unwrap(), note);
+    no_step(&folder.core, |core| core.add_tag("A.md", "x")).unwrap();
+    no_step(&folder.core, |core| core.remove_tag("A.md", "y")).unwrap();
+    no_step(&folder.core, |core| core.rename_note("A.md", "A")).unwrap();
 }
 
 #[test]
@@ -205,11 +197,11 @@ fn a_failed_write_keeps_the_revision() {
     let folder = Folder::new(&[("a.md", "# A\n")]);
 
     let written = no_step(&folder.core, |core| core.add_tag("missing.md", "x"));
-    assert!(written.result.is_err());
+    assert!(written.is_err());
     let written = no_step(&folder.core, |core| core.create_folder("missing", "x"));
-    assert!(written.result.is_err());
+    assert!(written.is_err());
     let written = no_step(&folder.core, |core| core.rename_tag("x", ""));
-    assert!(written.result.is_err());
+    assert!(written.is_err());
 }
 
 #[test]
@@ -217,7 +209,7 @@ fn an_old_snapshot_stays_as_it_was() {
     let folder = Folder::new(&[("A.md", "")]);
     let old = folder.core.snapshot();
 
-    folder.core.create("", "B").result.unwrap();
+    folder.core.create("", "B").unwrap();
 
     assert_eq!(titles(&old), ["A"]);
     assert_eq!(titles(&folder.core.snapshot()), ["A", "B"]);

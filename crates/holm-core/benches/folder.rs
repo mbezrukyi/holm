@@ -127,7 +127,7 @@ fn save(bencher: divan::Bencher<'_, '_>, size: usize) {
     let mut body = core.read(path).unwrap().body;
     bencher.bench_local(|| {
         body.push_str("word ");
-        core.save(path, &body).result.unwrap()
+        core.save(path, &body).unwrap()
     });
 }
 
@@ -161,9 +161,9 @@ fn add_or_remove_tag(bencher: divan::Bencher<'_, '_>) {
         flip = !flip;
         let path = "folder 1/Note 1.md";
         if flip {
-            core.add_tag(path, "new").result.unwrap()
+            core.add_tag(path, "new").unwrap()
         } else {
-            core.remove_tag(path, "new").result.unwrap()
+            core.remove_tag(path, "new").unwrap()
         }
     });
 }

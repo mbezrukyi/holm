@@ -257,7 +257,7 @@ impl Core {
     /// - [`Error::BadPath`] as in [`Core::read`].
     /// - [`Error::Read`] or [`Error::NotUtf8`] when the file on disk can't be read.
     /// - [`Error::Write`] when the new file can't be written. The old file then stays.
-    pub fn save(&self, path: impl AsRef<Path>, body: &str) -> Written<Note> {
+    pub fn save(&self, path: impl AsRef<Path>, body: &str) -> Result<Note> {
         self.inner.write(|draft| {
             let (note, stamp) = self.inner.store.save(path.as_ref(), body)?;
             self.inner.update(draft, &note, stamp)
@@ -272,7 +272,7 @@ impl Core {
     ///
     /// - [`Error::BadPath`] as in [`Core::read`].
     /// - [`Error::Write`] when the file can't be written, for example when the folder is missing.
-    pub fn restore(&self, note: &Note) -> Written<Note> {
+    pub fn restore(&self, note: &Note) -> Result<Note> {
         self.inner.write(|draft| {
             let (note, stamp) = self.inner.store.restore(note)?;
             self.inner.update(draft, &note, stamp)
@@ -291,7 +291,7 @@ impl Core {
     ///   capital letters.
     /// - [`Error::BadPath`] when `folder` is not a plain folder path inside the notes folder.
     /// - [`Error::Write`] when the file can't be written, for example when the folder is missing.
-    pub fn create(&self, folder: impl AsRef<Path>, title: &str) -> Written<Note> {
+    pub fn create(&self, folder: impl AsRef<Path>, title: &str) -> Result<Note> {
         self.inner.write(|draft| {
             let (note, stamp) = self.inner.store.create(folder.as_ref(), title)?;
             self.inner.update(draft, &note, stamp)
@@ -311,7 +311,7 @@ impl Core {
     /// - [`Error::BadPath`] as in [`Core::read`].
     /// - [`Error::Read`] or [`Error::NotUtf8`] when the file can't be read as text.
     /// - [`Error::Write`] when the file can't be moved. The note then stays where it was.
-    pub fn rename_note(&self, path: impl AsRef<Path>, title: &str) -> Written<NoteInfo> {
+    pub fn rename_note(&self, path: impl AsRef<Path>, title: &str) -> Result<NoteInfo> {
         let path = path.as_ref();
         self.inner.write(|draft| {
             Store::check_note(path)?;
@@ -336,7 +336,7 @@ impl Core {
     ///   capital letters. Nothing moves.
     /// - [`Error::BadPath`] when `path` is not a note path, or `folder` is not a folder path.
     /// - Else as in [`Core::rename_note`].
-    pub fn move_note(&self, path: impl AsRef<Path>, folder: impl AsRef<Path>) -> Written<NoteInfo> {
+    pub fn move_note(&self, path: impl AsRef<Path>, folder: impl AsRef<Path>) -> Result<NoteInfo> {
         let path = path.as_ref();
         self.inner.write(|draft| {
             Store::check_note(path)?;
@@ -359,7 +359,7 @@ impl Core {
     /// - [`Error::BadPath`] when `parent` is not a folder path.
     /// - [`Error::Write`] when the folder can't be made, for example when `parent` is missing.
     /// - [`Error::Read`] when the new folder can't be read.
-    pub fn create_folder(&self, parent: impl AsRef<Path>, name: &str) -> Written<PathBuf> {
+    pub fn create_folder(&self, parent: impl AsRef<Path>, name: &str) -> Result<PathBuf> {
         self.inner.write(|draft| {
             let new = self.inner.store.create_folder(parent.as_ref(), name)?;
             draft.folders(&new)?;
@@ -381,7 +381,7 @@ impl Core {
     ///   or is not a folder path.
     /// - [`Error::Read`] when `folder` is missing or is not a folder.
     /// - [`Error::Write`] when the folder can't be moved. It then stays where it was.
-    pub fn rename_folder(&self, folder: impl AsRef<Path>, name: &str) -> Written<PathBuf> {
+    pub fn rename_folder(&self, folder: impl AsRef<Path>, name: &str) -> Result<PathBuf> {
         let folder = folder.as_ref();
         self.move_folder_to(folder, folder_of(folder), name)
     }
@@ -398,7 +398,7 @@ impl Core {
         &self,
         folder: impl AsRef<Path>,
         parent: impl AsRef<Path>,
-    ) -> Written<PathBuf> {
+    ) -> Result<PathBuf> {
         let folder = folder.as_ref();
         match folder.file_name() {
             Some(name) => self.move_folder_to(folder, parent.as_ref(), &name.to_string_lossy()),
@@ -446,7 +446,7 @@ impl Core {
     /// - [`Error::BadPath`] as in [`Core::read`].
     /// - [`Error::Write`] when the note can't be deleted.
     ///   An attachment that can't be deleted stays, with a log line.
-    pub fn delete_note(&self, path: impl AsRef<Path>) -> Written<()> {
+    pub fn delete_note(&self, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
         self.inner.write(|draft| {
             Store::check_note(path)?;
@@ -464,7 +464,7 @@ impl Core {
     /// - [`Error::BadPath`] when `folder` is the root or `attachments/`, or is not a folder path.
     /// - [`Error::Read`] when `folder` is not a folder.
     /// - [`Error::Write`] when the folder can't be deleted. Some files in it may be gone.
-    pub fn delete_folder(&self, folder: impl AsRef<Path>) -> Written<()> {
+    pub fn delete_folder(&self, folder: impl AsRef<Path>) -> Result<()> {
         let folder = folder.as_ref();
         self.inner.write(|draft| {
             Store::check_folder(folder)?;
@@ -483,7 +483,7 @@ impl Core {
     /// - [`Error::BadPath`] as in [`Core::read`].
     /// - [`Error::Read`] or [`Error::NotUtf8`] when the file can't be read as text.
     /// - [`Error::Write`] when the id can't be written.
-    pub fn link_id(&self, path: impl AsRef<Path>) -> Written<NoteId> {
+    pub fn link_id(&self, path: impl AsRef<Path>) -> Result<NoteId> {
         self.inner.write(|draft| {
             let note = self.inner.edit_fields(draft, path.as_ref(), |text| {
                 if text.id().is_none() {
@@ -507,7 +507,7 @@ impl Core {
     /// - [`Error::BadPath`] as in [`Core::read`].
     /// - [`Error::Read`] or [`Error::NotUtf8`] when the file can't be read as text.
     /// - [`Error::Write`] when the file can't be written. The old file then stays.
-    pub fn add_tag(&self, path: impl AsRef<Path>, tag: &str) -> Written<NoteInfo> {
+    pub fn add_tag(&self, path: impl AsRef<Path>, tag: &str) -> Result<NoteInfo> {
         self.inner.write(|draft| {
             let tag = retag::clean(tag)?;
             self.inner
@@ -529,7 +529,7 @@ impl Core {
     ///
     /// - [`Error::BadTag`] when `tag` is not a tag name.
     /// - The errors of [`Core::add_tag`] for the file.
-    pub fn remove_tag(&self, path: impl AsRef<Path>, tag: &str) -> Written<NoteInfo> {
+    pub fn remove_tag(&self, path: impl AsRef<Path>, tag: &str) -> Result<NoteInfo> {
         self.inner.write(|draft| {
             let tag = retag::check(tag)?;
             self.inner
@@ -550,7 +550,7 @@ impl Core {
     /// # Errors
     ///
     /// As in [`Core::add_tag`].
-    pub fn set_pinned(&self, path: impl AsRef<Path>, pinned: bool) -> Written<NoteInfo> {
+    pub fn set_pinned(&self, path: impl AsRef<Path>, pinned: bool) -> Result<NoteInfo> {
         self.inner.write(|draft| {
             self.inner
                 .edit_fields(draft, path.as_ref(), |text| {
@@ -583,7 +583,7 @@ impl Core {
     ///
     /// - [`Error::BadTag`] when `from` is not a tag name, or nothing is left of `to`.
     /// - The first error of a note, as in [`Core::add_tag`].
-    pub fn rename_tag(&self, from: &str, to: &str) -> Written<usize> {
+    pub fn rename_tag(&self, from: &str, to: &str) -> Result<usize> {
         self.inner
             .write(|draft| self.inner.edit_tag(draft, &TagEdit::rename(from, to)?))
     }
@@ -605,7 +605,7 @@ impl Core {
     ///
     /// - [`Error::BadTag`] when `tag` is not a tag name.
     /// - The first error of a note, as in [`Core::add_tag`].
-    pub fn delete_tag(&self, tag: &str) -> Written<usize> {
+    pub fn delete_tag(&self, tag: &str) -> Result<usize> {
         self.inner
             .write(|draft| self.inner.edit_tag(draft, &TagEdit::delete(tag)?))
     }
@@ -684,7 +684,7 @@ impl Core {
             .count()
     }
 
-    fn move_folder_to(&self, folder: &Path, parent: &Path, name: &str) -> Written<PathBuf> {
+    fn move_folder_to(&self, folder: &Path, parent: &Path, name: &str) -> Result<PathBuf> {
         self.inner.write(|draft| {
             let new = self.inner.store.move_folder(folder, parent, name)?;
             if new != folder {
@@ -725,19 +725,6 @@ impl Core {
     }
 }
 
-/// What a write gives back: its result, and the snapshot right after it.
-///
-/// The snapshot comes also after a failed write. A part of that write may be done,
-/// like the first notes of [`Core::rename_tag`].
-#[derive(Debug)]
-#[must_use]
-pub struct Written<T> {
-    /// What the write gives, or why it failed.
-    pub result: Result<T>,
-    /// The facts of the notes folder right after the write.
-    pub snapshot: Snapshot,
-}
-
 /// The next snapshot, while one write runs.
 struct Draft<'a> {
     store: &'a Store,
@@ -769,7 +756,7 @@ impl Inner {
     /// Runs `op` under the write lock, with a draft of the next snapshot.
     /// When a fact changed, the draft gets the next revision and replaces the snapshot.
     /// The change list goes out first, so a reader that sees the revision already has its list.
-    fn write<T>(&self, op: impl FnOnce(&mut Draft<'_>) -> Result<T>) -> Written<T> {
+    fn write<T>(&self, op: impl FnOnce(&mut Draft<'_>) -> Result<T>) -> Result<T> {
         let _writing = lock(&self.writing);
         let mut draft = Draft {
             store: &self.store,
@@ -790,9 +777,9 @@ impl Inner {
             lock(&self.listeners).retain(|listener| listener.send(list.clone()).is_ok());
         }
         if draft.changed {
-            *lock(&self.snapshot) = snapshot.clone();
+            *lock(&self.snapshot) = snapshot;
         }
-        Written { result, snapshot }
+        result
     }
 
     /// Puts a note that Holm just wrote into the index and the draft, and returns it.
@@ -936,7 +923,6 @@ impl Inner {
             }
             Ok(())
         })
-        .result
     }
 }
 

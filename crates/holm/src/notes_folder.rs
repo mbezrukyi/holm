@@ -211,7 +211,7 @@ impl NotesFolder {
         cx: &mut Context<Self>,
     ) {
         self.write(
-            move |core| core.rename_note(&path, &title).result.map(|info| info.path),
+            move |core| core.rename_note(&path, &title).map(|info| info.path),
             done,
             cx,
         );
@@ -227,11 +227,11 @@ impl NotesFolder {
     ) {
         self.write(
             move |core| {
-                let written = match change {
+                match change {
                     TagChange::Add(tag) => core.add_tag(&path, &tag),
                     TagChange::Remove(tag) => core.remove_tag(&path, &tag),
-                };
-                written.result.map(drop)
+                }
+                .map(drop)
             },
             done,
             cx,
@@ -247,7 +247,7 @@ impl NotesFolder {
         cx: &mut Context<Self>,
     ) {
         self.write(
-            move |core| core.set_pinned(&path, pinned).result.map(drop),
+            move |core| core.set_pinned(&path, pinned).map(drop),
             done,
             cx,
         );
@@ -264,10 +264,10 @@ impl NotesFolder {
     ) {
         self.write(
             move |core| {
-                let note = core.create(&folder, &title).result?;
+                let note = core.create(&folder, &title)?;
                 match tag {
                     Some(tag) => {
-                        let info = core.add_tag(&note.info.path, &tag).result?;
+                        let info = core.add_tag(&note.info.path, &tag)?;
                         core.read(&info.path)
                     }
                     None => Ok(note),
@@ -288,8 +288,8 @@ impl NotesFolder {
     ) {
         self.write(
             move |core| {
-                let note = core.create(&folder, &title).result?;
-                Ok(core.link_id(&note.info.path).result?.to_string())
+                let note = core.create(&folder, &title)?;
+                Ok(core.link_id(&note.info.path)?.to_string())
             },
             done,
             cx,
@@ -304,7 +304,7 @@ impl NotesFolder {
         cx: &mut Context<Self>,
     ) {
         self.write(
-            move |core| core.link_id(&path).result.map(|id| id.to_string()),
+            move |core| core.link_id(&path).map(|id| id.to_string()),
             done,
             cx,
         );
@@ -318,7 +318,7 @@ impl NotesFolder {
         cx: &mut Context<Self>,
     ) {
         self.write(
-            move |core| core.move_note(&path, &folder).result.map(|info| info.path),
+            move |core| core.move_note(&path, &folder).map(|info| info.path),
             done,
             cx,
         );
@@ -331,11 +331,7 @@ impl NotesFolder {
         done: impl FnOnce(holm_core::Result<PathBuf>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.write(
-            move |core| core.move_folder(&path, &folder).result,
-            done,
-            cx,
-        );
+        self.write(move |core| core.move_folder(&path, &folder), done, cx);
     }
 
     pub(crate) fn rename_folder(
@@ -345,11 +341,7 @@ impl NotesFolder {
         done: impl FnOnce(holm_core::Result<PathBuf>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.write(
-            move |core| core.rename_folder(&folder, &name).result,
-            done,
-            cx,
-        );
+        self.write(move |core| core.rename_folder(&folder, &name), done, cx);
     }
 
     pub(crate) fn create_folder(
@@ -359,11 +351,7 @@ impl NotesFolder {
         done: impl FnOnce(holm_core::Result<PathBuf>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.write(
-            move |core| core.create_folder(&parent, &name).result,
-            done,
-            cx,
-        );
+        self.write(move |core| core.create_folder(&parent, &name), done, cx);
     }
 
     pub(crate) fn delete_note(
@@ -372,7 +360,7 @@ impl NotesFolder {
         done: impl FnOnce(holm_core::Result<()>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.write(move |core| core.delete_note(&path).result, done, cx);
+        self.write(move |core| core.delete_note(&path), done, cx);
     }
 
     pub(crate) fn delete_folder(
@@ -381,7 +369,7 @@ impl NotesFolder {
         done: impl FnOnce(holm_core::Result<()>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.write(move |core| core.delete_folder(&path).result, done, cx);
+        self.write(move |core| core.delete_folder(&path), done, cx);
     }
 
     /// What a delete of the note at `path` removes, after the writes before it.
@@ -412,7 +400,7 @@ impl NotesFolder {
         done: impl FnOnce(holm_core::Result<usize>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.write(move |core| core.rename_tag(&from, &to).result, done, cx);
+        self.write(move |core| core.rename_tag(&from, &to), done, cx);
     }
 
     /// The number of notes that a tag rename changes, after the writes before it.
@@ -433,7 +421,7 @@ impl NotesFolder {
         done: impl FnOnce(holm_core::Result<usize>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.write(move |core| core.delete_tag(&tag).result, done, cx);
+        self.write(move |core| core.delete_tag(&tag), done, cx);
     }
 
     /// The number of notes that a tag delete changes, after the writes before it.
@@ -735,8 +723,8 @@ fn first_note(core: &Core, last: Option<&Path>) -> holm_core::Result<Option<Note
 /// Saves the body of `text`. A save keeps the other facts that the core has for the note.
 fn write_text(core: &Core, text: NoteText) -> holm_core::Result<()> {
     match text {
-        NoteText::Save { path, body } => core.save(&path, &body).result.map(drop),
-        NoteText::Restore { info, body } => core.restore(&Note { info, body }).result.map(drop),
+        NoteText::Save { path, body } => core.save(&path, &body).map(drop),
+        NoteText::Restore { info, body } => core.restore(&Note { info, body }).map(drop),
     }
 }
 

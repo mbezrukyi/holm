@@ -25,12 +25,8 @@ fn add_tag_writes_a_clean_tag_and_keeps_the_body_other_fields_and_time() {
     let folder = Folder::new(&[("a.md", "---\nid: A\nauthor: me\n---\n# A\n")]);
     let time = folder.set_time("a.md", 1_000);
 
-    folder.core.add_tag("a.md", "home").result.unwrap();
-    let info = folder
-        .core
-        .add_tag("a.md", "my work / holm/")
-        .result
-        .unwrap();
+    folder.core.add_tag("a.md", "home").unwrap();
+    let info = folder.core.add_tag("a.md", "my work / holm/").unwrap();
 
     assert_eq!(info.tags, ["home", "my-work/holm"]);
     assert_eq!(info.modified, time);
@@ -46,7 +42,7 @@ fn add_tag_of_a_tag_the_note_has_does_not_write() {
     let text = "---\nid: A\ntags: [work, home]\n---\n# A\n";
     let folder = Folder::new(&[("a.md", text)]);
 
-    folder.core.add_tag("a.md", "work").result.unwrap();
+    folder.core.add_tag("a.md", "work").unwrap();
 
     assert_eq!(folder.text("a.md"), text);
 }
@@ -56,7 +52,7 @@ fn add_tag_with_nothing_left_fails() {
     let folder = Folder::new(&[("a.md", "# A\n")]);
 
     assert!(matches!(
-        folder.core.add_tag("a.md", "//").result,
+        folder.core.add_tag("a.md", "//"),
         Err(Error::BadTag { .. })
     ));
     assert_eq!(folder.text("a.md"), "# A\n");
@@ -70,7 +66,7 @@ fn remove_tag_keeps_the_other_tags_and_the_child_tags() {
     )]);
     let time = folder.set_time("a.md", 1_000);
 
-    let info = folder.core.remove_tag("a.md", "work").result.unwrap();
+    let info = folder.core.remove_tag("a.md", "work").unwrap();
 
     assert_eq!(info.tags, ["work/holm", "home"]);
     assert_eq!(info.modified, time);
@@ -80,7 +76,7 @@ fn remove_tag_keeps_the_other_tags_and_the_child_tags() {
 fn remove_tag_of_the_last_tag_removes_the_field() {
     let folder = Folder::new(&[("a.md", "---\nid: A\ntags: [work]\n---\n# A\n")]);
 
-    folder.core.remove_tag("a.md", "work").result.unwrap();
+    folder.core.remove_tag("a.md", "work").unwrap();
 
     assert_eq!(folder.text("a.md"), "---\nid: A\n---\n# A\n");
     assert_eq!(tagged(&folder, "work"), [] as [String; 0]);
@@ -91,7 +87,7 @@ fn remove_tag_of_a_tag_the_note_does_not_have_does_not_write() {
     let text = "---\nid: A\ntags: [work, home]\n---\n# A\n";
     let folder = Folder::new(&[("a.md", text)]);
 
-    folder.core.remove_tag("a.md", "other").result.unwrap();
+    folder.core.remove_tag("a.md", "other").unwrap();
 
     assert_eq!(folder.text("a.md"), text);
 }
@@ -100,9 +96,9 @@ fn remove_tag_of_a_tag_the_note_does_not_have_does_not_write() {
 fn tag_writes_keep_a_tag_from_another_tool() {
     let folder = Folder::new(&[("a.md", "---\nid: A\n---\n# A\n")]);
 
-    folder.core.add_tag("a.md", "a").result.unwrap();
+    folder.core.add_tag("a.md", "a").unwrap();
     folder.write("a.md", "---\nid: A\ntags: [a, b]\n---\n# A\n");
-    folder.core.remove_tag("a.md", "a").result.unwrap();
+    folder.core.remove_tag("a.md", "a").unwrap();
 
     assert_eq!(tags(&folder, "a.md"), ["b"]);
 }
@@ -112,14 +108,14 @@ fn set_pinned_pins_and_unpins_and_keeps_the_time() {
     let folder = Folder::new(&[("a.md", "---\nid: A\n---\n# A\n"), ("b.md", "# B\n")]);
     let time = folder.set_time("a.md", 1_000);
 
-    let info = folder.core.set_pinned("a.md", true).result.unwrap();
+    let info = folder.core.set_pinned("a.md", true).unwrap();
     assert!(info.pinned);
     assert_eq!(info.modified, time);
     assert_eq!(folder.text("a.md"), "---\nid: A\npinned: true\n---\n# A\n");
     let first = folder.core.snapshot().notes(Order::Title)[0].clone();
     assert!(first.pinned);
 
-    let info = folder.core.set_pinned("a.md", false).result.unwrap();
+    let info = folder.core.set_pinned("a.md", false).unwrap();
     assert!(!info.pinned);
     assert_eq!(folder.text("a.md"), "---\nid: A\n---\n# A\n");
 }
@@ -134,7 +130,7 @@ fn rename_tag_renames_child_tags_and_keeps_times() {
     let time = folder.set_time("b.md", 1_000);
 
     assert_eq!(folder.core.tag_rename_count("work", "job").unwrap(), 2);
-    assert_eq!(folder.core.rename_tag("work", "job").result.unwrap(), 2);
+    assert_eq!(folder.core.rename_tag("work", "job").unwrap(), 2);
 
     assert_eq!(tags(&folder, "a.md"), ["job", "home"]);
     assert_eq!(tags(&folder, "b.md"), ["job/holm"]);
@@ -151,7 +147,7 @@ fn rename_tag_to_an_existing_tag_merges_them() {
         ("b.md", "---\ntags: [job/holm, work/holm]\n---\n# B\n"),
     ]);
 
-    assert_eq!(folder.core.rename_tag("work", "job").result.unwrap(), 2);
+    assert_eq!(folder.core.rename_tag("work", "job").unwrap(), 2);
 
     assert_eq!(tags(&folder, "a.md"), ["job"]);
     assert_eq!(tags(&folder, "b.md"), ["job/holm"]);
@@ -161,7 +157,7 @@ fn rename_tag_to_an_existing_tag_merges_them() {
 fn rename_tag_cleans_the_new_name() {
     let folder = Folder::new(&[("a.md", "---\ntags: [work]\n---\n# A\n")]);
 
-    folder.core.rename_tag("work", " my job / ").result.unwrap();
+    folder.core.rename_tag("work", " my job / ").unwrap();
 
     assert_eq!(tags(&folder, "a.md"), ["my-job"]);
 }
@@ -172,7 +168,7 @@ fn rename_tag_to_the_same_name_changes_nothing() {
     let folder = Folder::new(&[("a.md", text)]);
 
     assert_eq!(folder.core.tag_rename_count("work", "work").unwrap(), 0);
-    assert_eq!(folder.core.rename_tag("work", "work").result.unwrap(), 0);
+    assert_eq!(folder.core.rename_tag("work", "work").unwrap(), 0);
     assert_eq!(folder.text("a.md"), text);
 }
 
@@ -185,7 +181,7 @@ fn delete_tag_removes_the_tag_and_its_child_tags() {
     ]);
 
     assert_eq!(folder.core.tag_delete_count("work").unwrap(), 2);
-    assert_eq!(folder.core.delete_tag("work").result.unwrap(), 2);
+    assert_eq!(folder.core.delete_tag("work").unwrap(), 2);
 
     assert_eq!(tags(&folder, "a.md"), ["home"]);
     assert_eq!(folder.text("b.md"), "---\nid: B\n---\n# B\n");
@@ -205,7 +201,7 @@ fn a_tag_that_no_note_has_changes_nothing() {
     let folder = Folder::new(&[("a.md", "---\ntags: [work]\n---\n# A\n")]);
 
     assert_eq!(folder.core.tag_delete_count("home").unwrap(), 0);
-    assert_eq!(folder.core.delete_tag("home").result.unwrap(), 0);
+    assert_eq!(folder.core.delete_tag("home").unwrap(), 0);
     assert_eq!(tags(&folder, "a.md"), ["work"]);
 }
 
@@ -214,10 +210,10 @@ fn bad_tag_names_are_refused() {
     let folder = Folder::new(&[("a.md", "---\ntags: [work]\n---\n# A\n")]);
 
     for result in [
-        folder.core.rename_tag("work", " / ").result,
-        folder.core.rename_tag("", "job").result,
-        folder.core.rename_tag("work/", "job").result,
-        folder.core.delete_tag("").result,
+        folder.core.rename_tag("work", " / "),
+        folder.core.rename_tag("", "job"),
+        folder.core.rename_tag("work/", "job"),
+        folder.core.delete_tag(""),
         folder.core.tag_delete_count("a//b"),
     ] {
         assert!(matches!(result, Err(Error::BadTag { .. })), "{result:?}");
@@ -234,7 +230,7 @@ fn a_note_that_cant_change_keeps_its_tags_and_the_others_still_change() {
     let locked = folder.path("locked");
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
 
-    let result = folder.core.rename_tag("work", "job").result;
+    let result = folder.core.rename_tag("work", "job");
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
 
     assert!(matches!(result, Err(Error::Write { .. })), "{result:?}");

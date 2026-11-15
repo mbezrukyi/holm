@@ -7,8 +7,8 @@ use std::sync::Arc;
 use crate::model::{Link, LinkTarget, NoteInfo, Order, Tag};
 use crate::store::folder_of;
 
-/// The facts of the notes folder at one moment, from [`Core::snapshot`](crate::Core::snapshot)
-/// or a [`Written`](crate::Written). It never changes.
+/// The facts of the notes folder at one moment, from [`Core::snapshot`](crate::Core::snapshot).
+/// It never changes.
 ///
 /// It is cheap to clone. All paths are relative to the notes folder, as in
 /// [`Core`](crate::Core).
