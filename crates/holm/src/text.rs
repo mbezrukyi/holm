@@ -98,6 +98,12 @@ pub(crate) const NEW_FOLDER: &str = "New folder";
 pub(crate) const NAME_FIELD: &str = "Name";
 pub(crate) const ROOT_FOLDER: &str = "Notes folder";
 pub(crate) const MOVE_TO: &str = "Move to";
+pub(crate) const NO_FOLDER: &str = "No folder has this name";
+
+/// The field of the move-to picker, for the note or folder `name`.
+pub(crate) fn move_to(name: &str) -> String {
+    format!("Move “{name}” to…")
+}
 pub(crate) const DELETE: &str = "Delete";
 pub(crate) const CANCEL: &str = "Cancel";
 pub(crate) const DO_NOT_ASK: &str = "Do not show again";

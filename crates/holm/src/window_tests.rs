@@ -1603,6 +1603,31 @@ fn a_move_into_a_clash_shows_the_answer_and_moves_nothing(cx: &mut TestAppContex
 }
 
 #[gpui_kit::test]
+fn the_move_picker_finds_a_folder_by_its_path(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    fs::create_dir_all(notes_dir.join("work/old")).unwrap();
+    fs::create_dir(notes_dir.join("home")).unwrap();
+    fs::write(notes_dir.join("Top.md"), "# Top\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+    let options =
+        |cx: &mut TestAppContext| labels(cx, handle, "folder-picker", Role::ListBoxOption);
+
+    keys(cx, handle, "ctrl-shift-l ctrl-shift-m");
+    assert_eq!(question(cx, handle).as_deref(), Some(text::MOVE_TO));
+    // The note is in the root folder already, so the root folder is not a choice.
+    assert_eq!(options(cx), ["home*", "work", "work/old"]);
+
+    cx.simulate_input(handle, "OLD");
+    settle(cx);
+    assert_eq!(options(cx), ["work/old*"]);
+    keys(cx, handle, "enter");
+    assert_eq!(question(cx, handle), None);
+    assert!(notes_dir.join("work/old/Top.md").is_file());
+    assert!(!notes_dir.join("Top.md").exists());
+}
+
+#[gpui_kit::test]
 fn a_folder_move_takes_the_open_note_with_it(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     nested_folders(&fixture);
