@@ -351,7 +351,11 @@ impl Sidebar {
     }
 
     fn rebuild_tree(&mut self) {
-        self.rows = self.tree.rows(&self.open);
+        let new_folder = match self.field.as_ref().map(|naming| &naming.named) {
+            Some(Named::NewFolder(parent)) => Some(parent.as_path()),
+            _ => None,
+        };
+        self.rows = self.tree.rows(&self.open, new_folder);
         self.entries.clear();
         for (at, row) in self.rows.iter().enumerate() {
             let first = |kind: fn(&Item) -> bool| {
@@ -654,7 +658,8 @@ impl Sidebar {
                 }
             }
             "left" => {
-                if self.open.remove(&item) {
+                if at.is_some_and(|at| self.rows[at].open) {
+                    self.open.remove(&item);
                     self.rebuild();
                     cx.notify();
                 } else if let Some(parent) = item.parent() {

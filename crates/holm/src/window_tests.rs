@@ -1902,6 +1902,74 @@ fn a_folder_delete_selects_the_parent_folder(cx: &mut TestAppContext) {
     );
 }
 
+/// Whether the tree row `label` shows open. `None` means it has no child rows.
+fn expanded(cx: &mut TestAppContext, handle: AnyWindowHandle, label: &str) -> Option<bool> {
+    screen(cx, handle, |window| {
+        window
+            .within("sidebar")
+            .find_all_by_role(Role::TreeItem)
+            .into_iter()
+            .find(|row| row.label() == Some(label))
+            .and_then(|row| row.expanded())
+    })
+}
+
+/// A note and the folders `area/work/plans`, with `area/work/plans` deleted in the app.
+fn delete_the_last_child_folder(cx: &mut TestAppContext, fixture: &Fixture) -> AnyWindowHandle {
+    fs::create_dir_all(fixture.notes().join("area/work/plans")).unwrap();
+    fs::write(fixture.notes().join("A.md"), "# A\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-shift-l escape down right down right");
+    assert_eq!(expanded(cx, handle, "area/work"), Some(true));
+    keys(cx, handle, "down delete enter");
+    assert_eq!(sidebar(cx, handle), "tree area/work");
+    handle
+}
+
+#[gpui_kit::test]
+fn a_folder_shows_closed_after_its_last_child_folder_is_deleted(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let handle = delete_the_last_child_folder(cx, &fixture);
+
+    assert_eq!(tree(cx, handle), ["All notes", "area", "area/work*"]);
+    assert_eq!(expanded(cx, handle, "area/work"), None);
+    // `←` on a closed folder selects its parent.
+    keys(cx, handle, "left");
+    assert_eq!(sidebar(cx, handle), "tree area");
+}
+
+#[gpui_kit::test]
+fn a_new_child_folder_after_the_delete_shows_at_once(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let handle = delete_the_last_child_folder(cx, &fixture);
+
+    fs::create_dir(fixture.notes().join("area/work/later")).unwrap();
+    fixture.tell(cx, "area/work/later");
+    assert_eq!(
+        tree(cx, handle),
+        ["All notes", "area", "area/work*", "area/work/later"]
+    );
+    assert_eq!(expanded(cx, handle, "area/work"), Some(true));
+}
+
+#[gpui_kit::test]
+fn esc_on_a_new_folder_in_a_folder_without_children_shows_it_closed(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    fs::create_dir(fixture.notes().join("home")).unwrap();
+    fs::write(fixture.notes().join("A.md"), "# A\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    keys(cx, handle, "ctrl-shift-l escape down");
+    assert_eq!(expanded(cx, handle, "home"), None);
+    keys(cx, handle, "ctrl-shift-n");
+    assert_eq!(tree(cx, handle), ["All notes", "home*", text::NEW_FOLDER]);
+    assert_eq!(expanded(cx, handle, "home"), Some(true));
+
+    keys(cx, handle, "escape");
+    assert_eq!(tree(cx, handle), ["All notes", "home*"]);
+    assert_eq!(expanded(cx, handle, "home"), None);
+}
+
 #[gpui_kit::test]
 fn a_child_tag_delete_selects_the_parent_tag_while_it_exists(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();

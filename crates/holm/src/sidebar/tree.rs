@@ -95,7 +95,9 @@ pub(crate) struct Row {
     pub(crate) name: String,
     pub(crate) depth: usize,
     pub(crate) count: usize,
+    /// Whether a row can show under this one. The field of a new folder counts.
     pub(crate) has_children: bool,
+    /// Whether rows show under this one. A folder in the open set with no child row is closed.
     pub(crate) open: bool,
 }
 
@@ -148,8 +150,8 @@ impl Tree {
     }
 
     /// The visible rows: "All notes", then the folders, then the tags. Only the children of
-    /// `open` items show.
-    pub(crate) fn rows(&self, open: &HashSet<Item>) -> Vec<Row> {
+    /// `open` items show. `new_folder` is the parent of the field of a new folder.
+    pub(crate) fn rows(&self, open: &HashSet<Item>, new_folder: Option<&Path>) -> Vec<Row> {
         let mut counts: HashMap<&Path, usize> = HashMap::new();
         for note in self.notes.notes() {
             *counts.entry(folder_of(&note.path)).or_default() += 1;
@@ -172,15 +174,17 @@ impl Tree {
                 continue;
             }
             let item = Item::Folder(folder.clone());
+            let has_children = new_folder == Some(folder.as_path())
+                || self
+                    .folders
+                    .get(i + 1)
+                    .is_some_and(|next| next.starts_with(folder));
             rows.push(Row {
                 name: item.name(),
                 depth: folder.components().count() - 1,
                 count: counts.get(folder.as_path()).copied().unwrap_or(0),
-                has_children: self
-                    .folders
-                    .get(i + 1)
-                    .is_some_and(|next| next.starts_with(folder)),
-                open: open.contains(&item),
+                has_children,
+                open: has_children && open.contains(&item),
                 item,
             });
         }
@@ -192,12 +196,13 @@ impl Tree {
 fn tag_rows(tags: &[Tag], depth: usize, open: &HashSet<Item>, rows: &mut Vec<Row>) {
     for tag in tags {
         let item = Item::Tag(tag.name.clone());
-        let is_open = open.contains(&item);
+        let has_children = !tag.children.is_empty();
+        let is_open = has_children && open.contains(&item);
         rows.push(Row {
             name: item.name(),
             depth,
             count: tag.notes,
-            has_children: !tag.children.is_empty(),
+            has_children,
             open: is_open,
             item,
         });
@@ -276,7 +281,7 @@ mod tests {
 
     #[test]
     fn closed_items_hide_their_children() {
-        let rows = tree().rows(&HashSet::new());
+        let rows = tree().rows(&HashSet::new(), None);
         assert_eq!(
             names(&rows),
             owned(&[
@@ -294,7 +299,7 @@ mod tests {
     #[test]
     fn open_items_show_their_children() {
         let open = HashSet::from([Item::Folder("work".into()), Item::Tag("work".into())]);
-        let rows = tree().rows(&open);
+        let rows = tree().rows(&open, None);
         assert_eq!(
             names(&rows),
             owned(&[
@@ -308,6 +313,16 @@ mod tests {
             ])
         );
         assert!(rows[2].open);
+    }
+
+    #[test]
+    fn an_open_folder_without_child_rows_is_closed() {
+        let open = HashSet::from([Item::Folder("home".into())]);
+        let rows = tree().rows(&open, None);
+        assert!(!rows[1].has_children && !rows[1].open);
+
+        let rows = tree().rows(&open, Some(Path::new("home")));
+        assert!(rows[1].has_children && rows[1].open);
     }
 
     #[test]
