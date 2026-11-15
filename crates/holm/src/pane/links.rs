@@ -44,8 +44,6 @@ pub(super) struct Links {
     backlinks: Entity<Backlinks>,
     /// The path of the open note, relative to the notes folder.
     note: Option<PathBuf>,
-    /// The revision of the snapshot that the links come from.
-    revision: u64,
     reading: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -59,8 +57,8 @@ impl Links {
         cx: &mut Context<Self>,
     ) -> Self {
         let subscriptions = vec![
-            cx.subscribe(&notes_folder, |links, notes_folder, _: &FolderEvent, cx| {
-                if notes_folder.read(cx).snapshot().revision() != links.revision {
+            cx.subscribe(&notes_folder, |links, _, event: &FolderEvent, cx| {
+                if !event.changes.is_empty() {
                     links.read(cx);
                 }
             }),
@@ -79,7 +77,6 @@ impl Links {
             editor,
             backlinks,
             note: None,
-            revision: 0,
             reading: None,
             _subscriptions: subscriptions,
         }
@@ -135,7 +132,6 @@ impl Links {
             return;
         };
         let notes_folder = self.notes_folder.read(cx);
-        self.revision = notes_folder.snapshot().revision();
         let backlinks = notes_folder.snapshot().backlinks(&path, Order::LastChange);
         let broken = notes_folder.broken_links(path.clone(), cx);
         let job = cx.background_spawn(async move {

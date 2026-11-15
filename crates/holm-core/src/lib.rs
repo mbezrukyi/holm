@@ -127,9 +127,10 @@ impl Core {
     /// A new stream of the change lists, for writes of Holm and for changes from other tools.
     ///
     /// Each stream gets every list from the time it was made. A list comes for each new
-    /// revision that has a change, before [`Core::snapshot`] shows that revision.
+    /// revision, before [`Core::snapshot`] shows that revision.
     /// A batch of outside changes gives the note changes in path order, then
-    /// [`Change::Folders`] and [`Change::Tags`]. A write gives the moves it made.
+    /// [`Change::Folders`] and [`Change::Tags`]. A write gives the moves it made, and
+    /// [`Change::Notes`] and [`Change::Folders`] for the other facts it changed.
     pub fn changes(&self) -> Changes {
         let (send, receive) = mpsc::channel();
         lock(&self.inner.listeners).push(send);
@@ -362,7 +363,7 @@ impl Core {
     pub fn create_folder(&self, parent: impl AsRef<Path>, name: &str) -> Result<PathBuf> {
         self.inner.write(|draft| {
             let new = self.inner.store.create_folder(parent.as_ref(), name)?;
-            draft.folders(&new)?;
+            draft.wrote_folders(&new)?;
             Ok(new)
         })
     }
@@ -735,8 +736,27 @@ struct Draft<'a> {
 }
 
 impl Draft<'_> {
-    fn notes(&mut self, delta: Delta) {
-        self.changed |= self.next.apply(delta);
+    /// Applies `delta`, and returns whether a note changed.
+    fn notes(&mut self, delta: Delta) -> bool {
+        let changed = self.next.apply(delta);
+        self.changed |= changed;
+        changed
+    }
+
+    /// Adds [`Change::Notes`] once, after a write of Holm changed notes with no move.
+    fn wrote_notes(&mut self) {
+        if !self.changes.contains(&Change::Notes) {
+            self.changes.push(Change::Notes);
+        }
+    }
+
+    /// Reads the folders at or below `scope` again after a write of Holm, and adds
+    /// [`Change::Folders`] once when they changed.
+    fn wrote_folders(&mut self, scope: &Path) -> Result<()> {
+        if self.folders(scope)? && !self.changes.contains(&Change::Folders) {
+            self.changes.push(Change::Folders);
+        }
+        Ok(())
     }
 
     /// Reads the folders at or below `scope` from the disk again. It returns whether they changed.
@@ -765,6 +785,10 @@ impl Inner {
             changes: Vec::new(),
         };
         let result = op(&mut draft);
+        debug_assert!(
+            !draft.changed || !draft.changes.is_empty(),
+            "a new revision with no change"
+        );
         let mut snapshot = draft.next;
         if draft.changed {
             snapshot = snapshot.next_revision();
@@ -785,7 +809,9 @@ impl Inner {
     /// Puts a note that Holm just wrote into the index and the draft, and returns it.
     fn update(&self, draft: &mut Draft<'_>, note: &Note, stamp: store::Stamp) -> Result<Note> {
         let (note, delta) = self.index.update(&self.store, note, stamp)?;
-        draft.notes(delta);
+        if draft.notes(delta) {
+            draft.wrote_notes();
+        }
         Ok(note)
     }
 
@@ -867,8 +893,10 @@ impl Inner {
                 }
             }
         }
-        self.refresh(draft, vec![scope.to_owned()])?;
-        draft.folders(scope)?;
+        if self.refresh(draft, vec![scope.to_owned()])? {
+            draft.wrote_notes();
+        }
+        draft.wrote_folders(scope)?;
         deleted
     }
 
@@ -886,13 +914,12 @@ impl Inner {
         Ok(info)
     }
 
-    /// Updates the index and the draft at each path after Holm's own change.
-    /// It adds no change to the list, so the write adds its own moves.
-    fn refresh(&self, draft: &mut Draft<'_>, mut paths: Vec<PathBuf>) -> Result<()> {
+    /// Updates the index and the draft at each path after Holm's own change, and returns
+    /// whether a note changed. It adds no change to the list, so the write adds its own.
+    fn refresh(&self, draft: &mut Draft<'_>, mut paths: Vec<PathBuf>) -> Result<bool> {
         paths.sort();
         let refresh = self.index.refresh(&self.store, &outer(paths))?;
-        draft.notes(refresh.delta);
-        Ok(())
+        Ok(draft.notes(refresh.delta))
     }
 
     /// Checks the disk at each path of `batch`, and updates the index, the snapshot and the

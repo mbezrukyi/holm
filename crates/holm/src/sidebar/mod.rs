@@ -122,8 +122,6 @@ pub(crate) struct Sidebar {
     notes_folder: Entity<NotesFolder>,
     order: Order,
     tree: Tree,
-    /// The revision of the snapshot that `tree` shows.
-    revision: u64,
     view: View,
     open: HashSet<Item>,
     rows: Vec<Row>,
@@ -174,7 +172,6 @@ impl Sidebar {
             notes_folder,
             order,
             tree: Tree::default(),
-            revision: 0,
             view,
             open: HashSet::new(),
             rows: Vec::new(),
@@ -203,8 +200,7 @@ impl Sidebar {
     /// Takes the end of a write or of outside changes: it follows the moves, and then shows
     /// the snapshot.
     fn changed(&mut self, changes: &[Change], cx: &mut Context<Self>) {
-        let revision = self.notes_folder.read(cx).snapshot().revision();
-        if changes.is_empty() && revision == self.revision {
+        if changes.is_empty() {
             return;
         }
         let view = self.view.clone();
@@ -249,7 +245,6 @@ impl Sidebar {
     /// view and the open items.
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let snapshot = self.notes_folder.read(cx).snapshot();
-        self.revision = snapshot.revision();
         self.tree = Tree::new(snapshot, self.order);
         let item = self.tree.nearest(self.view.item());
         if &item != self.view.item() {

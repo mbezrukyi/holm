@@ -120,9 +120,9 @@ pub struct DeleteCount {
 
 /// One change to the notes folder, in a [`ChangeList`].
 ///
-/// A write through [`Core`](crate::Core) gives only the moves it makes: [`Change::Moved`],
-/// [`Change::FolderMoved`] and [`Change::TagMoved`]. Its other changes show only in the
-/// snapshot.
+/// A write through [`Core`](crate::Core) gives the moves it makes: [`Change::Moved`],
+/// [`Change::FolderMoved`] and [`Change::TagMoved`]. Its other changes come only as
+/// [`Change::Notes`] and [`Change::Folders`], and show in the snapshot.
 ///
 /// The core finds no folder moves from other tools. Each note of a moved folder comes as
 /// [`Change::Moved`] or as [`Change::Removed`] and [`Change::Added`].
@@ -156,6 +156,9 @@ pub enum Change {
         /// The new name.
         to: String,
     },
+    /// Holm made, saved or deleted notes, or changed their tags or pin. The snapshot holds
+    /// the new facts.
+    Notes,
     /// The list from [`Snapshot::folders`](crate::Snapshot::folders) changed.
     Folders,
     /// The tag tree from [`Snapshot::tags`](crate::Snapshot::tags) changed.
@@ -198,6 +201,6 @@ pub struct ChangeList {
     /// The revision of the first snapshot that shows the changes.
     pub revision: u64,
     /// The changes in order: first the note and folder changes, then [`Change::Folders`] and
-    /// [`Change::Tags`]. It is never empty.
+    /// [`Change::Tags`]. It is never empty, and each new revision has one.
     pub changes: Vec<Change>,
 }

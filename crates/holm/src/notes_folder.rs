@@ -38,8 +38,8 @@ pub(crate) const POLL: Duration = Duration::from_millis(100);
 /// in. Each write sends one, also a failed write.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct FolderEvent {
-    /// The changes of every revision up to [`NotesFolder::snapshot`], for every cause. It can
-    /// be empty.
+    /// The changes of every revision up to [`NotesFolder::snapshot`], for every cause. It is
+    /// empty when the snapshot did not change.
     pub(crate) changes: Vec<Change>,
 }
 
@@ -816,7 +816,7 @@ mod tests {
         assert_eq!(
             *steps.borrow(),
             [
-                "event []",
+                "event [Folders]",
                 "create ok",
                 r#"event [FolderMoved { from: "work", to: "job" }]"#,
                 "rename ok",

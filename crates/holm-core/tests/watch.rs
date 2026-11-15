@@ -180,7 +180,7 @@ fn a_move_with_the_new_path_first_is_one_change() {
 }
 
 #[test]
-fn holm_s_own_saves_and_new_notes_do_not_come_back() {
+fn holm_s_own_saves_and_new_notes_come_only_as_notes() {
     let fed = Fed::new(&[("a.md", "# A\n")]);
 
     fed.core.save("a.md", "# A\n\nMore.\n").unwrap();
@@ -190,11 +190,11 @@ fn holm_s_own_saves_and_new_notes_do_not_come_back() {
         .changed([PathBuf::from("a.md"), new.info.path])
         .unwrap();
 
-    assert_eq!(fed.take(), []);
+    assert_eq!(fed.take(), [Change::Notes, Change::Notes, Change::Notes]);
 }
 
 #[test]
-fn holm_s_own_pin_and_attachment_changes_do_not_come_back() {
+fn a_pin_comes_only_as_notes_and_an_attachment_not_at_all() {
     let fed = Fed::new(&[("a.md", "# A\n")]);
 
     fed.core.set_pinned("a.md", true).unwrap();
@@ -203,7 +203,7 @@ fn holm_s_own_pin_and_attachment_changes_do_not_come_back() {
         .changed([PathBuf::from("a.md"), PathBuf::from("attachments"), image])
         .unwrap();
 
-    assert_eq!(fed.take(), []);
+    assert_eq!(fed.take(), [Change::Notes]);
 }
 
 #[test]
@@ -240,10 +240,13 @@ fn each_own_move_comes_as_one_list_with_its_revision() {
             },
             ChangeList {
                 revision: fed.core.snapshot().revision(),
-                changes: vec![Change::TagMoved {
-                    from: "work".into(),
-                    to: "Job".into(),
-                }],
+                changes: vec![
+                    Change::Notes,
+                    Change::TagMoved {
+                        from: "work".into(),
+                        to: "Job".into(),
+                    },
+                ],
             },
         ]
     );
@@ -528,12 +531,13 @@ mod real_events {
     }
 
     #[test]
-    fn a_save_does_not_come_back_but_the_next_outside_change_does() {
+    fn a_save_comes_only_as_notes_but_the_next_outside_change_comes() {
         let (dir, _cache, core, changes) = open(&[("a.md", "# A\n")]);
 
         core.save("a.md", "# A\n\nMore.\n").unwrap();
         fs::write(dir.path().join("b.md"), "# B\n").unwrap();
 
+        assert_eq!(next(&changes), [Change::Notes]);
         assert_eq!(
             next(&changes),
             [Change::Added(core.read("b.md").unwrap().info)]
