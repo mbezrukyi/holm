@@ -22,6 +22,7 @@ use gpui_kit::{
     Window, div,
 };
 
+use crate::path_text::PathText;
 use crate::problem_list::ProblemList;
 use crate::text;
 
@@ -36,7 +37,7 @@ pub(crate) struct Answer(pub(crate) &'static str);
 pub(crate) struct OpenState;
 
 pub(crate) struct MessageLine {
-    message: Option<SharedString>,
+    message: Option<PathText>,
     state: Option<SharedString>,
     writing: bool,
     /// The window bounds of the state in the last frame.
@@ -85,14 +86,14 @@ impl MessageLine {
     }
 
     /// Shows `text` on the left until the next key.
-    pub(crate) fn show(&mut self, text: impl Into<SharedString>, cx: &mut Context<Self>) {
+    pub(crate) fn show(&mut self, text: impl Into<PathText>, cx: &mut Context<Self>) {
         self.message = Some(text.into());
         cx.notify();
     }
 
     /// The answer or start message on the left.
     pub(crate) fn message(&self) -> Option<&str> {
-        self.message.as_deref()
+        self.message.as_ref().map(PathText::as_str)
     }
 
     /// Shows `state` on the right, or no state with `None`.
@@ -212,14 +213,14 @@ impl Render for MessageLine {
             return div().into_any_element();
         }
         let theme = cx.theme();
-        let message = self.message.clone().map(|message| {
+        let message = self.message.as_ref().map(|message| {
             div()
                 .id("message")
                 .role(Role::Status)
-                .aria_label(message.clone())
+                .aria_label(message.plain_text())
                 .test_support()
-                .truncate()
-                .child(message)
+                .overflow_hidden()
+                .child(message.one_line())
         });
         h_flex()
             .id("message-line")

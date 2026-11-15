@@ -24,6 +24,7 @@ use crate::log::Log;
 use crate::message_line::{Answer, MessageLine};
 use crate::notes::NotesView;
 use crate::notes_folder::NotesFolder;
+use crate::path_text::PathText;
 use crate::{notes_folder, text, theme};
 
 pub(crate) const APP_ID: &str = "io.github.mbezrukyi.Holm";
@@ -86,7 +87,7 @@ enum Stage {
     Ask,
     Opening,
     /// Holm can't open the notes folder.
-    Failed(SharedString),
+    Failed(PathText),
     Open(Entity<NotesView>),
 }
 
@@ -193,7 +194,7 @@ impl HolmWindow {
                         tracing::warn!(error = %crate::chain(&error), "cannot open the notes folder");
                         Stage::Failed(match error {
                             AppError::Core(holm_core::Error::NotesFolder { .. }) => {
-                                text::folder_missing(&folder).into()
+                                text::folder_missing(&folder)
                             }
                             error => error.message().into(),
                         })
@@ -284,10 +285,10 @@ impl HolmWindow {
                     ),
             ),
             Stage::Failed(message) => (
-                message.clone(),
+                message.plain_text(),
                 v_flex()
                     .gap_2()
-                    .child(message.clone())
+                    .child(message.wrapped())
                     .child(h_flex().pt_4().child(pick.primary())),
             ),
             Stage::Opening => (

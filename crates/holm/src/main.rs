@@ -17,6 +17,7 @@ mod name_field;
 mod notes;
 mod notes_folder;
 mod pane;
+mod path_text;
 mod picker;
 mod popup;
 mod problem_list;

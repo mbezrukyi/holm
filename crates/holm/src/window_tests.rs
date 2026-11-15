@@ -276,7 +276,7 @@ fn a_missing_folder_offers_to_pick_another(cx: &mut TestAppContext) {
     let handle = open(cx, fixture.startup(None));
     assert_eq!(
         folder_screen(cx, handle),
-        Some(text::folder_missing(&fixture.notes()))
+        Some(text::folder_missing(&fixture.notes()).to_string())
     );
 
     let other = fixture.dir.path().join("other");
@@ -387,7 +387,7 @@ fn a_broken_config_is_a_problem_in_the_message_line(cx: &mut TestAppContext) {
     let log = PathBuf::from("/state/holm/holm.log");
     let handle = open(cx, fixture.startup(Some(log.clone())));
     assert_eq!(folder_screen(cx, handle).as_deref(), Some(text::ASK_FOLDER));
-    assert_eq!(message(cx, handle), Some(text::crashed(&log)));
+    assert_eq!(message(cx, handle), Some(text::crashed(&log).to_string()));
     assert_eq!(problem_mark(cx, handle), Some(text::problem_mark(1)));
 
     keys(cx, handle, "ctrl-shift-e");
@@ -415,7 +415,7 @@ fn the_message_line_does_not_move_the_folder_question(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     let log = PathBuf::from("/state/holm/holm.log");
     let handle = open(cx, fixture.startup(Some(log.clone())));
-    assert_eq!(message(cx, handle), Some(text::crashed(&log)));
+    assert_eq!(message(cx, handle), Some(text::crashed(&log).to_string()));
     let with = bounds_of(cx, handle, "folder-question").unwrap();
     let line = bounds_of(cx, handle, "message-line").unwrap();
     let screen = bounds_of(cx, handle, "folder-screen").unwrap();
@@ -436,7 +436,7 @@ fn an_answer_shows_under_the_note_until_the_next_key(cx: &mut TestAppContext) {
     fs::write(fixture.notes().join("Note.md"), "[gone](holm:01X)\n").unwrap();
     let log = PathBuf::from("/state/holm/holm.log");
     let handle = open(cx, fixture.startup(Some(log.clone())));
-    assert_eq!(message(cx, handle), Some(text::crashed(&log)));
+    assert_eq!(message(cx, handle), Some(text::crashed(&log).to_string()));
     let (line, editor) = screen(cx, handle, |window| {
         (
             window.find("message-line").bounds(),

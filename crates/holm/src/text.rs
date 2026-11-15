@@ -2,6 +2,8 @@
 
 use std::path::Path;
 
+use crate::path_text::PathText;
+
 pub(crate) const NOTES_FOLDER: &str = "Holm can't open the notes folder.";
 pub(crate) const READ: &str = "Holm can't read a file in the notes folder.";
 pub(crate) const NOT_UTF8: &str = "This file is not plain text, so Holm can't open it.";
@@ -48,8 +50,11 @@ pub(crate) const NO_NOTE_OPEN: &str = "No note is open.";
 pub(crate) const NEW_NOTE: &str = "New note";
 pub(crate) const CLOSE: &str = "Close";
 
-pub(crate) fn folder_missing(folder: &Path) -> String {
-    format!("Holm can't find the notes folder {}.", home_path(folder))
+pub(crate) fn folder_missing(folder: &Path) -> PathText {
+    PathText::default()
+        .plain("Holm can't find the notes folder ")
+        .path(home_path(folder))
+        .plain(".")
 }
 
 /// `path` with `~` for the home folder.
@@ -60,11 +65,11 @@ pub(crate) fn home_path(path: &Path) -> String {
     }
 }
 
-pub(crate) fn crashed(log: &Path) -> String {
-    format!(
-        "Holm closed after an error. The log is at {}.",
-        home_path(log)
-    )
+pub(crate) fn crashed(log: &Path) -> PathText {
+    PathText::default()
+        .plain("Holm closed after an error. The log is at ")
+        .path(home_path(log))
+        .plain(".")
 }
 
 pub(crate) const ALL_NOTES: &str = "All notes";
