@@ -1,7 +1,8 @@
-//! Speed of the core in a notes folder with many notes: the start, the lists, the search and a save.
+//! Speed of the core in a notes folder with many notes: the start, the lists, the search and saves.
 
 #![allow(clippy::unwrap_used, reason = "benches")]
 
+use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
 
@@ -110,17 +111,43 @@ fn search(bencher: divan::Bencher<'_, '_>, text: &str) {
     });
 }
 
-/// An autosave: the note file and its index row.
-#[divan::bench(sample_count = 50)]
-fn save(bencher: divan::Bencher<'_, '_>) {
+/// An autosave: the note file and its index row. The 2 KB note is one of the folder.
+/// The bigger ones are new notes with headings, lists, links and code.
+#[divan::bench(sample_count = 50, args = [2_000, 200_000, 1_000_000])]
+fn save(bencher: divan::Bencher<'_, '_>, size: usize) {
     let notes = notes_folder();
     let index = tempfile::tempdir().unwrap();
     let core = open(notes.path(), index.path());
-    let mut body = core.read("folder 1/Note 1.md").unwrap().body;
+    let path = if size > 2_000 {
+        fs::write(notes.path().join("Big.md"), big_note(size)).unwrap();
+        "Big.md"
+    } else {
+        "folder 1/Note 1.md"
+    };
+    let mut body = core.read(path).unwrap().body;
     bencher.bench_local(|| {
         body.push_str("word ");
-        core.save("folder 1/Note 1.md", &body).result.unwrap()
+        core.save(path, &body).result.unwrap()
     });
+}
+
+/// A note text of about `size` bytes.
+fn big_note(size: usize) -> String {
+    let mut text = String::from("---\nid: BIG\ntags: [big]\n---\n# Big\n\n");
+    let mut part = 0;
+    while text.len() < size {
+        writeln!(
+            text,
+            "## Part {part}\n\nSome *plain* words with **strong** text, `code` and a \
+            [link](holm:N{:05}). A line about work and home.\n\n\
+            - one item\n- two items with [a file](attachments/f{part}.pdf)\n  - a nested item\n\n\
+            ```rust\nfn part_{part}() {{}}\n```\n",
+            part % NOTES,
+        )
+        .unwrap();
+        part += 1;
+    }
+    text
 }
 
 /// A tag change from the tag row: the frontmatter and the index row. The body stays.
