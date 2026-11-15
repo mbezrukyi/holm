@@ -22,7 +22,7 @@ use crate::Editor;
 use crate::ink;
 use crate::model::{LineKind, Mark, Quote, Run};
 use flow::{ChipPaint, FlowLine, Icon};
-use layout::{COLUMN_WIDTH, SIDE_MARGIN};
+use layout::SIDE_MARGIN;
 use layout::{Content, LaidLine, Shaper, lay_out, run_font};
 
 /// The width of a quote bar.
@@ -46,22 +46,15 @@ impl IntoElement for EditorElement {
 pub fn text_column(child: impl IntoElement) -> Div {
     div()
         .size_full()
-        .flex()
-        .justify_center()
         .px(SIDE_MARGIN)
-        .child(div().w_full().max_w(COLUMN_WIDTH).child(child))
+        .child(div().w_full().child(child))
 }
 
-/// The text column in the middle of `bounds`, with at least [`SIDE_MARGIN`] on each side.
+/// The text column: `bounds` without [`SIDE_MARGIN`] on each side.
 fn column(bounds: Bounds<Pixels>) -> Bounds<Pixels> {
-    let width = (bounds.size.width - SIDE_MARGIN * 2.)
-        .max(px(0.))
-        .min(COLUMN_WIDTH);
+    let width = (bounds.size.width - SIDE_MARGIN * 2.).max(px(0.));
     Bounds::new(
-        point(
-            bounds.origin.x + (bounds.size.width - width) / 2.,
-            bounds.origin.y,
-        ),
+        point(bounds.origin.x + SIDE_MARGIN, bounds.origin.y),
         size(width, bounds.size.height),
     )
 }

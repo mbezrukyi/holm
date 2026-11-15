@@ -178,6 +178,23 @@ fn long_lines_wrap_at_the_editor_width() {
 }
 
 #[test]
+fn the_text_column_fills_a_wide_editor() {
+    let mut app = app();
+    let width = {
+        let (_, cx) = open(&mut app, "", WIDTH, HEIGHT);
+        advance(cx) * 150.5 + MARGIN * 2.
+    };
+    let line = "a".repeat(150);
+    let (editor, cx) = open(&mut app, &line, width, HEIGHT);
+    click(cx, 140.2, LINE_HEIGHT * 0.5);
+    cx.simulate_input("X");
+    assert_eq!(
+        text(&editor, cx),
+        format!("{}X{}", "a".repeat(140), "a".repeat(10))
+    );
+}
+
+#[test]
 fn up_and_down_pass_a_wrap_inside_a_word() {
     let mut app = app();
     let width = {
