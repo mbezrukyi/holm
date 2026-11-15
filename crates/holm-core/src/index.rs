@@ -17,9 +17,9 @@ use rusqlite::types::Value;
 use rusqlite::{Connection, OptionalExtension as _, params};
 
 use crate::error::{Error, Result};
-use crate::model::{Change, Link, LinkTarget, Note, NoteId, NoteInfo, Order};
+use crate::model::{Change, Link, LinkTarget, Note, NoteId, NoteInfo};
 use crate::relink::resolve;
-use crate::snapshot::{Delta, sort};
+use crate::snapshot::Delta;
 use crate::store::{ATTACHMENTS, Stamp, Store, folder_of, time};
 
 const FILE: &str = "index.sqlite";
@@ -116,20 +116,19 @@ impl Index {
         })
     }
 
-    /// The notes whose title, text or tags hold every word of `text`, in `order`.
-    pub(crate) fn search(&self, store: &Store, text: &str, order: Order) -> Result<Vec<NoteInfo>> {
+    /// The paths of the notes whose title, text or tags hold every word of `text`, in no order.
+    pub(crate) fn search(&self, store: &Store, text: &str) -> Result<Vec<PathBuf>> {
         let Some(query) = match_query(text) else {
             return Ok(Vec::new());
         };
-        let sql =
-            format!("{NOTE_INFO} WHERE key IN (SELECT rowid FROM search WHERE search MATCH ?1)");
-        let mut notes = self.run(store, |conn| {
-            let mut statement = conn.prepare_cached(&sql)?;
-            let rows = statement.query_map([&query], note_info)?;
+        self.run(store, |conn| {
+            let mut statement = conn.prepare_cached(
+                "SELECT path FROM notes
+                WHERE key IN (SELECT rowid FROM search WHERE search MATCH ?1)",
+            )?;
+            let rows = statement.query_map([&query], |row| Ok(path(row.get(0)?)))?;
             Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-        })?;
-        sort(&mut notes, order);
-        Ok(notes)
+        })
     }
 
     /// Every note with its links, in no order.

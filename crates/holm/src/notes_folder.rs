@@ -547,14 +547,9 @@ impl NotesFolder {
         )
     }
 
-    /// The notes that match `query`. It does not wait for the line.
-    pub(crate) fn search(
-        &self,
-        query: String,
-        order: Order,
-        cx: &App,
-    ) -> Task<holm_core::Result<Vec<NoteInfo>>> {
-        self.look(move |core| core.search(&query, order), cx)
+    /// The paths of the notes that match `query`, in no order. It does not wait for the line.
+    pub(crate) fn search(&self, query: String, cx: &App) -> Task<holm_core::Result<Vec<PathBuf>>> {
+        self.look(move |core| core.search(&query), cx)
     }
 
     /// The headings of the note at `path`. It does not wait for the line.

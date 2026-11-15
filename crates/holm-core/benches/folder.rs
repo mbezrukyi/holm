@@ -97,12 +97,17 @@ fn sidebar_tags(bencher: divan::Bencher<'_, '_>) {
     bencher.bench_local(|| core.snapshot().tags());
 }
 
-#[divan::bench(sample_count = 50)]
-fn search(bencher: divan::Bencher<'_, '_>) {
+/// A search key, with the results in the order of the list. `"work ho"` matches every note,
+/// and `"note 50"` 11 notes.
+#[divan::bench(sample_count = 50, args = ["work ho", "note 50"])]
+fn search(bencher: divan::Bencher<'_, '_>, text: &str) {
     let notes = notes_folder();
     let index = tempfile::tempdir().unwrap();
     let core = open(notes.path(), index.path());
-    bencher.bench_local(|| core.search("work ho", Order::LastChange).unwrap());
+    bencher.bench_local(|| {
+        let found = core.search(text).unwrap();
+        core.snapshot().sorted(found, Order::LastChange)
+    });
 }
 
 /// An autosave: the note file and its index row.

@@ -222,3 +222,23 @@ fn an_old_snapshot_stays_as_it_was() {
     assert_eq!(titles(&old), ["A"]);
     assert_eq!(titles(&folder.core.snapshot()), ["A", "B"]);
 }
+
+#[test]
+fn sorted_puts_known_paths_in_order_and_leaves_out_the_others() {
+    let folder = Folder::new(&[
+        ("b.md", ""),
+        ("A.md", ""),
+        ("work/c.md", "---\npinned: true\n---\n"),
+    ]);
+    let snapshot = folder.core.snapshot();
+    let given = ["b.md", "gone.md", "work/c.md", "A.md", "work"].map(PathBuf::from);
+
+    assert_eq!(
+        common::paths(snapshot.sorted(given, Order::Title)),
+        ["work/c.md", "A.md", "b.md"]
+    );
+    assert_eq!(
+        snapshot.sorted(Vec::new(), Order::Title),
+        Vec::<PathBuf>::new()
+    );
+}

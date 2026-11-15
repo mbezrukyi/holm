@@ -135,7 +135,8 @@ impl Core {
         Changes { receive }
     }
 
-    /// The notes whose title, text or tags hold every word of `text`.
+    /// The paths of the notes whose title, text or tags hold every word of `text`, in no
+    /// order. [`Snapshot::sorted`] puts them in the order of a list.
     ///
     /// A word also matches longer words that start with it, so `pla` finds "plans".
     /// Capital letters and accents make no difference. With no words, the list is empty.
@@ -143,8 +144,8 @@ impl Core {
     /// # Errors
     ///
     /// [`Error::Index`] as in [`Core::open`].
-    pub fn search(&self, text: &str, order: Order) -> Result<Vec<NoteInfo>> {
-        self.inner.index.search(&self.inner.store, text, order)
+    pub fn search(&self, text: &str) -> Result<Vec<PathBuf>> {
+        self.inner.index.search(&self.inner.store, text)
     }
 
     /// The text of each heading in the note at `path`, in order.

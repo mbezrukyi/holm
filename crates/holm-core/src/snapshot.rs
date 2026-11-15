@@ -118,6 +118,17 @@ impl Snapshot {
         self.notes.get(path).map(|entry| &entry.info)
     }
 
+    /// The paths of `paths` that the snapshot has a note at, in `order`. Pinned notes are on
+    /// top. The others are left out.
+    pub fn sorted(&self, paths: impl IntoIterator<Item = PathBuf>, order: Order) -> Vec<PathBuf> {
+        let mut notes: Vec<&NoteInfo> = paths
+            .into_iter()
+            .filter_map(|path| self.note(path))
+            .collect();
+        sort(&mut notes, order);
+        notes.into_iter().map(|note| note.path.clone()).collect()
+    }
+
     /// Every subfolder of the notes folder, sorted by path.
     ///
     /// Hidden folders, symlinks and the `attachments/` folder at the root are skipped.
@@ -202,14 +213,14 @@ impl Snapshot {
     }
 
     fn list(&self, keep: impl Fn(&Entry) -> bool, order: Order) -> Vec<NoteInfo> {
-        let mut notes: Vec<NoteInfo> = self
+        let mut notes: Vec<&NoteInfo> = self
             .notes
             .values()
             .filter(|entry| keep(entry))
-            .map(|entry| entry.info.clone())
+            .map(|entry| &entry.info)
             .collect();
         sort(&mut notes, order);
-        notes
+        notes.into_iter().cloned().collect()
     }
 }
 
@@ -220,7 +231,7 @@ fn in_tag(name: &str, tag: &str) -> bool {
 }
 
 /// Pinned notes first, then `order`. The path breaks ties, so the order never changes at random.
-pub(crate) fn sort(notes: &mut [NoteInfo], order: Order) {
+fn sort(notes: &mut [&NoteInfo], order: Order) {
     match order {
         Order::LastChange => notes.sort_by(|a, b| {
             (b.pinned, b.modified)
@@ -228,9 +239,7 @@ pub(crate) fn sort(notes: &mut [NoteInfo], order: Order) {
                 .then_with(|| a.path.cmp(&b.path))
         }),
         Order::Title => {
-            notes.sort_by_cached_key(|note| {
-                (!note.pinned, note.title.to_lowercase(), note.path.clone())
-            });
+            notes.sort_by_cached_key(|&note| (!note.pinned, note.title.to_lowercase(), &note.path));
         }
     }
 }

@@ -16,6 +16,12 @@ fn paths(notes: Vec<NoteInfo>) -> Vec<String> {
     common::paths(notes.into_iter().map(|n| n.path))
 }
 
+/// The search results in the order of a list.
+fn found(folder: &Folder, text: &str) -> Vec<String> {
+    let found = folder.core.search(text).unwrap();
+    common::paths(folder.core.snapshot().sorted(found, Order::Title))
+}
+
 fn note(id: &str, extra: &str, body: &str) -> String {
     format!("---\nid: {id}\n{extra}---\n{body}")
 }
@@ -170,7 +176,7 @@ fn search_finds_words_in_titles_text_and_tags() {
         ("c.md", "---\ntags: [recipes/bread]\n---\n# Bake\n"),
         ("d.md", "# Nothing here\n"),
     ]);
-    let search = |text| paths(folder.core.search(text, Order::Title).unwrap());
+    let search = |text| found(&folder, text);
 
     assert_eq!(search("garden"), ["a.md"]);
     assert_eq!(search("PLA"), ["a.md"], "a word matches as a prefix");
@@ -252,10 +258,7 @@ fn save_and_create_update_the_index() {
     let saved = folder.core.save("a.md", "# A\nPotatoes\n").result.unwrap();
     let created = folder.core.create("", "New").result.unwrap();
 
-    assert_eq!(
-        paths(folder.core.search("potato", Order::Title).unwrap()),
-        ["a.md"]
-    );
+    assert_eq!(found(&folder, "potato"), ["a.md"]);
     assert_eq!(folder.core.snapshot().tags(), [tag("food", 1, vec![])]);
     let listed = folder.core.snapshot().notes(Order::Title);
     assert_eq!(listed, [saved.info, created.info]);
@@ -277,10 +280,7 @@ fn open_picks_up_changes_made_while_holm_was_closed() {
     let mut all = paths(folder.core.snapshot().notes(Order::Title));
     all.sort();
     assert_eq!(all, ["edited.md", "kept.md", "work/added.md"]);
-    assert_eq!(
-        paths(folder.core.search("words", Order::Title).unwrap()),
-        ["edited.md"]
-    );
+    assert_eq!(found(&folder, "words"), ["edited.md"]);
     assert_eq!(folder.core.read("edited.md").unwrap().info.preview, "After");
     assert_eq!(folder.core.snapshot().tags(), [tag("new", 1, vec![])]);
 }

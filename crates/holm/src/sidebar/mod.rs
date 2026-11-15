@@ -8,6 +8,7 @@
 //! The search field sits at the top. While it holds text, the note list shows the notes that
 //! match it, and `Esc` clears it and shows the last view again.
 
+mod list;
 mod tree;
 
 use std::collections::HashSet;
@@ -34,6 +35,7 @@ use crate::name_field::{Look, NameEvent, NameField, NameWrite};
 use crate::notes_folder::{FolderEvent, Move, NotesFolder, Step};
 use crate::text;
 
+use list::NoteList;
 pub(crate) use tree::{Item, View};
 use tree::{Row, Tree};
 
@@ -127,7 +129,7 @@ pub(crate) struct Sidebar {
     rows: Vec<Row>,
     /// The rows of the tree with the group labels between them.
     entries: Vec<Entry>,
-    list: Vec<NoteInfo>,
+    list: NoteList,
     /// The note in the editor. It is the selected row of a list.
     current: Option<PathBuf>,
     /// The note in the editor after it is gone from the notes folder, with its neighbor in the
@@ -138,7 +140,7 @@ pub(crate) struct Sidebar {
     search: Entity<InputState>,
     /// The trimmed text of the search field. With text, the list shows `found`.
     query: String,
-    found: Vec<NoteInfo>,
+    found: NoteList,
     finding: Option<Task<()>>,
     focus: FocusHandle,
     scroll: UniformListScrollHandle,
@@ -179,14 +181,14 @@ impl Sidebar {
             open: HashSet::new(),
             rows: Vec::new(),
             entries: Vec::new(),
-            list: Vec::new(),
+            list: NoteList::default(),
             current,
             left: None,
             field: None,
             write,
             search,
             query: String::new(),
-            found: Vec::new(),
+            found: NoteList::default(),
             finding: None,
             focus: cx.focus_handle(),
             scroll: UniformListScrollHandle::new(),
@@ -272,20 +274,26 @@ impl Sidebar {
     }
 
     /// Searches the notes for the query. A result for an old query is dropped.
+    ///
+    /// The background task also puts the results in order, so the sidebar only shows them.
     fn find(&mut self, cx: &mut Context<Self>) {
         if !self.searching() {
             self.finding = None;
-            self.found.clear();
-            self.rebuild();
+            self.found = NoteList::default();
+            self.rebuild_list();
             cx.notify();
             return;
         }
         let query = self.query.clone();
-        let search = self
-            .notes_folder
-            .read(cx)
-            .search(query.clone(), self.order, cx);
-        let job = cx.background_spawn(async move { (query, search.await) });
+        let search = self.notes_folder.read(cx).search(query.clone(), cx);
+        let snapshot = self.tree.snapshot.clone();
+        let order = self.order;
+        let job = cx.background_spawn(async move {
+            let found = search
+                .await
+                .map(|paths| NoteList::new(snapshot, paths, order));
+            (query, found)
+        });
         self.finding = Some(cx.spawn(async move |sidebar, cx| {
             let (query, found) = job.await;
             sidebar
@@ -302,7 +310,7 @@ impl Sidebar {
                             cx.emit(SidebarEvent::Answer(error.message()));
                         }
                     }
-                    sidebar.rebuild();
+                    sidebar.rebuild_list();
                     sidebar.scroll_to_selection();
                     cx.notify();
                 })
@@ -331,13 +339,18 @@ impl Sidebar {
     /// `Enter` or `↓` in the search field: the first result opens, and the list gets the focus.
     fn enter_results(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
-        if let Some(note) = self.list.first() {
-            let path = note.path.clone();
+        if let Some(path) = self.list.path(0) {
+            let path = path.to_owned();
             self.choose(path, cx);
         }
     }
 
     fn rebuild(&mut self) {
+        self.rebuild_tree();
+        self.rebuild_list();
+    }
+
+    fn rebuild_tree(&mut self) {
         self.rows = self.tree.rows(&self.open);
         self.entries.clear();
         for (at, row) in self.rows.iter().enumerate() {
@@ -355,17 +368,16 @@ impl Sidebar {
         if let Some(Named::NewFolder(parent)) = self.field.as_ref().map(|naming| &naming.named) {
             self.add_new_folder_entry(&parent.clone());
         }
-        let list: Vec<NoteInfo> = if self.searching() {
+    }
+
+    fn rebuild_list(&mut self) {
+        let list = if self.searching() {
             self.found.clone()
         } else {
-            self.tree
-                .list(self.view.item())
-                .into_iter()
-                .cloned()
-                .collect()
+            self.tree.list(self.view.item())
         };
         if let Some(current) = &self.current
-            && !self.tree.notes.iter().any(|note| &note.path == current)
+            && self.tree.snapshot.note(current).is_none()
             && let Some(next) = self.neighbor(current)
         {
             self.left = Some((current.clone(), next));
@@ -424,7 +436,7 @@ impl Sidebar {
     /// The note after `path` in the list, or else the one before it. For the note in the editor
     /// after another tool deleted it, it is its neighbor before the delete.
     pub(crate) fn neighbor(&self, path: &Path) -> Option<PathBuf> {
-        let Some(at) = self.list.iter().position(|note| note.path == path) else {
+        let Some(at) = self.list.position(path) else {
             return self
                 .left
                 .as_ref()
@@ -432,14 +444,14 @@ impl Sidebar {
                 .map(|(_, next)| next.clone());
         };
         self.list
-            .get(at + 1)
-            .or_else(|| at.checked_sub(1).and_then(|before| self.list.get(before)))
-            .map(|note| note.path.clone())
+            .path(at + 1)
+            .or_else(|| at.checked_sub(1).and_then(|before| self.list.path(before)))
+            .map(Path::to_path_buf)
     }
 
     /// Every note, in the order of the lists.
-    pub(crate) fn notes(&self) -> &[NoteInfo] {
-        &self.tree.notes
+    pub(crate) fn notes(&self) -> impl Iterator<Item = &NoteInfo> {
+        self.tree.notes.notes()
     }
 
     /// Every folder, sorted by path, for the folder picker.
@@ -482,8 +494,7 @@ impl Sidebar {
     }
 
     fn selected_note(&self) -> Option<usize> {
-        let current = self.current.as_ref()?;
-        self.list.iter().position(|note| &note.path == current)
+        self.list.position(self.current.as_ref()?)
     }
 
     /// Starts the name field for a folder or a tag in the tree. A tag field holds the full
@@ -610,7 +621,8 @@ impl Sidebar {
         match &self.view {
             _ if self.shows_list() => self
                 .selected_note()
-                .map(|at| Target::Note(self.list[at].path.clone())),
+                .and_then(|at| self.list.path(at))
+                .map(|path| Target::Note(path.to_owned())),
             View::Tree(Item::Folder(folder)) => Some(Target::Folder(folder.clone())),
             View::Tree(_) | View::List(_) => None,
         }
@@ -672,8 +684,8 @@ impl Sidebar {
                     (Some(at), _) => Some(at + 1),
                     (None, _) => Some(0),
                 };
-                if let Some(note) = next.and_then(|next| self.list.get(next)) {
-                    let path = note.path.clone();
+                if let Some(path) = next.and_then(|next| self.list.path(next)) {
+                    let path = path.to_owned();
                     self.choose(path, cx);
                 }
             }
@@ -898,7 +910,7 @@ impl Sidebar {
         let theme = cx.theme();
         let selected = self.selected_note();
         range
-            .filter_map(|at| self.list.get(at).map(|note| (at, note)))
+            .filter_map(|at| self.list.note(at).map(|note| (at, note)))
             .map(|(at, note)| {
                 let path = note.path.clone();
                 let title = h_flex()

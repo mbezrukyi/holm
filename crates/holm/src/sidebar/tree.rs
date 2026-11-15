@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use holm_core::Snapshot;
 use holm_core::model::{NoteInfo, Order, Tag};
 
+use super::list::NoteList;
 use crate::notes_folder::Move;
 
 /// An item of the folder tree. Each item has a note list.
@@ -98,11 +99,12 @@ pub(crate) struct Row {
     pub(crate) open: bool,
 }
 
-/// The facts of one snapshot in the form the sidebar needs. The notes are in the order of the
-/// sidebar.
+/// The facts of one snapshot in the form the sidebar needs.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Tree {
-    pub(crate) notes: Vec<NoteInfo>,
+    pub(crate) snapshot: Snapshot,
+    /// Every note, in the order of the sidebar.
+    pub(crate) notes: NoteList,
     /// Every folder, sorted by path, so a folder comes before its children.
     pub(crate) folders: Vec<PathBuf>,
     pub(crate) tags: Vec<Tag>,
@@ -111,7 +113,8 @@ pub(crate) struct Tree {
 impl Tree {
     pub(crate) fn new(snapshot: &Snapshot, order: Order) -> Self {
         Self {
-            notes: snapshot.notes(order),
+            snapshot: snapshot.clone(),
+            notes: NoteList::all(snapshot.clone(), order),
             folders: snapshot.folders().map(Path::to_path_buf).collect(),
             tags: snapshot.tags(),
         }
@@ -119,8 +122,11 @@ impl Tree {
 
     /// The notes of the list of `item`. A folder list has only the notes right in it.
     /// A tag list also has the notes of its child tags.
-    pub(crate) fn list(&self, item: &Item) -> Vec<&NoteInfo> {
-        self.notes.iter().filter(|note| holds(item, note)).collect()
+    pub(crate) fn list(&self, item: &Item) -> NoteList {
+        match item {
+            Item::All => self.notes.clone(),
+            _ => self.notes.filter(|note| holds(item, note)),
+        }
     }
 
     /// Whether the tree still has `item`.
@@ -145,7 +151,7 @@ impl Tree {
     /// `open` items show.
     pub(crate) fn rows(&self, open: &HashSet<Item>) -> Vec<Row> {
         let mut counts: HashMap<&Path, usize> = HashMap::new();
-        for note in &self.notes {
+        for note in self.notes.notes() {
             *counts.entry(folder_of(&note.path)).or_default() += 1;
         }
         let mut rows = vec![Row {
@@ -233,44 +239,27 @@ pub(crate) fn folder_of(path: &Path) -> &Path {
 
 #[cfg(test)]
 mod tests {
-    use std::time::SystemTime;
+    use std::fs;
+
+    use holm_core::Core;
+    use tempfile::TempDir;
 
     use super::*;
 
-    fn note(path: &str, tags: &[&str]) -> NoteInfo {
-        NoteInfo {
-            path: path.into(),
-            id: None,
-            title: path.to_owned(),
-            preview: String::new(),
-            tags: tags.iter().map(|tag| (*tag).to_owned()).collect(),
-            pinned: false,
-            modified: SystemTime::UNIX_EPOCH,
-        }
-    }
-
-    fn tag(name: &str, notes: usize, children: Vec<Tag>) -> Tag {
-        Tag {
-            name: name.to_owned(),
-            notes,
-            children,
-        }
-    }
-
+    /// A notes folder with four notes, and its tree in title order.
     fn tree() -> Tree {
-        Tree {
-            notes: vec![
-                note("a.md", &["work"]),
-                note("work/b.md", &["work/holm"]),
-                note("work/c.md", &[]),
-                note("work/deep/d.md", &["workshop"]),
-            ],
-            folders: vec!["home".into(), "work".into(), "work/deep".into()],
-            tags: vec![
-                tag("work", 2, vec![tag("work/holm", 1, Vec::new())]),
-                tag("workshop", 1, Vec::new()),
-            ],
+        let dir = TempDir::new().unwrap();
+        let notes = dir.path().join("notes");
+        for folder in ["home", "work/deep"] {
+            fs::create_dir_all(notes.join(folder)).unwrap();
         }
+        let tags = |tags: &str| format!("---\ntags: [{tags}]\n---\n");
+        fs::write(notes.join("a.md"), tags("work")).unwrap();
+        fs::write(notes.join("work/b.md"), tags("work/holm")).unwrap();
+        fs::write(notes.join("work/c.md"), "").unwrap();
+        fs::write(notes.join("work/deep/d.md"), tags("workshop")).unwrap();
+        let (core, _) = Core::open_with_feed(&notes, dir.path().join("index")).unwrap();
+        Tree::new(&core.snapshot(), Order::Title)
     }
 
     fn names(rows: &[Row]) -> Vec<(String, usize, usize)> {
@@ -326,7 +315,7 @@ mod tests {
         let tree = tree();
         let paths = |item: Item| -> Vec<String> {
             tree.list(&item)
-                .iter()
+                .notes()
                 .map(|note| note.path.display().to_string())
                 .collect()
         };

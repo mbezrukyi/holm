@@ -79,7 +79,7 @@ struct Answers {
     in_folders: Vec<Vec<NoteInfo>>,
     tags: Vec<Tag>,
     with_tag: Vec<Vec<NoteInfo>>,
-    search: Vec<Vec<NoteInfo>>,
+    search: Vec<Vec<PathBuf>>,
     links: Vec<Vec<Link>>,
     backlinks: Vec<Vec<NoteInfo>>,
 }
@@ -102,7 +102,10 @@ fn answers(core: &Core) -> Answers {
         search: WORDS
             .iter()
             .chain(&["berr", "CAFE"])
-            .map(|w| core.search(w, Order::LastChange).unwrap())
+            .map(|w| {
+                let found = core.search(w).unwrap();
+                core.snapshot().sorted(found, Order::LastChange)
+            })
             .collect(),
         links: paths
             .iter()

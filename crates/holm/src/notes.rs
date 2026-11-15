@@ -308,7 +308,7 @@ impl NotesView {
     }
 
     fn open_quick_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let notes = self.sidebar.read(cx).notes().to_vec();
+        let notes = self.sidebar.read(cx).notes().cloned().collect();
         self.before_popup = window.focused(cx);
         let quick_open = cx.new(|cx| QuickOpen::new(notes, window, cx));
         self.subscriptions

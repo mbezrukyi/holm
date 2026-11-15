@@ -87,7 +87,7 @@ fn an_outside_edit_updates_the_index_and_sends_a_change() {
 
     assert_eq!(fed.take(), [Change::Changed(fed.info("a.md"))]);
     assert_eq!(previews(&fed.core), ["New words"]);
-    assert_eq!(fed.core.search("words", Order::Title).unwrap().len(), 1);
+    assert_eq!(fed.core.search("words").unwrap().len(), 1);
 }
 
 #[test]

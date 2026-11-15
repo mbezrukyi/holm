@@ -8,9 +8,9 @@
 
 use std::fs;
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use gpui_kit::TestAppContext;
+use gpui_kit::{AnyWindowHandle, Keystroke, TestAppContext};
 
 use super::{Fixture, autosave, keys, open, screen, settle, type_new_name};
 
@@ -47,6 +47,39 @@ fn time(what: &str, run: impl FnOnce()) {
     println!(
         "{what:>32} {:8.2} ms",
         start.elapsed().as_secs_f64() * 1000.
+    );
+}
+
+/// Types `key` in the search field and draws the new rows. It prints the time on the UI thread
+/// and the time from the key to the rows apart.
+///
+/// The test runs the background tasks on this thread too. The UI time leaves them out.
+/// The test window draws a frame after each update, so the rows are on screen at the end.
+fn search_key(cx: &mut TestAppContext, handle: AnyWindowHandle, key: &'static str) {
+    let executor = cx.executor();
+    let dispatcher = executor.dispatcher().as_test().unwrap();
+    let start = Instant::now();
+    let mut background = Duration::ZERO;
+    cx.dispatch_keystroke(handle, Keystroke::parse(key).unwrap());
+    loop {
+        let before = Instant::now();
+        while dispatcher.tick(true) {}
+        background += before.elapsed();
+        if !dispatcher.tick(false) {
+            break;
+        }
+    }
+    let total = start.elapsed();
+    let ms = |time: Duration| time.as_secs_f64() * 1000.;
+    println!(
+        "{:>32} {:8.2} ms",
+        format!("search key {key}, UI thread"),
+        ms(total.saturating_sub(background))
+    );
+    println!(
+        "{:>32} {:8.2} ms",
+        format!("search key {key}, key to rows"),
+        ms(total)
     );
 }
 
@@ -89,11 +122,7 @@ fn window_speed(cx: &mut TestAppContext) {
 
     keys(cx, handle, "ctrl-shift-f");
     for key in ["w", "o", "r", "k"] {
-        time(&format!("search key {key}"), || {
-            cx.simulate_input(handle, key);
-            settle(cx);
-            frame(cx);
-        });
+        search_key(cx, handle, key);
     }
     keys(cx, handle, "escape");
 
