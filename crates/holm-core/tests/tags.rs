@@ -141,6 +141,30 @@ fn rename_tag_renames_child_tags_and_keeps_times() {
 }
 
 #[test]
+fn rename_tag_changes_every_note_in_many_folders_and_leaves_no_temp_file() {
+    let files: Vec<(String, String)> = (0..30)
+        .map(|n| {
+            let text = format!("---\ntags: [work, n{n}]\n---\n# Note {n}\n");
+            (format!("f{}/n{n}.md", n % 3), text)
+        })
+        .collect();
+    let files: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(p, t)| (p.as_str(), t.as_str()))
+        .collect();
+    let folder = Folder::new(&files);
+
+    assert_eq!(folder.core.rename_tag("work", "job").unwrap(), 30);
+
+    for n in 0..30 {
+        let path = format!("f{}/n{n}.md", n % 3);
+        assert_eq!(tags(&folder, &path), ["job".to_owned(), format!("n{n}")]);
+    }
+    assert_eq!(tagged(&folder, "job").len(), 30);
+    assert_eq!(folder.names("f0").len(), 10);
+}
+
+#[test]
 fn rename_tag_to_an_existing_tag_merges_them() {
     let folder = Folder::new(&[
         ("a.md", "---\ntags: [work, job]\n---\n# A\n"),

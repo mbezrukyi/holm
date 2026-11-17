@@ -8,6 +8,7 @@ use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 
 use holm_markdown::Note as Text;
+use rustix::fs::{Mode, OFlags};
 use tempfile::NamedTempFile;
 
 use sha2::{Digest as _, Sha256};
@@ -28,6 +29,8 @@ const MAX_STEM_BYTES: usize = 240;
 const HASH_BYTES: usize = 4;
 /// A new file gets these bits before the umask.
 const NEW_FILE_MODE: u32 = 0o666;
+const TEMP_PREFIX: &str = ".holm-";
+const TEMP_SUFFIX: &str = ".tmp";
 
 /// The note files in one notes folder.
 #[derive(Debug)]
@@ -56,6 +59,7 @@ impl Stamp {
 }
 
 impl Store {
+    /// Opens the notes folder and deletes the temp files that a crash left in it.
     pub(crate) fn open(root: &Path) -> Result<Self> {
         let fail = |source| Error::NotesFolder {
             path: root.to_owned(),
@@ -65,7 +69,16 @@ impl Store {
         if !root.is_dir() {
             return Err(fail(io::ErrorKind::NotADirectory.into()));
         }
-        Ok(Self { root })
+        let store = Self { root };
+        store.walk(Path::new(""), &mut |rel, kind| {
+            if kind == Kind::Temp {
+                let path = store.root.join(rel);
+                if let Err(error) = fs::remove_file(&path) {
+                    tracing::warn!(%error, path = %path.display(), "kept a temp file");
+                }
+            }
+        })?;
+        Ok(store)
     }
 
     /// The notes folder, as an absolute path with no symlinks.
@@ -176,6 +189,77 @@ impl Store {
         edit(&mut text);
         write(&path, &old, &text.to_string(), Some(stamp))?;
         self.read(rel)
+    }
+
+    /// Writes the new text of many notes. `edit` gets the path and the text of each note,
+    /// and returns its new text, or `None` to keep it. Each note keeps its modification
+    /// time and permissions.
+    ///
+    /// It syncs the whole file system twice, not each note. So each note changes in one
+    /// step, but after a crash some notes can be new and some old.
+    /// It returns each note that changed or failed. A note that fails keeps its old text.
+    pub(crate) fn rewrite(
+        &self,
+        paths: &[PathBuf],
+        mut edit: impl FnMut(&Path, &str) -> Option<String>,
+    ) -> Vec<(PathBuf, Result<()>)> {
+        let mut done = Vec::new();
+        let mut temps = Vec::new();
+        for rel in paths {
+            let temp = self.note_path(rel).and_then(|path| {
+                let (old, stamp) = read_text(&path)?;
+                let Some(new) = edit(rel, &old).filter(|new| *new != old) else {
+                    return Ok(None);
+                };
+                let fail = |source| write_error(&path, source);
+                let permissions = fs::metadata(&path).map_err(fail)?.permissions();
+                let modified = Some(time(stamp.modified));
+                let file = unsynced_temp_file(
+                    folder_abs(&path),
+                    new.as_bytes(),
+                    Some(permissions),
+                    modified,
+                )
+                .map_err(fail)?;
+                // A closed file, so a big job does not run out of file handles.
+                Ok(Some((path, file.into_temp_path())))
+            });
+            match temp {
+                Ok(Some(temp)) => temps.push((rel.clone(), temp)),
+                Ok(None) => {}
+                Err(error) => done.push((rel.clone(), Err(error))),
+            }
+        }
+        if temps.is_empty() {
+            return done;
+        }
+        if let Err(errno) = self.sync_all_files() {
+            done.extend(
+                temps
+                    .into_iter()
+                    .map(|(rel, (path, _))| (rel, Err(write_error(&path, errno.into())))),
+            );
+            return done;
+        }
+        let mut renamed = Vec::new();
+        for (rel, (path, temp)) in temps {
+            match temp.persist(&path) {
+                Ok(()) => renamed.push((rel, path)),
+                Err(e) => done.push((rel, Err(write_error(&path, e.error)))),
+            }
+        }
+        let synced = self.sync_all_files();
+        done.extend(renamed.into_iter().map(|(rel, path)| {
+            let result = synced.map_err(|errno| write_error(&path, errno.into()));
+            (rel, result)
+        }));
+        done
+    }
+
+    /// Flushes every write on the file system of the notes folder to the disk.
+    fn sync_all_files(&self) -> rustix::io::Result<()> {
+        let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC;
+        rustix::fs::syncfs(rustix::fs::open(&self.root, flags, Mode::empty())?)
     }
 
     /// Writes `body` over the body of the note at `rel`. The frontmatter stays.
@@ -483,27 +567,26 @@ impl Store {
 
     /// Fixes the relative file links of each note inside a folder that moved.
     fn relink_folder(&self, moved: Moved<'_>) -> Result<()> {
-        for (rel, _) in self.files(moved.to)? {
-            let Ok(inside) = rel.strip_prefix(moved.to) else {
-                continue;
-            };
+        let paths: Vec<PathBuf> = self
+            .files(moved.to)?
+            .into_iter()
+            .map(|(rel, _)| rel)
+            .collect();
+        let rewritten = self.rewrite(&paths, |rel, old| {
+            let inside = rel.strip_prefix(moved.to).ok()?;
             let old_folder = moved.from.join(folder_of(inside));
-            let path = self.root.join(&rel);
-            let fixed = read_text(&path).and_then(|(old, stamp)| {
-                match relink(&old, &self.root, &old_folder, folder_of(&rel), Some(moved)) {
-                    Some(new) => write(&path, &old, &new, Some(stamp)),
-                    None => Ok(()),
-                }
-            });
-            if let Err(error) = fixed {
+            relink(old, &self.root, &old_folder, folder_of(rel), Some(moved))
+        });
+        for (_, result) in rewritten {
+            if let Err(error) = result {
                 tracing::warn!(%error, "kept the file links of a moved note");
             }
         }
         Ok(())
     }
 
-    /// Calls `visit` with the relative path of each note and subfolder below the folder `start`.
-    /// It skips hidden entries and symlinks, so it can't loop.
+    /// Calls `visit` with the relative path of each note, subfolder and Holm temp file below the
+    /// folder `start`. It skips other hidden entries and symlinks, so it can't loop.
     fn walk(&self, start: &Path, visit: &mut dyn FnMut(&Path, Kind)) -> Result<()> {
         let mut dirs = vec![start.to_owned()];
         while let Some(dir) = dirs.pop() {
@@ -525,6 +608,9 @@ impl Store {
                     continue;
                 };
                 if is_hidden(&name) {
+                    if kind.is_file() && is_temp(&name) {
+                        visit(&dir.join(&name), Kind::Temp);
+                    }
                     continue;
                 }
                 let rel = dir.join(&name);
@@ -559,6 +645,7 @@ pub(crate) enum Entry {
 enum Kind {
     Note,
     Folder,
+    Temp,
 }
 
 fn note(rel: &Path, text: &Text, stamp: Stamp) -> Note {
@@ -729,13 +816,25 @@ fn replace(
 /// Writes `content` to a hidden temp file in `dir` and flushes it to the disk.
 fn temp_file(
     dir: &Path,
+    content: impl io::Read,
+    permissions: Option<Permissions>,
+    modified: Option<SystemTime>,
+) -> io::Result<NamedTempFile> {
+    let file = unsynced_temp_file(dir, content, permissions, modified)?;
+    file.as_file().sync_all()?;
+    Ok(file)
+}
+
+/// Writes `content` to a hidden temp file in `dir`, with no flush to the disk.
+fn unsynced_temp_file(
+    dir: &Path,
     mut content: impl io::Read,
     permissions: Option<Permissions>,
     modified: Option<SystemTime>,
 ) -> io::Result<NamedTempFile> {
     let mut file = tempfile::Builder::new()
-        .prefix(".holm-")
-        .suffix(".tmp")
+        .prefix(TEMP_PREFIX)
+        .suffix(TEMP_SUFFIX)
         .permissions(Permissions::from_mode(NEW_FILE_MODE))
         .tempfile_in(dir)?;
     io::copy(&mut content, &mut file)?;
@@ -745,7 +844,6 @@ fn temp_file(
     if let Some(modified) = modified {
         file.as_file().set_modified(modified)?;
     }
-    file.as_file().sync_all()?;
     Ok(file)
 }
 
@@ -765,6 +863,11 @@ fn plain_path(rel: &Path) -> Result<&Path> {
 
 fn is_hidden(name: &OsStr) -> bool {
     name.as_encoded_bytes().starts_with(b".")
+}
+
+fn is_temp(name: &OsStr) -> bool {
+    let name = name.as_encoded_bytes();
+    name.starts_with(TEMP_PREFIX.as_bytes()) && name.ends_with(TEMP_SUFFIX.as_bytes())
 }
 
 fn is_md(path: &Path) -> bool {

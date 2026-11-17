@@ -13,6 +13,7 @@ holm-markdown.workspace = true
 imbl.workspace = true
 notify.workspace = true
 rusqlite.workspace = true
+rustix.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true

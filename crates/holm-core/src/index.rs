@@ -157,20 +157,28 @@ impl Index {
         })
     }
 
-    /// Puts a note that Holm just read or wrote into the index, and returns it.
+    /// Puts notes that Holm just read or wrote into the index in one transaction,
+    /// and returns them in the same order.
     ///
-    /// When another note file has the same id, this note gets a new id.
-    pub(crate) fn update(&self, store: &Store, note: &Note, stamp: Stamp) -> Result<(Note, Delta)> {
+    /// When another note file has the same id, a note gets a new id.
+    pub(crate) fn update(
+        &self,
+        store: &Store,
+        notes: &[(Note, Stamp)],
+    ) -> Result<(Vec<Note>, Delta)> {
         self.run(store, |conn| {
             let tx = conn.transaction()?;
             let mut gone = Vec::new();
-            let (note, links) = put(&tx, store, note.clone(), stamp, &mut gone)?;
+            let mut put_notes = Vec::with_capacity(notes.len());
+            let mut delta = Delta::default();
+            for (note, stamp) in notes {
+                let (note, links) = put(&tx, store, note.clone(), *stamp, &mut gone)?;
+                delta.put.push((note.info.clone(), links));
+                put_notes.push(note);
+            }
             tx.commit()?;
-            let delta = Delta {
-                removed: gone.into_iter().map(|gone| gone.path).collect(),
-                put: vec![(note.info.clone(), links)],
-            };
-            Ok((note, delta))
+            delta.removed = gone.into_iter().map(|gone| gone.path).collect();
+            Ok((put_notes, delta))
         })
     }
 

@@ -28,6 +28,22 @@ fn open_fails_on_a_missing_folder() {
 }
 
 #[test]
+fn open_deletes_temp_files_that_a_crash_left() {
+    let mut folder = Folder::new(&[
+        ("a.md", "# A\n"),
+        ("work/b.md", "# B\n"),
+        ("work/.holm-x1.tmp", "half"),
+        (".holm-x2.tmp", "half"),
+        ("work/.other.tmp", "kept"),
+    ]);
+
+    folder.reopen();
+
+    assert_eq!(folder.files(), ["a.md", "work"]);
+    assert_eq!(folder.names("work"), [".other.tmp", "b.md"]);
+}
+
+#[test]
 fn open_fails_on_a_file() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("file");

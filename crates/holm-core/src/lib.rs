@@ -377,6 +377,8 @@ impl Core {
     /// Names work as in [`Core::create_folder`]. A change of only the capital letters works.
     /// Relative file links in its notes change, so they point to the same files.
     /// A note whose links can't change keeps them, with a log line.
+    /// Each note changes in one step, but the whole job does not. After a crash, the folder has
+    /// moved, but some notes can still have their old links.
     ///
     /// # Errors
     ///
@@ -393,7 +395,7 @@ impl Core {
 
     /// Moves the folder into `parent` with its name, and returns its new path.
     ///
-    /// It works as [`Core::rename_folder`].
+    /// It works as [`Core::rename_folder`], also after a crash.
     ///
     /// # Errors
     ///
@@ -583,6 +585,8 @@ impl Core {
     /// `to` is cleaned like a typed tag. The notes keep their modification times.
     ///
     /// A note that can't be changed keeps its tags, with a log line. The other notes still change.
+    /// Each note changes in one step, but the whole job does not. After a crash, some notes can
+    /// have the new tag and some the old one. A second rename then finishes the job.
     ///
     /// # Errors
     ///
@@ -604,7 +608,7 @@ impl Core {
 
     /// Removes the tag and its child tags from every note, and returns how many notes changed.
     ///
-    /// It works as [`Core::rename_tag`].
+    /// It works as [`Core::rename_tag`], also after a crash.
     ///
     /// # Errors
     ///
@@ -812,11 +816,24 @@ impl Inner {
 
     /// Puts a note that Holm just wrote into the index and the draft, and returns it.
     fn update(&self, draft: &mut Draft<'_>, note: &Note, stamp: store::Stamp) -> Result<Note> {
-        let (note, delta) = self.index.update(&self.store, note, stamp)?;
+        let notes = self.update_all(draft, &[(note.clone(), stamp)])?;
+        notes.into_iter().next().ok_or_else(|| Error::Write {
+            path: self.store.root().join(&note.info.path),
+            source: std::io::ErrorKind::InvalidData.into(),
+        })
+    }
+
+    /// Puts notes that Holm just wrote into the index and the draft, and returns them.
+    fn update_all(
+        &self,
+        draft: &mut Draft<'_>,
+        notes: &[(Note, store::Stamp)],
+    ) -> Result<Vec<Note>> {
+        let (notes, delta) = self.index.update(&self.store, notes)?;
         if draft.notes(delta) {
             draft.wrote_notes();
         }
-        Ok(note)
+        Ok(notes)
     }
 
     /// Changes the frontmatter of the note with `edit`, keeps its modification time,
@@ -832,26 +849,35 @@ impl Inner {
     }
 
     fn edit_tag(&self, draft: &mut Draft<'_>, edit: &TagEdit<'_>) -> Result<usize> {
-        let mut changed = 0;
+        let paths: Vec<PathBuf> = draft
+            .next
+            .notes_with_tag(edit.tag(), Order::Title)
+            .into_iter()
+            .map(|info| info.path)
+            .collect();
+        let rewritten = self.store.rewrite(&paths, |_, old| {
+            let mut text = holm_markdown::Note::parse(old);
+            let tags = text.tags();
+            let new = edit.apply(&tags);
+            (new != tags).then(|| {
+                text.set_tags(&new);
+                text.to_string()
+            })
+        });
+        let mut written = Vec::with_capacity(rewritten.len());
         let mut first_error = None;
-        for info in draft.next.notes_with_tag(edit.tag(), Order::Title) {
-            let mut hit = false;
-            let result = self.edit_fields(draft, &info.path, |text| {
-                let old = text.tags();
-                let new = edit.apply(&old);
-                if new != old {
-                    text.set_tags(&new);
-                    hit = true;
-                }
-            });
-            match result {
-                Ok(_) if hit => changed += 1,
-                Ok(_) => {}
+        for (path, result) in rewritten {
+            match result.and_then(|()| self.store.read(&path)) {
+                Ok(note) => written.push(note),
                 Err(error) => {
                     tracing::warn!(%error, "kept the tags of a note");
                     first_error.get_or_insert(error);
                 }
             }
+        }
+        let changed = written.len();
+        if changed > 0 {
+            self.update_all(draft, &written)?;
         }
         if changed > 0
             && let TagEdit::Rename { from, to } = edit
