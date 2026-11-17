@@ -30,7 +30,7 @@ const FILE: &str = "index.sqlite";
 /// Change this number with each change to [`SCHEMA`], to [`search::SCHEMA`], or to what a
 /// column holds.
 /// An index with another number is rebuilt.
-const SHAPE: i32 = 6;
+const SHAPE: i32 = 7;
 
 const SCHEMA: &str = "
 CREATE TABLE notes (

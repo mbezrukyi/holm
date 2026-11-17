@@ -19,6 +19,7 @@ CREATE TABLE text_hashes (
 );
 CREATE VIRTUAL TABLE text_words USING fts5 (
     title, body,
+    content = '', contentless_delete = 1,
     tokenize = 'unicode61 remove_diacritics 2'
 );
 CREATE TABLE tag_names (
