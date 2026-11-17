@@ -17,15 +17,19 @@
 //! writes the draft. So no job sees a note file older than the editor text. A draft and its
 //! save never wait.
 //!
-//! Every 100 ms, it looks for changes from outside Holm. At quit, it runs every write that
-//! waits in the line, and then writes the draft.
+//! A change list from outside Holm wakes it when no job runs, and it sends one event. During a
+//! job, the lists wait for the event of the job. At quit, it runs every write that waits in the
+//! line, and then writes the draft.
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::task::{self, Poll};
 use std::time::{Duration, Instant};
 
 use futures_channel::oneshot;
+use futures_core::Stream;
 use gpui_kit::{App, AppContext as _, Context, EventEmitter, Task, Window};
 use holm_core::model::{Change, ChangeList, DeleteCount, LinkTarget, Note, NoteInfo, Order};
 use holm_core::{Changes, Core, Snapshot};
@@ -33,10 +37,6 @@ use holm_editor::PastedFile;
 
 use crate::error::AppError;
 use crate::tags::TagChange;
-
-/// How often it looks for changes from outside Holm. The core already waits up to 500 ms to
-/// batch them.
-pub(crate) const POLL: Duration = Duration::from_millis(100);
 
 /// What the notes folder tells the views: a write of Holm ended, or changes from outside came
 /// in. Each write sends one, also a failed write.
@@ -101,8 +101,8 @@ struct Entry {
 struct Turn {
     number: u64,
     end: End,
-    /// The snapshot after the job. It is gone when the quit drain ran the job.
-    snapshot: oneshot::Receiver<Snapshot>,
+    /// It comes when the job ends. It is gone when the quit drain ran the job.
+    done: oneshot::Receiver<()>,
     /// It ends the turn when the job ends after its call.
     _wake: Task<()>,
 }
@@ -111,8 +111,6 @@ pub(crate) struct NotesFolder {
     core: Core,
     snapshot: Snapshot,
     changes: Changes,
-    /// The change lists of revisions newer than `snapshot`.
-    later: Vec<ChangeList>,
     /// How long a call waits for its job.
     budget: Duration,
     line: VecDeque<Entry>,
@@ -128,24 +126,15 @@ pub(crate) struct NotesFolder {
     draft: Option<Draft>,
     /// After the quit drain, no job runs.
     closed: bool,
-    _poll: Task<()>,
+    watch: Task<()>,
 }
 
 impl NotesFolder {
     /// A call waits up to `budget` for its job.
     pub(crate) fn new(core: Core, budget: Duration, cx: &mut Context<Self>) -> Self {
-        let poll = cx.spawn(async move |folder, cx| {
-            loop {
-                cx.background_executor().timer(POLL).await;
-                if folder.update(cx, NotesFolder::poll).is_err() {
-                    break;
-                }
-            }
-        });
         cx.on_release(|folder, _| folder.drain()).detach();
         Self {
             changes: core.changes(),
-            later: Vec::new(),
             snapshot: core.snapshot(),
             core,
             budget,
@@ -157,7 +146,7 @@ impl NotesFolder {
             turn: None,
             draft: None,
             closed: false,
-            _poll: poll,
+            watch: Self::watch(cx),
         }
     }
 
@@ -571,21 +560,21 @@ impl NotesFolder {
                 return;
             };
             let left = deadline.saturating_duration_since(Instant::now());
-            let snapshot = match &mut self.turn {
+            let done = match &mut self.turn {
                 Some(turn) if !left.is_zero() => cx
                     .foreground_executor()
-                    .block_with_timeout(left, &mut turn.snapshot)
+                    .block_with_timeout(left, &mut turn.done)
                     .ok(),
                 _ => None,
             };
-            let Some(snapshot) = snapshot else {
+            let Some(done) = done else {
                 if self.late < Some(until) {
                     self.late = Some(until);
                     cx.notify();
                 }
                 return;
             };
-            self.end_turn(snapshot.ok(), cx);
+            self.end_turn(done.is_ok(), cx);
         }
     }
 
@@ -600,23 +589,23 @@ impl NotesFolder {
         *lock(&self.running) = Some(job);
         let core = self.core.clone();
         let running = self.running.clone();
-        let (send, snapshot) = oneshot::channel();
+        let (send, done) = oneshot::channel();
         let work = cx.background_spawn(async move {
             let mut slot = lock(&running);
             if let Some(job) = slot.take() {
                 job(&core);
-                send.send(core.snapshot()).ok();
+                send.send(()).ok();
             }
         });
         let wake = cx.spawn(async move |folder, cx| {
             work.await;
             folder
                 .update(cx, |folder, cx| {
-                    let snapshot = folder
+                    let ran = folder
                         .turn
                         .as_mut()
-                        .and_then(|turn| turn.snapshot.try_recv().ok().flatten());
-                    folder.end_turn(snapshot, cx);
+                        .is_some_and(|turn| matches!(turn.done.try_recv(), Ok(Some(()))));
+                    folder.end_turn(ran, cx);
                     folder.run(None, cx);
                 })
                 .ok();
@@ -624,21 +613,22 @@ impl NotesFolder {
         self.turn = Some(Turn {
             number,
             end,
-            snapshot,
+            done,
             _wake: wake,
         });
         true
     }
 
-    /// Ends the entry whose job ran, with the snapshot after the job.
-    fn end_turn(&mut self, snapshot: Option<Snapshot>, cx: &mut Context<Self>) {
+    /// Ends the entry whose job ends. When the job `ran` on its thread, it takes every list
+    /// that waits and sends one event. Then the watch starts again.
+    fn end_turn(&mut self, ran: bool, cx: &mut Context<Self>) {
         let Some(turn) = self.turn.take() else {
             return;
         };
         self.ended = turn.number;
-        if let Some(snapshot) = snapshot {
-            self.set(snapshot);
-            let changes = self.take_changes();
+        if ran {
+            let lists: Vec<ChangeList> = std::iter::from_fn(|| self.changes.try_next()).collect();
+            let changes = self.keep(lists);
             cx.emit(FolderEvent { changes });
             (turn.end)(cx);
         }
@@ -646,6 +636,7 @@ impl NotesFolder {
             self.late = None;
             cx.notify();
         }
+        self.watch = Self::watch(cx);
     }
 
     /// Runs every job that waits, and then writes the draft, on this thread.
@@ -671,42 +662,43 @@ impl NotesFolder {
         }
     }
 
-    /// Takes the changes from outside Holm. While a job runs, it waits: the core can have the
-    /// snapshot of the job before its event.
-    fn poll(&mut self, cx: &mut Context<Self>) {
+    /// Wakes on each change list while no job runs. A job ends it, and [`Self::end_turn`]
+    /// starts a new one.
+    fn watch(cx: &mut Context<Self>) -> Task<()> {
+        cx.spawn(async move |folder, cx| {
+            std::future::poll_fn(|waker| {
+                folder
+                    .update(cx, |folder, cx| folder.wake(waker, cx))
+                    .unwrap_or(Poll::Ready(()))
+            })
+            .await;
+        })
+    }
+
+    /// Takes every list that waits and sends one event. During a job, it takes nothing.
+    fn wake(&mut self, waker: &mut task::Context<'_>, cx: &mut Context<Self>) -> Poll<()> {
         if self.turn.is_some() {
-            return;
+            return Poll::Ready(());
         }
-        let newer = self.set(self.core.snapshot());
-        let changes = self.take_changes();
-        if newer || !changes.is_empty() {
+        let mut lists = Vec::new();
+        while let Poll::Ready(Some(list)) = Pin::new(&mut self.changes).poll_next(waker) {
+            lists.push(list);
+        }
+        if !lists.is_empty() {
+            let changes = self.keep(lists);
             cx.emit(FolderEvent { changes });
         }
+        Poll::Pending
     }
 
-    /// The changes of the revisions up to the snapshot. The core sends a list before its
-    /// snapshot, so a list of a newer revision waits for that snapshot.
-    fn take_changes(&mut self) -> Vec<Change> {
-        self.later.extend(std::iter::from_fn(|| {
-            self.changes.recv_timeout(Duration::ZERO)
-        }));
-        let revision = self.snapshot.revision();
-        let (now, later) = std::mem::take(&mut self.later)
-            .into_iter()
-            .partition(|list| list.revision <= revision);
-        self.later = later;
-        now.into_iter()
-            .flat_map(|list: ChangeList| list.changes)
-            .collect()
-    }
-
-    /// Keeps `snapshot` when it is newer, and gives whether it did.
-    fn set(&mut self, snapshot: Snapshot) -> bool {
-        let newer = snapshot.revision() > self.snapshot.revision();
-        if newer {
-            self.snapshot = snapshot;
+    /// Keeps the snapshot of the last list, and gives the changes of all lists.
+    fn keep(&mut self, lists: Vec<ChangeList>) -> Vec<Change> {
+        let mut changes = Vec::new();
+        for list in lists {
+            self.snapshot = list.snapshot;
+            changes.extend(list.changes);
         }
-        newer
+        changes
     }
 }
 

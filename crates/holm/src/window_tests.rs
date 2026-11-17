@@ -16,7 +16,7 @@ use super::{HolmWindow, Startup};
 use crate::config::Config;
 use crate::log::Log;
 use crate::sidebar::{Item, View};
-use crate::{notes_folder, text, theme};
+use crate::{text, theme};
 
 struct Fixture {
     dir: TempDir,
@@ -114,9 +114,8 @@ fn open(cx: &mut TestAppContext, startup: Startup) -> AnyWindowHandle {
     handle
 }
 
-/// Lets the UI see the outside changes, and runs all tasks. The autosave does not run yet.
+/// Runs all tasks, so the UI sees the outside changes. The autosave does not run yet.
 fn settle(cx: &mut TestAppContext) {
-    cx.executor().advance_clock(notes_folder::POLL);
     cx.run_until_parked();
 }
 

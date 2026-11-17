@@ -4,6 +4,8 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use crate::Snapshot;
+
 /// The stable id of a note. It lives in the `id:` field of the frontmatter.
 ///
 /// Holm makes a ULID for each new id. An id that the user wrote by hand stays as it is.
@@ -196,10 +198,10 @@ impl Change {
 }
 
 /// The changes that made one revision of the snapshot, from [`Changes`](crate::Changes).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct ChangeList {
-    /// The revision of the first snapshot that shows the changes.
-    pub revision: u64,
+    /// The first snapshot that shows the changes.
+    pub snapshot: Snapshot,
     /// The changes in order: first the note and folder changes, then [`Change::Folders`] and
     /// [`Change::Tags`]. It is never empty, and each new revision has one.
     pub changes: Vec<Change>,

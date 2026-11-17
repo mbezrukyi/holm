@@ -3410,6 +3410,7 @@ name = "holm"
 version = "0.1.0"
 dependencies = [
  "futures-channel",
+ "futures-core",
  "gpui-kit",
  "holm-core",
  "holm-editor",
@@ -3428,6 +3429,8 @@ name = "holm-core"
 version = "0.1.0"
 dependencies = [
  "divan",
+ "futures-channel",
+ "futures-core",
  "holm-markdown",
  "imbl",
  "notify",

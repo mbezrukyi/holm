@@ -15,9 +15,12 @@ use std::collections::{HashMap, hash_map};
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Duration;
+use std::task::{Context, Poll};
+
+use futures_channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use futures_core::Stream;
 
 pub use error::{Error, NameProblem, Result};
 pub use snapshot::Snapshot;
@@ -55,7 +58,7 @@ struct Inner {
     writing: Mutex<()>,
     /// Changes only under `writing`.
     snapshot: Mutex<Snapshot>,
-    listeners: Mutex<Vec<Sender<ChangeList>>>,
+    listeners: Mutex<Vec<UnboundedSender<ChangeList>>>,
     _watcher: Option<watch::Watcher>,
 }
 
@@ -127,12 +130,13 @@ impl Core {
     /// A new stream of the change lists, for writes of Holm and for changes from other tools.
     ///
     /// Each stream gets every list from the time it was made. A list comes for each new
-    /// revision, before [`Core::snapshot`] shows that revision.
+    /// revision, with the snapshot of that revision. It can come before [`Core::snapshot`]
+    /// shows that revision.
     /// A batch of outside changes gives the note changes in path order, then
     /// [`Change::Folders`] and [`Change::Tags`]. A write gives the moves it made, and
     /// [`Change::Notes`] and [`Change::Folders`] for the other facts it changed.
     pub fn changes(&self) -> Changes {
-        let (send, receive) = mpsc::channel();
+        let (send, receive) = mpsc::unbounded();
         lock(&self.inner.listeners).push(send);
         Changes { receive }
     }
@@ -775,7 +779,7 @@ impl Inner {
 
     /// Runs `op` under the write lock, with a draft of the next snapshot.
     /// When a fact changed, the draft gets the next revision and replaces the snapshot.
-    /// The change list goes out first, so a reader that sees the revision already has its list.
+    /// The change list carries the snapshot of its revision.
     fn write<T>(&self, op: impl FnOnce(&mut Draft<'_>) -> Result<T>) -> Result<T> {
         let _writing = lock(&self.writing);
         let mut draft = Draft {
@@ -795,10 +799,10 @@ impl Inner {
         }
         if !draft.changes.is_empty() {
             let list = ChangeList {
-                revision: snapshot.revision(),
+                snapshot: snapshot.clone(),
                 changes: draft.changes,
             };
-            lock(&self.listeners).retain(|listener| listener.send(list.clone()).is_ok());
+            lock(&self.listeners).retain(|listener| listener.unbounded_send(list.clone()).is_ok());
         }
         if draft.changed {
             *lock(&self.snapshot) = snapshot;
@@ -955,26 +959,26 @@ impl Inner {
 
 /// A stream of change lists. [`Core::changes`] makes it.
 ///
-/// As an [`Iterator`], it waits for each list. It ends when every [`Core`] handle is gone.
+/// It ends when every [`Core`] handle is gone.
 #[derive(Debug)]
 pub struct Changes {
-    receive: Receiver<ChangeList>,
+    receive: UnboundedReceiver<ChangeList>,
 }
 
 impl Changes {
-    /// Waits up to `timeout` for the next change list.
+    /// The next change list, with no wait.
     ///
-    /// It returns `None` when no list came in time, or when every [`Core`] handle is gone.
-    pub fn recv_timeout(&self, timeout: Duration) -> Option<ChangeList> {
-        self.receive.recv_timeout(timeout).ok()
+    /// It returns `None` when no list waits, or when every [`Core`] handle is gone.
+    pub fn try_next(&mut self) -> Option<ChangeList> {
+        self.receive.try_recv().ok()
     }
 }
 
-impl Iterator for Changes {
+impl Stream for Changes {
     type Item = ChangeList;
 
-    fn next(&mut self) -> Option<ChangeList> {
-        self.receive.recv().ok()
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<ChangeList>> {
+        Pin::new(&mut self.receive).poll_next(cx)
     }
 }
 
