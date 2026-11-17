@@ -14,7 +14,7 @@ use gpui_kit::{
     TestSupportExt as _, Window, px,
 };
 use holm_core::Snapshot;
-use holm_core::model::{NoteInfo, NoteSet};
+use holm_core::model::{NoteInfo, NoteSet, compare_paths};
 
 use crate::link_rows::{self, Query, Row};
 use crate::notes_folder::NotesFolder;
@@ -37,7 +37,7 @@ impl LinkStart {
         notes.sort_unstable_by(|a, b| {
             b.modified
                 .cmp(&a.modified)
-                .then_with(|| a.path.cmp(&b.path))
+                .then_with(|| compare_paths(&a.path, &b.path))
         });
         Self {
             notes: notes.into_iter().cloned().collect(),

@@ -1,10 +1,10 @@
 //! The facts of the notes folder in memory: note infos, folders, tags and links.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::model::{Link, LinkTarget, NoteInfo, NoteSet, Order, Tag};
+use crate::model::{Link, LinkTarget, NoteInfo, NoteSet, Order, Tag, compare_paths};
 use crate::store::folder_of;
 
 /// The facts of the notes folder at one moment, from [`Core::snapshot`](crate::Core::snapshot).
@@ -81,13 +81,21 @@ impl Snapshot {
     ///
     /// A parent tag shows even when no note has it, only its children.
     pub fn tags(&self) -> Vec<Tag> {
-        let pairs: Vec<(&str, usize)> = self
-            .notes
-            .values()
-            .enumerate()
-            .flat_map(|(note, entry)| entry.info.tags.iter().map(move |tag| (tag.as_str(), note)))
-            .collect();
-        tag_tree(&pairs)
+        let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+        let mut names: Vec<&str> = Vec::new();
+        for entry in self.notes.values() {
+            names.clear();
+            for tag in &entry.info.tags {
+                let ends = tag.match_indices('/').map(|(i, _)| i).chain([tag.len()]);
+                names.extend(ends.map(|end| &tag[..end]));
+            }
+            names.sort_unstable();
+            names.dedup();
+            for name in &names {
+                *counts.entry(name).or_default() += 1;
+            }
+        }
+        tag_tree(&counts)
     }
 
     /// The count of notes right in each folder, without the notes of its subfolders. The root
@@ -266,34 +274,44 @@ fn sort(notes: &mut [&NoteInfo], order: Order) {
 fn last_change(a: &NoteInfo, b: &NoteInfo) -> std::cmp::Ordering {
     (b.pinned, b.modified)
         .cmp(&(a.pinned, a.modified))
-        .then_with(|| a.path.cmp(&b.path))
+        .then_with(|| compare_paths(&a.path, &b.path))
 }
 
-fn title_key(note: &NoteInfo) -> (bool, String, &Path) {
-    (!note.pinned, note.title.to_lowercase(), &note.path)
+fn title_key(note: &NoteInfo) -> (bool, String, PathKey<'_>) {
+    (!note.pinned, note.title.to_lowercase(), PathKey(&note.path))
 }
 
-/// Builds the tag tree from `(tag, note)` pairs. A parent tag counts the notes of its children.
-fn tag_tree(pairs: &[(&str, usize)]) -> Vec<Tag> {
-    let mut notes: BTreeMap<&str, HashSet<usize>> = BTreeMap::new();
-    for &(tag, note) in pairs {
-        let ends = tag.match_indices('/').map(|(i, _)| i).chain([tag.len()]);
-        for end in ends {
-            notes.entry(&tag[..end]).or_default().insert(note);
-        }
+/// A path that sorts with [`compare_paths`].
+#[derive(PartialEq, Eq)]
+struct PathKey<'a>(&'a Path);
+
+impl Ord for PathKey<'_> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        compare_paths(self.0, other.0)
     }
+}
+
+impl PartialOrd for PathKey<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Builds the tag tree from the count of notes of each tag. A parent tag counts the notes of its
+/// children.
+fn tag_tree(counts: &BTreeMap<&str, usize>) -> Vec<Tag> {
     let mut children: HashMap<Option<&str>, Vec<&str>> = HashMap::new();
-    for name in notes.keys() {
+    for name in counts.keys() {
         let parent = name.rsplit_once('/').map(|(parent, _)| parent);
         children.entry(parent).or_default().push(name);
     }
-    tag_children(None, &notes, &children)
+    tag_children(None, counts, &children)
 }
 
 /// The tags under `parent`, with their children.
 fn tag_children(
     parent: Option<&str>,
-    notes: &BTreeMap<&str, HashSet<usize>>,
+    counts: &BTreeMap<&str, usize>,
     children: &HashMap<Option<&str>, Vec<&str>>,
 ) -> Vec<Tag> {
     let mut tags: Vec<Tag> = children
@@ -302,8 +320,8 @@ fn tag_children(
         .flatten()
         .map(|name| Tag {
             name: (*name).to_owned(),
-            notes: notes.get(name).map_or(0, HashSet::len),
-            children: tag_children(Some(name), notes, children),
+            notes: counts.get(name).copied().unwrap_or(0),
+            children: tag_children(Some(name), counts, children),
         })
         .collect();
     tags.sort_by_cached_key(|tag| (tag.name.to_lowercase(), tag.name.clone()));
