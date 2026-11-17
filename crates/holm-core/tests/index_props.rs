@@ -117,10 +117,7 @@ fn answers(core: &Core) -> Answers {
             .iter()
             .map(|p| core.snapshot().links(p).to_vec())
             .collect(),
-        backlinks: paths
-            .iter()
-            .map(|p| core.snapshot().backlinks(p, Order::LastChange))
-            .collect(),
+        backlinks: paths.iter().map(|p| core.snapshot().backlinks(p)).collect(),
         notes,
     }
 }

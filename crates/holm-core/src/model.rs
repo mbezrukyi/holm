@@ -53,23 +53,6 @@ pub struct NoteInfo {
     pub modified: SystemTime,
 }
 
-/// Compares two note paths in the order of [`Path::cmp`], but faster.
-///
-/// It compares bytes, with `/` as the lowest byte. This gives the order of [`Path::cmp`] for
-/// relative paths with no `.` or `..` part, no `//` and no `/` at the end, like
-/// [`NoteInfo::path`].
-pub fn compare_paths(a: &Path, b: &Path) -> std::cmp::Ordering {
-    let key = |byte: u8| if byte == b'/' { 0 } else { byte };
-    let (a, b) = (
-        a.as_os_str().as_encoded_bytes(),
-        b.as_os_str().as_encoded_bytes(),
-    );
-    match a.iter().zip(b).find(|(x, y)| x != y) {
-        Some((&x, &y)) => key(x).cmp(&key(y)),
-        None => a.len().cmp(&b.len()),
-    }
-}
-
 /// A whole note: its info and its body.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Note {

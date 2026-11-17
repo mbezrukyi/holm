@@ -125,7 +125,7 @@ fn a_renamed_note_keeps_its_id_and_its_backlinks() {
 
     folder.core.rename_note("a.md", "Target").unwrap();
 
-    let backlinks = folder.core.snapshot().backlinks("Target.md", Order::Title);
+    let backlinks = folder.core.snapshot().backlinks("Target.md");
     assert_eq!(paths(backlinks), ["b.md"]);
     assert_eq!(
         folder
@@ -333,7 +333,7 @@ fn rename_folder_moves_its_notes_and_keeps_links_that_still_work() {
     let fixed = "![a](../attachments/a.png) [b](b.md) [self](b.md)\n";
     assert_eq!(folder.text("Job/a.md"), note("A", fixed));
     assert_eq!(
-        paths(folder.core.snapshot().backlinks("Job/a.md", Order::Title)),
+        paths(folder.core.snapshot().backlinks("Job/a.md")),
         ["other.md"]
     );
     assert_eq!(

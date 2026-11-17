@@ -66,10 +66,7 @@ fn note_writes_show_in_the_snapshot_after_them() {
         core.save(&note.info.path, "# Ideas\n[plans](holm:P)\n")
     });
     assert_eq!(titles(&snapshot), ["Plans", "Untitled"]);
-    assert_eq!(
-        paths(snapshot.backlinks("Plans.md", Order::Title)),
-        ["work/Untitled.md"]
-    );
+    assert_eq!(paths(snapshot.backlinks("Plans.md")), ["work/Untitled.md"]);
 
     let (info, snapshot) = one_step(core, |core| core.rename_note("work/Untitled.md", "Ideas"));
     assert_eq!(info.path, Path::new("work/Ideas.md"));
@@ -83,10 +80,7 @@ fn note_writes_show_in_the_snapshot_after_them() {
         paths(snapshot.notes(NoteSet::In(Path::new("")), Order::Title)),
         ["Ideas.md", "Plans.md"]
     );
-    assert_eq!(
-        paths(snapshot.backlinks("Plans.md", Order::Title)),
-        ["Ideas.md"]
-    );
+    assert_eq!(paths(snapshot.backlinks("Plans.md")), ["Ideas.md"]);
 
     let (_, snapshot) = one_step(core, |core| core.add_tag("Ideas.md", "work/holm"));
     assert_eq!(tag_names(&snapshot), ["work"]);
@@ -107,7 +101,7 @@ fn note_writes_show_in_the_snapshot_after_them() {
 
     let ((), snapshot) = one_step(core, |core| core.delete_note("Ideas.md"));
     assert_eq!(titles(&snapshot), ["Plans"]);
-    assert_eq!(snapshot.backlinks("Plans.md", Order::Title), []);
+    assert_eq!(snapshot.backlinks("Plans.md"), []);
 
     let plans = core.read("Plans.md").unwrap();
     fs::remove_file(folder.path("Plans.md")).unwrap();
@@ -289,5 +283,36 @@ fn paths_first_matching_keep_and_counts_agree_with_the_note_lists() {
     assert_eq!(
         common::paths(snapshot.paths(NoteSet::All, Order::LastChange)),
         ["c.md", "work/E.md", "work/d.md", "b.md", "A.md"]
+    );
+}
+
+#[test]
+fn newest_and_backlinks_put_the_newest_change_first_with_no_pins_on_top() {
+    let mut folder = Folder::new(&[
+        ("target.md", "---\nid: T\n---\n"),
+        ("old.md", "---\npinned: true\n---\n[t](holm:T)\n"),
+        ("b.md", "[t](holm:T)\n"),
+        ("a.md", "[t](holm:T)\n"),
+        ("a b.md", "[t](holm:T)\n"),
+        ("a/z.md", "[t](holm:T)\n"),
+    ]);
+    for (path, secs) in [
+        ("target.md", 5),
+        ("old.md", 10),
+        ("b.md", 20),
+        ("a.md", 20),
+        ("a b.md", 20),
+        ("a/z.md", 20),
+    ] {
+        folder.set_time(path, secs);
+    }
+    folder.reopen();
+    let snapshot = folder.core.snapshot();
+    let linked = ["a/z.md", "a b.md", "a.md", "b.md", "old.md"];
+
+    assert_eq!(paths(snapshot.backlinks("target.md")), linked);
+    assert_eq!(
+        paths(snapshot.newest(NoteSet::All)),
+        [&linked[..], &["target.md"]].concat()
     );
 }

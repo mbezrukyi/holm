@@ -1,10 +1,11 @@
 //! The facts of the notes folder in memory: note infos, folders, tags and links.
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::model::{Link, LinkTarget, NoteInfo, NoteSet, Order, Tag, compare_paths};
+use crate::model::{Link, LinkTarget, NoteInfo, NoteSet, Order, Tag};
 use crate::store::folder_of;
 
 /// The facts of the notes folder at one moment, from [`Core::snapshot`](crate::Core::snapshot).
@@ -48,7 +49,16 @@ impl Snapshot {
     /// Only `*.md` files are notes. Hidden files and folders, and symlinks, are skipped.
     /// A note that can't be read is left out.
     pub fn notes(&self, set: NoteSet<'_>, order: Order) -> Vec<NoteInfo> {
-        self.list(|entry| set.holds(&entry.info), order)
+        let mut notes: Vec<&NoteInfo> = self.matching(set).collect();
+        sort(&mut notes, order);
+        notes.into_iter().cloned().collect()
+    }
+
+    /// The notes of `set`, the newest change first. Pins have no effect.
+    pub fn newest(&self, set: NoteSet<'_>) -> Vec<NoteInfo> {
+        let mut notes: Vec<&NoteInfo> = self.matching(set).collect();
+        notes.sort_unstable_by(|a, b| newest(a, b));
+        notes.into_iter().cloned().collect()
     }
 
     /// The paths of the notes of `set`, in `order`. Pinned notes are on top.
@@ -73,7 +83,11 @@ impl Snapshot {
     pub fn first(&self, set: NoteSet<'_>, order: Order) -> Option<&NoteInfo> {
         match order {
             Order::LastChange => self.matching(set).min_by(|a, b| last_change(a, b)),
-            Order::Title => self.matching(set).min_by_key(|note| title_key(note)),
+            Order::Title => self
+                .matching(set)
+                .map(|note| (title_key(note), note))
+                .min_by(by_title)
+                .map(|(_, note)| note),
         }
     }
 
@@ -117,24 +131,29 @@ impl Snapshot {
             .map_or(&[], |entry| entry.links.as_slice())
     }
 
-    /// The other notes that link to the note at `path`, by its id or by its file path.
-    pub fn backlinks(&self, path: impl AsRef<Path>, order: Order) -> Vec<NoteInfo> {
+    /// The other notes that link to the note at `path`, by its id or by its file path. The
+    /// newest change is first, as in [`Snapshot::newest`].
+    pub fn backlinks(&self, path: impl AsRef<Path>) -> Vec<NoteInfo> {
         let path = path.as_ref();
         let Some(target) = self.notes.get(path) else {
             return Vec::new();
         };
         let id = target.info.id.as_ref();
-        self.list(
-            |entry| {
+        let mut notes: Vec<&NoteInfo> = self
+            .notes
+            .values()
+            .filter(|entry| {
                 entry.info.path != path
                     && entry.links.iter().any(|link| match &link.target {
                         LinkTarget::Note { id: to, .. } => Some(to) == id,
                         LinkTarget::File(file) => file == path,
                         LinkTarget::Heading(_) | LinkTarget::Web(_) => false,
                     })
-            },
-            order,
-        )
+            })
+            .map(|entry| &entry.info)
+            .collect();
+        notes.sort_unstable_by(|a, b| newest(a, b));
+        notes.into_iter().cloned().collect()
     }
 
     /// The note at `path`, or `None` when no note is there.
@@ -250,50 +269,55 @@ impl Snapshot {
         }
         true
     }
-
-    fn list(&self, keep: impl Fn(&Entry) -> bool, order: Order) -> Vec<NoteInfo> {
-        let mut notes: Vec<&NoteInfo> = self
-            .notes
-            .values()
-            .filter(|entry| keep(entry))
-            .map(|entry| &entry.info)
-            .collect();
-        sort(&mut notes, order);
-        notes.into_iter().cloned().collect()
-    }
 }
 
 /// Pinned notes first, then `order`. The path breaks ties, so the order never changes at random.
 fn sort(notes: &mut [&NoteInfo], order: Order) {
     match order {
-        Order::LastChange => notes.sort_by(|a, b| last_change(a, b)),
-        Order::Title => notes.sort_by_cached_key(|note| title_key(note)),
+        Order::LastChange => notes.sort_unstable_by(|a, b| last_change(a, b)),
+        Order::Title => {
+            let mut keyed: Vec<_> = notes.iter().map(|note| (title_key(note), *note)).collect();
+            keyed.sort_unstable_by(by_title);
+            for (slot, (_, note)) in notes.iter_mut().zip(keyed) {
+                *slot = note;
+            }
+        }
     }
 }
 
-fn last_change(a: &NoteInfo, b: &NoteInfo) -> std::cmp::Ordering {
-    (b.pinned, b.modified)
-        .cmp(&(a.pinned, a.modified))
+fn last_change(a: &NoteInfo, b: &NoteInfo) -> Ordering {
+    b.pinned.cmp(&a.pinned).then_with(|| newest(a, b))
+}
+
+/// The newest change first. The path breaks a tie.
+fn newest(a: &NoteInfo, b: &NoteInfo) -> Ordering {
+    b.modified
+        .cmp(&a.modified)
         .then_with(|| compare_paths(&a.path, &b.path))
 }
 
-fn title_key(note: &NoteInfo) -> (bool, String, PathKey<'_>) {
-    (!note.pinned, note.title.to_lowercase(), PathKey(&note.path))
+fn title_key(note: &NoteInfo) -> (bool, String) {
+    (!note.pinned, note.title.to_lowercase())
 }
 
-/// A path that sorts with [`compare_paths`].
-#[derive(PartialEq, Eq)]
-struct PathKey<'a>(&'a Path);
-
-impl Ord for PathKey<'_> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        compare_paths(self.0, other.0)
-    }
+fn by_title(a: &((bool, String), &NoteInfo), b: &((bool, String), &NoteInfo)) -> Ordering {
+    a.0.cmp(&b.0)
+        .then_with(|| compare_paths(&a.1.path, &b.1.path))
 }
 
-impl PartialOrd for PathKey<'_> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
+/// The order of [`Path::cmp`], but faster. It compares bytes, with `/` as the lowest byte.
+///
+/// This gives the order of [`Path::cmp`] only for relative paths with no `.` or `..` part, no
+/// `//` and no `/` at the end. Snapshot paths are like this.
+fn compare_paths(a: &Path, b: &Path) -> Ordering {
+    let key = |byte: u8| if byte == b'/' { 0 } else { byte };
+    let (a, b) = (
+        a.as_os_str().as_encoded_bytes(),
+        b.as_os_str().as_encoded_bytes(),
+    );
+    match a.iter().zip(b).find(|(x, y)| x != y) {
+        Some((&x, &y)) => key(x).cmp(&key(y)),
+        None => a.len().cmp(&b.len()),
     }
 }
 
@@ -326,4 +350,35 @@ fn tag_children(
         .collect();
     tags.sort_by_cached_key(|tag| (tag.name.to_lowercase(), tag.name.clone()));
     tags
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use proptest::prelude::*;
+
+    use super::compare_paths;
+
+    /// A relative path with no `.` or `..` part, no `//` and no `/` at the end.
+    fn note_path() -> impl Strategy<Value = String> {
+        let part =
+            "[ !#+,.a-bA-Bé-]{1,4}".prop_filter("not . or ..", |part| part != "." && part != "..");
+        prop::collection::vec(part, 1..4).prop_map(|parts| parts.join("/"))
+    }
+
+    proptest! {
+        #[test]
+        fn same_order_as_path_cmp(a in note_path(), b in note_path()) {
+            let (a, b) = (Path::new(&a), Path::new(&b));
+            prop_assert_eq!(compare_paths(a, b), a.cmp(b));
+        }
+
+        #[test]
+        fn same_order_with_a_shared_start(start in note_path(), a in note_path(), b in note_path()) {
+            let (a, b) = (format!("{start}{a}"), format!("{start}/{b}"));
+            let (a, b) = (Path::new(&a), Path::new(&b));
+            prop_assert_eq!(compare_paths(a, b), a.cmp(b));
+        }
+    }
 }

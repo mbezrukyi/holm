@@ -14,7 +14,7 @@ use gpui_kit::{
     TestSupportExt as _, Window, px,
 };
 use holm_core::Snapshot;
-use holm_core::model::{NoteInfo, NoteSet, compare_paths};
+use holm_core::model::{NoteInfo, NoteSet};
 
 use crate::link_rows::{self, Query, Row};
 use crate::notes_folder::NotesFolder;
@@ -30,17 +30,11 @@ pub(crate) struct LinkStart {
 }
 
 impl LinkStart {
-    /// The picker lists each note of `snapshot`, the newest change first. The path breaks a tie.
+    /// The picker lists the notes of `snapshot` as [`Snapshot::newest`] gives them.
     /// The link goes into `open_note`. The field starts with `query`.
     pub(crate) fn new(snapshot: &Snapshot, open_note: PathBuf, query: String) -> Self {
-        let mut notes: Vec<&NoteInfo> = snapshot.matching(NoteSet::All).collect();
-        notes.sort_unstable_by(|a, b| {
-            b.modified
-                .cmp(&a.modified)
-                .then_with(|| compare_paths(&a.path, &b.path))
-        });
         Self {
-            notes: notes.into_iter().cloned().collect(),
+            notes: snapshot.newest(NoteSet::All),
             open_note,
             query,
         }

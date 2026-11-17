@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, PathPromptOptions, Subscription, Task,
 };
-use holm_core::model::{LinkTarget, Order};
+use holm_core::model::LinkTarget;
 use holm_editor::{Editor, OpenFile, OpenLink, PasteFiles, PastedFile};
 use holm_markdown::Target;
 
@@ -132,7 +132,7 @@ impl Links {
             return;
         };
         let notes_folder = self.notes_folder.read(cx);
-        let backlinks = notes_folder.snapshot().backlinks(&path, Order::LastChange);
+        let backlinks = notes_folder.snapshot().backlinks(&path);
         let broken = notes_folder.broken_links(path.clone(), cx);
         let job = cx.background_spawn(async move {
             Ok::<_, holm_core::Error>((path, backlinks, broken.await?))

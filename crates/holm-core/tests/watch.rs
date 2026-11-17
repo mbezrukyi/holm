@@ -162,7 +162,7 @@ fn a_moved_note_keeps_its_id_and_its_backlinks() {
         }
     );
     assert_eq!(changes[1..], [Change::Folders]);
-    let backlinks = fed.core.snapshot().backlinks("work/a.md", Order::Title);
+    let backlinks = fed.core.snapshot().backlinks("work/a.md");
     assert_eq!(backlinks[0].path, PathBuf::from("b.md"));
 }
 
@@ -411,7 +411,7 @@ fn a_renamed_folder_keeps_search_links_and_file_links_of_its_notes() {
     assert_eq!(found("food"), [PathBuf::from("job/a.md")]);
     assert_eq!(snapshot.links("job/a.md"), links);
     let back = |path| -> Vec<PathBuf> {
-        let notes = snapshot.backlinks(path, Order::Title);
+        let notes = snapshot.backlinks(path);
         notes.into_iter().map(|n| n.path).collect()
     };
     assert_eq!(back("job/a.md"), [PathBuf::from("b.md")]);

@@ -55,9 +55,8 @@ impl Backlinks {
         }
     }
 
-    /// Shows `notes` as the backlinks of the open note.
-    pub(crate) fn show(&mut self, mut notes: Vec<NoteInfo>, cx: &mut Context<Self>) {
-        notes.sort_by_key(|note| std::cmp::Reverse(note.modified));
+    /// Shows `notes` as the backlinks of the open note, in their order.
+    pub(crate) fn show(&mut self, notes: Vec<NoteInfo>, cx: &mut Context<Self>) {
         if notes == self.notes {
             return;
         }

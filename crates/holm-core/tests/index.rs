@@ -287,12 +287,12 @@ fn backlinks_come_from_id_links_and_file_links() {
         ("other.md", "[x](holm:01X) [y](target.pdf)\n"),
     ]);
 
-    let mut back = paths(folder.core.snapshot().backlinks("target.md", Order::Title));
+    let mut back = paths(folder.core.snapshot().backlinks("target.md"));
     back.sort();
 
     assert_eq!(back, ["by-heading.md", "by-id.md", "work/by-path.md"]);
     assert_eq!(
-        folder.core.snapshot().backlinks("other.md", Order::Title),
+        folder.core.snapshot().backlinks("other.md"),
         Vec::<NoteInfo>::new()
     );
 }
@@ -402,7 +402,7 @@ fn a_note_moved_while_holm_was_closed_keeps_its_id() {
 
     assert_eq!(folder.text("work/a.md"), note("01MOVE", "", "# A\n"));
     assert_eq!(
-        paths(folder.core.snapshot().backlinks("work/a.md", Order::Title)),
+        paths(folder.core.snapshot().backlinks("work/a.md")),
         ["link.md"]
     );
 }
