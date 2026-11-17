@@ -13,6 +13,7 @@ use gpui_kit::{
 };
 use holm_core::model::NoteInfo;
 
+use crate::pick_notes::{Lowercase, PickNotes};
 use crate::popup::{self, PickEvent, PickList, PickRow};
 use crate::text;
 
@@ -27,7 +28,7 @@ pub(crate) enum QuickOpenEvent {
 const MAX_ROWS: usize = 50;
 
 pub(crate) struct QuickOpen {
-    notes: Vec<NoteInfo>,
+    notes: PickNotes,
     list: Entity<PickList>,
     /// The place in `notes` of each row.
     rows: Vec<usize>,
@@ -44,7 +45,7 @@ impl QuickOpen {
             PickEvent::Close => cx.emit(QuickOpenEvent::Close),
         });
         let mut this = Self {
-            notes,
+            notes: PickNotes::new(notes),
             list,
             rows: Vec::new(),
             _list: subscription,
@@ -72,14 +73,14 @@ impl QuickOpen {
     }
 }
 
-/// The place in `notes` of each title that holds `query`, with no regard to capital letters.
-/// Only the first [`MAX_ROWS`] show.
-fn rows(query: &str, notes: &[NoteInfo]) -> Vec<usize> {
-    let query = query.trim().to_lowercase();
+/// The place of each title that holds `query`, with no regard to capital letters. Only the
+/// first [`MAX_ROWS`] show.
+fn rows(query: &str, notes: &PickNotes) -> Vec<usize> {
+    let query = Lowercase::new(query.trim());
     notes
-        .iter()
+        .titles()
         .enumerate()
-        .filter(|(_, note)| note.title.to_lowercase().contains(&query))
+        .filter(|(_, title)| title.as_str().contains(query.as_str()))
         .map(|(at, _)| at)
         .take(MAX_ROWS)
         .collect()
@@ -109,7 +110,11 @@ mod tests {
 
     use holm_core::model::NoteInfo;
 
-    use super::{MAX_ROWS, rows};
+    use super::{MAX_ROWS, PickNotes};
+
+    fn rows(query: &str, notes: &[NoteInfo]) -> Vec<usize> {
+        super::rows(query, &PickNotes::new(notes.to_vec()))
+    }
 
     fn notes(titles: &[String]) -> Vec<NoteInfo> {
         titles

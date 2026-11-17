@@ -13,21 +13,38 @@ use gpui_kit::{
     ParentElement, Render, Role, StatefulInteractiveElement as _, Subscription,
     TestSupportExt as _, Window, px,
 };
-use holm_core::model::NoteInfo;
+use holm_core::Snapshot;
+use holm_core::model::{NoteInfo, NoteSet};
 
 use crate::link_rows::{self, Query, Row};
 use crate::notes_folder::NotesFolder;
+use crate::pick_notes::PickNotes;
 use crate::popup::{self, PickEvent, PickList, PickRow};
 use crate::text;
 
 /// What the link picker starts with.
 pub(crate) struct LinkStart {
-    /// The notes to pick from, in their order.
-    pub(crate) notes: Vec<NoteInfo>,
-    /// The note that gets the link.
-    pub(crate) open_note: PathBuf,
-    /// The first text of the field.
-    pub(crate) query: String,
+    notes: Vec<NoteInfo>,
+    open_note: PathBuf,
+    query: String,
+}
+
+impl LinkStart {
+    /// The picker lists each note of `snapshot`, the newest change first. The path breaks a tie.
+    /// The link goes into `open_note`. The field starts with `query`.
+    pub(crate) fn new(snapshot: &Snapshot, open_note: PathBuf, query: String) -> Self {
+        let mut notes: Vec<&NoteInfo> = snapshot.matching(NoteSet::All).collect();
+        notes.sort_unstable_by(|a, b| {
+            b.modified
+                .cmp(&a.modified)
+                .then_with(|| a.path.cmp(&b.path))
+        });
+        Self {
+            notes: notes.into_iter().cloned().collect(),
+            open_note,
+            query,
+        }
+    }
 }
 
 /// The answer of the window.
@@ -54,7 +71,7 @@ pub(crate) enum LinkChoice {
 
 pub(crate) struct LinkPicker {
     notes_folder: Entity<NotesFolder>,
-    notes: Vec<NoteInfo>,
+    notes: PickNotes,
     open_note: PathBuf,
     list: Entity<PickList>,
     rows: Vec<Row>,
@@ -86,7 +103,7 @@ impl LinkPicker {
         });
         let mut this = Self {
             notes_folder,
-            notes: start.notes,
+            notes: PickNotes::new(start.notes),
             open_note: start.open_note,
             list,
             rows: Vec::new(),

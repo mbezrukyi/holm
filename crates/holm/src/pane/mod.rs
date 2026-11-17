@@ -42,7 +42,7 @@ use gpui_kit::{
     StatefulInteractiveElement as _, Styled, Subscription, Task, TestSupportExt as _, Window, div,
     px,
 };
-use holm_core::model::{Change, Note, NoteInfo, NoteSet, Order};
+use holm_core::model::{Change, Note, NoteInfo};
 use holm_editor::{Changed, Editor, UpFromStart};
 use holm_markdown::Target;
 
@@ -408,8 +408,6 @@ impl NotePane {
         let target = link.map(|link| link.target);
         let done = step(cx, move |pane, _: holm_core::Result<()>, cx| {
             let snapshot = pane.notes_folder.read(cx).snapshot();
-            let mut notes = snapshot.notes(NoteSet::All, Order::LastChange);
-            notes.sort_by_key(|note| std::cmp::Reverse(note.modified));
             let query = match target {
                 Some(Target::Note { id, heading }) => match snapshot.note_with_id(&id) {
                     Some(note) => match heading {
@@ -421,12 +419,7 @@ impl NotePane {
                 Some(Target::Heading(heading)) => format!("#{heading}"),
                 _ => String::new(),
             };
-            let start = LinkStart {
-                notes,
-                open_note,
-                query,
-            };
-            done(start, cx);
+            done(LinkStart::new(snapshot, open_note, query), cx);
         });
         self.notes_folder
             .update(cx, |notes_folder, cx| notes_folder.wait(done, cx));

@@ -18,6 +18,7 @@ mod notes;
 mod notes_folder;
 mod pane;
 mod path_text;
+mod pick_notes;
 mod picker;
 mod popup;
 mod problem_list;
