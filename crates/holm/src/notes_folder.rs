@@ -31,7 +31,9 @@ use std::time::{Duration, Instant};
 use futures_channel::oneshot;
 use futures_core::Stream;
 use gpui_kit::{App, AppContext as _, Context, EventEmitter, Task, Window};
-use holm_core::model::{Change, ChangeList, DeleteCount, LinkTarget, Note, NoteInfo, Order};
+use holm_core::model::{
+    Change, ChangeList, DeleteCount, LinkTarget, Note, NoteInfo, NoteSet, Order,
+};
 use holm_core::{Changes, Core, Snapshot};
 use holm_editor::PastedFile;
 
@@ -726,7 +728,7 @@ fn first_note(core: &Core, last: Option<&Path>) -> holm_core::Result<Option<Note
     if let Some(note) = last.and_then(|last| core.read(last).ok()) {
         return Ok(Some(note));
     }
-    match core.snapshot().notes(Order::LastChange).first() {
+    match core.snapshot().first(NoteSet::All, Order::LastChange) {
         Some(info) => core.read(&info.path).map(Some),
         None => Ok(None),
     }

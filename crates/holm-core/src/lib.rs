@@ -28,7 +28,7 @@ pub use store::title_of;
 pub use watch::Feed;
 
 use index::Index;
-use model::{Change, ChangeList, DeleteCount, LinkTarget, Note, NoteId, NoteInfo, Order};
+use model::{Change, ChangeList, DeleteCount, LinkTarget, Note, NoteId, NoteInfo, NoteSet, Order};
 use retag::TagEdit;
 use snapshot::Delta;
 use store::{Store, folder_of};
@@ -687,8 +687,7 @@ impl Core {
 
     fn tag_edit_count(&self, edit: &TagEdit<'_>) -> usize {
         self.snapshot()
-            .notes_with_tag(edit.tag(), Order::Title)
-            .iter()
+            .matching(NoteSet::WithTag(edit.tag()))
             .filter(|note| edit.apply(&note.tags) != note.tags)
             .count()
     }
@@ -849,12 +848,7 @@ impl Inner {
     }
 
     fn edit_tag(&self, draft: &mut Draft<'_>, edit: &TagEdit<'_>) -> Result<usize> {
-        let paths: Vec<PathBuf> = draft
-            .next
-            .notes_with_tag(edit.tag(), Order::Title)
-            .into_iter()
-            .map(|info| info.path)
-            .collect();
+        let paths = draft.next.paths(NoteSet::WithTag(edit.tag()), Order::Title);
         let rewritten = self.store.rewrite(&paths, |_, old| {
             let mut text = holm_markdown::Note::parse(old);
             let tags = text.tags();

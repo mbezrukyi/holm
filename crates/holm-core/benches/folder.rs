@@ -9,7 +9,7 @@ use std::path::Path;
 use std::process::Command;
 
 use holm_core::Core;
-use holm_core::model::Order;
+use holm_core::model::{NoteSet, Order};
 use tempfile::TempDir;
 
 const NOTES: usize = 5_000;
@@ -77,6 +77,15 @@ fn sidebar_notes(bencher: divan::Bencher<'_, '_>) {
     let index = tempfile::tempdir().unwrap();
     let core = open(notes.path(), index.path());
     bencher.bench_local(|| core.snapshot().notes(Order::LastChange));
+}
+
+/// The sidebar keeps only the paths of the note list.
+#[divan::bench(sample_count = 50)]
+fn sidebar_paths(bencher: divan::Bencher<'_, '_>) {
+    let notes = notes_folder();
+    let index = tempfile::tempdir().unwrap();
+    let core = open(notes.path(), index.path());
+    bencher.bench_local(|| core.snapshot().paths(NoteSet::All, Order::LastChange));
 }
 
 #[divan::bench(sample_count = 50)]

@@ -16,7 +16,7 @@ use gpui_kit::{
     ParentElement, Pixels, Render, Styled, Subscription, Window, div, px,
 };
 use holm_core::Snapshot;
-use holm_core::model::{Note, Order};
+use holm_core::model::{Note, NoteSet, Order};
 
 use crate::config::{Config, SidebarSettings};
 use crate::dialog::{self, Ask, Confirm, Dialog};
@@ -728,8 +728,6 @@ fn next_note(snapshot: &Snapshot, neighbor: Option<PathBuf>, order: Order) -> Op
         return Some(next);
     }
     snapshot
-        .notes(order)
-        .into_iter()
-        .next()
-        .map(|note| note.path)
+        .first(NoteSet::All, order)
+        .map(|note| note.path.clone())
 }

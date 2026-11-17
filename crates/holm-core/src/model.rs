@@ -72,6 +72,18 @@ pub enum Order {
     Title,
 }
 
+/// Which notes of a [`Snapshot`] a list holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoteSet<'a> {
+    /// Every note.
+    All,
+    /// The notes right in a folder, without the notes of its subfolders.
+    In(&'a Path),
+    /// The notes with a tag or one of its child tags. Tags match exactly, also in capital
+    /// letters.
+    WithTag(&'a str),
+}
+
 /// One tag in the tag tree.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tag {

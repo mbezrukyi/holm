@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::model::{Link, LinkTarget, NoteInfo, Order, Tag};
+use crate::model::{Link, LinkTarget, NoteInfo, NoteSet, Order, Tag};
 use crate::store::folder_of;
 
 /// The facts of the notes folder at one moment, from [`Core::snapshot`](crate::Core::snapshot).
@@ -53,16 +53,38 @@ impl Snapshot {
 
     /// The notes right in `folder`, without the notes of its subfolders.
     pub fn notes_in(&self, folder: impl AsRef<Path>, order: Order) -> Vec<NoteInfo> {
-        let folder = folder.as_ref();
-        self.list(|entry| folder_of(&entry.info.path) == folder, order)
+        self.list(|entry| is_in(entry, NoteSet::In(folder.as_ref())), order)
     }
 
     /// The notes with `tag` or one of its child tags. Tags match exactly, also in capital letters.
     pub fn notes_with_tag(&self, tag: &str, order: Order) -> Vec<NoteInfo> {
-        self.list(
-            |entry| entry.info.tags.iter().any(|t| in_tag(t, tag)),
-            order,
-        )
+        self.list(|entry| is_in(entry, NoteSet::WithTag(tag)), order)
+    }
+
+    /// The paths of the notes of `set`, in `order`. Pinned notes are on top.
+    pub fn paths(&self, set: NoteSet<'_>, order: Order) -> Vec<PathBuf> {
+        let mut notes: Vec<&NoteInfo> = self.matching(set).collect();
+        sort(&mut notes, order);
+        notes.into_iter().map(|note| note.path.clone()).collect()
+    }
+
+    /// The notes of `set`, in no fixed order.
+    pub fn matching<'s, 'a>(
+        &'s self,
+        set: NoteSet<'a>,
+    ) -> impl Iterator<Item = &'s NoteInfo> + use<'s, 'a> {
+        self.notes
+            .values()
+            .filter(move |entry| is_in(entry, set))
+            .map(|entry| &entry.info)
+    }
+
+    /// The first note of `set` in `order`, or `None` when `set` has no notes.
+    pub fn first(&self, set: NoteSet<'_>, order: Order) -> Option<&NoteInfo> {
+        match order {
+            Order::LastChange => self.matching(set).min_by(|a, b| last_change(a, b)),
+            Order::Title => self.matching(set).min_by_key(|note| title_key(note)),
+        }
     }
 
     /// Every tag as a tree. `work` holds `work/holm`.
@@ -224,6 +246,14 @@ impl Snapshot {
     }
 }
 
+fn is_in(entry: &Entry, set: NoteSet<'_>) -> bool {
+    match set {
+        NoteSet::All => true,
+        NoteSet::In(folder) => folder_of(&entry.info.path) == folder,
+        NoteSet::WithTag(tag) => entry.info.tags.iter().any(|t| in_tag(t, tag)),
+    }
+}
+
 /// Whether the tag `name` is `tag` or one of its child tags.
 fn in_tag(name: &str, tag: &str) -> bool {
     name.strip_prefix(tag)
@@ -233,15 +263,19 @@ fn in_tag(name: &str, tag: &str) -> bool {
 /// Pinned notes first, then `order`. The path breaks ties, so the order never changes at random.
 fn sort(notes: &mut [&NoteInfo], order: Order) {
     match order {
-        Order::LastChange => notes.sort_by(|a, b| {
-            (b.pinned, b.modified)
-                .cmp(&(a.pinned, a.modified))
-                .then_with(|| a.path.cmp(&b.path))
-        }),
-        Order::Title => {
-            notes.sort_by_cached_key(|&note| (!note.pinned, note.title.to_lowercase(), &note.path));
-        }
+        Order::LastChange => notes.sort_by(|a, b| last_change(a, b)),
+        Order::Title => notes.sort_by_cached_key(|note| title_key(note)),
     }
+}
+
+fn last_change(a: &NoteInfo, b: &NoteInfo) -> std::cmp::Ordering {
+    (b.pinned, b.modified)
+        .cmp(&(a.pinned, a.modified))
+        .then_with(|| a.path.cmp(&b.path))
+}
+
+fn title_key(note: &NoteInfo) -> (bool, String, &Path) {
+    (!note.pinned, note.title.to_lowercase(), &note.path)
 }
 
 /// Builds the tag tree from `(tag, note)` pairs. A parent tag counts the notes of its children.

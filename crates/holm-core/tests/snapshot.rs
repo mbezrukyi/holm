@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use common::Folder;
-use holm_core::model::{NoteInfo, Order};
+use holm_core::model::{NoteInfo, NoteSet, Order};
 use holm_core::{Core, Result, Snapshot};
 
 fn titles(snapshot: &Snapshot) -> Vec<String> {
@@ -232,5 +232,52 @@ fn sorted_puts_known_paths_in_order_and_leaves_out_the_others() {
     assert_eq!(
         snapshot.sorted(Vec::new(), Order::Title),
         Vec::<PathBuf>::new()
+    );
+}
+
+#[test]
+fn paths_first_and_matching_agree_with_the_note_lists() {
+    let mut folder = Folder::new(&[
+        ("b.md", "#work\n"),
+        ("A.md", "#work/holm\n"),
+        ("c.md", "---\npinned: true\n---\n#home\n"),
+        ("work/d.md", "#work\n"),
+        ("work/E.md", "#workshop\n"),
+    ]);
+    for (path, secs) in [("b.md", 30), ("A.md", 10), ("c.md", 20), ("work/d.md", 50)] {
+        folder.set_time(path, secs);
+    }
+    folder.reopen();
+    let snapshot = folder.core.snapshot();
+    let sets = [
+        NoteSet::All,
+        NoteSet::In(Path::new("")),
+        NoteSet::In(Path::new("work")),
+        NoteSet::In(Path::new("gone")),
+        NoteSet::WithTag("work"),
+        NoteSet::WithTag("home"),
+        NoteSet::WithTag("gone"),
+    ];
+
+    for set in sets {
+        for order in [Order::LastChange, Order::Title] {
+            let notes = match set {
+                NoteSet::All => snapshot.notes(order),
+                NoteSet::In(folder) => snapshot.notes_in(folder, order),
+                NoteSet::WithTag(tag) => snapshot.notes_with_tag(tag, order),
+            };
+            let expected: Vec<PathBuf> = notes.iter().map(|note| note.path.clone()).collect();
+            assert_eq!(snapshot.paths(set, order), expected, "{set:?} {order:?}");
+            assert_eq!(
+                snapshot.first(set, order),
+                notes.first(),
+                "{set:?} {order:?}"
+            );
+            assert_eq!(snapshot.matching(set).count(), notes.len(), "{set:?}");
+        }
+    }
+    assert_eq!(
+        common::paths(snapshot.paths(NoteSet::All, Order::LastChange)),
+        ["c.md", "work/E.md", "work/d.md", "b.md", "A.md"]
     );
 }

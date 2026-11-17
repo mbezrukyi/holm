@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use holm_core::Snapshot;
-use holm_core::model::{NoteInfo, Order};
+use holm_core::model::{NoteInfo, NoteSet, Order};
 
 /// The notes of one list, in the order of the list. Each path has a note in the snapshot.
 ///
@@ -24,11 +24,7 @@ impl NoteList {
 
     /// Every note of `snapshot`, in `order`.
     pub(crate) fn all(snapshot: Snapshot, order: Order) -> Self {
-        let paths = snapshot
-            .notes(order)
-            .into_iter()
-            .map(|note| note.path)
-            .collect();
+        let paths = snapshot.paths(NoteSet::All, order).into();
         Self { snapshot, paths }
     }
 
