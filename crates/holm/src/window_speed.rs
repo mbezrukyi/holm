@@ -10,14 +10,13 @@ use std::fs;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use gpui_kit::{AnyWindowHandle, Keystroke, TestAppContext};
+use gpui_kit::{AnyWindowHandle, AppContext as _, Entity, Keystroke, TestAppContext};
 
 use super::Startup;
+use crate::pane::NotePane;
+use crate::window::{HolmWindow, Stage};
 
-use super::{
-    Fixture, autosave, keys, new_note_open, note_path, open, press, screen, settle, sidebar,
-    type_new_name,
-};
+use super::{Fixture, autosave, keys, open, press, screen, settle, sidebar, type_new_name};
 
 const NOTES: usize = 5_000;
 const FOLDERS: usize = 50;
@@ -154,24 +153,47 @@ fn window_speed(cx: &mut TestAppContext) {
     });
 }
 
-/// Presses `key` and runs the tasks one at a time until `shown` is true. It prints the time.
+/// Presses `key` and runs the tasks one at a time until the pane is `shown`, then draws one
+/// frame. It prints the time.
 ///
-/// The test runs the background tasks on this thread too, so the time holds a write that runs.
+/// The check reads the pane and draws no frame, so the time holds only the frames a window
+/// would draw. The test runs the background tasks on this thread too, so the time holds a
+/// write that runs.
 fn key_until(
     what: &str,
     cx: &mut TestAppContext,
     handle: AnyWindowHandle,
     key: &'static str,
-    shown: impl Fn(&mut TestAppContext, AnyWindowHandle) -> bool,
+    shown: impl Fn(&NotePane) -> bool,
 ) {
     let executor = cx.executor();
     let dispatcher = executor.dispatcher().as_test().unwrap();
+    let pane = pane(cx, handle);
     time(what, || {
         cx.dispatch_keystroke(handle, Keystroke::parse(key).unwrap());
-        while !shown(cx, handle) {
+        while !cx.read(|cx| shown(pane.read(cx))) {
             assert!(dispatcher.tick(false), "{what}: it never shows");
         }
+        screen(cx, handle, |_| ());
     });
+}
+
+/// The note pane of the open notes folder.
+fn pane(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Entity<NotePane> {
+    cx.update_window(handle, |root, _, cx| {
+        let root = root.downcast::<gpui_kit::base::Root>().unwrap();
+        let holm = root
+            .read(cx)
+            .view()
+            .clone()
+            .downcast::<HolmWindow>()
+            .unwrap();
+        match &holm.read(cx).stage {
+            Stage::Open(notes) => notes.read(cx).pane().clone(),
+            _ => panic!("the notes folder is not open"),
+        }
+    })
+    .unwrap()
 }
 
 /// Opens the note with `number` in quick open, until the pane shows it.
@@ -183,8 +205,9 @@ fn quick_open(what: &str, cx: &mut TestAppContext, handle: AnyWindowHandle, numb
         }
     }
     let title = format!("Note {number}");
-    key_until(what, cx, handle, "enter", move |cx, handle| {
-        note_path(cx, handle).is_some_and(|path| path.ends_with(&title))
+    key_until(what, cx, handle, "enter", move |pane| {
+        pane.shown_note()
+            .is_some_and(|path| path.file_stem().is_some_and(|stem| stem == title.as_str()))
     });
 }
 
@@ -201,7 +224,13 @@ fn window_speed_during_a_tag_rename(cx: &mut TestAppContext) {
     };
     let handle = open(cx, startup);
 
-    key_until("Ctrl+N, empty line", cx, handle, "ctrl-n", new_note_open);
+    key_until(
+        "Ctrl+N, empty line",
+        cx,
+        handle,
+        "ctrl-n",
+        NotePane::shows_new_note,
+    );
     keys(cx, handle, "escape");
     quick_open("open a note, empty line", cx, handle, "4321");
 
@@ -212,7 +241,13 @@ fn window_speed_during_a_tag_rename(cx: &mut TestAppContext) {
     type_new_name(cx, handle, "zone");
     keys(cx, handle, "enter");
     press(cx, handle, "enter");
-    key_until("Ctrl+N, tag rename", cx, handle, "ctrl-n", new_note_open);
+    key_until(
+        "Ctrl+N, tag rename",
+        cx,
+        handle,
+        "ctrl-n",
+        NotePane::shows_new_note,
+    );
     cx.run_until_parked();
     keys(cx, handle, "escape");
 

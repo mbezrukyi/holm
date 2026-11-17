@@ -481,6 +481,11 @@ impl NotesView {
 
     /// A close of the window: gives whether the window may close now. See
     /// [`NotePane::may_close`].
+    #[cfg(test)]
+    pub(crate) fn pane(&self) -> &Entity<NotePane> {
+        &self.pane
+    }
+
     pub(crate) fn may_close(&self, window: &Window, cx: &mut Context<Self>) -> bool {
         self.pane.update(cx, |pane, cx| pane.may_close(window, cx))
     }

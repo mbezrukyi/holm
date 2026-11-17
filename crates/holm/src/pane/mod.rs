@@ -776,6 +776,18 @@ impl NotePane {
         self.shown.editor().map(PathBuf::as_path)
     }
 
+    /// Whether the pane shows a new note with no file yet. Speed tests read it with no frame.
+    #[cfg(test)]
+    pub(crate) fn shows_new_note(&self) -> bool {
+        matches!(self.shown, Shown::New { .. })
+    }
+
+    /// The note that the user sees. Speed tests read it with no frame.
+    #[cfg(test)]
+    pub(crate) fn shown_note(&self) -> Option<&Path> {
+        self.shown.note().map(PathBuf::as_path)
+    }
+
     /// Opens the note at `path`, and drops a new note. With [`Leave::Keep`], the line first
     /// writes the unsaved text. When that save fails, the pane stays on the note.
     pub(crate) fn open(&mut self, path: PathBuf, leave: Leave, cx: &mut Context<Self>) {
