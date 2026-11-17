@@ -5,14 +5,88 @@
 
 mod common;
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use common::Folder;
 use holm_core::Error;
-use holm_core::model::LinkTarget;
+use holm_core::model::{Link, LinkTarget};
 
 fn note(id: &str, body: &str) -> String {
     format!("---\nid: {id}\n---\n{body}")
+}
+
+/// The links of `path` in the snapshot. It checks that the index rows and a new index give
+/// the same links.
+fn links_everywhere(folder: &mut Folder, path: &str) -> Vec<Link> {
+    let links = folder.core.snapshot().links(path).to_vec();
+    folder.reopen();
+    assert_eq!(folder.core.snapshot().links(path), links, "index rows");
+    fs::remove_file(folder.index_file()).unwrap();
+    folder.reopen();
+    assert_eq!(folder.core.snapshot().links(path), links, "new index");
+    links
+}
+
+fn file(path: &str) -> Link {
+    Link {
+        target: LinkTarget::File(PathBuf::from(path)),
+        embedded: false,
+    }
+}
+
+#[test]
+fn a_tag_change_keeps_the_links() {
+    let mut folder = Folder::new(&[("work/a.md", &note("01A", "[f](x.pdf) [n](holm:01B)\n"))]);
+    let before = folder.core.snapshot().links("work/a.md").to_vec();
+
+    folder.core.add_tag("work/a.md", "new").unwrap();
+
+    assert_eq!(links_everywhere(&mut folder, "work/a.md"), before);
+    assert_eq!(before[0], file("work/x.pdf"));
+}
+
+#[test]
+fn a_save_follows_the_links_of_the_text() {
+    let mut folder = Folder::new(&[("work/a.md", &note("01A", "[f](x.pdf)\n"))]);
+
+    folder
+        .core
+        .save("work/a.md", "More words. [f](x.pdf)\n")
+        .unwrap();
+    assert_eq!(
+        links_everywhere(&mut folder, "work/a.md"),
+        [file("work/x.pdf")]
+    );
+
+    folder
+        .core
+        .save("work/a.md", "More words. [f](y.pdf)\n")
+        .unwrap();
+    assert_eq!(
+        links_everywhere(&mut folder, "work/a.md"),
+        [file("work/y.pdf")]
+    );
+}
+
+#[test]
+fn a_folder_move_points_relative_file_links_to_the_new_place() {
+    let mut folder = Folder::new(&[
+        ("work/a.md", &note("01A", "[b](sub/b.md)\n")),
+        ("work/sub/b.md", ""),
+        ("archive/x.md", ""),
+    ]);
+
+    folder.core.move_folder("work", "archive").unwrap();
+
+    assert_eq!(
+        folder.text("archive/work/a.md"),
+        note("01A", "[b](sub/b.md)\n")
+    );
+    assert_eq!(
+        links_everywhere(&mut folder, "archive/work/a.md"),
+        [file("archive/work/sub/b.md")]
+    );
 }
 
 #[test]

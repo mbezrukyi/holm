@@ -3429,6 +3429,7 @@ name = "holm-core"
 version = "0.1.0"
 dependencies = [
  "divan",
+ "foldhash",
  "futures-channel",
  "futures-core",
  "holm-markdown",

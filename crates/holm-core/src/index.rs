@@ -7,12 +7,14 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::fs;
+use std::hash::{BuildHasher as _, Hash};
 use std::io;
 use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
 use holm_markdown::{Body, Target};
+use rusqlite::config::DbConfig;
 use rusqlite::types::Value;
 use rusqlite::{Connection, OptionalExtension as _, params};
 
@@ -28,7 +30,7 @@ const FILE: &str = "index.sqlite";
 /// Change this number with each change to [`SCHEMA`], to [`search::SCHEMA`], or to what a
 /// column holds.
 /// An index with another number is rebuilt.
-const SHAPE: i32 = 5;
+const SHAPE: i32 = 6;
 
 const SCHEMA: &str = "
 CREATE TABLE notes (
@@ -41,7 +43,9 @@ CREATE TABLE notes (
     pinned INTEGER NOT NULL,
     modified INTEGER NOT NULL,
     changed INTEGER NOT NULL,
-    size INTEGER NOT NULL
+    size INTEGER NOT NULL,
+    source_hash INTEGER NOT NULL,
+    links_hash INTEGER NOT NULL
 );
 CREATE INDEX notes_folder ON notes (folder);
 CREATE TABLE tags (
@@ -161,7 +165,7 @@ impl Index {
             let mut put_notes = Vec::with_capacity(notes.len());
             let mut delta = Delta::default();
             for (note, stamp) in notes {
-                let (note, links) = put(&tx, store, note.clone(), *stamp, &mut gone)?;
+                let (note, links) = put(&tx, store, note.clone(), *stamp, false, &mut gone)?;
                 delta.put.push((note.info.clone(), links));
                 put_notes.push(note);
             }
@@ -271,7 +275,7 @@ fn fresh(path: &Path, store: &Store, fail: &Fail) -> Result<Connection, Fail> {
         Err(error) => {
             tracing::warn!(%error, path = %path.display(), "Holm keeps the index in memory");
             let mut conn = Connection::open_in_memory()?;
-            conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+            settings(&conn)?;
             schema(&mut conn)?;
             sync(&mut conn, store, &[PathBuf::new()])?;
             Ok(conn)
@@ -284,7 +288,8 @@ fn fresh(path: &Path, store: &Store, fail: &Fail) -> Result<Connection, Fail> {
 fn connect(path: &Path) -> Result<Connection, Fail> {
     let mut conn = Connection::open(path)?;
     conn.query_row("PRAGMA journal_mode = WAL", [], |_| Ok(()))?;
-    conn.execute_batch("PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;")?;
+    conn.execute_batch("PRAGMA synchronous = NORMAL;")?;
+    settings(&conn)?;
     let shape: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if shape == SHAPE {
         return Ok(conn);
@@ -300,6 +305,14 @@ fn connect(path: &Path) -> Result<Connection, Fail> {
     }
     schema(&mut conn)?;
     Ok(conn)
+}
+
+fn settings(conn: &Connection) -> Result<(), Fail> {
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+    // Without it, SQLite prepares some statements again for each new bound value,
+    // like the read of the link rows of a note.
+    conn.set_db_config(DbConfig::SQLITE_DBCONFIG_ENABLE_QPSG, true)?;
+    Ok(())
 }
 
 fn schema(conn: &mut Connection) -> Result<(), Fail> {
@@ -381,7 +394,7 @@ fn sync(conn: &mut Connection, store: &Store, scopes: &[PathBuf]) -> Result<Refr
         let old_tags = if new { None } else { Some(tags_of(&tx, rel)?) };
         match store.read(rel) {
             Ok((note, stamp)) => {
-                let (note, links) = put(&tx, store, note, stamp, &mut gone)?;
+                let (note, links) = put(&tx, store, note, stamp, new, &mut gone)?;
                 put_in.push((note.info.clone(), links));
                 written.push((note.info, old_tags));
             }
@@ -446,26 +459,24 @@ fn pairs<'a>(
 /// read again. The index does not keep whether a link was relative, so this
 /// skips every note with a file link.
 fn shift(conn: &Connection, from: &Path, to: &Path) -> Result<Option<(NoteInfo, Vec<Link>)>, Fail> {
-    let count = conn
+    let key: Option<i64> = conn
         .prepare_cached(
             "UPDATE notes SET path = ?2, folder = ?3 WHERE path = ?1
-            AND NOT EXISTS (SELECT 1 FROM links WHERE links.note = notes.key AND kind = 'file')",
+            AND NOT EXISTS (SELECT 1 FROM links WHERE links.note = notes.key AND kind = 'file')
+            RETURNING key",
         )?
-        .execute(params![bytes(from), bytes(to), bytes(folder_of(to))])?;
-    if count == 0 {
+        .query_row(
+            params![bytes(from), bytes(to), bytes(folder_of(to))],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(key) = key else {
         return Ok(None);
-    }
+    };
     let info = conn
-        .prepare_cached(&format!("{NOTE_INFO} WHERE path = ?1"))?
-        .query_row([bytes(to)], note_info)?;
-    let mut statement = conn.prepare_cached(
-        "SELECT kind, target, heading, embedded FROM links
-        JOIN notes ON notes.key = links.note WHERE notes.path = ?1 ORDER BY pos",
-    )?;
-    let links = statement
-        .query_map([bytes(to)], link)?
-        .collect::<rusqlite::Result<_>>()?;
-    Ok(Some((info, links)))
+        .prepare_cached(&format!("{NOTE_INFO} WHERE key = ?1"))?
+        .query_row([key], note_info)?;
+    Ok(Some((info, stored_links(conn, key)?)))
 }
 
 /// The stamps of the known notes at or below `scope`.
@@ -570,11 +581,13 @@ fn change_path(change: &Change) -> Option<&Path> {
 /// It returns the note and its links.
 ///
 /// When the other file is gone, its note leaves the index and goes into `gone`.
+/// When `new` is true, the caller knows that the index has no note at this path.
 fn put(
     conn: &Connection,
     store: &Store,
     mut note: Note,
     mut stamp: Stamp,
+    new: bool,
     gone: &mut Vec<Gone>,
 ) -> Result<(Note, Vec<Link>), Fail> {
     if let Some(id) = &note.info.id
@@ -582,9 +595,9 @@ fn put(
         && owner != note.info.path
     {
         if store.exists(&owner) {
-            let new = NoteId::generate();
-            tracing::info!(%id, %new, path = %note.info.path.display(), "gave a copied note a new id");
-            match store.edit_fields(&note.info.path, |text| text.set_id(Some(new.as_str()))) {
+            let new_id = NoteId::generate();
+            tracing::info!(%id, new = %new_id, path = %note.info.path.display(), "gave a copied note a new id");
+            match store.edit_fields(&note.info.path, |text| text.set_id(Some(new_id.as_str()))) {
                 Ok((written, written_stamp)) => (note, stamp) = (written, written_stamp),
                 Err(error) => {
                     tracing::warn!(%error, "kept a copied note without an id");
@@ -595,8 +608,7 @@ fn put(
             gone.extend(delete(conn, &owner)?);
         }
     }
-    let links = links_of(store.root(), &note);
-    write(conn, &note, &links, stamp)?;
+    let links = write(conn, store.root(), &note, stamp, new)?;
     Ok((note, links))
 }
 
@@ -637,16 +649,45 @@ fn owner(conn: &Connection, id: &NoteId) -> Result<Option<PathBuf>, Fail> {
     Ok(owner.map(path))
 }
 
-fn write(conn: &Connection, note: &Note, links: &[Link], stamp: Stamp) -> Result<(), Fail> {
+/// Writes the rows of one note and returns its links.
+///
+/// The links come from the body and the folder, their source. When the source stays,
+/// the links come from the stored rows. When the parsed links stay, the stored rows stay.
+fn write(
+    conn: &Connection,
+    root: &Path,
+    note: &Note,
+    stamp: Stamp,
+    new: bool,
+) -> Result<Vec<Link>, Fail> {
     let info = &note.info;
     let folder = folder_of(&info.path);
+    let source_hash = hash((&note.body, folder));
+    let old: Option<(i64, i64)> = if new {
+        None
+    } else {
+        conn.prepare_cached("SELECT source_hash, links_hash FROM notes WHERE path = ?1")?
+            .query_row([bytes(&info.path)], |row| Ok((row.get(0)?, row.get(1)?)))
+            .optional()?
+    };
+    let (links, links_hash, stored) = match old {
+        Some((old_source, old_links)) if old_source == source_hash => (None, old_links, true),
+        _ => {
+            let links = links_of(root, note);
+            let links_hash = hash(&links);
+            let stored = old.is_some_and(|(_, old_links)| old_links == links_hash);
+            (Some(links), links_hash, stored)
+        }
+    };
     let key: i64 = conn
         .prepare_cached(
-            "INSERT INTO notes (path, folder, id, title, preview, pinned, modified, changed, size)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            "INSERT INTO notes (path, folder, id, title, preview, pinned, modified, changed, size,
+                source_hash, links_hash)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
             ON CONFLICT (path) DO UPDATE SET folder = excluded.folder, id = excluded.id,
                 title = excluded.title, preview = excluded.preview, pinned = excluded.pinned, modified = excluded.modified,
-                changed = excluded.changed, size = excluded.size
+                changed = excluded.changed, size = excluded.size,
+                source_hash = excluded.source_hash, links_hash = excluded.links_hash
             RETURNING key",
         )?
         .query_row(
@@ -660,20 +701,35 @@ fn write(conn: &Connection, note: &Note, links: &[Link], stamp: Stamp) -> Result
                 stamp.modified,
                 stamp.changed,
                 stamp.size,
+                source_hash,
+                links_hash,
             ],
             |row| row.get(0),
         )?;
-    for sql in [
-        "DELETE FROM tags WHERE note = ?1",
-        "DELETE FROM links WHERE note = ?1",
-    ] {
-        conn.prepare_cached(sql)?.execute([key])?;
-    }
+    conn.prepare_cached("DELETE FROM tags WHERE note = ?1")?
+        .execute([key])?;
     let mut add_tag =
         conn.prepare_cached("INSERT INTO tags (note, pos, tag) VALUES (?1, ?2, ?3)")?;
     for (pos, tag) in (0_i64..).zip(&info.tags) {
         add_tag.execute(params![key, pos, tag])?;
     }
+    let links = match links {
+        None => stored_links(conn, key)?,
+        Some(links) => {
+            if !stored {
+                write_links(conn, key, &links)?;
+            }
+            links
+        }
+    };
+    search::put(conn, key, &info.title, &note.body, &info.tags)?;
+    Ok(links)
+}
+
+/// Replaces the link rows of the note with `key`.
+fn write_links(conn: &Connection, key: i64, links: &[Link]) -> Result<(), Fail> {
+    conn.prepare_cached("DELETE FROM links WHERE note = ?1")?
+        .execute([key])?;
     let mut add_link = conn.prepare_cached(
         "INSERT INTO links (note, pos, kind, target, heading, embedded)
         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -691,8 +747,27 @@ fn write(conn: &Connection, note: &Note, links: &[Link], stamp: Stamp) -> Result
         };
         add_link.execute(params![key, pos, kind, target, heading, link.embedded])?;
     }
-    search::put(conn, key, &info.title, &note.body, &info.tags)?;
     Ok(())
+}
+
+/// The links of the note with `key`, from its rows.
+fn stored_links(conn: &Connection, key: i64) -> Result<Vec<Link>, Fail> {
+    let mut statement = conn.prepare_cached(
+        "SELECT kind, target, heading, embedded FROM links WHERE note = ?1 ORDER BY pos",
+    )?;
+    let links = statement
+        .query_map([key], link)?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(links)
+}
+
+/// A hash of `value`. Two values with the same hash count as the same.
+///
+/// The hash may change with the `foldhash` version. Then the index writes the rows of each
+/// note once more.
+fn hash(value: impl Hash) -> i64 {
+    let hash = foldhash::quality::FixedState::default().hash_one(value);
+    i64::from_ne_bytes(hash.to_ne_bytes())
 }
 
 /// Removes the note at `rel` from the index, and returns what it was.

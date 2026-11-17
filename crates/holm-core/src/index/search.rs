@@ -4,14 +4,12 @@
 //! per tag name, not per note. So a change of tags never parses the text of a note again,
 //! and a tag rename on many notes adds one row.
 
-use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
-use std::hash::{Hash as _, Hasher as _};
 use std::path::PathBuf;
 
 use rusqlite::{Connection, OptionalExtension as _, params};
 
-use super::path;
+use super::{hash, path};
 
 /// The tables of this module. `tags` and `notes` belong to the index.
 pub(super) const SCHEMA: &str = "
@@ -46,7 +44,7 @@ pub(super) fn put(
     body: &str,
     tags: &[String],
 ) -> rusqlite::Result<()> {
-    let hash = text_hash(title, body);
+    let hash = hash((title, body));
     let old: Option<i64> = conn
         .prepare_cached("SELECT hash FROM text_hashes WHERE note = ?1")?
         .query_row([key], |row| row.get(0))
@@ -171,14 +169,4 @@ fn words(text: &str) -> Vec<String> {
         .take(MAX_WORDS)
         .map(|word| format!("\"{}\"*", word.replace('"', "\"\"")))
         .collect()
-}
-
-/// A hash of the text of a note. Two texts with the same hash count as the same.
-///
-/// The hash may change with the Rust version. Then each note's words are written once more.
-fn text_hash(title: &str, body: &str) -> i64 {
-    let mut hasher = DefaultHasher::new();
-    title.hash(&mut hasher);
-    body.hash(&mut hasher);
-    i64::from_ne_bytes(hasher.finish().to_ne_bytes())
 }
