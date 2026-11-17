@@ -22,10 +22,13 @@ use crate::relink::resolve;
 use crate::snapshot::Delta;
 use crate::store::{ATTACHMENTS, Stamp, Store, folder_of, time};
 
+mod search;
+
 const FILE: &str = "index.sqlite";
-/// Change this number with each change to [`SCHEMA`] or to what a column holds.
+/// Change this number with each change to [`SCHEMA`], to [`search::SCHEMA`], or to what a
+/// column holds.
 /// An index with another number is rebuilt.
-const SHAPE: i32 = 4;
+const SHAPE: i32 = 5;
 
 const SCHEMA: &str = "
 CREATE TABLE notes (
@@ -47,7 +50,7 @@ CREATE TABLE tags (
     tag TEXT NOT NULL,
     PRIMARY KEY (note, pos)
 );
-CREATE INDEX tags_tag ON tags (tag);
+CREATE INDEX tags_tag ON tags (tag, note);
 CREATE TABLE links (
     note INTEGER NOT NULL REFERENCES notes ON DELETE CASCADE,
     pos INTEGER NOT NULL,
@@ -58,14 +61,6 @@ CREATE TABLE links (
     PRIMARY KEY (note, pos)
 );
 CREATE INDEX links_target ON links (kind, target);
-CREATE VIRTUAL TABLE search USING fts5 (
-    title, body,
-    tokenize = 'unicode61 remove_diacritics 2'
-);
-CREATE VIRTUAL TABLE tag_search USING fts5 (
-    tags,
-    tokenize = 'unicode61 remove_diacritics 2'
-);
 ";
 
 const NOTE_INFO: &str = "
@@ -122,46 +117,7 @@ impl Index {
 
     /// The paths of the notes whose title, text or tags hold every word of `text`, in no order.
     pub(crate) fn search(&self, store: &Store, text: &str) -> Result<Vec<PathBuf>> {
-        let words = match_words(text);
-        if words.is_empty() {
-            return Ok(Vec::new());
-        }
-        self.run(store, |conn| {
-            // Most notes match with every word in the title or the body.
-            let mut found: Vec<(i64, PathBuf)> = keyed_paths(
-                conn,
-                "SELECT key, path FROM notes
-                WHERE key IN (SELECT rowid FROM search WHERE search MATCH ?1)",
-                &words.join(" "),
-            )?;
-            // A note with a matching tag needs a check of each word on its own.
-            let mut tagged: HashMap<i64, PathBuf> = keyed_paths(
-                conn,
-                "SELECT key, path FROM notes
-                WHERE key IN (SELECT rowid FROM tag_search WHERE tag_search MATCH ?1)",
-                &words.join(" OR "),
-            )?;
-            if !tagged.is_empty() {
-                let known: HashSet<i64> = found.iter().map(|(key, _)| *key).collect();
-                tagged.retain(|key, _| !known.contains(key));
-            }
-            for word in &words {
-                if tagged.is_empty() {
-                    break;
-                }
-                let mut has_word = HashSet::new();
-                for table in ["search", "tag_search"] {
-                    let sql = format!("SELECT rowid FROM {table} WHERE {table} MATCH ?1");
-                    let mut statement = conn.prepare_cached(&sql)?;
-                    for key in statement.query_map([word], |row| row.get::<_, i64>(0))? {
-                        has_word.insert(key?);
-                    }
-                }
-                tagged.retain(|key, _| has_word.contains(key));
-            }
-            found.extend(tagged);
-            Ok(found.into_iter().map(|(_, path)| path).collect())
-        })
+        self.run(store, |conn| Ok(search::find(conn, text)?))
     }
 
     /// Every note with its links, in no order.
@@ -349,6 +305,7 @@ fn connect(path: &Path) -> Result<Connection, Fail> {
 fn schema(conn: &mut Connection) -> Result<(), Fail> {
     let tx = conn.transaction()?;
     tx.execute_batch(SCHEMA)?;
+    tx.execute_batch(search::SCHEMA)?;
     tx.pragma_update(None, "user_version", SHAPE)?;
     tx.commit()?;
     Ok(())
@@ -709,21 +666,8 @@ fn write(conn: &Connection, note: &Note, links: &[Link], stamp: Stamp) -> Result
     for sql in [
         "DELETE FROM tags WHERE note = ?1",
         "DELETE FROM links WHERE note = ?1",
-        "DELETE FROM tag_search WHERE rowid = ?1",
     ] {
         conn.prepare_cached(sql)?.execute([key])?;
-    }
-    // A new search row parses the whole body again, so it is written only on a change.
-    let same_text = conn
-        .prepare_cached("SELECT title = ?2 AND body = ?3 FROM search WHERE rowid = ?1")?
-        .query_row(params![key, info.title, note.body], |row| row.get(0))
-        .optional()?
-        .unwrap_or(false);
-    if !same_text {
-        conn.prepare_cached("DELETE FROM search WHERE rowid = ?1")?
-            .execute([key])?;
-        conn.prepare_cached("INSERT INTO search (rowid, title, body) VALUES (?1, ?2, ?3)")?
-            .execute(params![key, info.title, note.body])?;
     }
     let mut add_tag =
         conn.prepare_cached("INSERT INTO tags (note, pos, tag) VALUES (?1, ?2, ?3)")?;
@@ -747,51 +691,28 @@ fn write(conn: &Connection, note: &Note, links: &[Link], stamp: Stamp) -> Result
         };
         add_link.execute(params![key, pos, kind, target, heading, link.embedded])?;
     }
-    conn.prepare_cached("INSERT INTO tag_search (rowid, tags) VALUES (?1, ?2)")?
-        .execute(params![key, info.tags.join(" ")])?;
+    search::put(conn, key, &info.title, &note.body, &info.tags)?;
     Ok(())
 }
 
 /// Removes the note at `rel` from the index, and returns what it was.
 fn delete(conn: &Connection, rel: &Path) -> Result<Option<Gone>, Fail> {
-    let id: Option<Option<String>> = conn
-        .prepare_cached("SELECT id FROM notes WHERE path = ?1")?
-        .query_row([bytes(rel)], |row| row.get(0))
+    let row: Option<(i64, Option<String>)> = conn
+        .prepare_cached("SELECT key, id FROM notes WHERE path = ?1")?
+        .query_row([bytes(rel)], |row| Ok((row.get(0)?, row.get(1)?)))
         .optional()?;
-    let Some(id) = id else { return Ok(None) };
+    let Some((key, id)) = row else {
+        return Ok(None);
+    };
     let tags = tags_of(conn, rel)?;
-    for sql in [
-        "DELETE FROM search WHERE rowid = (SELECT key FROM notes WHERE path = ?1)",
-        "DELETE FROM tag_search WHERE rowid = (SELECT key FROM notes WHERE path = ?1)",
-    ] {
-        conn.prepare_cached(sql)?.execute([bytes(rel)])?;
-    }
-    conn.prepare_cached("DELETE FROM notes WHERE path = ?1")?
-        .execute([bytes(rel)])?;
+    search::remove(conn, key)?;
+    conn.prepare_cached("DELETE FROM notes WHERE key = ?1")?
+        .execute([key])?;
     Ok(Some(Gone {
         path: rel.to_owned(),
         id: id.map(NoteId::from_field),
         tags,
     }))
-}
-
-/// The rows of `sql`, a query of a key and a path with one parameter.
-fn keyed_paths<C: FromIterator<(i64, PathBuf)>>(
-    conn: &Connection,
-    sql: &str,
-    param: &str,
-) -> Result<C, Fail> {
-    let mut statement = conn.prepare_cached(sql)?;
-    let rows = statement.query_map([param], |row| Ok((row.get(0)?, path(row.get(1)?))))?;
-    Ok(rows.collect::<rusqlite::Result<_>>()?)
-}
-
-/// Turns the words the user typed into one FTS5 query per word. Each word matches as a prefix.
-fn match_words(text: &str) -> Vec<String> {
-    text.split_whitespace()
-        .filter(|word| word.chars().any(char::is_alphanumeric))
-        .map(|word| format!("\"{}\"*", word.replace('"', "\"\"")))
-        .collect()
 }
 
 fn note_info(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteInfo> {
