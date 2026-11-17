@@ -6,11 +6,11 @@ mod common;
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use common::Folder;
 use holm_core::Core;
-use holm_core::model::{Link, LinkTarget, NoteInfo, Order, Tag};
+use holm_core::model::{Link, LinkTarget, NoteInfo, NoteSet, Order, Tag};
 
 fn paths(notes: Vec<NoteInfo>) -> Vec<String> {
     common::paths(notes.into_iter().map(|n| n.path))
@@ -50,11 +50,16 @@ fn notes_come_last_change_first_with_pinned_notes_on_top() {
     folder.reopen();
 
     assert_eq!(
-        paths(folder.core.snapshot().notes(Order::LastChange)),
+        paths(
+            folder
+                .core
+                .snapshot()
+                .notes(NoteSet::All, Order::LastChange)
+        ),
         ["pinned.md", "new.md", "work/mid.md", "old.md"]
     );
     assert_eq!(
-        paths(folder.core.snapshot().notes(Order::Title)),
+        paths(folder.core.snapshot().notes(NoteSet::All, Order::Title)),
         ["pinned.md", "work/mid.md", "new.md", "old.md"]
     );
 }
@@ -66,7 +71,7 @@ fn title_order_ignores_capital_letters() {
     let titles: Vec<String> = folder
         .core
         .snapshot()
-        .notes(Order::Title)
+        .notes(NoteSet::All, Order::Title)
         .into_iter()
         .map(|n| n.title)
         .collect();
@@ -83,20 +88,36 @@ fn a_folder_lists_only_its_own_notes() {
         ("work/holm/c.md", ""),
     ]);
 
-    let mut work = paths(folder.core.snapshot().notes_in("work", Order::Title));
+    let mut work = paths(
+        folder
+            .core
+            .snapshot()
+            .notes(NoteSet::In(Path::new("work")), Order::Title),
+    );
     work.sort();
 
     assert_eq!(work, ["work/a.md", "work/b.md"]);
     assert_eq!(
-        paths(folder.core.snapshot().notes_in("", Order::Title)),
+        paths(
+            folder
+                .core
+                .snapshot()
+                .notes(NoteSet::In(Path::new("")), Order::Title)
+        ),
         ["root.md"]
     );
     assert_eq!(
-        folder.core.snapshot().notes_in("missing", Order::Title),
+        folder
+            .core
+            .snapshot()
+            .notes(NoteSet::In(Path::new("missing")), Order::Title),
         Vec::<NoteInfo>::new()
     );
     assert_eq!(
-        folder.core.snapshot().notes_in("../x", Order::Title),
+        folder
+            .core
+            .snapshot()
+            .notes(NoteSet::In(Path::new("../x")), Order::Title),
         Vec::<NoteInfo>::new()
     );
 }
@@ -106,7 +127,10 @@ fn notes_keep_their_fields_in_the_index() {
     let text = "---\nid: 01A\ntags: [work/holm, home]\npinned: true\n---\n\n- Buy *milk*\n";
     let folder = Folder::new(&[("a.md", text)]);
 
-    let listed = folder.core.snapshot().notes(Order::LastChange);
+    let listed = folder
+        .core
+        .snapshot()
+        .notes(NoteSet::All, Order::LastChange);
 
     assert_eq!(listed, [folder.core.read("a.md").unwrap().info]);
     assert_eq!(listed[0].tags, ["work/holm", "home"]);
@@ -149,7 +173,12 @@ fn a_tag_lists_the_notes_of_its_child_tags_too() {
         ("d.md", "---\ntags: [Work]\n---\n"),
     ]);
 
-    let mut work = paths(folder.core.snapshot().notes_with_tag("work", Order::Title));
+    let mut work = paths(
+        folder
+            .core
+            .snapshot()
+            .notes(NoteSet::WithTag("work"), Order::Title),
+    );
     work.sort();
 
     assert_eq!(work, ["a.md", "b.md"]);
@@ -158,12 +187,15 @@ fn a_tag_lists_the_notes_of_its_child_tags_too() {
             folder
                 .core
                 .snapshot()
-                .notes_with_tag("work/holm", Order::Title)
+                .notes(NoteSet::WithTag("work/holm"), Order::Title)
         ),
         ["a.md"]
     );
     assert_eq!(
-        folder.core.snapshot().notes_with_tag("wor", Order::Title),
+        folder
+            .core
+            .snapshot()
+            .notes(NoteSet::WithTag("wor"), Order::Title),
         Vec::<NoteInfo>::new()
     );
 }
@@ -275,7 +307,7 @@ fn save_and_create_update_the_index() {
 
     assert_eq!(found(&folder, "potato"), ["a.md"]);
     assert_eq!(folder.core.snapshot().tags(), [tag("food", 1, vec![])]);
-    let listed = folder.core.snapshot().notes(Order::Title);
+    let listed = folder.core.snapshot().notes(NoteSet::All, Order::Title);
     assert_eq!(listed, [saved.info, created.info]);
 }
 
@@ -292,7 +324,7 @@ fn open_picks_up_changes_made_while_holm_was_closed() {
 
     folder.reopen();
 
-    let mut all = paths(folder.core.snapshot().notes(Order::Title));
+    let mut all = paths(folder.core.snapshot().notes(NoteSet::All, Order::Title));
     all.sort();
     assert_eq!(all, ["edited.md", "kept.md", "work/added.md"]);
     assert_eq!(found(&folder, "words"), ["edited.md"]);
@@ -310,7 +342,7 @@ fn open_sees_a_change_that_keeps_the_size_and_the_time() {
 
     folder.reopen();
 
-    let listed = folder.core.snapshot().notes(Order::Title);
+    let listed = folder.core.snapshot().notes(NoteSet::All, Order::Title);
     assert_eq!(listed[0].preview, "Bbbb");
     assert_eq!(listed[0].modified, time);
 }
@@ -333,7 +365,14 @@ fn a_copied_note_gets_a_new_id_and_the_known_note_keeps_its_id() {
         note(new.as_str(), "author: me\n", "# Copy\n")
     );
     assert_eq!(a.info.modified, time, "the copy keeps its time");
-    assert_eq!(folder.core.snapshot().notes(Order::Title).len(), 2);
+    assert_eq!(
+        folder
+            .core
+            .snapshot()
+            .notes(NoteSet::All, Order::Title)
+            .len(),
+        2
+    );
 }
 
 #[test]
@@ -376,7 +415,10 @@ fn saving_a_note_with_the_id_of_a_deleted_note_keeps_the_id() {
     let saved = folder.core.save("b.md", "Text\n").unwrap();
 
     assert_eq!(saved.info.id.unwrap().as_str(), "01GONE");
-    assert_eq!(paths(folder.core.snapshot().notes(Order::Title)), ["b.md"]);
+    assert_eq!(
+        paths(folder.core.snapshot().notes(NoteSet::All, Order::Title)),
+        ["b.md"]
+    );
 }
 
 #[test]
@@ -387,7 +429,10 @@ fn a_broken_index_is_rebuilt() {
 
     let core = Core::open(folder.dir.path(), cache.path()).unwrap();
 
-    assert_eq!(paths(core.snapshot().notes(Order::Title)), ["a.md"]);
+    assert_eq!(
+        paths(core.snapshot().notes(NoteSet::All, Order::Title)),
+        ["a.md"]
+    );
 }
 
 #[test]
@@ -403,7 +448,10 @@ fn an_index_with_another_shape_is_rebuilt() {
 
     let core = Core::open(folder.dir.path(), cache.path()).unwrap();
 
-    assert_eq!(paths(core.snapshot().notes(Order::Title)), ["a.md"]);
+    assert_eq!(
+        paths(core.snapshot().notes(NoteSet::All, Order::Title)),
+        ["a.md"]
+    );
 }
 
 #[test]
@@ -429,7 +477,7 @@ fn notes_in_attachments_and_odd_names_round_trip() {
     let mut all: Vec<PathBuf> = folder
         .core
         .snapshot()
-        .notes(Order::Title)
+        .notes(NoteSet::All, Order::Title)
         .into_iter()
         .map(|n| n.path)
         .collect();

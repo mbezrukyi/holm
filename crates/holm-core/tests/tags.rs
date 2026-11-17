@@ -9,14 +9,17 @@ use std::os::unix::fs::PermissionsExt as _;
 
 use common::Folder;
 use holm_core::Error;
-use holm_core::model::Order;
+use holm_core::model::{NoteSet, Order};
 
 fn tags(folder: &Folder, path: &str) -> Vec<String> {
     folder.core.read(path).unwrap().info.tags
 }
 
 fn tagged(folder: &Folder, tag: &str) -> Vec<String> {
-    let notes = folder.core.snapshot().notes_with_tag(tag, Order::Title);
+    let notes = folder
+        .core
+        .snapshot()
+        .notes(NoteSet::WithTag(tag), Order::Title);
     common::paths(notes.into_iter().map(|n| n.path))
 }
 
@@ -112,7 +115,7 @@ fn set_pinned_pins_and_unpins_and_keeps_the_time() {
     assert!(info.pinned);
     assert_eq!(info.modified, time);
     assert_eq!(folder.text("a.md"), "---\nid: A\npinned: true\n---\n# A\n");
-    let first = folder.core.snapshot().notes(Order::Title)[0].clone();
+    let first = folder.core.snapshot().notes(NoteSet::All, Order::Title)[0].clone();
     assert!(first.pinned);
 
     let info = folder.core.set_pinned("a.md", false).unwrap();

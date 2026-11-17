@@ -43,22 +43,12 @@ impl Snapshot {
         self.revision
     }
 
-    /// Every note, in `order`. Pinned notes are on top.
+    /// The notes of `set`, in `order`. Pinned notes are on top.
     ///
     /// Only `*.md` files are notes. Hidden files and folders, and symlinks, are skipped.
     /// A note that can't be read is left out.
-    pub fn notes(&self, order: Order) -> Vec<NoteInfo> {
-        self.list(|_| true, order)
-    }
-
-    /// The notes right in `folder`, without the notes of its subfolders.
-    pub fn notes_in(&self, folder: impl AsRef<Path>, order: Order) -> Vec<NoteInfo> {
-        self.list(|entry| is_in(entry, NoteSet::In(folder.as_ref())), order)
-    }
-
-    /// The notes with `tag` or one of its child tags. Tags match exactly, also in capital letters.
-    pub fn notes_with_tag(&self, tag: &str, order: Order) -> Vec<NoteInfo> {
-        self.list(|entry| is_in(entry, NoteSet::WithTag(tag)), order)
+    pub fn notes(&self, set: NoteSet<'_>, order: Order) -> Vec<NoteInfo> {
+        self.list(|entry| is_in(entry, set), order)
     }
 
     /// The paths of the notes of `set`, in `order`. Pinned notes are on top.

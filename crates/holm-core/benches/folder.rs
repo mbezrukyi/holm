@@ -76,7 +76,7 @@ fn sidebar_notes(bencher: divan::Bencher<'_, '_>) {
     let notes = notes_folder();
     let index = tempfile::tempdir().unwrap();
     let core = open(notes.path(), index.path());
-    bencher.bench_local(|| core.snapshot().notes(Order::LastChange));
+    bencher.bench_local(|| core.snapshot().notes(NoteSet::All, Order::LastChange));
 }
 
 /// The sidebar keeps only the paths of the note list.

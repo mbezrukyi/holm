@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use common::Folder;
-use holm_core::model::Order;
+use holm_core::model::{NoteSet, Order};
 use holm_core::{Core, Error, NameProblem};
 
 fn paths(items: impl IntoIterator<Item = PathBuf>) -> Vec<String> {
@@ -68,7 +68,10 @@ fn notes_lists_only_md_files_and_skips_hidden_ones() {
         ("work/.trash/e.md", ""),
     ]);
 
-    let notes = folder.core.snapshot().notes(Order::LastChange);
+    let notes = folder
+        .core
+        .snapshot()
+        .notes(NoteSet::All, Order::LastChange);
 
     assert_eq!(
         paths(notes.into_iter().map(|n| n.path)),
@@ -81,7 +84,10 @@ fn notes_skips_a_note_that_is_not_text() {
     let folder = Folder::new(&[("a.md", "")]);
     fs::write(folder.dir.path().join("b.md"), [0xff, 0xfe]).unwrap();
 
-    let notes = folder.core.snapshot().notes(Order::LastChange);
+    let notes = folder
+        .core
+        .snapshot()
+        .notes(NoteSet::All, Order::LastChange);
 
     assert_eq!(paths(notes.into_iter().map(|n| n.path)), ["a.md"]);
 }
@@ -397,5 +403,12 @@ fn the_handle_works_from_many_threads() {
     created.dedup();
 
     assert_eq!(created.len(), 8);
-    assert_eq!(folder.core.snapshot().notes(Order::LastChange).len(), 8);
+    assert_eq!(
+        folder
+            .core
+            .snapshot()
+            .notes(NoteSet::All, Order::LastChange)
+            .len(),
+        8
+    );
 }

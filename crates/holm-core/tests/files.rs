@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use common::Folder;
-use holm_core::model::{DeleteCount, LinkTarget, NoteInfo, Order};
+use holm_core::model::{DeleteCount, LinkTarget, NoteInfo, NoteSet, Order};
 use holm_core::{Error, NameProblem};
 
 fn note(id: &str, body: &str) -> String {
@@ -22,16 +22,19 @@ fn paths(notes: Vec<NoteInfo>) -> Vec<String> {
 }
 
 fn all(folder: &Folder) -> Vec<String> {
-    paths(folder.core.snapshot().notes(Order::Title))
+    paths(folder.core.snapshot().notes(NoteSet::All, Order::Title))
 }
 
 /// Checks that the index after the change equals an index built from the files.
 fn assert_index_matches_files(folder: &mut Folder, expected: &[&str]) {
-    let before = folder.core.snapshot().notes(Order::Title);
+    let before = folder.core.snapshot().notes(NoteSet::All, Order::Title);
     assert_eq!(paths(before.clone()), expected);
     fs::remove_file(folder.index_file()).unwrap();
     folder.reopen();
-    assert_eq!(folder.core.snapshot().notes(Order::Title), before);
+    assert_eq!(
+        folder.core.snapshot().notes(NoteSet::All, Order::Title),
+        before
+    );
 }
 
 fn file_links(folder: &Folder, path: &str) -> Vec<PathBuf> {
@@ -550,6 +553,6 @@ fn link_id_adds_only_the_id_line_and_keeps_the_time() {
     assert_eq!(folder.core.link_id("a.md").unwrap(), id);
     assert_eq!(folder.core.link_id("b.md").unwrap().as_str(), "B");
     assert_eq!(folder.text("b.md"), note("B", ""));
-    let indexed = folder.core.snapshot().notes(Order::Title);
+    let indexed = folder.core.snapshot().notes(NoteSet::All, Order::Title);
     assert_eq!(indexed[0].id.as_ref(), Some(&id));
 }

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use common::Folder;
 use holm_core::Core;
-use holm_core::model::{Link, NoteInfo, Order, Tag};
+use holm_core::model::{Link, NoteInfo, NoteSet, Order, Tag};
 use proptest::prelude::*;
 
 const WORDS: [&str; 4] = ["apple", "Berry", "café", "dough"];
@@ -85,19 +85,25 @@ struct Answers {
 }
 
 fn answers(core: &Core) -> Answers {
-    let notes = core.snapshot().notes(Order::LastChange);
+    let notes = core.snapshot().notes(NoteSet::All, Order::LastChange);
     let paths: Vec<PathBuf> = notes.iter().map(|n| n.path.clone()).collect();
     Answers {
         folders: core.snapshot().folders().map(Path::to_path_buf).collect(),
-        by_title: core.snapshot().notes(Order::Title),
+        by_title: core.snapshot().notes(NoteSet::All, Order::Title),
         in_folders: ["", "work"]
             .iter()
-            .map(|f| core.snapshot().notes_in(f, Order::LastChange))
+            .map(|f| {
+                core.snapshot()
+                    .notes(NoteSet::In(Path::new(f)), Order::LastChange)
+            })
             .collect(),
         tags: core.snapshot().tags(),
         with_tag: ["work", "work/holm", "home", "Work"]
             .iter()
-            .map(|t| core.snapshot().notes_with_tag(t, Order::LastChange))
+            .map(|t| {
+                core.snapshot()
+                    .notes(NoteSet::WithTag(t), Order::LastChange)
+            })
             .collect(),
         search: WORDS
             .iter()
@@ -125,7 +131,7 @@ fn body(folder: &Folder, words: &[usize], link: usize) -> String {
         body.push_str(WORDS[w]);
         body.push(' ');
     }
-    let notes = folder.core.snapshot().notes(Order::Title);
+    let notes = folder.core.snapshot().notes(NoteSet::All, Order::Title);
     if !notes.is_empty() {
         let target = &notes[link % notes.len()];
         if let Some(id) = &target.id {
@@ -147,7 +153,7 @@ fn tags(picks: &[usize]) -> Vec<String> {
 }
 
 fn pick(folder: &Folder, note: usize) -> Option<PathBuf> {
-    let notes = folder.core.snapshot().notes(Order::Title);
+    let notes = folder.core.snapshot().notes(NoteSet::All, Order::Title);
     (!notes.is_empty()).then(|| notes[note % notes.len()].path.clone())
 }
 
@@ -155,7 +161,12 @@ fn apply(folder: &mut Folder, edit: &Edit, copies: &mut usize) {
     match edit {
         Edit::Create { in_work } => {
             let place = if *in_work { "work" } else { "" };
-            let free = (1..=folder.core.snapshot().notes(Order::Title).len() + 1)
+            let free = (1..=folder
+                .core
+                .snapshot()
+                .notes(NoteSet::All, Order::Title)
+                .len()
+                + 1)
                 .map(|n| format!("Note {n}"))
                 .find(|title| !folder.path(place).join(format!("{title}.md")).exists())
                 .unwrap();

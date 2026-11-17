@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use futures_core::Stream;
 
-use holm_core::model::{Change, ChangeList, LinkTarget, NoteId, NoteInfo, Order};
+use holm_core::model::{Change, ChangeList, LinkTarget, NoteId, NoteInfo, NoteSet, Order};
 use holm_core::{Changes, Core, Error, Feed};
 use tempfile::TempDir;
 
@@ -83,7 +83,7 @@ fn note(id: &str, extra: &str, body: &str) -> String {
 fn previews(core: &Core) -> Vec<String> {
     let mut previews: Vec<String> = core
         .snapshot()
-        .notes(Order::Title)
+        .notes(NoteSet::All, Order::Title)
         .into_iter()
         .map(|n| n.preview)
         .collect();
@@ -277,7 +277,7 @@ fn each_list_carries_the_snapshot_of_its_revision() {
         .lists()
         .iter()
         .map(|list| {
-            let notes = list.snapshot.notes(Order::Title);
+            let notes = list.snapshot.notes(NoteSet::All, Order::Title);
             let folders = list.snapshot.folders().map(Path::to_owned).collect();
             (notes.into_iter().map(|info| info.path).collect(), folders)
         })
@@ -421,7 +421,7 @@ fn a_renamed_folder_keeps_search_links_and_file_links_of_its_notes() {
         LinkTarget::File("job/pic.png".into())
     );
     assert_eq!(
-        snapshot.notes_with_tag("food", Order::Title)[0].path,
+        snapshot.notes(NoteSet::WithTag("food"), Order::Title)[0].path,
         PathBuf::from("job/a.md")
     );
 }
@@ -623,7 +623,7 @@ mod real_events {
         let start = core.snapshot().revision();
 
         core.read("work/b.md").unwrap();
-        core.snapshot().notes(Order::Title);
+        core.snapshot().notes(NoteSet::All, Order::Title);
         fs::read(dir.path().join("a.md")).unwrap();
         std::thread::sleep(Duration::from_secs(1));
 
@@ -637,7 +637,7 @@ fn the_revision_grows_with_own_writes_and_outside_changes() {
     let start = fed.core.snapshot().revision();
 
     fed.core.read("a.md").unwrap();
-    fed.core.snapshot().notes(Order::Title);
+    fed.core.snapshot().notes(NoteSet::All, Order::Title);
     assert_eq!(
         fed.core.snapshot().revision(),
         start,

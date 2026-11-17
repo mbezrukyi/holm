@@ -13,7 +13,7 @@ use holm_core::{Core, Result, Snapshot};
 
 fn titles(snapshot: &Snapshot) -> Vec<String> {
     snapshot
-        .notes(Order::Title)
+        .notes(NoteSet::All, Order::Title)
         .into_iter()
         .map(|note| note.title)
         .collect()
@@ -58,7 +58,7 @@ fn note_writes_show_in_the_snapshot_after_them() {
 
     let (note, snapshot) = one_step(core, |core| core.create("work", "Untitled"));
     assert_eq!(
-        paths(snapshot.notes_in("work", Order::Title)),
+        paths(snapshot.notes(NoteSet::In(Path::new("work")), Order::Title)),
         ["work/Untitled.md"]
     );
 
@@ -74,13 +74,13 @@ fn note_writes_show_in_the_snapshot_after_them() {
     let (info, snapshot) = one_step(core, |core| core.rename_note("work/Untitled.md", "Ideas"));
     assert_eq!(info.path, Path::new("work/Ideas.md"));
     assert_eq!(
-        paths(snapshot.notes_in("work", Order::Title)),
+        paths(snapshot.notes(NoteSet::In(Path::new("work")), Order::Title)),
         ["work/Ideas.md"]
     );
 
     let (_, snapshot) = one_step(core, |core| core.move_note("work/Ideas.md", ""));
     assert_eq!(
-        paths(snapshot.notes_in("", Order::Title)),
+        paths(snapshot.notes(NoteSet::In(Path::new("")), Order::Title)),
         ["Ideas.md", "Plans.md"]
     );
     assert_eq!(
@@ -91,7 +91,7 @@ fn note_writes_show_in_the_snapshot_after_them() {
     let (_, snapshot) = one_step(core, |core| core.add_tag("Ideas.md", "work/holm"));
     assert_eq!(tag_names(&snapshot), ["work"]);
     assert_eq!(
-        paths(snapshot.notes_with_tag("work", Order::Title)),
+        paths(snapshot.notes(NoteSet::WithTag("work"), Order::Title)),
         ["Ideas.md"]
     );
 
@@ -142,7 +142,7 @@ fn folder_writes_show_in_the_snapshot_after_them() {
     let (_, snapshot) = one_step(core, |core| core.rename_folder("work", "job"));
     assert_eq!(folders(&snapshot), ["Home", "job", "job/old"]);
     assert_eq!(
-        paths(snapshot.notes_in("job/old", Order::Title)),
+        paths(snapshot.notes(NoteSet::In(Path::new("job/old")), Order::Title)),
         ["job/old/b.md"]
     );
 
@@ -261,11 +261,7 @@ fn paths_first_and_matching_agree_with_the_note_lists() {
 
     for set in sets {
         for order in [Order::LastChange, Order::Title] {
-            let notes = match set {
-                NoteSet::All => snapshot.notes(order),
-                NoteSet::In(folder) => snapshot.notes_in(folder, order),
-                NoteSet::WithTag(tag) => snapshot.notes_with_tag(tag, order),
-            };
+            let notes = snapshot.notes(set, order);
             let expected: Vec<PathBuf> = notes.iter().map(|note| note.path.clone()).collect();
             assert_eq!(snapshot.paths(set, order), expected, "{set:?} {order:?}");
             assert_eq!(

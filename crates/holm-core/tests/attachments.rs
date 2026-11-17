@@ -137,7 +137,10 @@ fn attachments_do_not_show_as_folders_or_notes() {
         folder
             .core
             .snapshot()
-            .notes(holm_core::model::Order::Title)
+            .notes(
+                holm_core::model::NoteSet::All,
+                holm_core::model::Order::Title
+            )
             .len(),
         1
     );
