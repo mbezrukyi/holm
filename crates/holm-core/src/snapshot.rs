@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::model::{Link, LinkTarget, NoteInfo, NoteSet, Order, Tag};
+use crate::store::folder_of;
 
 /// The facts of the notes folder at one moment, from [`Core::snapshot`](crate::Core::snapshot).
 /// It never changes.
@@ -89,6 +90,16 @@ impl Snapshot {
         tag_tree(&pairs)
     }
 
+    /// The count of notes right in each folder, without the notes of its subfolders. The root
+    /// folder is the empty path. A folder with no notes is not in the map.
+    pub fn folder_counts(&self) -> HashMap<&Path, usize> {
+        let mut counts = HashMap::new();
+        for entry in self.notes.values() {
+            *counts.entry(folder_of(&entry.info.path)).or_default() += 1;
+        }
+        counts
+    }
+
     /// The links and embedded files in the note at `path`, in the order of its text.
     ///
     /// A note that the snapshot does not know has no links.
@@ -138,6 +149,15 @@ impl Snapshot {
             .collect();
         sort(&mut notes, order);
         notes.into_iter().map(|note| note.path.clone()).collect()
+    }
+
+    /// The paths of `paths` in `set`, in the same order. The paths come from this snapshot.
+    pub fn keep(&self, paths: &[PathBuf], set: NoteSet<'_>) -> Vec<PathBuf> {
+        paths
+            .iter()
+            .filter(|path| set.holds_at(path, || self.note(path)))
+            .cloned()
+            .collect()
     }
 
     /// Every subfolder of the notes folder, sorted by path.

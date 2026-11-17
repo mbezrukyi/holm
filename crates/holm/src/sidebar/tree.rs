@@ -1,7 +1,7 @@
 //! The data of the sidebar: the folder tree rows and the note lists, from one snapshot of the
 //! notes folder.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use holm_core::Snapshot;
@@ -135,7 +135,7 @@ impl Tree {
     pub(crate) fn list(&self, item: &Item) -> NoteList {
         match item.set() {
             NoteSet::All => self.notes.clone(),
-            set => self.notes.filter(|note| set.holds(note)),
+            set => self.notes.filter(set),
         }
     }
 
@@ -160,10 +160,7 @@ impl Tree {
     /// The visible rows: "All notes", then the folders, then the tags. Only the children of
     /// `open` items show. `new_folder` is the parent of the field of a new folder.
     pub(crate) fn rows(&self, open: &HashSet<Item>, new_folder: Option<&Path>) -> Vec<Row> {
-        let mut counts: HashMap<&Path, usize> = HashMap::new();
-        for note in self.notes.notes() {
-            *counts.entry(folder_of(&note.path)).or_default() += 1;
-        }
+        let counts = self.snapshot.folder_counts();
         let mut rows = vec![Row {
             item: Item::All,
             name: String::new(),
@@ -230,11 +227,6 @@ fn find_tag<'a>(tags: &'a [Tag], name: &str) -> Option<&'a Tag> {
             None
         }
     })
-}
-
-/// The folder of a note. The root folder is the empty path.
-pub(crate) fn folder_of(path: &Path) -> &Path {
-    path.parent().unwrap_or(Path::new(""))
 }
 
 #[cfg(test)]

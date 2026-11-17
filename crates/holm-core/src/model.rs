@@ -87,12 +87,23 @@ pub enum NoteSet<'a> {
 impl NoteSet<'_> {
     /// Whether the set holds `note`.
     pub fn holds(self, note: &NoteInfo) -> bool {
+        self.holds_at(&note.path, || Some(note))
+    }
+
+    /// Whether the set holds the note at `path`. It calls `note` only when the path can't tell.
+    pub(crate) fn holds_at<'n>(
+        self,
+        path: &Path,
+        note: impl FnOnce() -> Option<&'n NoteInfo>,
+    ) -> bool {
         match self {
             Self::All => true,
-            Self::In(folder) => crate::store::folder_of(&note.path) == folder,
-            Self::WithTag(tag) => note.tags.iter().any(|name| {
-                name.strip_prefix(tag)
-                    .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+            Self::In(folder) => crate::store::folder_of(path) == folder,
+            Self::WithTag(tag) => note().is_some_and(|note| {
+                note.tags.iter().any(|name| {
+                    name.strip_prefix(tag)
+                        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+                })
             }),
         }
     }

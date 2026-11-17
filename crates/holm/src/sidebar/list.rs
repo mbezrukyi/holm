@@ -28,16 +28,11 @@ impl NoteList {
         Self { snapshot, paths }
     }
 
-    /// The notes of this list that `keep` takes, in the same order.
-    pub(crate) fn filter(&self, keep: impl Fn(&NoteInfo) -> bool) -> Self {
-        let paths = self
-            .notes()
-            .filter(|note| keep(note))
-            .map(|note| note.path.clone())
-            .collect();
+    /// The notes of this list in `set`, in the same order.
+    pub(crate) fn filter(&self, set: NoteSet<'_>) -> Self {
         Self {
+            paths: self.snapshot.keep(&self.paths, set).into(),
             snapshot: self.snapshot.clone(),
-            paths,
         }
     }
 

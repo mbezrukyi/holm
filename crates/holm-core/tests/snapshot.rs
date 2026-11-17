@@ -236,7 +236,7 @@ fn sorted_puts_known_paths_in_order_and_leaves_out_the_others() {
 }
 
 #[test]
-fn paths_first_and_matching_agree_with_the_note_lists() {
+fn paths_first_matching_keep_and_counts_agree_with_the_note_lists() {
     let mut folder = Folder::new(&[
         ("b.md", "#work\n"),
         ("A.md", "#work/holm\n"),
@@ -271,7 +271,21 @@ fn paths_first_and_matching_agree_with_the_note_lists() {
             );
             assert_eq!(snapshot.matching(set).count(), notes.len(), "{set:?}");
         }
+        let all = snapshot.paths(NoteSet::All, Order::Title);
+        assert_eq!(
+            snapshot.keep(&all, set),
+            snapshot.paths(set, Order::Title),
+            "{set:?}"
+        );
+        if let NoteSet::In(folder) = set {
+            assert_eq!(
+                snapshot.folder_counts().get(folder).copied().unwrap_or(0),
+                snapshot.matching(set).count(),
+                "{set:?}"
+            );
+        }
     }
+    assert_eq!(snapshot.folder_counts().len(), 2);
     assert_eq!(
         common::paths(snapshot.paths(NoteSet::All, Order::LastChange)),
         ["c.md", "work/E.md", "work/d.md", "b.md", "A.md"]
