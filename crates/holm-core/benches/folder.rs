@@ -101,8 +101,8 @@ fn sidebar_tags(bencher: divan::Bencher<'_, '_>) {
 }
 
 /// A search key, with the results in the order of the list. `"work ho"` matches every note,
-/// and `"note 50"` 11 notes.
-#[divan::bench(sample_count = 50, args = ["work ho", "note 50"])]
+/// and `"note 50"` 11 notes. `"tag work"` matches every note through a tag and the text.
+#[divan::bench(sample_count = 50, args = ["work ho", "note 50", "tag work"])]
 fn search(bencher: divan::Bencher<'_, '_>, text: &str) {
     let notes = notes_folder();
     let index = tempfile::tempdir().unwrap();

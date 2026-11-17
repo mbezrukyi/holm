@@ -184,6 +184,11 @@ fn search_finds_words_in_titles_text_and_tags() {
     assert_eq!(search("bread"), ["c.md"]);
     assert_eq!(search("garden text"), ["a.md"]);
     assert_eq!(
+        search("bake bread"),
+        ["c.md"],
+        "words match the title and a tag"
+    );
+    assert_eq!(
         search("garden nine"),
         Vec::<String>::new(),
         "every word must match"
@@ -191,6 +196,16 @@ fn search_finds_words_in_titles_text_and_tags() {
     assert_eq!(search(""), Vec::<String>::new());
     assert_eq!(search("  \"* ( "), Vec::<String>::new());
     assert_eq!(search("\"garden"), ["a.md"], "quotes are plain text");
+}
+
+#[test]
+fn search_follows_a_tag_change_and_keeps_the_text() {
+    let folder = Folder::new(&[("a.md", "---\ntags: [work]\n---\n# Garden\n")]);
+
+    folder.core.rename_tag("work", "home").unwrap();
+
+    assert_eq!(found(&folder, "work"), Vec::<String>::new());
+    assert_eq!(found(&folder, "home garden"), ["a.md"]);
 }
 
 #[test]
