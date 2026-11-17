@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use holm_core::Snapshot;
-use holm_core::model::{Change, NoteInfo, Order, Tag};
+use holm_core::model::{Change, NoteSet, Order, Tag};
 
 use super::list::NoteList;
 
@@ -37,6 +37,15 @@ impl Item {
         match self {
             Self::Folder(path) => path,
             Self::All | Self::Tag(_) => Path::new(""),
+        }
+    }
+
+    /// The notes of the list of this item.
+    pub(crate) fn set(&self) -> NoteSet<'_> {
+        match self {
+            Self::All => NoteSet::All,
+            Self::Folder(path) => NoteSet::In(path),
+            Self::Tag(name) => NoteSet::WithTag(name),
         }
     }
 
@@ -124,9 +133,9 @@ impl Tree {
     /// The notes of the list of `item`. A folder list has only the notes right in it.
     /// A tag list also has the notes of its child tags.
     pub(crate) fn list(&self, item: &Item) -> NoteList {
-        match item {
-            Item::All => self.notes.clone(),
-            _ => self.notes.filter(|note| holds(item, note)),
+        match item.set() {
+            NoteSet::All => self.notes.clone(),
+            set => self.notes.filter(|note| set.holds(note)),
         }
     }
 
@@ -221,19 +230,6 @@ fn find_tag<'a>(tags: &'a [Tag], name: &str) -> Option<&'a Tag> {
             None
         }
     })
-}
-
-fn holds(item: &Item, note: &NoteInfo) -> bool {
-    match item {
-        Item::All => true,
-        Item::Folder(folder) => folder_of(&note.path) == folder,
-        Item::Tag(name) => note.tags.iter().any(|tag| {
-            tag == name
-                || tag
-                    .strip_prefix(name.as_str())
-                    .is_some_and(|rest| rest.starts_with('/'))
-        }),
-    }
 }
 
 /// The folder of a note. The root folder is the empty path.

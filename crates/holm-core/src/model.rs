@@ -84,6 +84,20 @@ pub enum NoteSet<'a> {
     WithTag(&'a str),
 }
 
+impl NoteSet<'_> {
+    /// Whether the set holds `note`.
+    pub fn holds(self, note: &NoteInfo) -> bool {
+        match self {
+            Self::All => true,
+            Self::In(folder) => crate::store::folder_of(&note.path) == folder,
+            Self::WithTag(tag) => note.tags.iter().any(|name| {
+                name.strip_prefix(tag)
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+            }),
+        }
+    }
+}
+
 /// One tag in the tag tree.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tag {

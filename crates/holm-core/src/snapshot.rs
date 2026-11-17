@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::model::{Link, LinkTarget, NoteInfo, NoteSet, Order, Tag};
-use crate::store::folder_of;
 
 /// The facts of the notes folder at one moment, from [`Core::snapshot`](crate::Core::snapshot).
 /// It never changes.
@@ -48,7 +47,7 @@ impl Snapshot {
     /// Only `*.md` files are notes. Hidden files and folders, and symlinks, are skipped.
     /// A note that can't be read is left out.
     pub fn notes(&self, set: NoteSet<'_>, order: Order) -> Vec<NoteInfo> {
-        self.list(|entry| is_in(entry, set), order)
+        self.list(|entry| set.holds(&entry.info), order)
     }
 
     /// The paths of the notes of `set`, in `order`. Pinned notes are on top.
@@ -65,7 +64,7 @@ impl Snapshot {
     ) -> impl Iterator<Item = &'s NoteInfo> + use<'s, 'a> {
         self.notes
             .values()
-            .filter(move |entry| is_in(entry, set))
+            .filter(move |entry| set.holds(&entry.info))
             .map(|entry| &entry.info)
     }
 
@@ -234,20 +233,6 @@ impl Snapshot {
         sort(&mut notes, order);
         notes.into_iter().cloned().collect()
     }
-}
-
-fn is_in(entry: &Entry, set: NoteSet<'_>) -> bool {
-    match set {
-        NoteSet::All => true,
-        NoteSet::In(folder) => folder_of(&entry.info.path) == folder,
-        NoteSet::WithTag(tag) => entry.info.tags.iter().any(|t| in_tag(t, tag)),
-    }
-}
-
-/// Whether the tag `name` is `tag` or one of its child tags.
-fn in_tag(name: &str, tag: &str) -> bool {
-    name.strip_prefix(tag)
-        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
 
 /// Pinned notes first, then `order`. The path breaks ties, so the order never changes at random.
