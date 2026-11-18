@@ -330,6 +330,28 @@ fn each_list_carries_the_snapshot_of_its_revision() {
 }
 
 #[test]
+fn a_list_never_comes_before_its_snapshot() {
+    let fed = Fed::new(&[("a.md", &note("a", "", "zero\n"))]);
+    let core = fed.core.clone();
+    let path = note_path("a.md");
+    let writer = std::thread::spawn(move || {
+        for round in 0..300 {
+            core.save(&path, &format!("{round}\n")).unwrap();
+        }
+    });
+    let mut seen = 0;
+    while seen < 300 {
+        let Some(list) = fed.changes.borrow_mut().try_next() else {
+            std::hint::spin_loop();
+            continue;
+        };
+        assert!(fed.core.snapshot().revision() >= list.snapshot.revision());
+        seen += 1;
+    }
+    writer.join().unwrap();
+}
+
+#[test]
 fn a_move_rule_follows_paths_below_a_folder_and_child_tags() {
     let folder = Change::FolderMoved {
         from: folder_path("work"),

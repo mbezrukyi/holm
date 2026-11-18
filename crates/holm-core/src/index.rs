@@ -11,7 +11,6 @@ use std::hash::{BuildHasher as _, Hash};
 use std::io;
 use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
 
 use rusqlite::config::DbConfig;
 use rusqlite::types::{Type, Value};
@@ -78,7 +77,7 @@ pub(crate) struct Index {
     path: PathBuf,
     /// The notes folder, for the paths of file links.
     root: PathBuf,
-    conn: Mutex<Connection>,
+    conn: Connection,
 }
 
 impl Index {
@@ -99,26 +98,25 @@ impl Index {
         Ok(Self {
             path,
             root: root.to_owned(),
-            conn: Mutex::new(conn),
+            conn,
         })
     }
 
     /// Drops every row and writes the rows of `settled`, which holds every note file.
     /// The rows go into a new file, or into memory when the new file fails.
-    pub(crate) fn rebuild(&self, settled: &Settled) -> Result<()> {
-        let mut conn = self.conn.lock().unwrap_or_else(PoisonError::into_inner);
-        *conn =
+    pub(crate) fn rebuild(&mut self, settled: &Settled) -> Result<()> {
+        self.conn =
             fresh(&self.path, &self.root, settled).map_err(|fail| fail.into_error(&self.path))?;
         Ok(())
     }
 
     /// The paths of the notes whose title, text or tags hold every word of `text`, in no order.
-    pub(crate) fn search(&self, text: &str) -> Result<Vec<NotePath>> {
+    pub(crate) fn search(&mut self, text: &str) -> Result<Vec<NotePath>> {
         self.run(|conn| Ok(search::find(conn, text)?))
     }
 
     /// Every note with its links and its stamp, in no order.
-    pub(crate) fn entries(&self) -> Result<Vec<(NoteInfo, Vec<Link>, Stamp)>> {
+    pub(crate) fn entries(&mut self) -> Result<Vec<(NoteInfo, Vec<Link>, Stamp)>> {
         self.run(|conn| {
             let mut reader = NoteReader::default();
             let mut statement = conn.prepare_cached(&format!(
@@ -150,18 +148,18 @@ impl Index {
 
     /// Writes the rows of `settled` in one transaction, and returns the links of each put note,
     /// in order. A moved note keeps its row, so its text, tags and links stay.
-    pub(crate) fn write(&self, settled: &Settled) -> Result<Vec<Vec<Link>>> {
-        self.run(|conn| {
+    pub(crate) fn write(&mut self, settled: &Settled) -> Result<Vec<Vec<Link>>> {
+        let write = |conn: &mut Connection| {
             let tx = conn.transaction()?;
             let links = put_rows(&tx, &self.root, settled)?;
             tx.commit()?;
             Ok(links)
-        })
+        };
+        write(&mut self.conn).map_err(|fail: Fail| fail.into_error(&self.path))
     }
 
-    fn run<T>(&self, op: impl FnOnce(&mut Connection) -> Result<T, Fail>) -> Result<T> {
-        let mut conn = self.conn.lock().unwrap_or_else(PoisonError::into_inner);
-        op(&mut conn).map_err(|fail| fail.into_error(&self.path))
+    fn run<T>(&mut self, op: impl FnOnce(&mut Connection) -> Result<T, Fail>) -> Result<T> {
+        op(&mut self.conn).map_err(|fail| fail.into_error(&self.path))
     }
 }
 
