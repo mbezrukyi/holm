@@ -64,7 +64,6 @@ impl NotesView {
         cx: &mut Context<Self>,
     ) -> Self {
         let settings = config.read(cx).settings().clone();
-        let current = note.as_ref().map(|note| note.info.path.clone());
         let pane =
             cx.new(|cx| NotePane::new(notes_folder.clone(), line.clone(), root, note, window, cx));
         let this = cx.weak_entity();
@@ -79,9 +78,9 @@ impl NotesView {
         let sidebar = cx.new(|cx| {
             Sidebar::new(
                 notes_folder.clone(),
+                pane.clone(),
                 settings.note_order,
                 settings.sidebar.view.clone(),
-                current,
                 confirm,
                 window,
                 cx,
@@ -128,15 +127,9 @@ impl NotesView {
         cx: &mut Context<Self>,
     ) {
         match event {
-            PaneEvent::Opened(path) => {
-                let path = path.clone();
-                self.sidebar
-                    .update(cx, |sidebar, cx| sidebar.set_current(Some(path), cx));
-                self.keep_state(cx);
-            }
+            PaneEvent::Opening(_) => {}
+            PaneEvent::Opened(_) => self.keep_state(cx),
             PaneEvent::Closed => {
-                self.sidebar
-                    .update(cx, |sidebar, cx| sidebar.set_current(None, cx));
                 self.keep_state(cx);
                 // A popup that closes later must not give the focus back to the editor.
                 self.before_popup = None;

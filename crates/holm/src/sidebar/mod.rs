@@ -34,6 +34,7 @@ use crate::error::AppError;
 use crate::icons::Icon;
 use crate::name_field::{Look, NameEvent, NameField, NameWrite};
 use crate::notes_folder::{Done, FolderEvent, NotesFolder, Step};
+use crate::pane::{NotePane, PaneEvent};
 use crate::text;
 
 use list::NoteList;
@@ -73,8 +74,7 @@ pub(crate) enum SidebarEvent {
     Move(Target),
     /// Remove a tag from all notes, with the dialog.
     DeleteTag(TagName),
-    /// The view changed, or a folder rename moved the open note. The app keeps both in the
-    /// config.
+    /// The view changed. The app keeps it in the config.
     ViewChanged,
 }
 
@@ -123,10 +123,10 @@ pub(crate) struct Sidebar {
     /// The rows of the tree with the group labels between them.
     entries: Vec<Entry>,
     list: NoteList,
-    /// The note in the editor. It is the selected row of a list.
-    current: Option<NotePath>,
-    /// The note in the editor after it is gone from the notes folder, with its neighbor in the
-    /// list before.
+    /// The pane, for the open note. The open note is the selected row of a list.
+    pane: Entity<NotePane>,
+    /// The open note after it is gone from the notes folder, with its neighbor in the list
+    /// before.
     left: Option<(NotePath, NotePath)>,
     field: Option<Naming>,
     confirm: Confirm,
@@ -143,15 +143,20 @@ pub(crate) struct Sidebar {
 impl Sidebar {
     pub(crate) fn new(
         notes_folder: Entity<NotesFolder>,
+        pane: Entity<NotePane>,
         order: Order,
         view: View,
-        current: Option<NotePath>,
         confirm: Confirm,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let changed = cx.subscribe(&notes_folder, |sidebar, _, event: &FolderEvent, cx| {
             sidebar.changed(event, cx);
+        });
+        let opened = cx.subscribe(&pane, |sidebar, _, event: &PaneEvent, cx| {
+            if !matches!(event, PaneEvent::Gone(_)) {
+                sidebar.open_changed(cx);
+            }
         });
         let search = cx.new(|cx| InputState::new(window, cx).placeholder(text::SEARCH));
         let search_changed = cx.subscribe(&search, |sidebar, input, event, cx| {
@@ -172,7 +177,7 @@ impl Sidebar {
             rows: Vec::new(),
             entries: Vec::new(),
             list: NoteList::default(),
-            current,
+            pane,
             left: None,
             field: None,
             confirm,
@@ -182,7 +187,7 @@ impl Sidebar {
             finding: None,
             focus: cx.focus_handle(),
             scroll: UniformListScrollHandle::new(),
-            _subscriptions: vec![changed, search_changed],
+            _subscriptions: vec![changed, opened, search_changed],
         };
         sidebar.refresh(cx);
         sidebar
@@ -204,12 +209,11 @@ impl Sidebar {
         }
         self.refresh(cx);
         if self.view != view {
-            self.scroll_to_selection();
+            self.scroll_to_selection(cx);
         }
     }
 
-    /// Moves the view, the open items, the name field and the note in the editor with
-    /// `change`, when it is a move.
+    /// Moves the view, the open items and the name field with `change`, when it is a move.
     fn follow(&mut self, change: &Change, cx: &mut Context<Self>) {
         let view = match &self.view {
             View::Tree(item) => item.moved(change).map(View::Tree),
@@ -229,11 +233,6 @@ impl Sidebar {
         {
             naming.named = named;
         }
-        if let Some(current) = &mut self.current
-            && let Some(path) = change.note_after(current)
-        {
-            *current = path;
-        }
     }
 
     /// Builds the tree from the snapshot of the notes folder. An item that is gone leaves the
@@ -246,7 +245,7 @@ impl Sidebar {
             self.show_in_tree(item, cx);
         }
         self.open.retain(|item| self.tree.has(item));
-        self.rebuild();
+        self.rebuild(cx);
         cx.notify();
         if self.searching() {
             self.find(cx);
@@ -267,7 +266,7 @@ impl Sidebar {
         if !self.searching() {
             self.finding = None;
             self.found = NoteList::default();
-            self.rebuild_list();
+            self.rebuild_list(cx);
             cx.notify();
             return;
         }
@@ -286,8 +285,8 @@ impl Sidebar {
                     if let Some(found) = found {
                         sidebar.found = found;
                     }
-                    sidebar.rebuild_list();
-                    sidebar.scroll_to_selection();
+                    sidebar.rebuild_list(cx);
+                    sidebar.scroll_to_selection(cx);
                     cx.notify();
                 })
                 .ok();
@@ -309,7 +308,7 @@ impl Sidebar {
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.find(cx);
         window.focus(&self.focus, cx);
-        self.scroll_to_selection();
+        self.scroll_to_selection(cx);
     }
 
     /// `Enter` or `↓` in the search field: the first result opens, and the list gets the focus.
@@ -317,13 +316,13 @@ impl Sidebar {
         window.focus(&self.focus, cx);
         if let Some(path) = self.list.path(0) {
             let path = path.to_owned();
-            self.choose(path, cx);
+            cx.emit(SidebarEvent::Open(path));
         }
     }
 
-    fn rebuild(&mut self) {
+    fn rebuild(&mut self, cx: &App) {
         self.rebuild_tree();
-        self.rebuild_list();
+        self.rebuild_list(cx);
     }
 
     fn rebuild_tree(&mut self) {
@@ -350,17 +349,17 @@ impl Sidebar {
         }
     }
 
-    fn rebuild_list(&mut self) {
+    fn rebuild_list(&mut self, cx: &App) {
         let list = if self.searching() {
             self.found.clone()
         } else {
             self.tree.list(self.view.item())
         };
-        if let Some(current) = &self.current
-            && self.tree.snapshot.note(current).is_none()
-            && let Some(next) = self.neighbor(current)
+        if let Some(open) = self.open_note(cx)
+            && self.tree.snapshot.note(open).is_none()
+            && let Some(next) = self.neighbor(open)
         {
-            self.left = Some((current.clone(), next));
+            self.left = Some((open.clone(), next));
         }
         self.list = list;
     }
@@ -391,11 +390,14 @@ impl Sidebar {
         }
     }
 
-    /// Marks the note in the editor.
-    pub(crate) fn set_current(&mut self, path: Option<NotePath>, cx: &mut Context<Self>) {
-        self.current = path;
+    fn open_note<'a>(&self, cx: &'a App) -> Option<&'a NotePath> {
+        self.pane.read(cx).path()
+    }
+
+    /// Selects the new open note.
+    fn open_changed(&mut self, cx: &mut Context<Self>) {
         self.left = None;
-        self.scroll_to_selection();
+        self.scroll_to_selection(cx);
         cx.notify();
     }
 
@@ -454,27 +456,27 @@ impl Sidebar {
             self.view = view;
             cx.emit(SidebarEvent::ViewChanged);
         }
-        self.rebuild();
-        self.scroll_to_selection();
+        self.rebuild(cx);
+        self.scroll_to_selection(cx);
         cx.notify();
     }
 
-    fn scroll_to_selection(&self) {
+    fn scroll_to_selection(&self, cx: &App) {
         let at = match &self.view {
-            _ if self.shows_list() => self.selected_note(),
+            _ if self.shows_list() => self.selected_note(cx),
             View::Tree(item) => self
                 .entries
                 .iter()
                 .position(|entry| matches!(entry, Entry::Row(at) if &self.rows[*at].item == item)),
-            View::List(_) => self.selected_note(),
+            View::List(_) => self.selected_note(cx),
         };
         if let Some(at) = at {
             self.scroll.scroll_to_item(at, ScrollStrategy::Nearest);
         }
     }
 
-    fn selected_note(&self) -> Option<usize> {
-        self.list.position(self.current.as_ref()?)
+    fn selected_note(&self, cx: &App) -> Option<usize> {
+        self.list.position(self.open_note(cx)?)
     }
 
     /// Starts the name field for a folder or a tag in the tree. A tag field holds the full
@@ -549,7 +551,7 @@ impl Sidebar {
         };
         let subscription = cx.subscribe(&field, |sidebar, _, _: &NameEvent<()>, cx| {
             sidebar.field = None;
-            sidebar.rebuild();
+            sidebar.rebuild(cx);
             cx.notify();
         });
         self.field = Some(Naming {
@@ -664,7 +666,7 @@ impl Sidebar {
         let key = keystroke.key.as_str();
         let handled = match (modifiers.control, modifiers.shift, key) {
             (true, true, "m") => {
-                if let Some(target) = self.target() {
+                if let Some(target) = self.target(cx) {
                     cx.emit(SidebarEvent::Move(target));
                 }
                 true
@@ -679,10 +681,10 @@ impl Sidebar {
     }
 
     /// The note or folder that `Delete` and Ctrl+Shift+M act on.
-    fn target(&self) -> Option<Target> {
+    fn target(&self, cx: &App) -> Option<Target> {
         match &self.view {
             _ if self.shows_list() => self
-                .selected_note()
+                .selected_note(cx)
                 .and_then(|at| self.list.path(at))
                 .map(|path| Target::Note(path.to_owned())),
             View::Tree(Item::Folder(folder)) => Some(Target::Folder(folder.clone())),
@@ -711,14 +713,14 @@ impl Sidebar {
             "right" => {
                 if at.is_some_and(|at| self.rows[at].has_children) {
                     self.open.insert(item);
-                    self.rebuild();
+                    self.rebuild(cx);
                     cx.notify();
                 }
             }
             "left" => {
                 if at.is_some_and(|at| self.rows[at].open) {
                     self.open.remove(&item);
-                    self.rebuild();
+                    self.rebuild(cx);
                     cx.notify();
                 } else if let Some(parent) = item.parent() {
                     self.set_view(View::Tree(parent), cx);
@@ -742,14 +744,14 @@ impl Sidebar {
     fn list_key(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
         match key {
             "up" | "down" => {
-                let next = match (self.selected_note(), key) {
+                let next = match (self.selected_note(cx), key) {
                     (Some(at), "up") => at.checked_sub(1),
                     (Some(at), _) => Some(at + 1),
                     (None, _) => Some(0),
                 };
                 if let Some(path) = next.and_then(|next| self.list.path(next)) {
                     let path = path.to_owned();
-                    self.choose(path, cx);
+                    cx.emit(SidebarEvent::Open(path));
                 }
             }
             "enter" => cx.emit(SidebarEvent::FocusEditor),
@@ -759,23 +761,18 @@ impl Sidebar {
                 self.show_in_tree(item, cx);
             }
             "f2" => {
-                if self.selected_note().is_some() {
+                if self.selected_note(cx).is_some() {
                     cx.emit(SidebarEvent::RenameNote);
                 }
             }
             "delete" => {
-                if let Some(target) = self.target() {
+                if let Some(target) = self.target(cx) {
                     cx.emit(SidebarEvent::Delete(target));
                 }
             }
             _ => return false,
         }
         true
-    }
-
-    fn choose(&mut self, path: NotePath, cx: &mut Context<Self>) {
-        self.set_current(Some(path.clone()), cx);
-        cx.emit(SidebarEvent::Open(path));
     }
 
     fn search_field(&self, window: &Window, cx: &Context<Self>) -> impl IntoElement {
@@ -885,7 +882,7 @@ impl Sidebar {
                     if !sidebar.open.remove(&item) {
                         sidebar.open.insert(item.clone());
                     }
-                    sidebar.rebuild();
+                    sidebar.rebuild(cx);
                     cx.notify();
                     cx.stop_propagation();
                 }
@@ -971,7 +968,7 @@ impl Sidebar {
 
     fn note_rows(&mut self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let theme = cx.theme();
-        let selected = self.selected_note();
+        let selected = self.selected_note(cx);
         range
             .filter_map(|at| self.list.note(at).map(|note| (at, note)))
             .map(|(at, note)| {
@@ -1018,7 +1015,7 @@ impl Sidebar {
                     )
                     .on_click(cx.listener(move |sidebar, _: &ClickEvent, window, cx| {
                         window.focus(&sidebar.focus, cx);
-                        sidebar.choose(path.clone(), cx);
+                        cx.emit(SidebarEvent::Open(path.clone()));
                     }))
                     .into_any_element()
             })

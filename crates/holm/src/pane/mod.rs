@@ -67,7 +67,9 @@ const AUTOSAVE: Duration = Duration::from_millis(500);
 /// What the pane tells the app.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PaneEvent {
-    /// The pane shows the note at this path.
+    /// The pane starts to read this note. It is the open note from now on.
+    Opening(NotePath),
+    /// The pane shows the note at this path: after an open, a move, or an open that stopped.
     Opened(NotePath),
     /// The pane shows no note.
     Closed,
@@ -139,6 +141,8 @@ pub(crate) struct NotePane {
     backlinks: Entity<Backlinks>,
     links: Entity<Links>,
     shown: Shown,
+    /// The note that an open reads, until it shows. Moves follow it too.
+    next: Option<NotePath>,
     /// The facts of the open note in the last snapshot that had it.
     last_info: Option<NoteInfo>,
     ending: LineEnding,
@@ -250,6 +254,7 @@ impl NotePane {
             backlinks,
             links,
             shown: Shown::Empty,
+            next: None,
             last_info: None,
             ending: LineEnding::Lf,
             autosave: None,
@@ -307,6 +312,7 @@ impl NotePane {
     fn drop_note(&mut self, cx: &mut Context<Self>) {
         self.title.update(cx, TitleField::close);
         self.shown = Shown::Empty;
+        self.next = None;
         self.last_info = None;
         self.autosave = None;
         self.opening += 1;
@@ -703,9 +709,10 @@ impl NotePane {
         cx.emit(PaneEvent::Gone(path));
     }
 
-    /// The path of the note in the editor, also under a new note.
+    /// The open note: the note that an open reads, or else the note in the editor, also
+    /// under a new note.
     pub(crate) fn path(&self) -> Option<&NotePath> {
-        self.shown.editor()
+        self.next.as_ref().or_else(|| self.shown.editor())
     }
 
     /// Whether the pane shows a new note with no file yet. Speed tests read it with no frame.
@@ -724,6 +731,7 @@ impl NotePane {
     /// writes the unsaved text. When that save fails, the pane stays on the note.
     pub(crate) fn open(&mut self, path: NotePath, leave: Leave, cx: &mut Context<Self>) {
         if leave == Leave::Keep && self.shown.note() == Some(&path) {
+            self.stop_opening(cx);
             return;
         }
         if let Shown::New { kept, .. } = &mut self.shown {
@@ -732,13 +740,19 @@ impl NotePane {
         }
         self.opening += 1;
         let opening = self.opening;
+        self.next = Some(path.clone());
+        cx.emit(PaneEvent::Opening(path.clone()));
         match leave {
             Leave::Keep => {
                 let read = step(
                     cx,
                     move |pane: &mut Self, saved: Result<(), NotSaved>, cx| {
-                        if pane.opening == opening && saved.is_ok() {
-                            pane.read_note(path, opening, cx);
+                        if pane.opening != opening {
+                            return;
+                        }
+                        match (saved, pane.next.clone()) {
+                            (Ok(()), Some(next)) => pane.read_note(next, opening, cx),
+                            _ => pane.stop_opening(cx),
                         }
                     },
                 );
@@ -755,9 +769,13 @@ impl NotePane {
 
     /// Reads the note at `path` and shows it, when no newer open came after `opening`.
     fn read_note(&mut self, path: NotePath, opening: u64, cx: &mut Context<Self>) {
-        let done = Done::value(step(cx, move |pane: &mut Self, note, cx| {
+        // The pane owns the error: a failed read stops the open.
+        let done = Done::result(step(cx, move |pane: &mut Self, note, cx| {
             if pane.opening == opening {
-                pane.opened(note, cx);
+                match note {
+                    Ok(note) => pane.opened(note, cx),
+                    Err(_) => pane.stop_opening(cx),
+                }
             }
         }));
         self.notes_folder
@@ -766,14 +784,32 @@ impl NotePane {
 
     fn opened(&mut self, note: Note, cx: &mut Context<Self>) {
         let path = note.info.path.clone();
+        self.next = None;
         self.show(note, false, cx);
         cx.emit(PaneEvent::Opened(path));
+    }
+
+    /// Stops an open that waits, so the note in the editor is the open note again.
+    fn stop_opening(&mut self, cx: &mut Context<Self>) {
+        if self.next.take().is_none() {
+            return;
+        }
+        self.opening += 1;
+        if let Some(path) = self.shown.editor() {
+            cx.emit(PaneEvent::Opened(path.clone()));
+        }
     }
 
     /// Follows a move of the open note, or of a folder that holds it. A move to another
     /// folder can change the file links in the note, so the pane reads it again when it has
     /// no unsaved text.
     fn follow(&mut self, event: &FolderEvent, cx: &mut Context<Self>) {
+        if let Some(next) = &mut self.next
+            && let Some(new) = event.changes().find_map(|change| change.note_after(next))
+        {
+            next.clone_from(&new);
+            cx.emit(PaneEvent::Opening(new));
+        }
         let unsaved = self.unsaved(cx);
         let Some(path) = self.shown.editor_mut() else {
             return;
@@ -783,6 +819,7 @@ impl NotePane {
         };
         let other_folder = new.folder() != path.folder();
         path.clone_from(&new);
+        cx.emit(PaneEvent::Opened(new.clone()));
         if other_folder {
             let folder = Some(self.root.join(new.folder()));
             self.editor
@@ -832,6 +869,7 @@ impl NotePane {
             note.update(cx, |note, cx| note.focus(window, cx));
             return;
         }
+        self.stop_opening(cx);
         self.opening += 1;
         let opening = self.opening;
         let start = window_step(
