@@ -13,6 +13,7 @@ mod relink;
 mod retag;
 #[cfg(feature = "test-support")]
 pub mod sample;
+mod scan;
 mod snapshot;
 mod store;
 mod watch;
@@ -41,6 +42,7 @@ use model::{
 };
 use nodes::{Node, Nodes};
 use paths::Name;
+use reconcile::Settled;
 use retag::TagEdit;
 use store::Store;
 use watch::{Apply, Batch};
@@ -84,7 +86,7 @@ impl Core {
     /// When the file can't be rebuilt, for example on a full disk, the index lives in memory,
     /// with a log line. So a write fails only when its change did not reach the disk.
     ///
-    /// When two note files have the same id, the file that the index already knows keeps it.
+    /// When two note files have the same id, the file that Holm already knows keeps it.
     /// The other file gets a new id, written into the file.
     ///
     /// # Errors
@@ -681,7 +683,11 @@ impl Core {
 
     fn build(store: Store, index_dir: &Path, watcher: Option<watch::Watcher>) -> Result<Self> {
         let index = Index::open(index_dir, &store)?;
-        let facts = Facts::new(index.entries()?, store.folders(&FolderPath::root())?);
+        let mut facts = Facts::new(index.entries()?, store.folders(&FolderPath::root())?);
+        let settled = scan::files(&store, &facts, &Nodes::root())?;
+        let links = index.write(&settled)?;
+        let (delta, _) = settled.into_delta(links);
+        facts.apply(delta);
         let inner = Inner {
             store,
             index,
@@ -784,7 +790,7 @@ impl Inner {
 
     /// Puts a note that Holm just wrote into the index and the draft, and returns it.
     fn update(&self, draft: &mut Draft<'_>, note: &Note, stamp: store::Stamp) -> Result<Note> {
-        let notes = self.update_all(draft, &[(note.clone(), stamp)])?;
+        let notes = self.update_all(draft, vec![(note.clone(), stamp)])?;
         notes.into_iter().next().ok_or_else(|| Error::Write {
             path: self.store.root().join(&note.info.path),
             source: std::io::ErrorKind::InvalidData.into(),
@@ -795,10 +801,11 @@ impl Inner {
     fn update_all(
         &self,
         draft: &mut Draft<'_>,
-        notes: &[(Note, store::Stamp)],
+        notes: Vec<(Note, store::Stamp)>,
     ) -> Result<Vec<Note>> {
-        let (notes, delta) = self.index.update(notes)?;
-        if draft.notes(delta) {
+        let settled = scan::wrote(&self.store, &draft.next, notes);
+        let (notes, changed) = self.take(draft, settled)?;
+        if changed {
             draft.wrote_notes();
         }
         Ok(notes)
@@ -843,7 +850,7 @@ impl Inner {
         }
         let changed = written.len();
         if changed > 0 {
-            self.update_all(draft, &written)?;
+            self.update_all(draft, written)?;
         }
         if changed > 0
             && let TagEdit::Rename { from, to } = edit
@@ -914,9 +921,16 @@ impl Inner {
     /// Updates the index and the draft at each path after Holm's own change, and returns
     /// whether a note changed. It adds no change to the list, so the write adds its own.
     fn refresh(&self, draft: &mut Draft<'_>, nodes: Vec<Node>) -> Result<bool> {
-        let nodes = Nodes::new(nodes);
-        let refresh = self.index.refresh(&nodes, &draft.next.stamps_in(&nodes))?;
-        Ok(draft.notes(refresh.delta))
+        let settled = scan::files(&self.store, &draft.next, &Nodes::new(nodes))?;
+        Ok(self.take(draft, settled)?.1)
+    }
+
+    /// Writes the rows of `settled` into the index and puts it in the draft. It returns the
+    /// notes that were read, and whether a note changed.
+    fn take(&self, draft: &mut Draft<'_>, settled: Settled) -> Result<(Vec<Note>, bool)> {
+        let links = self.index.write(&settled)?;
+        let (delta, notes) = settled.into_delta(links);
+        Ok((notes, draft.notes(delta)))
     }
 
     /// Checks the disk at each path of `batch`, and updates the index, the snapshot and the
@@ -927,8 +941,9 @@ impl Inner {
             if nodes.is_empty() {
                 return Ok(());
             }
-            let refresh = self.index.refresh(&nodes, &draft.next.stamps_in(&nodes))?;
-            draft.notes(refresh.delta);
+            let settled = scan::files(&self.store, &draft.next, &nodes)?;
+            let refresh = reconcile::changes(&draft.next, &settled);
+            self.take(draft, settled)?;
             let mut folders = false;
             for node in &nodes {
                 if let Node::Folder(folder) = node {

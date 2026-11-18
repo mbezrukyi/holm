@@ -4,8 +4,8 @@
 //! is old or when SQLite fails on it. When the file can't be rebuilt, the index lives
 //! in memory until Holm ends.
 
-use std::collections::{HashMap, HashSet};
-use std::ffi::{OsStr, OsString};
+use std::collections::HashMap;
+use std::ffi::OsString;
 use std::fs;
 use std::hash::{BuildHasher as _, Hash};
 use std::io;
@@ -19,11 +19,13 @@ use rusqlite::types::{Type, Value};
 use rusqlite::{Connection, OptionalExtension as _, params};
 
 use crate::error::{Error, Result};
-use crate::facts::Delta;
-use crate::model::{Change, Link, LinkTarget, Note, NoteId, NoteInfo};
+use crate::facts::Facts;
+use crate::model::{Link, LinkTarget, Note, NoteId, NoteInfo};
 use crate::nodes::{Node, Nodes};
 use crate::paths::{NotePath, NoteReader};
+use crate::reconcile::Settled;
 use crate::relink::resolve;
+use crate::scan;
 use crate::store::{Stamp, Store, time};
 
 mod search;
@@ -74,17 +76,6 @@ const NOTE_INFO: &str = "
 path, id, title, pinned, modified, preview,
     (SELECT group_concat(tag, char(10) ORDER BY pos) FROM tags WHERE note = notes.key)";
 
-/// What a [`Index::refresh`] found.
-#[derive(Debug, Default)]
-pub(crate) struct Refresh {
-    /// The note changes, sorted by path. It holds no [`Change::Folders`] or [`Change::Tags`].
-    pub(crate) notes: Vec<Change>,
-    /// Whether the tag tree changed.
-    pub(crate) tags: bool,
-    /// The notes that left and joined the index.
-    pub(crate) delta: Delta,
-}
-
 /// What [`Index::removal`] found.
 #[derive(Debug)]
 pub(crate) struct Removal {
@@ -104,17 +95,14 @@ pub(crate) struct Index {
 }
 
 impl Index {
-    /// Opens the index in `dir` and brings it up to date with the files.
+    /// Opens the index in `dir`. It rebuilds the index from the files when SQLite fails on it.
     ///
-    /// The index reads and writes the note files through `store`.
+    /// A rebuild reads the note files through `store`.
     pub(crate) fn open(dir: &Path, store: &Store) -> Result<Self> {
         let path = dir.join(FILE);
-        let opened = fs::create_dir_all(dir).map_err(Fail::Io).and_then(|()| {
-            let mut conn = connect(&path)?;
-            let known = start_stamps(&conn)?;
-            sync(&mut conn, store, &Nodes::root(), &known)?;
-            Ok(conn)
-        });
+        let opened = fs::create_dir_all(dir)
+            .map_err(Fail::Io)
+            .and_then(|()| connect(&path));
         let conn = match opened {
             Ok(conn) => conn,
             Err(Fail::Core(error)) => return Err(error),
@@ -163,37 +151,15 @@ impl Index {
         })
     }
 
-    /// Puts notes that Holm just read or wrote into the index in one transaction,
-    /// and returns them in the same order.
-    ///
-    /// When another note file has the same id, a note gets a new id.
-    pub(crate) fn update(&self, notes: &[(Note, Stamp)]) -> Result<(Vec<Note>, Delta)> {
+    /// Writes the rows of `settled` in one transaction, and returns the links of each put note,
+    /// in order. A moved note keeps its row, so its text, tags and links stay.
+    pub(crate) fn write(&self, settled: &Settled) -> Result<Vec<Vec<Link>>> {
         self.run(|conn| {
             let tx = conn.transaction()?;
-            let mut gone = Vec::new();
-            let mut put_notes = Vec::with_capacity(notes.len());
-            let mut delta = Delta::default();
-            for (note, stamp) in notes {
-                let (note, links, stamp) =
-                    put(&tx, &self.store, note.clone(), *stamp, false, &mut gone)?;
-                delta.put.push((note.info.clone(), links, stamp));
-                put_notes.push(note);
-            }
+            let links = put_rows(&tx, self.store.root(), settled)?;
             tx.commit()?;
-            delta.removed = gone.into_iter().map(|gone| gone.path).collect();
-            Ok((put_notes, delta))
+            Ok(links)
         })
-    }
-
-    /// Brings the notes at or below each of `nodes` up to date with the files.
-    ///
-    /// `known` holds the stamp of each note there that the facts know.
-    pub(crate) fn refresh(
-        &self,
-        nodes: &Nodes,
-        known: &HashMap<NotePath, Stamp>,
-    ) -> Result<Refresh> {
-        self.run(|conn| sync(conn, &self.store, nodes, known))
     }
 
     /// What a delete of `node` removes: a note, or a folder with all its notes.
@@ -300,7 +266,7 @@ fn fresh(path: &Path, store: &Store, fail: &Fail) -> Result<Connection, Fail> {
             let mut conn = Connection::open_in_memory()?;
             settings(&conn)?;
             schema(&mut conn)?;
-            sync(&mut conn, store, &Nodes::root(), &HashMap::new())?;
+            fill(&mut conn, store)?;
             Ok(conn)
         }
         conn => conn,
@@ -350,8 +316,17 @@ fn schema(conn: &mut Connection) -> Result<(), Fail> {
 fn rebuild(path: &Path, store: &Store) -> Result<Connection, Fail> {
     remove(path)?;
     let mut conn = connect(path)?;
-    sync(&mut conn, store, &Nodes::root(), &HashMap::new())?;
+    fill(&mut conn, store)?;
     Ok(conn)
+}
+
+/// Writes the rows of every note file into the empty index.
+fn fill(conn: &mut Connection, store: &Store) -> Result<(), Fail> {
+    let settled = scan::files(store, &Facts::default(), &Nodes::root())?;
+    let tx = conn.transaction()?;
+    put_rows(&tx, store.root(), &settled)?;
+    tx.commit()?;
+    Ok(())
 }
 
 /// Deletes the index file and the files SQLite keeps next to it.
@@ -367,267 +342,27 @@ fn remove(path: &Path) -> Result<(), Fail> {
     Ok(())
 }
 
-/// Brings the notes in `places` up to date with the files. It reads only the files whose stamp changed.
-///
-/// `known` holds the stamp of each known note in `nodes`. It handles the known files before
-/// new ones. So a known file keeps its id when a new file has the same id.
-fn sync(
-    conn: &mut Connection,
-    store: &Store,
-    nodes: &Nodes,
-    known: &HashMap<NotePath, Stamp>,
-) -> Result<Refresh, Fail> {
-    let mut files = Vec::new();
-    for node in nodes {
-        files.extend(store.files(node)?);
+/// Writes the rows of `settled`, and returns the links of each put note, in order.
+fn put_rows(conn: &Connection, root: &Path, settled: &Settled) -> Result<Vec<Vec<Link>>, Fail> {
+    for path in &settled.removed {
+        delete(conn, path)?;
     }
-    let tx = conn.transaction()?;
-    let on_disk: HashMap<&NotePath, Stamp> =
-        files.iter().map(|(rel, stamp)| (rel, *stamp)).collect();
-    let left: Vec<(&NotePath, Stamp)> = known
+    for moved in &settled.moved {
+        shift(conn, &moved.from, &moved.info.path)?;
+    }
+    settled
+        .put
         .iter()
-        .filter(|(rel, _)| !on_disk.contains_key(rel))
-        .map(|(rel, stamp)| (rel, *stamp))
-        .collect();
-    let joined: Vec<(&NotePath, Stamp)> = files
-        .iter()
-        .filter(|(rel, _)| !known.contains_key(rel))
-        .map(|(rel, stamp)| (rel, *stamp))
-        .collect();
-    let mut moves = Vec::new();
-    let mut done = HashSet::new();
-    for (from, to) in pairs(&left, &joined) {
-        if let Some(note) = shift(&tx, from, to)? {
-            done.insert(from);
-            done.insert(to);
-            moves.push((from.clone(), note, on_disk[to]));
-        }
-    }
-    let mut gone = Vec::new();
-    for (rel, _) in left.iter().filter(|(rel, _)| !done.contains(rel)) {
-        gone.extend(delete(&tx, rel)?);
-    }
-    let mut todo: Vec<(bool, &NotePath)> = files
-        .iter()
-        .filter(|(rel, stamp)| known.get(rel) != Some(stamp) && !done.contains(rel))
-        .map(|(rel, _)| (!known.contains_key(rel), rel))
-        .collect();
-    todo.sort_unstable();
-    let mut written = Vec::new();
-    let mut put_in = Vec::new();
-    for (new, rel) in todo {
-        let old_tags = if new { None } else { Some(tags_of(&tx, rel)?) };
-        match store.read(rel) {
-            Ok((note, stamp)) => {
-                let (note, links, stamp) = put(&tx, store, note, stamp, new, &mut gone)?;
-                put_in.push((note.info.clone(), links, stamp));
-                written.push((note.info, old_tags));
-            }
-            Err(error) => {
-                tracing::warn!(%error, "skipped a note");
-                gone.extend(delete(&tx, rel)?);
-            }
-        }
-    }
-    tx.commit()?;
-    let mut removed: Vec<NotePath> = gone.iter().map(|gone| gone.path.clone()).collect();
-    for (from, (info, links), stamp) in &moves {
-        removed.push(from.clone());
-        put_in.push((info.clone(), links.clone(), *stamp));
-    }
-    let delta = Delta {
-        removed,
-        put: put_in,
-    };
-    let moves = moves.into_iter().map(|(from, (info, _), _)| (from, info));
-    Ok(Refresh {
-        delta,
-        ..refresh(written, moves, gone)
-    })
-}
-
-/// The gone paths and new paths that are one file at a new place: the same file name
-/// and stamp, with no other gone or new path that has both.
-///
-/// A folder rename keeps the stamps of the files inside it.
-fn pairs<'a>(
-    left: &[(&'a NotePath, Stamp)],
-    joined: &[(&'a NotePath, Stamp)],
-) -> Vec<(&'a NotePath, &'a NotePath)> {
-    type Key<'a> = (&'a OsStr, Stamp);
-    type Sides<'a> = (Vec<&'a NotePath>, Vec<&'a NotePath>);
-    let mut sides: HashMap<Key<'a>, Sides<'a>> = HashMap::new();
-    for (rel, stamp) in left {
-        sides.entry((rel.name(), *stamp)).or_default().0.push(rel);
-    }
-    for (rel, stamp) in joined {
-        if let Some(side) = sides.get_mut(&(rel.name(), *stamp)) {
-            side.1.push(rel);
-        }
-    }
-    sides
-        .into_values()
-        .filter_map(|(from, to)| match (from.as_slice(), to.as_slice()) {
-            (&[from], &[to]) => Some((from, to)),
-            _ => None,
-        })
+        .map(|put| write(conn, root, &put.note, put.stamp, !put.known))
         .collect()
 }
 
-/// Moves the index row of the note at `from` to `to`, when the note has no file link.
-/// Its key stays, so its text, tags and links stay too. It returns the moved note.
-///
-/// A relative file link points to another file after a move, so such a note must be
-/// read again. The index does not keep whether a link was relative, so this
-/// skips every note with a file link.
-fn shift(
-    conn: &Connection,
-    from: &NotePath,
-    to: &NotePath,
-) -> Result<Option<(NoteInfo, Vec<Link>)>, Fail> {
-    let key: Option<i64> = conn
-        .prepare_cached(
-            "UPDATE notes SET path = ?2, folder = ?3 WHERE path = ?1
-            AND NOT EXISTS (SELECT 1 FROM links WHERE links.note = notes.key AND kind = 'file')
-            RETURNING key",
-        )?
-        .query_row(params![bytes(from), bytes(to), bytes(to.folder())], |row| {
-            row.get(0)
-        })
-        .optional()?;
-    let Some(key) = key else {
-        return Ok(None);
-    };
-    let info = conn
-        .prepare_cached(&format!("SELECT {NOTE_INFO} FROM notes WHERE key = ?1"))?
-        .query_row([key], |row| note_info(&mut NoteReader::default(), row))?;
-    Ok(Some((info, stored_links(conn, key)?)))
-}
-
-/// The stamp of each note in the index. Only the start reads them, before the facts exist.
-fn start_stamps(conn: &Connection) -> Result<HashMap<NotePath, Stamp>, Fail> {
-    let mut statement = conn.prepare_cached("SELECT path, modified, changed, size FROM notes")?;
-    let mut reader = NoteReader::default();
-    let rows = statement.query_map([], |row| {
-        let stamp = Stamp {
-            modified: row.get(1)?,
-            changed: row.get(2)?,
-            size: row.get(3)?,
-        };
-        Ok((note_path(&mut reader, row, 0)?, stamp))
-    })?;
-    Ok(rows.collect::<rusqlite::Result<_>>()?)
-}
-
-/// A note that left the index.
-struct Gone {
-    path: NotePath,
-    id: Option<NoteId>,
-    tags: Vec<String>,
-}
-
-/// Turns the notes that `sync` wrote and removed into changes.
-///
-/// A removed note and a new note with the same id are one move. A shifted row without an id
-/// is a removed note and a new one, as a read would find it.
-fn refresh(
-    written: Vec<(NoteInfo, Option<Vec<String>>)>,
-    moves: impl Iterator<Item = (NotePath, NoteInfo)>,
-    mut gone: Vec<Gone>,
-) -> Refresh {
-    let mut out = Refresh::default();
-    for (from, note) in moves {
-        if note.id.is_some() {
-            out.notes.push(Change::Moved { from, note });
-        } else {
-            out.tags |= !note.tags.is_empty();
-            out.notes.push(Change::Removed(from));
-            out.notes.push(Change::Added(note));
-        }
-    }
-    for (note, old_tags) in written {
-        let from = match (&old_tags, &note.id) {
-            (None, Some(id)) => gone
-                .iter()
-                .position(|g| g.id.as_ref() == Some(id))
-                .map(|i| gone.swap_remove(i)),
-            _ => None,
-        };
-        let change = match (from, old_tags) {
-            (Some(from), _) => {
-                out.tags |= !same_tags(&from.tags, &note.tags);
-                Change::Moved {
-                    from: from.path,
-                    note,
-                }
-            }
-            (None, None) => {
-                out.tags |= !note.tags.is_empty();
-                Change::Added(note)
-            }
-            (None, Some(old)) => {
-                out.tags |= !same_tags(&old, &note.tags);
-                Change::Changed(note)
-            }
-        };
-        out.notes.push(change);
-    }
-    for gone in gone {
-        out.tags |= !gone.tags.is_empty();
-        out.notes.push(Change::Removed(gone.path));
-    }
-    out.notes
-        .sort_by(|a, b| change_path(a).cmp(&change_path(b)));
-    out
-}
-
-fn same_tags(a: &[String], b: &[String]) -> bool {
-    a.iter().collect::<HashSet<_>>() == b.iter().collect::<HashSet<_>>()
-}
-
-fn change_path(change: &Change) -> Option<&NotePath> {
-    match change {
-        Change::Added(note) | Change::Changed(note) | Change::Moved { note, .. } => {
-            Some(&note.path)
-        }
-        Change::Removed(path) => Some(path),
-        _ => None,
-    }
-}
-
-/// Writes one note into the index, after a check that no other file has its id.
-/// It returns the note, its links and its stamp. A new id changes the note and its stamp.
-///
-/// When the other file is gone, its note leaves the index and goes into `gone`.
-/// When `new` is true, the caller knows that the index has no note at this path.
-fn put(
-    conn: &Connection,
-    store: &Store,
-    mut note: Note,
-    mut stamp: Stamp,
-    new: bool,
-    gone: &mut Vec<Gone>,
-) -> Result<(Note, Vec<Link>, Stamp), Fail> {
-    if let Some(id) = &note.info.id
-        && let Some(owner) = owner(conn, id)?
-        && owner != note.info.path
-    {
-        if store.exists(&owner) {
-            let new_id = NoteId::generate();
-            tracing::info!(%id, new = %new_id, path = %note.info.path, "gave a copied note a new id");
-            match store.edit_fields(&note.info.path, |text| text.set_id(Some(new_id.as_str()))) {
-                Ok((written, written_stamp)) => (note, stamp) = (written, written_stamp),
-                Err(error) => {
-                    tracing::warn!(%error, "kept a copied note without an id");
-                    note.info.id = None;
-                }
-            }
-        } else {
-            gone.extend(delete(conn, &owner)?);
-        }
-    }
-    let links = write(conn, store.root(), &note, stamp, new)?;
-    Ok((note, links, stamp))
+/// Moves the row of the note at `from` to `to`. Its key stays, so its text, tags and links
+/// stay too.
+fn shift(conn: &Connection, from: &NotePath, to: &NotePath) -> Result<(), Fail> {
+    conn.prepare_cached("UPDATE notes SET path = ?2, folder = ?3 WHERE path = ?1")?
+        .execute(params![bytes(from), bytes(to), bytes(to.folder())])?;
+    Ok(())
 }
 
 /// The links of the note, with file paths from the notes folder.
@@ -649,24 +384,6 @@ fn links_of(root: &Path, note: &Note) -> Vec<Link> {
             embedded: link.embedded,
         })
         .collect()
-}
-
-fn tags_of(conn: &Connection, rel: &NotePath) -> Result<Vec<String>, Fail> {
-    let mut statement = conn.prepare_cached(
-        "SELECT tag FROM tags JOIN notes ON notes.key = tags.note WHERE notes.path = ?1 ORDER BY pos",
-    )?;
-    let rows = statement.query_map([bytes(rel)], |row| row.get(0))?;
-    Ok(rows.collect::<rusqlite::Result<_>>()?)
-}
-
-fn owner(conn: &Connection, id: &NoteId) -> Result<Option<NotePath>, Fail> {
-    let owner = conn
-        .prepare_cached("SELECT path FROM notes WHERE id = ?1")?
-        .query_row([id.as_str()], |row| {
-            note_path(&mut NoteReader::default(), row, 0)
-        })
-        .optional()?;
-    Ok(owner)
 }
 
 /// Writes the rows of one note and returns its links.
@@ -790,24 +507,19 @@ fn hash(value: impl Hash) -> i64 {
     i64::from_ne_bytes(hash.to_ne_bytes())
 }
 
-/// Removes the note at `rel` from the index, and returns what it was.
-fn delete(conn: &Connection, rel: &NotePath) -> Result<Option<Gone>, Fail> {
-    let row: Option<(i64, Option<String>)> = conn
-        .prepare_cached("SELECT key, id FROM notes WHERE path = ?1")?
-        .query_row([bytes(rel)], |row| Ok((row.get(0)?, row.get(1)?)))
+/// Removes the note at `rel` from the index.
+fn delete(conn: &Connection, rel: &NotePath) -> Result<(), Fail> {
+    let key: Option<i64> = conn
+        .prepare_cached("SELECT key FROM notes WHERE path = ?1")?
+        .query_row([bytes(rel)], |row| row.get(0))
         .optional()?;
-    let Some((key, id)) = row else {
-        return Ok(None);
+    let Some(key) = key else {
+        return Ok(());
     };
-    let tags = tags_of(conn, rel)?;
     search::remove(conn, key)?;
     conn.prepare_cached("DELETE FROM notes WHERE key = ?1")?
         .execute([key])?;
-    Ok(Some(Gone {
-        path: rel.clone(),
-        id: id.map(NoteId::from_field),
-        tags,
-    }))
+    Ok(())
 }
 
 fn note_info(reader: &mut NoteReader, row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteInfo> {

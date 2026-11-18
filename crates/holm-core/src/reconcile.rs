@@ -2,7 +2,6 @@
 //! clashes.
 //!
 //! It does no I/O. The core lists and reads the files, and runs what it settles.
-#![expect(dead_code, reason = "the core does not run plans yet")]
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
