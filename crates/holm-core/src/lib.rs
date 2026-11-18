@@ -19,6 +19,7 @@ mod snapshot;
 mod store;
 mod tag;
 mod watch;
+mod write;
 
 use std::collections::{HashMap, hash_map};
 use std::ffi::OsStr;
@@ -37,12 +38,11 @@ pub use snapshot::Snapshot;
 pub use tag::TagName;
 pub use watch::Feed;
 
-use diff::Touched;
 use facts::Facts;
 use index::{Index, Row, Rows};
 use model::{
-    Change, ChangeList, DeleteCount, LinkTarget, Note, NoteId, NoteInfo, NoteSet, Order,
-    SearchResults, Source,
+    ChangeList, DeleteCount, LinkTarget, Note, NoteId, NoteInfo, NoteSet, Order, SearchResults,
+    Source,
 };
 use nodes::{Node, Nodes};
 use paths::Name;
@@ -50,6 +50,7 @@ use reconcile::Settled;
 use retag::TagEdit;
 use store::Store;
 use watch::{Apply, Batch};
+use write::Write;
 
 /// The stem of a pasted image before its hash.
 const PASTED_IMAGE: &str = "Pasted image";
@@ -156,7 +157,7 @@ impl Core {
     /// revision, with the snapshot of that revision. When a list comes, [`Core::snapshot`]
     /// shows its revision or a newer one.
     /// Each list gives the moves of a write first, then the note changes in path order, then
-    /// [`Change::Folders`] and [`Change::Tags`].
+    /// [`Change::Folders`](model::Change::Folders) and [`Change::Tags`](model::Change::Tags).
     pub fn changes(&self) -> Changes {
         let (send, receive) = mpsc::unbounded();
         lock(&self.inner.listeners).push(send);
@@ -281,10 +282,7 @@ impl Core {
     /// - [`Error::Read`] or [`Error::NotUtf8`] when the file on disk can't be read.
     /// - [`Error::Write`] when the new file can't be written. The old file then stays.
     pub fn save(&self, path: &NotePath, body: &str) -> Result<Note> {
-        self.inner.write(|pending| {
-            let (note, stamp) = pending.disk.store.save(path, body)?;
-            pending.update(&note, stamp)
-        })
+        self.inner.write(|write| write.save(path, body))
     }
 
     /// Writes `note` again at its path after another tool deleted its file, and returns it.
@@ -295,10 +293,7 @@ impl Core {
     ///
     /// [`Error::Write`] when the file can't be written, for example when the folder is missing.
     pub fn restore(&self, note: &Note) -> Result<Note> {
-        self.inner.write(|pending| {
-            let (note, stamp) = pending.disk.store.restore(note)?;
-            pending.update(&note, stamp)
-        })
+        self.inner.write(|write| write.restore(note))
     }
 
     /// Creates an empty note with a new id in `folder`, and returns it.
@@ -313,13 +308,8 @@ impl Core {
     ///   capital letters.
     /// - [`Error::Write`] when the file can't be written, for example when the folder is missing.
     pub fn create(&self, folder: &FolderPath, title: &str) -> Result<Note> {
-        self.inner.write(|pending| {
-            let (note, stamp) = pending
-                .disk
-                .store
-                .create(&folder.note(&Name::title(title)?))?;
-            pending.update(&note, stamp)
-        })
+        self.inner
+            .write(|write| write.create(&folder.note(&Name::title(title)?)))
     }
 
     /// Gives the note the title `title`: its file becomes `<title>.md` in the same folder.
@@ -335,13 +325,8 @@ impl Core {
     /// - [`Error::Read`] or [`Error::NotUtf8`] when the file can't be read as text.
     /// - [`Error::Write`] when the file can't be moved. The note then stays where it was.
     pub fn rename_note(&self, path: &NotePath, title: &str) -> Result<NoteInfo> {
-        self.inner.write(|pending| {
-            let new = pending
-                .disk
-                .store
-                .move_note(path, path.folder().note(&Name::title(title)?))?;
-            pending.settle(path, &new)
-        })
+        self.inner
+            .write(|write| write.move_note(path, path.folder().note(&Name::title(title)?)))
     }
 
     /// Moves the note to `folder` with its file name, and returns it at its new path.
@@ -355,10 +340,8 @@ impl Core {
     ///   capital letters. Nothing moves.
     /// - Else as in [`Core::rename_note`].
     pub fn move_note(&self, path: &NotePath, folder: &FolderPath) -> Result<NoteInfo> {
-        self.inner.write(|pending| {
-            let new = pending.disk.store.move_note(path, path.in_folder(folder))?;
-            pending.settle(path, &new)
-        })
+        self.inner
+            .write(|write| write.move_note(path, path.in_folder(folder)))
     }
 
     /// Creates the folder `name` in `parent`, and returns its path.
@@ -374,14 +357,8 @@ impl Core {
     /// - [`Error::Write`] when the folder can't be made, for example when `parent` is missing.
     /// - [`Error::Read`] when the new folder can't be read.
     pub fn create_folder(&self, parent: &FolderPath, name: &str) -> Result<FolderPath> {
-        self.inner.write(|pending| {
-            let new = pending
-                .disk
-                .store
-                .create_folder(parent, &Name::typed(name)?)?;
-            pending.folders(&new)?;
-            Ok(new)
-        })
+        self.inner
+            .write(|write| write.create_folder(parent, &Name::typed(name)?))
     }
 
     /// Renames the folder to `name`, and returns its new path.
@@ -455,9 +432,7 @@ impl Core {
     /// [`Error::Write`] when the note can't be deleted.
     /// An attachment that can't be deleted stays, with a log line.
     pub fn delete_note(&self, path: &NotePath) -> Result<()> {
-        self.inner.write(|pending| {
-            pending.delete(&Node::Note(path.clone()), |store| store.delete_note(path))
-        })
+        self.inner.write(|write| write.delete_note(path))
     }
 
     /// Deletes the folder forever, with every note and file in it.
@@ -470,11 +445,7 @@ impl Core {
     /// - [`Error::Read`] when `folder` is not a folder.
     /// - [`Error::Write`] when the folder can't be deleted. Some files in it may be gone.
     pub fn delete_folder(&self, folder: &FolderPath) -> Result<()> {
-        self.inner.write(|pending| {
-            pending.delete(&Node::Folder(folder.clone()), |store| {
-                store.delete_folder(folder)
-            })
-        })
+        self.inner.write(|write| write.delete_folder(folder))
     }
 
     /// The id of the note, for a link to it.
@@ -487,14 +458,14 @@ impl Core {
     /// - [`Error::Read`] or [`Error::NotUtf8`] when the file can't be read as text.
     /// - [`Error::Write`] when the id can't be written.
     pub fn link_id(&self, path: &NotePath) -> Result<NoteId> {
-        self.inner.write(|pending| {
-            let note = pending.edit_fields(path, |text| {
+        self.inner.write(|write| {
+            let note = write.edit_fields(path, |text| {
                 if text.id().is_none() {
                     text.set_id(Some(NoteId::generate().as_str()));
                 }
             })?;
             note.info.id.ok_or_else(|| Error::Write {
-                path: pending.disk.store.root().join(&note.info.path),
+                path: write.root().join(&note.info.path),
                 source: std::io::ErrorKind::InvalidData.into(),
             })
         })
@@ -509,8 +480,8 @@ impl Core {
     /// - [`Error::Read`] or [`Error::NotUtf8`] when the file can't be read as text.
     /// - [`Error::Write`] when the file can't be written. The old file then stays.
     pub fn add_tag(&self, path: &NotePath, tag: &TagName) -> Result<NoteInfo> {
-        self.inner.write(|pending| {
-            pending
+        self.inner.write(|write| {
+            write
                 .edit_fields(path, |text| {
                     let mut tags = TagName::of_note(text);
                     if !tags.contains(tag) {
@@ -529,8 +500,8 @@ impl Core {
     ///
     /// The errors of [`Core::add_tag`] for the file.
     pub fn remove_tag(&self, path: &NotePath, tag: &TagName) -> Result<NoteInfo> {
-        self.inner.write(|pending| {
-            pending
+        self.inner.write(|write| {
+            write
                 .edit_fields(path, |text| {
                     let mut tags = TagName::of_note(text);
                     let count = tags.len();
@@ -549,8 +520,8 @@ impl Core {
     ///
     /// As in [`Core::add_tag`].
     pub fn set_pinned(&self, path: &NotePath, pinned: bool) -> Result<NoteInfo> {
-        self.inner.write(|pending| {
-            pending
+        self.inner.write(|write| {
+            write
                 .edit_fields(path, |text| {
                     if text.pinned() != pinned {
                         text.set_pinned(pinned);
@@ -580,7 +551,7 @@ impl Core {
     /// The first error of a note, as in [`Core::add_tag`].
     pub fn rename_tag(&self, from: &TagName, to: &TagName) -> Result<usize> {
         self.inner
-            .write(|pending| pending.edit_tag(&TagEdit::Rename { from, to }))
+            .write(|write| write.edit_tag(&TagEdit::Rename { from, to }))
     }
 
     /// How many notes [`Core::delete_tag`] changes.
@@ -597,7 +568,7 @@ impl Core {
     /// The first error of a note, as in [`Core::add_tag`].
     pub fn delete_tag(&self, tag: &TagName) -> Result<usize> {
         self.inner
-            .write(|pending| pending.edit_tag(&TagEdit::Delete(tag)))
+            .write(|write| write.edit_tag(&TagEdit::Delete(tag)))
     }
 
     /// Copies the file into `attachments/` at the root of the notes folder,
@@ -666,20 +637,8 @@ impl Core {
         parent: &FolderPath,
         name: &Name,
     ) -> Result<FolderPath> {
-        self.inner.write(|pending| {
-            let new = pending.disk.store.move_folder(folder, parent, name)?;
-            if new != *folder {
-                pending.touched.moved(Change::FolderMoved {
-                    from: folder.clone(),
-                    to: new.clone(),
-                });
-                let nodes = vec![Node::Folder(folder.clone()), Node::Folder(new.clone())];
-                pending.refresh(nodes)?;
-                pending.folders(folder)?;
-                pending.folders(&new)?;
-            }
-            Ok(new)
-        })
+        self.inner
+            .write(|write| write.move_folder(folder, parent, name))
     }
 
     fn build(store: Store, index_dir: &Path, watcher: Option<watch::Watcher>) -> Result<Self> {
@@ -701,155 +660,6 @@ impl Core {
     fn apply(&self) -> Apply {
         let inner = Arc::downgrade(&self.inner);
         Arc::new(move |batch| inner.upgrade().map(|inner| inner.apply(batch)))
-    }
-}
-
-/// The next facts, while one write runs, and what the write touched.
-struct Pending<'a> {
-    disk: &'a mut Disk,
-    next: Facts,
-    touched: Touched,
-}
-
-impl Pending<'_> {
-    /// Reads the folders at `folder` or below it from the disk again.
-    fn folders(&mut self, folder: &FolderPath) -> Result<()> {
-        let found = self.disk.store.folders(folder)?;
-        self.next.set_folders(folder, found);
-        self.touched.folder(folder.clone());
-        Ok(())
-    }
-
-    /// Puts a note that Holm just wrote into the index and the next facts, and returns it.
-    fn update(&mut self, note: &Note, stamp: store::Stamp) -> Result<Note> {
-        let notes = self.update_all(vec![(note.clone(), stamp)]);
-        notes.into_iter().next().ok_or_else(|| Error::Write {
-            path: self.disk.store.root().join(&note.info.path),
-            source: std::io::ErrorKind::InvalidData.into(),
-        })
-    }
-
-    /// Puts notes that Holm just wrote into the index and the next facts, and returns them.
-    fn update_all(&mut self, notes: Vec<(Note, store::Stamp)>) -> Vec<Note> {
-        let settled = scan::wrote(&self.disk.store, &self.next, notes);
-        self.take(settled)
-    }
-
-    /// Changes the frontmatter of the note with `edit`, keeps its modification time,
-    /// and updates the index and the next facts.
-    fn edit_fields(
-        &mut self,
-        path: &NotePath,
-        edit: impl FnOnce(&mut holm_markdown::Note),
-    ) -> Result<Note> {
-        let (note, stamp) = self.disk.store.edit_fields(path, edit)?;
-        self.update(&note, stamp)
-    }
-
-    fn edit_tag(&mut self, edit: &TagEdit<'_>) -> Result<usize> {
-        let paths = self
-            .next
-            .snapshot()
-            .paths(NoteSet::WithTag(edit.tag()), Order::Title);
-        let store = &self.disk.store;
-        let rewritten = store.rewrite(&paths, |_, old| {
-            let mut text = holm_markdown::Note::parse(old);
-            let tags = TagName::of_note(&text);
-            let new = edit.apply(&tags);
-            (new != tags).then(|| {
-                text.set_tags(&new);
-                text.to_string()
-            })
-        });
-        let mut written = Vec::with_capacity(rewritten.len());
-        let mut first_error = None;
-        for (path, result) in rewritten {
-            match result.and_then(|()| store.read(&path)) {
-                Ok(note) => written.push(note),
-                Err(error) => {
-                    tracing::warn!(%error, "kept the tags of a note");
-                    first_error.get_or_insert(error);
-                }
-            }
-        }
-        let changed = written.len();
-        if changed > 0 {
-            self.update_all(written);
-        }
-        if changed > 0
-            && let TagEdit::Rename { from, to } = edit
-            && from != to
-        {
-            self.touched.moved(Change::TagMoved {
-                from: (*from).clone(),
-                to: (*to).clone(),
-            });
-        }
-        first_error.map_or(Ok(changed), Err)
-    }
-
-    /// Runs `delete` on `node`, then deletes its attachment files.
-    /// It updates the index and the next facts also when `delete` fails, since a part may be gone.
-    fn delete(&mut self, node: &Node, delete: impl FnOnce(&Store) -> Result<()>) -> Result<()> {
-        let (_, files) = self.disk.removal(self.next.snapshot(), node);
-        let deleted = delete(&self.disk.store);
-        if deleted.is_ok() {
-            for file in files {
-                if let Err(error) = self.disk.store.delete_attachment(&file) {
-                    tracing::warn!(%error, "kept an attachment");
-                }
-            }
-        }
-        self.refresh(vec![node.clone()])?;
-        if let Node::Folder(folder) = node {
-            self.folders(folder)?;
-        }
-        deleted
-    }
-
-    /// Updates the index and the next facts after a note moved from `from` to `to`, and returns the note.
-    fn settle(&mut self, from: &NotePath, to: &NotePath) -> Result<NoteInfo> {
-        if from == to {
-            return self.disk.store.read(to).map(|(note, _)| note.info);
-        }
-        self.refresh(vec![Node::Note(from.clone()), Node::Note(to.clone())])?;
-        let info = self.disk.store.read(to)?.0.info;
-        self.touched.moved(Change::Moved {
-            from: from.clone(),
-            to: to.clone(),
-        });
-        Ok(info)
-    }
-
-    /// Updates the index and the next facts at each path after Holm's own change.
-    fn refresh(&mut self, nodes: Vec<Node>) -> Result<()> {
-        let settled = scan::files(&self.disk.store, &self.next, &Nodes::new(nodes))?;
-        self.take(settled);
-        Ok(())
-    }
-
-    /// Checks the disk at each path of `batch`, and updates the index and the next facts.
-    fn outside(&mut self, batch: Batch) -> Result<()> {
-        let nodes = Nodes::outside(&self.disk.store, self.next.snapshot(), batch);
-        if nodes.is_empty() {
-            return Ok(());
-        }
-        let settled = scan::files(&self.disk.store, &self.next, &nodes)?;
-        self.take(settled);
-        for node in &nodes {
-            if let Node::Folder(folder) = node {
-                self.folders(folder)?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Writes the rows of `settled` into the index and puts it in the next facts. It returns the
-    /// notes that were read.
-    fn take(&mut self, settled: Settled) -> Vec<Note> {
-        self.disk.write_rows(&settled);
-        self.touched.settled(&settled);
-        self.next.settle(settled)
     }
 }
 
@@ -957,24 +767,17 @@ impl Inner {
     /// Runs `op` under the lock, with a copy of the facts as the next facts.
     /// The next facts replace the facts, so they keep each new stamp. When a fact changed, they
     /// get the next revision. The change list carries the snapshot of its revision.
-    fn write<T>(&self, op: impl FnOnce(&mut Pending<'_>) -> Result<T>) -> Result<T> {
+    fn write<T>(&self, op: impl FnOnce(&mut Write<'_>) -> Result<T>) -> Result<T> {
         self.run(Source::Holm, op)
     }
 
     /// Runs `op` as [`Inner::write`] does, for changes from `source`.
-    fn run<T>(&self, source: Source, op: impl FnOnce(&mut Pending<'_>) -> Result<T>) -> Result<T> {
+    fn run<T>(&self, source: Source, op: impl FnOnce(&mut Write<'_>) -> Result<T>) -> Result<T> {
         self.with(|Locked { disk, facts }| {
-            let mut pending = Pending {
-                disk,
-                next: facts.clone(),
-                touched: Touched::default(),
-            };
-            let result = op(&mut pending);
-            let (after, list) = pending.touched.list(source, facts, pending.next);
+            let (result, list) = write::run(disk, facts, source, op);
             if let Some(list) = list {
                 send(&mut lock(&self.listeners), list);
             }
-            *facts = after;
             result
         })
     }
@@ -982,7 +785,7 @@ impl Inner {
     /// Checks the disk at each path of `batch`, and updates the index, the snapshot and the
     /// change list.
     fn apply(&self, batch: Batch) -> Result<()> {
-        self.run(Source::Outside, |pending| pending.outside(batch))
+        self.run(Source::Outside, |write| write.outside(batch))
     }
 }
 
