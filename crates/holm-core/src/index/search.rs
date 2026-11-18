@@ -3,6 +3,9 @@
 //! The text of a note and its tags have their own word tables. The tag words are kept once
 //! per tag name, not per note. So a change of tags never parses the text of a note again,
 //! and a tag rename on many notes adds one row.
+//!
+//! The text words also keep a list for each prefix of one to three letters. So a short search
+//! word reads one list, and does not merge the lists of all words that start with it.
 
 use std::collections::{HashMap, HashSet};
 
@@ -21,7 +24,8 @@ CREATE TABLE text_hashes (
 CREATE VIRTUAL TABLE text_words USING fts5 (
     title, body,
     content = '', contentless_delete = 1,
-    tokenize = 'unicode61 remove_diacritics 2'
+    tokenize = 'unicode61 remove_diacritics 2',
+    prefix = '1 2 3'
 );
 CREATE TABLE tag_names (
     key INTEGER PRIMARY KEY,
