@@ -3,6 +3,10 @@
 //! Each file action goes in the write line of the notes folder. The line writes the unsaved
 //! text of the pane first. The sidebar shows each new snapshot by itself.
 //!
+//! Every change that counts notes or asks the user runs here. The sidebar sends an event for
+//! it. A name field of the sidebar writes by itself, and the field of a tag writes through
+//! this view.
+//!
 //! Holm makes no note by itself. When the open note is gone, the pane opens its neighbor in
 //! the sidebar list. With no note left, it shows the empty pane.
 
@@ -16,17 +20,18 @@ use gpui_kit::{
     ParentElement, Pixels, Render, Styled, Subscription, Window, div, px,
 };
 use holm_core::model::Note;
-use holm_core::{FolderPath, NotePath};
+use holm_core::{FolderPath, NotePath, TagName};
 
 use crate::config::{Config, SidebarSettings};
-use crate::dialog::{self, Ask, Confirm, Dialog};
+use crate::dialog::{self, Ask, Dialog};
+use crate::error::AppError;
 use crate::link_picker::{LinkPicker, LinkPickerEvent, LinkStart};
 use crate::message_line::MessageLine;
-use crate::notes_folder::{Done, JobFailed, NotesFolder, window_step};
+use crate::notes_folder::{Done, JobFailed, NotesFolder, Step, window_step};
 use crate::pane::{Leave, NotePane, PaneEvent, Pick};
 use crate::picker::{FolderPicker, PickerEvent};
 use crate::quick_open::{QuickOpen, QuickOpenEvent};
-use crate::sidebar::{Item, Sidebar, SidebarEvent, Target};
+use crate::sidebar::{Item, Sidebar, SidebarEvent, TagRename, Target};
 use crate::tags::RenameTag;
 
 const MIN_WIDTH: f32 = 160.;
@@ -66,22 +71,12 @@ impl NotesView {
         let settings = config.read(cx).settings().clone();
         let pane =
             cx.new(|cx| NotePane::new(notes_folder.clone(), line.clone(), root, note, window, cx));
-        let this = cx.weak_entity();
-        let confirm: Confirm = Rc::new(move |ask, answered, window, cx| {
-            this.update(cx, |this, cx| {
-                this.ask(ask, window, cx, move |_, confirmed, _, cx| {
-                    answered(confirmed, cx);
-                });
-            })
-            .ok();
-        });
         let sidebar = cx.new(|cx| {
             Sidebar::new(
                 notes_folder.clone(),
                 pane.clone(),
                 settings.note_order,
                 settings.sidebar.view.clone(),
-                confirm,
                 window,
                 cx,
             )
@@ -145,14 +140,8 @@ impl NotesView {
         }
     }
 
-    /// Starts the rename of a tag in the sidebar, for all notes.
-    fn rename_tag(
-        &mut self,
-        RenameTag(tag): &RenameTag,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let item = Item::Tag(tag.clone());
+    /// Starts the name field of a tag in the sidebar, for a rename in all notes.
+    fn rename_tag(&mut self, tag: TagName, window: &mut Window, cx: &mut Context<Self>) {
         self.hidden = false;
         self.keep_state(cx);
         self.focus_sidebar(window, cx);
@@ -163,10 +152,63 @@ impl NotesView {
             cx,
             NotesFolder::wait,
             move |this, (), window, cx| {
-                this.sidebar
-                    .update(cx, |sidebar, cx| sidebar.rename(item, window, cx));
+                let notes = cx.weak_entity();
+                let rename: TagRename = Rc::new(move |from, to, done, window, cx| {
+                    notes
+                        .update(cx, |this, cx| {
+                            this.ask_rename_tag(from, to, done, window, cx);
+                        })
+                        .ok();
+                });
+                this.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.rename_tag(tag, rename, window, cx);
+                });
             },
         );
+    }
+
+    /// The write of the tag name field: it counts the notes, asks, and renames.
+    fn ask_rename_tag(
+        &mut self,
+        from: TagName,
+        to: String,
+        done: Step<Result<(), AppError>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if to.trim().is_empty() {
+            done(Ok(()), cx);
+            return;
+        }
+        let counted_from = from.clone();
+        let counted = window_step(
+            window,
+            cx,
+            move |this: &mut Self, count: Result<(TagName, usize), AppError>, window, cx| {
+                let (to, notes) = match count {
+                    Ok(count) => count,
+                    Err(error) => return done(Err(error), cx),
+                };
+                let ask = Ask::RenameTag {
+                    from: from.clone(),
+                    to: to.clone(),
+                    notes,
+                };
+                this.ask(ask, window, cx, move |this, confirmed, _, cx| {
+                    if !confirmed {
+                        done(Ok(()), cx);
+                        return;
+                    }
+                    let renamed = Done::result(move |renamed, cx| done(renamed.map(drop), cx));
+                    this.notes_folder.update(cx, |notes_folder, cx| {
+                        notes_folder.rename_tag(from, to, renamed, cx);
+                    });
+                });
+            },
+        );
+        self.notes_folder.update(cx, |notes_folder, cx| {
+            notes_folder.tag_rename_count(counted_from, to, Done::result(counted), cx);
+        });
     }
 
     /// Opens `next`, or shows the empty pane.
@@ -204,6 +246,7 @@ impl NotesView {
                 self.picker = Some(picker);
                 cx.notify();
             }
+            SidebarEvent::RenameTag(tag) => self.rename_tag(tag.clone(), window, cx),
             SidebarEvent::DeleteTag(tag) => {
                 let tag = tag.clone();
                 self.write(
@@ -662,7 +705,9 @@ impl Render for NotesView {
             .size_full()
             .relative()
             .on_key_down(cx.listener(Self::key_down))
-            .on_action(cx.listener(Self::rename_tag))
+            .on_action(cx.listener(|this, RenameTag(tag): &RenameTag, window, cx| {
+                this.rename_tag(tag.clone(), window, cx);
+            }))
             .on_mouse_move(cx.listener(Self::mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::mouse_up))

@@ -14,7 +14,6 @@ use gpui_kit::{
     ParentElement, Render, Role, StatefulInteractiveElement as _, Styled, TestSupportExt as _,
     Window, div, px,
 };
-use std::rc::Rc;
 
 use holm_core::TagName;
 use holm_core::model::DeleteCount;
@@ -36,9 +35,6 @@ pub(crate) enum Ask {
     /// Remove a tag from all notes.
     DeleteTag { tag: TagName, notes: usize },
 }
-
-/// Shows the dialog for an [`Ask`], and gives its step whether the user confirmed.
-pub(crate) type Confirm = Rc<dyn Fn(Ask, Step<bool>, &mut Window, &mut App)>;
 
 /// The answer of the dialog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

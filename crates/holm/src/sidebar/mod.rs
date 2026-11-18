@@ -1,8 +1,8 @@
 //! The sidebar: one panel that shows the folder tree or the note list of one tree item.
 //!
 //! The tree has "All notes", then the folders, then the tags. In a list, `↑` and `↓` open each
-//! note at once. A name field writes its name through the notes folder. A tag rename first
-//! asks with the [`Confirm`] of the app. For other changes, the sidebar sends a
+//! note at once. A name field of a folder writes its name through the notes folder. The name
+//! field of a tag writes through its owner. For other changes, the sidebar sends a
 //! [`SidebarEvent`].
 //!
 //! The search field sits at the top. While it holds text, the note list shows the notes that
@@ -29,7 +29,6 @@ use gpui_kit::{
 use holm_core::model::{Change, NoteInfo, NoteSet, Order};
 use holm_core::{FolderPath, NotePath, TagName};
 
-use crate::dialog::{Ask, Confirm};
 use crate::error::AppError;
 use crate::icons::Icon;
 use crate::name_field::{Look, NameEvent, NameField, NameWrite};
@@ -72,11 +71,18 @@ pub(crate) enum SidebarEvent {
     Delete(Target),
     /// Move, with the folder picker.
     Move(Target),
+    /// Rename a tag in all notes, with the dialog.
+    RenameTag(TagName),
     /// Remove a tag from all notes, with the dialog.
     DeleteTag(TagName),
     /// The view changed. The app keeps it in the config.
     ViewChanged,
 }
+
+/// Renames the tag `from` to a typed name, and ends with the result. It shows the answer of
+/// a fail.
+pub(crate) type TagRename =
+    Rc<dyn Fn(TagName, String, Step<Result<(), AppError>>, &mut Window, &mut App)>;
 
 /// A name field in the tree: for a folder or a tag after `F2`, or for a new folder.
 struct Naming {
@@ -129,7 +135,6 @@ pub(crate) struct Sidebar {
     /// before.
     left: Option<(NotePath, NotePath)>,
     field: Option<Naming>,
-    confirm: Confirm,
     search: Entity<InputState>,
     /// The trimmed text of the search field. With text, the list shows `found`.
     query: String,
@@ -146,7 +151,6 @@ impl Sidebar {
         pane: Entity<NotePane>,
         order: Order,
         view: View,
-        confirm: Confirm,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -180,7 +184,6 @@ impl Sidebar {
             pane,
             left: None,
             field: None,
-            confirm,
             search,
             query: String::new(),
             found: NoteList::default(),
@@ -494,18 +497,34 @@ impl Sidebar {
         self.list.position(self.open_note(cx)?)
     }
 
-    /// Starts the name field for a folder or a tag in the tree. A tag field holds the full
-    /// name, so a rename can also move the tag under another parent. It does nothing while
-    /// the write of a name field runs.
-    pub(crate) fn rename(&mut self, item: Item, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(named) = Named::item(&item) else {
-            return;
-        };
-        let name = match &named {
-            Named::Tag(tag) => tag.to_string(),
-            Named::Folder(_) | Named::NewFolder(_) => item.name(),
-        };
-        self.open_name_field(named, Some(&name), item, window, cx);
+    /// Starts the name field of a tag in the tree, with its full name, so a rename can also move
+    /// the tag under another parent. `rename` writes the typed name. It does nothing while the
+    /// write of a name field runs.
+    pub(crate) fn rename_tag(
+        &mut self,
+        tag: TagName,
+        rename: TagRename,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let sidebar = cx.weak_entity();
+        // The name field follows moves, so the write takes the tag it names at `Enter`.
+        let write: NameWrite<()> = Rc::new(move |name, done, window, cx| {
+            match sidebar.read_with(cx, |sidebar, _| sidebar.named()) {
+                Ok(Some(Named::Tag(from))) => rename(from, name, done, window, cx),
+                _ => done(Ok(()), cx),
+            }
+        });
+        let text = tag.to_string();
+        let item = Item::Tag(tag.clone());
+        self.open_name_field(Named::Tag(tag), Some(&text), item, write, window, cx);
+    }
+
+    fn rename_folder(&mut self, folder: FolderPath, window: &mut Window, cx: &mut Context<Self>) {
+        let item = Item::Folder(folder.clone());
+        let text = item.name();
+        let write = Self::folder_write(cx);
+        self.open_name_field(Named::Folder(folder), Some(&text), item, write, window, cx);
     }
 
     /// Starts an empty name field for a new folder in `parent`, as its first child row.
@@ -523,7 +542,13 @@ impl Sidebar {
             self.open.insert(item.clone());
             item
         };
-        self.open_name_field(Named::NewFolder(parent), None, item, window, cx);
+        let write = Self::folder_write(cx);
+        self.open_name_field(Named::NewFolder(parent), None, item, write, window, cx);
+    }
+
+    /// What the open name field names.
+    fn named(&self) -> Option<Named> {
+        self.field.as_ref().map(|naming| naming.named.clone())
     }
 
     /// Opens the name field for `named`, with `text` for a rename, and shows `item` selected in
@@ -533,6 +558,7 @@ impl Sidebar {
         named: Named,
         text: Option<&str>,
         item: Item,
+        write: NameWrite<()>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -547,18 +573,6 @@ impl Sidebar {
             label: text::NAME_FIELD.into(),
             placeholder: SharedString::default(),
         };
-        let sidebar = cx.weak_entity();
-        // The name field follows moves, so the write takes what it names at `Enter`.
-        let write: NameWrite<()> = Rc::new(move |name, done, window, cx| {
-            sidebar
-                .update(cx, |sidebar, cx| {
-                    match sidebar.field.as_ref().map(|naming| naming.named.clone()) {
-                        Some(named) => sidebar.name_write(named, name, done, window, cx),
-                        None => done(Ok(()), cx),
-                    }
-                })
-                .ok();
-        });
         let home = self.focus.clone();
         let field = match text {
             Some(text) => cx.new(|cx| NameField::rename(look, text, write, home, window, cx)),
@@ -577,89 +591,65 @@ impl Sidebar {
         self.show_in_tree(item, cx);
     }
 
-    /// Writes `name` from the name field of `named`, and gives its end to `done`. A tag rename
-    /// first asks with the dialog.
-    fn name_write(
+    /// The write of a folder name field. The name field follows moves, so the write takes the
+    /// folder it names at `Enter`.
+    fn folder_write(cx: &Context<Self>) -> NameWrite<()> {
+        let sidebar = cx.weak_entity();
+        Rc::new(move |name, done, _, cx| {
+            sidebar
+                .update(cx, |sidebar, cx| match sidebar.named() {
+                    Some(Named::Folder(folder)) => {
+                        sidebar.write_folder_name(folder, name, done, cx);
+                    }
+                    Some(Named::NewFolder(parent)) => sidebar.create_folder(parent, name, done, cx),
+                    Some(Named::Tag(_)) | None => done(Ok(()), cx),
+                })
+                .ok();
+        })
+    }
+
+    fn write_folder_name(
         &mut self,
-        named: Named,
+        folder: FolderPath,
         name: String,
         done: Step<Result<(), AppError>>,
-        window: &Window,
         cx: &mut Context<Self>,
     ) {
         let sidebar = cx.weak_entity();
-        match named {
-            Named::Folder(folder) => {
-                let renamed =
-                    Done::result(move |renamed: Result<FolderPath, AppError>, cx: &mut App| {
-                        if renamed.is_ok() {
-                            sidebar
-                                .update(cx, |_, cx| cx.emit(SidebarEvent::ViewChanged))
-                                .ok();
-                        }
-                        done(renamed.map(drop), cx);
-                    });
-                self.notes_folder.update(cx, |notes_folder, cx| {
-                    notes_folder.rename_folder(folder, name, renamed, cx);
-                });
+        let renamed = Done::result(move |renamed: Result<FolderPath, AppError>, cx: &mut App| {
+            if renamed.is_ok() {
+                sidebar
+                    .update(cx, |_, cx| cx.emit(SidebarEvent::ViewChanged))
+                    .ok();
             }
-            Named::NewFolder(parent) => {
-                let created =
-                    Done::result(move |created: Result<FolderPath, AppError>, cx: &mut App| {
-                        let shown = created.map(|folder| {
-                            sidebar
-                                .update(cx, |sidebar, cx| {
-                                    sidebar.show_in_tree(Item::Folder(folder), cx);
-                                })
-                                .ok();
-                        });
-                        done(shown, cx);
-                    });
-                self.notes_folder.update(cx, |notes_folder, cx| {
-                    notes_folder.create_folder(parent, name, created, cx);
-                });
-            }
-            Named::Tag(from) if !name.trim().is_empty() => {
-                let confirm = self.confirm.clone();
-                let window = window.window_handle();
-                let notes_folder = self.notes_folder.clone();
-                let counted_from = from.clone();
-                let asked =
-                    move |count: Result<(TagName, usize), AppError>, cx: &mut App| match count {
-                        Ok((name, notes)) => {
-                            let ask = Ask::RenameTag {
-                                from: from.clone(),
-                                to: name.clone(),
-                                notes,
-                            };
-                            let answered: Step<bool> = Box::new(move |confirmed, cx| {
-                                if !confirmed {
-                                    done(Ok(()), cx);
-                                    return;
-                                }
-                                notes_folder.update(cx, |notes_folder, cx| {
-                                    notes_folder.rename_tag(
-                                        from,
-                                        name,
-                                        Done::result(move |renamed, cx| {
-                                            done(renamed.map(drop), cx);
-                                        }),
-                                        cx,
-                                    );
-                                });
-                            });
-                            window
-                                .update(cx, |_, window, cx| confirm(ask, answered, window, cx))
-                                .ok();
-                        }
-                        Err(error) => done(Err(error), cx),
-                    };
-                self.notes_folder.update(cx, |notes_folder, cx| {
-                    notes_folder.tag_rename_count(counted_from, name, Done::result(asked), cx);
-                });
-            }
-            Named::Tag(_) => done(Ok(()), cx),
-        }
+            done(renamed.map(drop), cx);
+        });
+        self.notes_folder.update(cx, |notes_folder, cx| {
+            notes_folder.rename_folder(folder, name, renamed, cx);
+        });
+    }
+
+    fn create_folder(
+        &mut self,
+        parent: FolderPath,
+        name: String,
+        done: Step<Result<(), AppError>>,
+        cx: &mut Context<Self>,
+    ) {
+        let sidebar = cx.weak_entity();
+        let created = Done::result(move |created: Result<FolderPath, AppError>, cx: &mut App| {
+            let shown = created.map(|folder| {
+                sidebar
+                    .update(cx, |sidebar, cx| {
+                        sidebar.show_in_tree(Item::Folder(folder), cx);
+                    })
+                    .ok();
+            });
+            done(shown, cx);
+        });
+        self.notes_folder.update(cx, |notes_folder, cx| {
+            notes_folder.create_folder(parent, name, created, cx);
+        });
     }
 
     /// Whether the write of a name field runs.
@@ -743,9 +733,11 @@ impl Sidebar {
             }
             "enter" => self.set_view(View::List(item), cx),
             "escape" => cx.emit(SidebarEvent::FocusEditor),
-            "f2" => {
-                self.rename(item, window, cx);
-            }
+            "f2" => match item {
+                Item::Tag(tag) => cx.emit(SidebarEvent::RenameTag(tag)),
+                Item::Folder(folder) => self.rename_folder(folder, window, cx),
+                Item::All => {}
+            },
             "delete" => match item {
                 Item::Tag(tag) => cx.emit(SidebarEvent::DeleteTag(tag)),
                 Item::Folder(folder) => cx.emit(SidebarEvent::Delete(Target::Folder(folder))),
