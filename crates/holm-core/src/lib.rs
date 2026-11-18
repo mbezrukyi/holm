@@ -30,7 +30,7 @@ pub use watch::Feed;
 
 use index::Index;
 use model::{Change, ChangeList, DeleteCount, LinkTarget, Note, NoteId, NoteInfo, NoteSet, Order};
-use paths::Scope;
+use paths::{Name, Node};
 use retag::TagEdit;
 use snapshot::Delta;
 use store::Store;
@@ -288,7 +288,10 @@ impl Core {
     /// - [`Error::Write`] when the file can't be written, for example when the folder is missing.
     pub fn create(&self, folder: &FolderPath, title: &str) -> Result<Note> {
         self.inner.write(|draft| {
-            let (note, stamp) = self.inner.store.create(&folder.note(title)?)?;
+            let (note, stamp) = self
+                .inner
+                .store
+                .create(&folder.note(&Name::title(title)?))?;
             self.inner.update(draft, &note, stamp)
         })
     }
@@ -310,7 +313,7 @@ impl Core {
             let new = self
                 .inner
                 .store
-                .move_note(path, path.folder().note(title)?)?;
+                .move_note(path, path.folder().note(&Name::title(title)?))?;
             self.inner.settle(draft, path, &new)
         })
     }
@@ -346,8 +349,11 @@ impl Core {
     /// - [`Error::Read`] when the new folder can't be read.
     pub fn create_folder(&self, parent: &FolderPath, name: &str) -> Result<FolderPath> {
         self.inner.write(|draft| {
-            let new = self.inner.store.create_folder(parent, name)?;
-            draft.wrote_folders(&new.scope())?;
+            let new = self
+                .inner
+                .store
+                .create_folder(parent, &Name::typed(name)?)?;
+            draft.wrote_folders(&new)?;
             Ok(new)
         })
     }
@@ -368,7 +374,8 @@ impl Core {
     /// - [`Error::Read`] when `folder` is missing or is not a folder.
     /// - [`Error::Write`] when the folder can't be moved. It then stays where it was.
     pub fn rename_folder(&self, folder: &FolderPath, name: &str) -> Result<FolderPath> {
-        self.move_folder_to(folder, &folder.folder().unwrap_or_default(), name)
+        let name = Name::typed(name)?;
+        self.move_folder_to(folder, &folder.folder().unwrap_or_default(), &name)
     }
 
     /// Moves the folder into `parent` with its name, and returns its new path.
@@ -380,8 +387,8 @@ impl Core {
     /// - [`Error::BadPath`] also when `parent` is `folder` or inside it.
     /// - Else as in [`Core::rename_folder`].
     pub fn move_folder(&self, folder: &FolderPath, parent: &FolderPath) -> Result<FolderPath> {
-        match folder.name() {
-            Some(name) => self.move_folder_to(folder, parent, &name.to_string_lossy()),
+        match folder.split() {
+            Some((_, name)) => self.move_folder_to(folder, parent, &name),
             None => self.inner.write(|_| {
                 Err(Error::BadPath {
                     path: folder.as_ref().to_owned(),
@@ -396,7 +403,9 @@ impl Core {
     ///
     /// [`Error::Index`] as in [`Core::search`].
     pub fn note_delete_count(&self, path: &NotePath) -> Result<DeleteCount> {
-        self.inner.removal(&path.scope()).map(|(count, _)| count)
+        self.inner
+            .removal(&Node::Note(path.clone()))
+            .map(|(count, _)| count)
     }
 
     /// What [`Core::delete_folder`] removes: the notes in the folder and below it,
@@ -406,7 +415,9 @@ impl Core {
     ///
     /// [`Error::Index`] as in [`Core::search`].
     pub fn folder_delete_count(&self, folder: &FolderPath) -> Result<DeleteCount> {
-        self.inner.removal(&folder.scope()).map(|(count, _)| count)
+        self.inner
+            .removal(&Node::Folder(folder.clone()))
+            .map(|(count, _)| count)
     }
 
     /// Deletes the note forever. Holm has no trash.
@@ -422,7 +433,9 @@ impl Core {
     pub fn delete_note(&self, path: &NotePath) -> Result<()> {
         self.inner.write(|draft| {
             self.inner
-                .delete(draft, &path.scope(), |store| store.delete_note(path))
+                .delete(draft, &Node::Note(path.clone()), |store| {
+                    store.delete_note(path)
+                })
         })
     }
 
@@ -438,7 +451,9 @@ impl Core {
     pub fn delete_folder(&self, folder: &FolderPath) -> Result<()> {
         self.inner.write(|draft| {
             self.inner
-                .delete(draft, &folder.scope(), |store| store.delete_folder(folder))
+                .delete(draft, &Node::Folder(folder.clone()), |store| {
+                    store.delete_folder(folder)
+                })
         })
     }
 
@@ -645,7 +660,7 @@ impl Core {
         &self,
         folder: &FolderPath,
         parent: &FolderPath,
-        name: &str,
+        name: &Name,
     ) -> Result<FolderPath> {
         self.inner.write(|draft| {
             let new = self.inner.store.move_folder(folder, parent, name)?;
@@ -654,10 +669,10 @@ impl Core {
                     from: folder.clone(),
                     to: new.clone(),
                 });
-                self.inner
-                    .refresh(draft, vec![folder.scope(), new.scope()])?;
-                draft.folders(&folder.scope())?;
-                draft.folders(&new.scope())?;
+                let nodes = vec![Node::Folder(folder.clone()), Node::Folder(new.clone())];
+                self.inner.refresh(draft, nodes)?;
+                draft.folders(folder)?;
+                draft.folders(&new)?;
             }
             Ok(new)
         })
@@ -665,7 +680,7 @@ impl Core {
 
     fn build(store: Store, index_dir: &Path, watcher: Option<watch::Watcher>) -> Result<Self> {
         let index = Index::open(index_dir, &store)?;
-        let snapshot = Snapshot::new(index.entries(&store)?, store.folders(&Scope::root())?);
+        let snapshot = Snapshot::new(index.entries(&store)?, store.folders(&FolderPath::root())?);
         let inner = Inner {
             store,
             index,
@@ -711,19 +726,20 @@ impl Draft<'_> {
         }
     }
 
-    /// Reads the folders at or below `scope` again after a write of Holm, and adds
+    /// Reads the folders at `folder` or below it again after a write of Holm, and adds
     /// [`Change::Folders`] once when they changed.
-    fn wrote_folders(&mut self, scope: &Scope) -> Result<()> {
-        if self.folders(scope)? && !self.changes.contains(&Change::Folders) {
+    fn wrote_folders(&mut self, folder: &FolderPath) -> Result<()> {
+        if self.folders(folder)? && !self.changes.contains(&Change::Folders) {
             self.changes.push(Change::Folders);
         }
         Ok(())
     }
 
-    /// Reads the folders at or below `scope` from the disk again. It returns whether they changed.
-    fn folders(&mut self, scope: &Scope) -> Result<bool> {
-        let found = self.store.folders(scope)?;
-        let changed = self.next.set_folders(scope, found);
+    /// Reads the folders at `folder` or below it from the disk again. It returns whether they
+    /// changed.
+    fn folders(&mut self, folder: &FolderPath) -> Result<bool> {
+        let found = self.store.folders(folder)?;
+        let changed = self.next.set_folders(folder, found);
         self.changed |= changed;
         Ok(changed)
     }
@@ -839,10 +855,10 @@ impl Inner {
         first_error.map_or(Ok(changed), Err)
     }
 
-    /// The count of a delete of `scope`, and the attachment files it removes.
-    fn removal(&self, scope: &Scope) -> Result<(DeleteCount, Vec<Scope>)> {
-        let removal = self.index.removal(&self.store, scope)?;
-        let files: Vec<Scope> = removal
+    /// The count of a delete of `node`, and the attachment files it removes.
+    fn removal(&self, node: &Node) -> Result<(DeleteCount, Vec<PathBuf>)> {
+        let removal = self.index.removal(&self.store, node)?;
+        let files: Vec<PathBuf> = removal
             .files
             .into_iter()
             .filter(|file| self.store.is_attachment(file))
@@ -854,15 +870,15 @@ impl Inner {
         Ok((count, files))
     }
 
-    /// Runs `delete` on `scope`, then deletes its attachment files.
+    /// Runs `delete` on `node`, then deletes its attachment files.
     /// It updates the index and the draft also when `delete` fails, since a part may be gone.
     fn delete(
         &self,
         draft: &mut Draft<'_>,
-        scope: &Scope,
+        node: &Node,
         delete: impl FnOnce(&Store) -> Result<()>,
     ) -> Result<()> {
-        let (_, files) = self.removal(scope)?;
+        let (_, files) = self.removal(node)?;
         let deleted = delete(&self.store);
         if deleted.is_ok() {
             for file in files {
@@ -871,10 +887,12 @@ impl Inner {
                 }
             }
         }
-        if self.refresh(draft, vec![scope.clone()])? {
+        if self.refresh(draft, vec![node.clone()])? {
             draft.wrote_notes();
         }
-        draft.wrote_folders(scope)?;
+        if let Node::Folder(folder) = node {
+            draft.wrote_folders(folder)?;
+        }
         deleted
     }
 
@@ -883,7 +901,10 @@ impl Inner {
         if from == to {
             return self.store.read(to).map(|(note, _)| note.info);
         }
-        self.refresh(draft, vec![from.scope(), to.scope()])?;
+        self.refresh(
+            draft,
+            vec![Node::Note(from.clone()), Node::Note(to.clone())],
+        )?;
         let info = self.store.read(to)?.0.info;
         draft.changes.push(Change::Moved {
             from: from.clone(),
@@ -894,31 +915,31 @@ impl Inner {
 
     /// Updates the index and the draft at each path after Holm's own change, and returns
     /// whether a note changed. It adds no change to the list, so the write adds its own.
-    fn refresh(&self, draft: &mut Draft<'_>, mut paths: Vec<Scope>) -> Result<bool> {
-        paths.sort();
-        let refresh = self.index.refresh(&self.store, &outer(paths))?;
+    fn refresh(&self, draft: &mut Draft<'_>, nodes: Vec<Node>) -> Result<bool> {
+        let refresh = self.index.refresh(&self.store, &outer(nodes))?;
         Ok(draft.notes(refresh.delta))
     }
 
     /// Checks the disk at each path of `batch`, and updates the index, the snapshot and the
     /// change list.
     fn apply(&self, batch: Batch) -> Result<()> {
-        // The batch is sorted, and the order of plain paths is the order of scopes.
-        let scopes = outer(
-            batch
-                .into_iter()
-                .filter_map(|path| Scope::new(&path))
-                .collect(),
-        );
-        if scopes.is_empty() {
-            return Ok(());
-        }
         self.write(|draft| {
-            let refresh = self.index.refresh(&self.store, &scopes)?;
+            let nodes = outer(
+                batch
+                    .into_iter()
+                    .flat_map(|path| nodes(&self.store, &draft.next, &path))
+                    .collect(),
+            );
+            if nodes.is_empty() {
+                return Ok(());
+            }
+            let refresh = self.index.refresh(&self.store, &nodes)?;
             draft.notes(refresh.delta);
             let mut folders = false;
-            for scope in &scopes {
-                folders |= draft.folders(scope)?;
+            for node in &nodes {
+                if let Node::Folder(folder) = node {
+                    folders |= draft.folders(folder)?;
+                }
             }
             draft.changes.extend(refresh.notes);
             if folders {
@@ -957,16 +978,49 @@ impl Stream for Changes {
     }
 }
 
-/// The scopes that are not inside another of them. `scopes` must be sorted,
-/// so a folder comes before the paths inside it.
-fn outer(scopes: Vec<Scope>) -> Vec<Scope> {
-    let mut outer: Vec<Scope> = Vec::new();
-    for path in scopes {
-        if !outer.iter().any(|o| o.holds(&path)) {
-            outer.push(path);
-        }
+/// The nodes that are not inside another of them, each once.
+fn outer(mut nodes: Vec<Node>) -> Vec<Node> {
+    nodes.sort();
+    nodes.dedup();
+    let all = nodes.clone();
+    nodes.retain(|node| !all.iter().any(|other| other != node && other.holds(node)));
+    nodes
+}
+
+/// The nodes for an outside change at the raw path `path`: what is there now, and what was
+/// there in `before`. The empty path is the whole notes folder.
+///
+/// A path that is gone, and that `before` knows as no note, may have been a folder that
+/// `before` does not list, like `attachments/`. So it gives a folder node.
+fn nodes(store: &Store, before: &Snapshot, path: &Path) -> Vec<Node> {
+    if path.as_os_str().is_empty() {
+        return vec![Node::Folder(FolderPath::root())];
     }
-    outer
+    let folder = path.parent().and_then(FolderPath::new);
+    let name = path.file_name().and_then(Name::from_disk);
+    let (Some(folder), Some(name)) = (folder, name) else {
+        return Vec::new();
+    };
+    let mut nodes = Vec::new();
+    let now = match store.entry(&folder, &name) {
+        store::Entry::Note(note, _) => Some(Node::Note(note)),
+        store::Entry::Folder(folder) => Some(Node::Folder(folder)),
+        store::Entry::Other | store::Entry::Missing => None,
+    };
+    let note = folder
+        .note_file(&name)
+        .filter(|note| before.note(note).is_some());
+    let child = folder.child(&name);
+    match (&now, note) {
+        (_, Some(note)) => nodes.push(Node::Note(note)),
+        (Some(Node::Note(_)), None) if before.has_folder(&child) => {
+            nodes.push(Node::Folder(child));
+        }
+        (Some(_), None) => {}
+        (None, None) => nodes.push(Node::Folder(child)),
+    }
+    nodes.extend(now);
+    nodes
 }
 
 /// A lock that still works after a panic in another thread. The data it guards stays valid.

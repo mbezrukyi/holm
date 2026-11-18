@@ -36,6 +36,7 @@ impl AppError {
                     NameProblem::Dot => text::NAME_DOT,
                     NameProblem::Attachments => text::NAME_ATTACHMENTS,
                     NameProblem::TooLong => text::NAME_TOO_LONG,
+                    NameProblem::ZeroByte => text::NAME_ZERO_BYTE,
                     _ => text::BAD_PATH,
                 },
                 _ => text::UNKNOWN,

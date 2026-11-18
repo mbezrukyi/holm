@@ -685,3 +685,64 @@ fn the_revision_grows_with_own_writes_and_outside_changes() {
     fed.feed.changed(["a.md"]).unwrap();
     assert!(fed.core.snapshot().revision() > created);
 }
+
+fn paths(core: &Core) -> Vec<String> {
+    let mut paths = common::paths(core.snapshot().paths(NoteSet::All, Order::Title));
+    paths.sort();
+    paths
+}
+
+#[test]
+fn a_missing_notes_folder_keeps_the_notes() {
+    let fed = Fed::new(&[("a.md", "# A\n"), ("w/b.md", "# B\n")]);
+    let start = fed.core.snapshot().revision();
+    let away = fed.dir.path().with_extension("away");
+
+    fs::rename(fed.dir.path(), &away).unwrap();
+    let gone = fed.feed.changed([""]);
+
+    assert!(matches!(gone, Err(Error::Read { .. })), "{gone:?}");
+    assert_eq!(paths(&fed.core), ["a.md", "w/b.md"]);
+    assert_eq!(fed.core.snapshot().revision(), start);
+    assert!(fed.lists().is_empty());
+
+    fs::rename(&away, fed.dir.path()).unwrap();
+    fed.feed.changed([""]).unwrap();
+
+    assert_eq!(paths(&fed.core), ["a.md", "w/b.md"]);
+    assert_eq!(fed.core.snapshot().revision(), start);
+}
+
+#[test]
+fn a_gone_folder_that_the_snapshot_does_not_list_loses_its_notes() {
+    let fed = Fed::new(&[("a.md", "# A\n"), ("attachments/n.md", "# N\n")]);
+
+    fs::remove_dir_all(fed.path("attachments")).unwrap();
+    fed.feed.changed(["attachments"]).unwrap();
+
+    assert_eq!(paths(&fed.core), ["a.md"]);
+}
+
+#[test]
+fn a_folder_can_become_a_note() {
+    let fed = Fed::new(&[("x.md/a.md", "# A\n")]);
+
+    fs::remove_dir_all(fed.path("x.md")).unwrap();
+    fed.write("x.md", "# X\n");
+    fed.feed.changed(["x.md"]).unwrap();
+
+    assert_eq!(paths(&fed.core), ["x.md"]);
+    assert_eq!(fed.core.snapshot().folders().count(), 0);
+}
+
+#[test]
+fn a_note_can_become_a_folder() {
+    let fed = Fed::new(&[("x.md", "# X\n")]);
+
+    fs::remove_file(fed.path("x.md")).unwrap();
+    fed.write("x.md/a.md", "# A\n");
+    fed.feed.changed(["x.md"]).unwrap();
+
+    assert_eq!(paths(&fed.core), ["x.md/a.md"]);
+    assert_eq!(common::paths(fed.core.snapshot().folders()), ["x.md"]);
+}

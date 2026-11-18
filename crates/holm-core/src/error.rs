@@ -89,6 +89,8 @@ pub enum NameProblem {
     Attachments,
     /// The name is too long for a file name.
     TooLong,
+    /// The name holds a zero byte, which no file name can hold.
+    ZeroByte,
 }
 
 /// A `Result` with the `holm-core` [`Error`].

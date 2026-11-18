@@ -17,6 +17,7 @@ pub(crate) const NAME_SLASH: &str = "A name can't hold “/”.";
 pub(crate) const NAME_DOT: &str = "A name can't start with “.”.";
 pub(crate) const NAME_ATTACHMENTS: &str = "The name “attachments” is for attached files.";
 pub(crate) const NAME_TOO_LONG: &str = "This name is too long.";
+pub(crate) const NAME_ZERO_BYTE: &str = "A name can't hold a zero byte.";
 pub(crate) const UNKNOWN: &str = "Something went wrong. The log has the details.";
 pub(crate) const CONFIG_WRITE: &str = "Holm can't save the settings.";
 pub(crate) const LOG: &str = "Holm can't write its log.";

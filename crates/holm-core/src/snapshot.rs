@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use crate::model::{Link, LinkTarget, NoteInfo, NoteSet, Order, Tag};
-use crate::paths::{FolderPath, NotePath, Scope};
+use crate::paths::{FolderPath, NotePath};
 
 /// The facts of the notes folder at one moment, from [`Core::snapshot`](crate::Core::snapshot).
 /// It never changes.
@@ -191,6 +191,11 @@ impl Snapshot {
         self.folders.iter()
     }
 
+    /// Whether the snapshot knows the folder.
+    pub(crate) fn has_folder(&self, folder: &FolderPath) -> bool {
+        self.folders.contains(folder)
+    }
+
     /// A snapshot that holds `notes` and `folders`, with revision 0.
     pub(crate) fn new(notes: Vec<(NoteInfo, Vec<Link>)>, folders: Vec<FolderPath>) -> Self {
         let mut snapshot = Self {
@@ -230,13 +235,13 @@ impl Snapshot {
         changed
     }
 
-    /// Puts `found` in place of the folders at or below `scope`. It returns whether they changed.
-    /// `found` must be sorted.
-    pub(crate) fn set_folders(&mut self, scope: &Scope, found: Vec<FolderPath>) -> bool {
+    /// Puts `found` in place of the folders at `folder` or below it. It returns whether they
+    /// changed. `found` must be sorted.
+    pub(crate) fn set_folders(&mut self, folder: &FolderPath, found: Vec<FolderPath>) -> bool {
         let old: Vec<FolderPath> = self
             .folders
             .iter()
-            .filter(|folder| scope.holds_folder(folder))
+            .filter(|old| *old == folder || old.is_below(folder))
             .cloned()
             .collect();
         if old == found {

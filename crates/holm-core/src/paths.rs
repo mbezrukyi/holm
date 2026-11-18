@@ -1,33 +1,33 @@
-//! The paths of notes and folders in the notes folder.
+//! The paths of notes and folders in the notes folder, and the names they are made of.
 //!
-//! Each path is relative to the notes folder and plain: each part is a name that is not empty
-//! and does not start with `.`. So a path has no `.` or `..` part, no hidden part, no `//` and
-//! no `/` at the end. The root folder is the empty path.
+//! Each path is relative to the notes folder and plain: each part is a [`Name`]. So a path has
+//! no `.` or `..` part, no hidden part, no `//` and no `/` at the end. The root folder is the
+//! empty path.
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::os::unix::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::error::{Error, NameProblem, Result};
 
-/// The folder for pasted files at the root.
-pub(crate) const ATTACHMENTS: &str = "attachments";
 const NOTE_EXT: &str = ".md";
 /// The longest file name that Linux file systems take.
 pub(crate) const MAX_NAME_BYTES: usize = 255;
 
 /// The path of a note: a plain path that ends in `.md`, like `work/Plans.md`.
 ///
-/// It holds its folder and its file name. Notes of one folder can share the folder.
+/// It holds its whole path and its folder. Notes of one folder can share the folder.
 /// Its order is the order of [`Path::cmp`].
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone)]
 pub struct NotePath {
+    path: Arc<[u8]>,
     folder: FolderPath,
-    name: Name,
 }
 
 /// The path of a folder: any plain path, like `work/2026`. The root folder is the empty path.
@@ -36,22 +36,78 @@ pub struct NotePath {
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct FolderPath(Plain);
 
-/// One part of a plain path.
+/// One part of a plain path: not empty, with no `/`, no leading `.`, no zero byte, and at most
+/// [`MAX_NAME_BYTES`] bytes.
 #[derive(Clone, PartialEq, Eq, Hash)]
-struct Name(Box<[u8]>);
+pub(crate) struct Name(Arc<[u8]>);
 
-/// Any entry in the notes folder: a note, a folder, another file, or a path with nothing
-/// there. The core checks the disk at a scope and below it.
-#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
-pub(crate) struct Scope(Plain);
+/// A note or a folder that the core brings up to date with the disk. A folder node holds
+/// everything at its path and below it.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub(crate) enum Node {
+    Note(NotePath),
+    Folder(FolderPath),
+}
+
+impl Name {
+    /// The name that a person typed, with no spaces around it.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::BadName`] when the name is empty, holds `/` or a zero byte, starts with `.`,
+    /// or is too long.
+    pub(crate) fn typed(text: &str) -> Result<Self> {
+        Self::checked(text.trim(), 0)
+    }
+
+    /// The name of a note with the typed `title`: the title with no spaces around it. Its file
+    /// name adds `.md`.
+    ///
+    /// # Errors
+    ///
+    /// As in [`Name::typed`], and also when the title is too long with `.md`.
+    pub(crate) fn title(text: &str) -> Result<Self> {
+        Self::checked(text.trim(), NOTE_EXT.len())
+    }
+
+    /// A name from the disk, or `None` when it is no part of a plain path, like a hidden name.
+    pub(crate) fn from_disk(name: &OsStr) -> Option<Self> {
+        let name = name.as_bytes();
+        is_part(name).then(|| Self(name.into()))
+    }
+
+    pub(crate) fn as_os_str(&self) -> &OsStr {
+        OsStr::from_bytes(&self.0)
+    }
+
+    /// Checks a trimmed typed name. `more` is the count of bytes that its file name adds.
+    fn checked(typed: &str, more: usize) -> Result<Self> {
+        let problem = if typed.is_empty() {
+            NameProblem::Empty
+        } else if typed.contains('/') {
+            NameProblem::Slash
+        } else if typed.starts_with('.') {
+            NameProblem::Dot
+        } else if typed.contains('\0') {
+            NameProblem::ZeroByte
+        } else if typed.len() + more > MAX_NAME_BYTES {
+            NameProblem::TooLong
+        } else {
+            return Ok(Self(typed.as_bytes().into()));
+        };
+        Err(Error::BadName {
+            name: typed.to_owned(),
+            problem,
+        })
+    }
+}
 
 impl NotePath {
     /// The path, or `None` when it is not a plain path that ends in `.md`.
     pub fn new(path: impl AsRef<Path>) -> Option<Self> {
-        let plain = Plain::new(path.as_ref())?;
-        let name = plain.name();
-        let folder = FolderPath(Plain::from(&plain.bytes()[..plain.parent_end()]));
-        Self::from_parts(folder, name)
+        let bytes = path.as_ref().as_os_str().as_bytes();
+        let (folder, _) = split(bytes)?;
+        Self::from_bytes(FolderPath(Plain::from(folder)), bytes)
     }
 
     /// The folder that holds the note.
@@ -61,22 +117,19 @@ impl NotePath {
 
     /// The file name without `.md`.
     pub fn title(&self) -> Cow<'_, str> {
-        let name = &self.name.0;
+        let name = self.name_bytes();
         String::from_utf8_lossy(&name[..name.len() - NOTE_EXT.len()])
     }
 
     /// The file name, with `.md`.
     pub fn name(&self) -> &OsStr {
-        OsStr::from_bytes(&self.name.0)
+        OsStr::from_bytes(self.name_bytes())
     }
 
     /// The note with the same name in `folder`.
     #[must_use]
     pub fn in_folder(&self, folder: &FolderPath) -> Self {
-        Self {
-            folder: folder.clone(),
-            name: self.name.clone(),
-        }
+        Self::joined(folder, self.name_bytes())
     }
 
     /// Whether the note is right in `folder`, not in one of its subfolders.
@@ -104,44 +157,59 @@ impl NotePath {
 
     /// The path of the note below the folder `root`.
     pub fn under(&self, root: &Path) -> PathBuf {
-        let mut path = PathBuf::from(root);
-        path.reserve(self.folder.0.bytes().len() + self.name.0.len() + 2);
-        if !self.folder.is_root() {
-            path.push(&self.folder);
-        }
-        path.push(self.name());
-        path
+        root.join(self.as_path())
     }
 
     /// Whether `path` is the path of this note, relative to the notes folder.
     pub fn is_at(&self, path: &Path) -> bool {
-        let [folder, slash, name] = self.parts();
-        let rest = path.as_os_str().as_bytes().strip_prefix(folder);
-        rest.and_then(|rest| rest.strip_prefix(slash)) == Some(name)
+        path.as_os_str().as_bytes() == &*self.path
     }
 
     /// The path relative to the notes folder.
     pub fn to_path(&self) -> PathBuf {
-        self.under(Path::new(""))
+        self.as_path().to_owned()
     }
 
-    pub(crate) fn scope(&self) -> Scope {
-        Scope(self.folder.0.join(&self.name.0))
+    /// The bytes of the path relative to the notes folder.
+    pub(crate) fn bytes(&self) -> &[u8] {
+        &self.path
     }
 
-    fn from_parts(folder: FolderPath, name: &[u8]) -> Option<Self> {
-        (name.len() > NOTE_EXT.len() && name.ends_with(NOTE_EXT.as_bytes())).then(|| Self {
+    /// The file name, with `.md`.
+    pub(crate) fn file(&self) -> Name {
+        Name(self.name_bytes().into())
+    }
+
+    fn as_path(&self) -> &Path {
+        Path::new(OsStr::from_bytes(&self.path))
+    }
+
+    fn name_bytes(&self) -> &[u8] {
+        let folder = self.folder.0.bytes().len();
+        &self.path[if folder == 0 { 0 } else { folder + 1 }..]
+    }
+
+    /// The note at `bytes`, a plain path in `folder`, or `None` when it does not end in `.md`.
+    fn from_bytes(folder: FolderPath, bytes: &[u8]) -> Option<Self> {
+        is_note_name(&bytes[folder.0.bytes().len()..]).then(|| Self {
+            path: bytes.into(),
             folder,
-            name: Name(name.into()),
         })
     }
 
-    /// The parts of the joined path.
-    fn parts(&self) -> [&[u8]; 3] {
-        let folder = self.folder.0.bytes();
-        let slash: &[u8] = if folder.is_empty() { b"" } else { b"/" };
-        [folder, slash, &self.name.0]
+    /// The note `name` in `folder`. `name` must be a note name.
+    fn joined(folder: &FolderPath, name: &[u8]) -> Self {
+        Self {
+            path: folder.0.join(name).0,
+            folder: folder.clone(),
+        }
     }
+}
+
+/// Whether the last part of a path is the file name of a note. It may start with `/`.
+fn is_note_name(name: &[u8]) -> bool {
+    let name = name.strip_prefix(b"/").unwrap_or(name);
+    name.len() > NOTE_EXT.len() && name.ends_with(NOTE_EXT.as_bytes())
 }
 
 impl FolderPath {
@@ -179,42 +247,6 @@ impl FolderPath {
         }
     }
 
-    /// The path of a new note with the typed `title` in this folder: `<title>.md`, with no
-    /// spaces around `title`.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::BadName`] when `title` is empty, holds `/`, starts with `.`, or is too long
-    /// with `.md`.
-    pub fn note(&self, title: &str) -> Result<NotePath> {
-        let title = title.trim();
-        let name = format!("{title}{NOTE_EXT}");
-        check_name(title, &name)?;
-        Ok(NotePath {
-            folder: self.clone(),
-            name: Name(name.into_bytes().into()),
-        })
-    }
-
-    /// The path of a new folder with the typed `name` in this folder, with no spaces around
-    /// `name`.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::BadName`] when `name` is empty, holds `/`, starts with `.`, is too long, or is
-    /// `attachments` at the root.
-    pub fn child(&self, name: &str) -> Result<Self> {
-        let name = name.trim();
-        if self.is_root() && name.eq_ignore_ascii_case(ATTACHMENTS) {
-            return Err(Error::BadName {
-                name: name.to_owned(),
-                problem: NameProblem::Attachments,
-            });
-        }
-        check_name(name, name)?;
-        Ok(Self(self.0.join(name.as_bytes())))
-    }
-
     /// Whether this folder is right in `folder`.
     pub fn is_in(&self, folder: &Self) -> bool {
         self.0.is_in(&folder.0)
@@ -236,61 +268,106 @@ impl FolderPath {
         self.0.parents().map(Self)
     }
 
-    pub(crate) fn scope(&self) -> Scope {
-        Scope(self.0.clone())
+    /// The note with the title `title` in this folder: `<title>.md`.
+    pub(crate) fn note(&self, title: &Name) -> NotePath {
+        let mut name = title.0.to_vec();
+        name.extend_from_slice(NOTE_EXT.as_bytes());
+        NotePath::joined(self, &name)
     }
 
-    /// The note with the name `name` from the disk in this folder, or `None` when it is not a
-    /// note name.
-    pub(crate) fn note_named(&self, name: &OsStr) -> Option<NotePath> {
-        let name = name.as_bytes();
-        Plain::is_part(name)
-            .then(|| NotePath::from_parts(self.clone(), name))
-            .flatten()
+    /// The note with the file name `name` in this folder, or `None` when `name` does not
+    /// end in `.md`.
+    pub(crate) fn note_file(&self, name: &Name) -> Option<NotePath> {
+        is_note_name(&name.0).then(|| NotePath::joined(self, &name.0))
     }
 
-    /// The folder with the name `name` from the disk in this folder, or `None` when it is
-    /// hidden.
-    pub(crate) fn folder_named(&self, name: &OsStr) -> Option<Self> {
-        Plain::is_part(name.as_bytes()).then(|| Self(self.0.join(name.as_bytes())))
+    /// The folder `name` in this folder.
+    pub(crate) fn child(&self, name: &Name) -> Self {
+        Self(self.0.join(&name.0))
+    }
+
+    /// The folder that holds this folder, and its name. The root has none.
+    pub(crate) fn split(&self) -> Option<(Self, Name)> {
+        (!self.is_root()).then(|| (Self(self.0.parent()), Name(self.0.name().into())))
     }
 }
 
-impl Scope {
-    /// The scope, or `None` when it is not a plain path.
-    pub(crate) fn new(path: &Path) -> Option<Self> {
-        Plain::new(path).map(Self)
-    }
+/// Reads many note paths, like the rows of a query. The notes of one folder share it.
+#[derive(Default)]
+pub(crate) struct NoteReader {
+    folders: HashMap<Box<[u8]>, FolderPath, foldhash::fast::RandomState>,
+}
 
-    /// The whole notes folder.
-    pub(crate) fn root() -> Self {
-        Self(Plain::default())
+impl NoteReader {
+    /// The note path in `bytes`, or `None` as in [`NotePath::new`].
+    pub(crate) fn note(&mut self, bytes: &[u8]) -> Option<NotePath> {
+        let (folder, _) = split(bytes)?;
+        let folder = if let Some(known) = self.folders.get(folder) {
+            known.clone()
+        } else {
+            let new = FolderPath(Plain::from(folder));
+            self.folders.insert(folder.into(), new.clone());
+            new
+        };
+        NotePath::from_bytes(folder, bytes)
     }
+}
 
-    /// The scope as a note path, when it is one.
-    pub(crate) fn note(&self) -> Option<NotePath> {
-        NotePath::new(self)
+/// The folder and the last part of a plain path, or `None` when it is not plain or is the
+/// root.
+fn split(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
+    if bytes.is_empty() || !is_plain(bytes) {
+        return None;
     }
+    Some(match bytes.iter().rposition(|&byte| byte == b'/') {
+        Some(slash) => (&bytes[..slash], &bytes[slash + 1..]),
+        None => (&b""[..], bytes),
+    })
+}
 
-    /// The scope as a folder path. It need not be a folder on disk.
-    pub(crate) fn folder(&self) -> FolderPath {
-        FolderPath(self.0.clone())
-    }
-
-    /// Whether `other` is this scope or below it.
+impl Node {
+    /// Whether `other` is this node or below it.
     pub(crate) fn holds(&self, other: &Self) -> bool {
-        self == other || other.0.is_below(&self.0)
+        match (self, other) {
+            (Self::Folder(folder), Self::Note(note)) => note.is_below(folder),
+            (Self::Folder(_), Self::Folder(folder)) => self.holds_folder(folder),
+            (Self::Note(note), Self::Note(other)) => note == other,
+            (Self::Note(_), Self::Folder(_)) => false,
+        }
     }
 
-    /// Whether `folder` is this scope or below it.
+    /// Whether `folder` is this node or below it.
     pub(crate) fn holds_folder(&self, folder: &FolderPath) -> bool {
-        self.0 == folder.0 || folder.0.is_below(&self.0)
+        match self {
+            Self::Folder(node) => node == folder || folder.is_below(node),
+            Self::Note(_) => false,
+        }
     }
+}
 
-    /// Whether this is a file path in `attachments/` at the root.
-    pub(crate) fn is_attachment(&self) -> bool {
-        self.0.is_below(&Plain::from(ATTACHMENTS.as_bytes()))
+/// Whether `name` can be one part of a plain path. A zero byte would break the order.
+fn is_part(name: &[u8]) -> bool {
+    name.first().is_some_and(|&first| first != b'.')
+        && name.len() <= MAX_NAME_BYTES
+        && !name.contains(&b'/')
+        && !name.contains(&0)
+}
+
+/// Whether `bytes` is a plain path: the root, or names split by `/` that follow [`is_part`].
+fn is_plain(bytes: &[u8]) -> bool {
+    let mut start = 0;
+    for (at, &byte) in bytes.iter().enumerate() {
+        if at == start && (byte == b'.' || byte == b'/') {
+            return false;
+        }
+        match byte {
+            0 => return false,
+            b'/' => start = at + 1,
+            _ if at - start >= MAX_NAME_BYTES => return false,
+            _ => {}
+        }
     }
+    bytes.is_empty() || start < bytes.len()
 }
 
 /// The bytes of a plain path. A clone is cheap.
@@ -300,22 +377,14 @@ struct Plain(Arc<[u8]>);
 impl Plain {
     fn new(path: &Path) -> Option<Self> {
         let bytes = path.as_os_str().as_bytes();
-        let plain = bytes.is_empty() || bytes.split(|&byte| byte == b'/').all(Self::is_part);
-        plain.then(|| Self::from(bytes))
-    }
-
-    /// Whether `name` can be one part of a plain path. A zero byte would break the order.
-    fn is_part(name: &[u8]) -> bool {
-        name.first().is_some_and(|&first| first != b'.')
-            && !name.contains(&b'/')
-            && !name.contains(&0)
+        is_plain(bytes).then(|| Self::from(bytes))
     }
 
     fn bytes(&self) -> &[u8] {
         &self.0
     }
 
-    /// The path with one more part. `name` must follow [`Plain::is_part`].
+    /// The path with one more part. `name` must follow [`is_part`].
     fn join(&self, name: &[u8]) -> Self {
         if self.0.is_empty() {
             return Self::from(name);
@@ -336,17 +405,11 @@ impl Plain {
             .map_or(bytes, |slash| &bytes[slash + 1..])
     }
 
-    /// The end of the path without its last part.
-    fn parent_end(&self) -> usize {
-        self.bytes()
-            .iter()
-            .rposition(|&byte| byte == b'/')
-            .unwrap_or(0)
-    }
-
     /// The path without its last part. The root gives the root.
     fn parent(&self) -> Self {
-        Self::from(&self.bytes()[..self.parent_end()])
+        let bytes = self.bytes();
+        let end = bytes.iter().rposition(|&byte| byte == b'/').unwrap_or(0);
+        Self::from(&bytes[..end])
     }
 
     fn parents(&self) -> impl Iterator<Item = Self> + use<> {
@@ -394,18 +457,27 @@ impl From<&[u8]> for Plain {
     }
 }
 
-/// The order of [`Path::cmp`] for plain paths, given in parts. It compares bytes, with `/` as
-/// the lowest byte.
-fn compare(a: &[&[u8]], b: &[&[u8]]) -> Ordering {
-    let key = |byte: &u8| if *byte == b'/' { 0 } else { *byte };
-    let a = a.iter().flat_map(|part| part.iter().map(key));
-    let b = b.iter().flat_map(|part| part.iter().map(key));
-    a.cmp(b)
+/// The key of a byte in the order of [`Path::cmp`] for plain paths: `/` is the lowest byte.
+fn key(byte: u8) -> u8 {
+    if byte == b'/' { 0 } else { byte }
+}
+
+/// Where `a` and `b` differ first, within the shorter of them.
+fn mismatch(a: &[u8], b: &[u8]) -> Option<usize> {
+    a.iter().zip(b).position(|(x, y)| x != y)
+}
+
+/// The order of [`Path::cmp`] for plain paths.
+fn compare(a: &[u8], b: &[u8]) -> Ordering {
+    match mismatch(a, b) {
+        Some(at) => key(a[at]).cmp(&key(b[at])),
+        None => a.len().cmp(&b.len()),
+    }
 }
 
 impl Ord for Plain {
     fn cmp(&self, other: &Self) -> Ordering {
-        compare(&[self.bytes()], &[other.bytes()])
+        compare(self.bytes(), other.bytes())
     }
 }
 
@@ -417,10 +489,21 @@ impl PartialOrd for Plain {
 
 impl Ord for NotePath {
     fn cmp(&self, other: &Self) -> Ordering {
-        if self.folder == other.folder {
-            return self.name.0.cmp(&other.name.0);
-        }
-        compare(&self.parts(), &other.parts())
+        compare(&self.path, &other.path)
+    }
+}
+
+impl PartialEq for NotePath {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+    }
+}
+
+impl Eq for NotePath {}
+
+impl Hash for NotePath {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.path.hash(state);
     }
 }
 
@@ -436,13 +519,13 @@ impl fmt::Debug for Plain {
     }
 }
 
-impl AsRef<Path> for FolderPath {
-    fn as_ref(&self) -> &Path {
-        Path::new(OsStr::from_bytes(self.0.bytes()))
+impl fmt::Debug for Name {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.as_os_str(), f)
     }
 }
 
-impl AsRef<Path> for Scope {
+impl AsRef<Path> for FolderPath {
     fn as_ref(&self) -> &Path {
         Path::new(OsStr::from_bytes(self.0.bytes()))
     }
@@ -450,10 +533,7 @@ impl AsRef<Path> for Scope {
 
 impl fmt::Display for NotePath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if !self.folder.is_root() {
-            write!(f, "{}/", self.folder)?;
-        }
-        Path::new(self.name()).display().fmt(f)
+        self.as_path().display().fmt(f)
     }
 }
 
@@ -473,25 +553,6 @@ impl fmt::Debug for FolderPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
-}
-
-/// Checks the rules for a trimmed typed name. `file_name` is the name on disk for `typed`.
-fn check_name(typed: &str, file_name: &str) -> Result<()> {
-    let problem = if typed.is_empty() {
-        NameProblem::Empty
-    } else if typed.contains('/') {
-        NameProblem::Slash
-    } else if typed.starts_with('.') {
-        NameProblem::Dot
-    } else if file_name.len() > MAX_NAME_BYTES {
-        NameProblem::TooLong
-    } else {
-        return Ok(());
-    };
-    Err(Error::BadName {
-        name: typed.to_owned(),
-        problem,
-    })
 }
 
 #[cfg(test)]
@@ -597,41 +658,20 @@ mod tests {
     }
 
     #[test]
+    fn a_part_has_at_most_255_bytes() {
+        let part = |len: usize| "a".repeat(len);
+        assert!(FolderPath::new(format!("x/{}", part(255))).is_some());
+        assert!(FolderPath::new(format!("x/{}/y", part(256))).is_none());
+        assert!(NotePath::new(format!("{}.md", part(252))).is_some());
+        assert!(NotePath::new(format!("{}.md", part(253))).is_none());
+    }
+
+    #[test]
     fn a_plain_path_gives_a_value() {
         assert!(NotePath::new("a b/c.d.md").is_some());
         assert!(FolderPath::new("").is_some_and(|root| root.is_root()));
         assert!(FolderPath::new("a b/c.md").is_some());
         assert!(FolderPath::new("attachments").is_some());
-    }
-
-    #[test]
-    fn note_and_child_give_a_name_problem_for_bad_names() {
-        let root = FolderPath::root();
-        let long = "a".repeat(MAX_NAME_BYTES - 2);
-        assert_eq!(problem(root.note("  ")), NameProblem::Empty);
-        assert_eq!(problem(root.note("a/b")), NameProblem::Slash);
-        assert_eq!(problem(root.note(".a")), NameProblem::Dot);
-        assert_eq!(problem(root.note(&long)), NameProblem::TooLong);
-        assert_eq!(problem(root.child("")), NameProblem::Empty);
-        assert_eq!(problem(root.child("a/b")), NameProblem::Slash);
-        assert_eq!(problem(root.child("..")), NameProblem::Dot);
-        assert_eq!(problem(root.child(&"a".repeat(256))), NameProblem::TooLong);
-        assert_eq!(
-            problem(root.child(" Attachments ")),
-            NameProblem::Attachments
-        );
-    }
-
-    #[test]
-    fn note_and_child_trim_the_name() {
-        let work = folder("work");
-        assert_eq!(work.note(" Plans ").unwrap(), note("work/Plans.md"));
-        assert_eq!(work.child(" 2026 ").unwrap(), folder("work/2026"));
-        assert_eq!(
-            work.child("attachments").unwrap(),
-            folder("work/attachments")
-        );
-        assert_eq!(FolderPath::root().note("A").unwrap(), note("A.md"));
     }
 
     #[test]
@@ -697,28 +737,72 @@ mod tests {
     }
 
     #[test]
-    fn disk_names_skip_hidden_entries_and_other_files() {
-        let work = folder("work");
-        assert_eq!(work.note_named(OsStr::new("a.md")), Some(note("work/a.md")));
-        assert_eq!(work.note_named(OsStr::new("a.txt")), None);
-        assert_eq!(work.note_named(OsStr::new(".a.md")), None);
-        assert_eq!(
-            work.folder_named(OsStr::new(" x ")),
-            Some(folder("work/ x "))
-        );
-        assert_eq!(work.folder_named(OsStr::new(".git")), None);
+    fn typed_names_give_each_name_problem() {
+        let long = "a".repeat(MAX_NAME_BYTES - 2);
+        assert_eq!(problem(Name::typed("  ")), NameProblem::Empty);
+        assert_eq!(problem(Name::typed("a/b")), NameProblem::Slash);
+        assert_eq!(problem(Name::typed("..")), NameProblem::Dot);
+        assert_eq!(problem(Name::typed("a\0b")), NameProblem::ZeroByte);
+        assert_eq!(problem(Name::typed(&"a".repeat(256))), NameProblem::TooLong);
+        assert!(Name::typed(&long).is_ok());
+        assert_eq!(problem(Name::title(&long)), NameProblem::TooLong);
+        assert_eq!(problem(Name::title(".a")), NameProblem::Dot);
     }
 
     #[test]
-    fn a_scope_holds_itself_and_what_is_below_it() {
-        let scope = |path: &str| Scope::new(Path::new(path)).unwrap();
-        assert!(scope("work").holds(&scope("work")));
-        assert!(scope("work").holds(&scope("work/a.md")));
-        assert!(!scope("work").holds(&scope("workshop")));
-        assert!(Scope::root().holds(&scope("a")));
-        assert!(scope("attachments/a.png").is_attachment());
-        assert!(!scope("attachments").is_attachment());
-        assert_eq!(scope("a/b.md").note(), Some(note("a/b.md")));
-        assert_eq!(scope("a/b").note(), None);
+    fn typed_names_lose_the_spaces_around_them() {
+        let work = folder("work");
+        let title = Name::title(" Plans ").unwrap();
+        assert_eq!(work.note(&title), note("work/Plans.md"));
+        assert_eq!(
+            work.child(&Name::typed(" 2026 ").unwrap()),
+            folder("work/2026")
+        );
+        let attachments = Name::typed("attachments").unwrap();
+        assert_eq!(
+            FolderPath::root().child(&attachments),
+            folder("attachments")
+        );
+    }
+
+    #[test]
+    fn disk_names_skip_hidden_names_only() {
+        let disk = |name: &str| Name::from_disk(OsStr::new(name));
+        let work = folder("work");
+        assert_eq!(work.child(&disk(" x ").unwrap()), folder("work/ x "));
+        assert_eq!(
+            work.child(&disk("attachments").unwrap()),
+            folder("work/attachments")
+        );
+        assert_eq!(
+            work.note_file(&disk("a.md").unwrap()),
+            Some(note("work/a.md"))
+        );
+        assert_eq!(work.note_file(&disk("a.txt").unwrap()), None);
+        assert_eq!(disk(".a.md"), None);
+        assert_eq!(disk(".git"), None);
+        assert_eq!(disk(""), None);
+        assert_eq!(disk(&"a".repeat(256)), None);
+    }
+
+    #[test]
+    fn a_folder_splits_into_its_folder_and_name() {
+        let (parent, name) = folder("work/2026").split().unwrap();
+        assert_eq!(parent, folder("work"));
+        assert_eq!(parent.child(&name), folder("work/2026"));
+        assert!(FolderPath::root().split().is_none());
+    }
+
+    #[test]
+    fn a_folder_node_holds_itself_and_what_is_below_it() {
+        let work = Node::Folder(folder("work"));
+        assert!(work.holds(&work));
+        assert!(work.holds(&Node::Note(note("work/a.md"))));
+        assert!(work.holds(&Node::Folder(folder("work/x"))));
+        assert!(!work.holds(&Node::Folder(folder("workshop"))));
+        assert!(Node::Folder(FolderPath::root()).holds(&Node::Note(note("a.md"))));
+        let a = Node::Note(note("a.md"));
+        assert!(a.holds(&a));
+        assert!(!a.holds(&Node::Folder(folder("a.md"))));
     }
 }
