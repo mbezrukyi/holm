@@ -225,6 +225,12 @@ impl FolderPath {
         self.0.is_below(&folder.0)
     }
 
+    /// Whether this folder can move into `parent`. The root can't move, and no folder can move
+    /// into itself or a folder below it.
+    pub fn can_move_into(&self, parent: &Self) -> bool {
+        !self.is_root() && parent != self && !parent.is_below(self)
+    }
+
     /// The path after the folder `from` moved to `to`, or `None` when this folder is not
     /// `from` and not below it.
     pub fn moved(&self, from: &Self, to: &Self) -> Option<Self> {
@@ -671,6 +677,16 @@ mod tests {
         assert!(!work.is_below(&work));
         assert!(work.is_below(&FolderPath::root()));
         assert!(!FolderPath::root().is_below(&FolderPath::root()));
+    }
+
+    #[test]
+    fn a_folder_moves_into_no_folder_of_its_own() {
+        let work = folder("work");
+        assert!(work.can_move_into(&FolderPath::root()));
+        assert!(work.can_move_into(&folder("workshop")));
+        assert!(!work.can_move_into(&work));
+        assert!(!work.can_move_into(&folder("work/x")));
+        assert!(!FolderPath::root().can_move_into(&work));
     }
 
     #[test]

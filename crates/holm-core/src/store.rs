@@ -419,7 +419,7 @@ impl Store {
         name: &Name,
     ) -> Result<FolderPath> {
         self.check_user_folder(from)?;
-        if parent == from || parent.is_below(from) {
+        if !from.can_move_into(parent) {
             return Err(bad_path(parent.as_ref()));
         }
         let rel = new_folder(parent, name)?;

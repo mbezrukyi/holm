@@ -51,7 +51,7 @@ impl FolderPicker {
             .chain(folders.iter().cloned())
             .filter(|folder| {
                 home.as_ref() != Some(folder)
-                    && inside.is_none_or(|inside| folder != inside && !folder.is_below(inside))
+                    && inside.is_none_or(|inside| inside.can_move_into(folder))
             })
             .collect();
         let name = match &target {
