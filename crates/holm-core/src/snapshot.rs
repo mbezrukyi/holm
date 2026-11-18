@@ -2,11 +2,10 @@
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
-use std::path::Path;
 use std::sync::Arc;
 
 use crate::model::{Link, LinkTarget, NoteInfo, NoteSet, Order, Tag};
-use crate::paths::{self, FolderPath, NotePath, Scope};
+use crate::paths::{FolderPath, NotePath, Scope};
 
 /// The facts of the notes folder at one moment, from [`Core::snapshot`](crate::Core::snapshot).
 /// It never changes.
@@ -113,8 +112,12 @@ impl Snapshot {
 
     /// The count of notes right in each folder, without the notes of its subfolders. A folder
     /// with no notes is not in the map.
-    pub fn folder_counts(&self) -> HashMap<FolderPath, usize> {
-        paths::folder_counts(self.notes.keys())
+    pub fn folder_counts(&self) -> HashMap<&FolderPath, usize> {
+        let mut counts = HashMap::new();
+        for note in self.notes.keys() {
+            *counts.entry(note.folder()).or_default() += 1;
+        }
+        counts
     }
 
     /// The links and embedded files in the note at `path`, in the order of its text.
@@ -140,7 +143,7 @@ impl Snapshot {
                 entry.info.path != *path
                     && entry.links.iter().any(|link| match &link.target {
                         LinkTarget::Note { id: to, .. } => Some(to) == id,
-                        LinkTarget::File(file) => file.as_path() == AsRef::<Path>::as_ref(path),
+                        LinkTarget::File(file) => path.is_at(file),
                         LinkTarget::Heading(_) | LinkTarget::Web(_) => false,
                     })
             })

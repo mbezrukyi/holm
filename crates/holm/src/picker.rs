@@ -42,7 +42,7 @@ impl FolderPicker {
         cx: &mut Context<Self>,
     ) -> Self {
         let (home, inside) = match &target {
-            Target::Note(path) => (Some(path.folder()), None),
+            Target::Note(path) => (Some(path.folder().clone()), None),
             Target::Folder(path) => (path.folder(), Some(path)),
         };
         let folders = std::iter::once(FolderPath::root())

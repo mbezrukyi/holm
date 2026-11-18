@@ -6,11 +6,11 @@
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::HashMap;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
 use std::fmt;
-use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
-use std::path::Path;
+use std::os::unix::ffi::OsStrExt as _;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::error::{Error, NameProblem, Result};
 
@@ -22,15 +22,23 @@ pub(crate) const MAX_NAME_BYTES: usize = 255;
 
 /// The path of a note: a plain path that ends in `.md`, like `work/Plans.md`.
 ///
+/// It holds its folder and its file name. Notes of one folder can share the folder.
 /// Its order is the order of [`Path::cmp`].
-#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct NotePath(Plain);
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct NotePath {
+    folder: FolderPath,
+    name: Name,
+}
 
 /// The path of a folder: any plain path, like `work/2026`. The root folder is the empty path.
 ///
-/// Its order is the order of [`Path::cmp`].
+/// A clone is cheap. Its order is the order of [`Path::cmp`].
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct FolderPath(Plain);
+
+/// One part of a plain path.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct Name(Box<[u8]>);
 
 /// Any entry in the notes folder: a note, a folder, another file, or a path with nothing
 /// there. The core checks the disk at a scope and below it.
@@ -40,53 +48,99 @@ pub(crate) struct Scope(Plain);
 impl NotePath {
     /// The path, or `None` when it is not a plain path that ends in `.md`.
     pub fn new(path: impl AsRef<Path>) -> Option<Self> {
-        Plain::new(path.as_ref()).and_then(Self::from_plain)
+        let plain = Plain::new(path.as_ref())?;
+        let name = plain.name();
+        let folder = FolderPath(Plain::from(&plain.bytes()[..plain.parent_end()]));
+        Self::from_parts(folder, name)
     }
 
     /// The folder that holds the note.
-    pub fn folder(&self) -> FolderPath {
-        FolderPath(self.0.parent())
+    pub fn folder(&self) -> &FolderPath {
+        &self.folder
     }
 
     /// The file name without `.md`.
     pub fn title(&self) -> Cow<'_, str> {
-        let name = self.0.name();
+        let name = &self.name.0;
         String::from_utf8_lossy(&name[..name.len() - NOTE_EXT.len()])
     }
 
     /// The file name, with `.md`.
     pub fn name(&self) -> &OsStr {
-        OsStr::from_bytes(self.0.name())
+        OsStr::from_bytes(&self.name.0)
+    }
+
+    /// The note with the same name in `folder`.
+    #[must_use]
+    pub fn in_folder(&self, folder: &FolderPath) -> Self {
+        Self {
+            folder: folder.clone(),
+            name: self.name.clone(),
+        }
     }
 
     /// Whether the note is right in `folder`, not in one of its subfolders.
     pub fn is_in(&self, folder: &FolderPath) -> bool {
-        self.0.is_in(&folder.0)
+        self.folder == *folder
     }
 
     /// Whether the note is in `folder` or in one of its subfolders.
     pub fn is_below(&self, folder: &FolderPath) -> bool {
-        self.0.is_below(&folder.0)
+        self.folder == *folder || self.folder.is_below(folder)
     }
 
     /// The path after the folder `from` moved to `to`, or `None` when the note is not below
     /// `from`.
     pub fn moved(&self, from: &FolderPath, to: &FolderPath) -> Option<Self> {
-        self.0.moved(&from.0, &to.0).map(Self)
+        self.folder
+            .moved(from, to)
+            .map(|folder| self.in_folder(&folder))
     }
 
     /// The folders that hold the note, the nearest first. The root is last.
     pub fn parents(&self) -> impl Iterator<Item = FolderPath> + use<> {
-        self.0.parents().map(FolderPath)
+        std::iter::once(self.folder.clone()).chain(self.folder.parents())
+    }
+
+    /// The path of the note below the folder `root`.
+    pub fn under(&self, root: &Path) -> PathBuf {
+        let mut path = PathBuf::from(root);
+        path.reserve(self.folder.0.bytes().len() + self.name.0.len() + 2);
+        if !self.folder.is_root() {
+            path.push(&self.folder);
+        }
+        path.push(self.name());
+        path
+    }
+
+    /// Whether `path` is the path of this note, relative to the notes folder.
+    pub fn is_at(&self, path: &Path) -> bool {
+        let [folder, slash, name] = self.parts();
+        let rest = path.as_os_str().as_bytes().strip_prefix(folder);
+        rest.and_then(|rest| rest.strip_prefix(slash)) == Some(name)
+    }
+
+    /// The path relative to the notes folder.
+    pub fn to_path(&self) -> PathBuf {
+        self.under(Path::new(""))
     }
 
     pub(crate) fn scope(&self) -> Scope {
-        Scope(self.0.clone())
+        Scope(self.folder.0.join(&self.name.0))
     }
 
-    fn from_plain(plain: Plain) -> Option<Self> {
-        let name = plain.name();
-        (name.len() > NOTE_EXT.len() && name.ends_with(NOTE_EXT.as_bytes())).then_some(Self(plain))
+    fn from_parts(folder: FolderPath, name: &[u8]) -> Option<Self> {
+        (name.len() > NOTE_EXT.len() && name.ends_with(NOTE_EXT.as_bytes())).then(|| Self {
+            folder,
+            name: Name(name.into()),
+        })
+    }
+
+    /// The parts of the joined path.
+    fn parts(&self) -> [&[u8]; 3] {
+        let folder = self.folder.0.bytes();
+        let slash: &[u8] = if folder.is_empty() { b"" } else { b"/" };
+        [folder, slash, &self.name.0]
     }
 }
 
@@ -103,7 +157,7 @@ impl FolderPath {
 
     /// Whether this is the root folder.
     pub fn is_root(&self) -> bool {
-        self.0.0.is_empty()
+        self.0.bytes().is_empty()
     }
 
     /// The folder that holds this folder. The root has none.
@@ -136,7 +190,10 @@ impl FolderPath {
         let title = title.trim();
         let name = format!("{title}{NOTE_EXT}");
         check_name(title, &name)?;
-        Ok(NotePath(self.0.join(name.as_bytes())))
+        Ok(NotePath {
+            folder: self.clone(),
+            name: Name(name.into_bytes().into()),
+        })
     }
 
     /// The path of a new folder with the typed `name` in this folder, with no spaces around
@@ -186,9 +243,10 @@ impl FolderPath {
     /// The note with the name `name` from the disk in this folder, or `None` when it is not a
     /// note name.
     pub(crate) fn note_named(&self, name: &OsStr) -> Option<NotePath> {
-        Plain::is_part(name.as_bytes())
-            .then(|| self.0.join(name.as_bytes()))
-            .and_then(NotePath::from_plain)
+        let name = name.as_bytes();
+        Plain::is_part(name)
+            .then(|| NotePath::from_parts(self.clone(), name))
+            .flatten()
     }
 
     /// The folder with the name `name` from the disk in this folder, or `None` when it is
@@ -211,7 +269,7 @@ impl Scope {
 
     /// The scope as a note path, when it is one.
     pub(crate) fn note(&self) -> Option<NotePath> {
-        NotePath::from_plain(self.0.clone())
+        NotePath::new(self)
     }
 
     /// The scope as a folder path. It need not be a folder on disk.
@@ -231,19 +289,19 @@ impl Scope {
 
     /// Whether this is a file path in `attachments/` at the root.
     pub(crate) fn is_attachment(&self) -> bool {
-        self.0.is_below(&Plain(ATTACHMENTS.into()))
+        self.0.is_below(&Plain::from(ATTACHMENTS.as_bytes()))
     }
 }
 
-/// The one form of all path types: the bytes of a plain path.
-#[derive(Clone, PartialEq, Eq, Hash, Default)]
-struct Plain(OsString);
+/// The bytes of a plain path. A clone is cheap.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct Plain(Arc<[u8]>);
 
 impl Plain {
     fn new(path: &Path) -> Option<Self> {
         let bytes = path.as_os_str().as_bytes();
         let plain = bytes.is_empty() || bytes.split(|&byte| byte == b'/').all(Self::is_part);
-        plain.then(|| Self(path.as_os_str().to_owned()))
+        plain.then(|| Self::from(bytes))
     }
 
     /// Whether `name` can be one part of a plain path. A zero byte would break the order.
@@ -254,19 +312,19 @@ impl Plain {
     }
 
     fn bytes(&self) -> &[u8] {
-        self.0.as_bytes()
+        &self.0
     }
 
     /// The path with one more part. `name` must follow [`Plain::is_part`].
     fn join(&self, name: &[u8]) -> Self {
         if self.0.is_empty() {
-            return Self(OsString::from_vec(name.to_vec()));
+            return Self::from(name);
         }
         let mut bytes = Vec::with_capacity(self.0.len() + 1 + name.len());
         bytes.extend_from_slice(self.bytes());
         bytes.push(b'/');
         bytes.extend_from_slice(name);
-        Self(OsString::from_vec(bytes))
+        Self(bytes.into())
     }
 
     /// The last part. The root gives an empty name.
@@ -278,11 +336,17 @@ impl Plain {
             .map_or(bytes, |slash| &bytes[slash + 1..])
     }
 
+    /// The end of the path without its last part.
+    fn parent_end(&self) -> usize {
+        self.bytes()
+            .iter()
+            .rposition(|&byte| byte == b'/')
+            .unwrap_or(0)
+    }
+
     /// The path without its last part. The root gives the root.
     fn parent(&self) -> Self {
-        let bytes = self.bytes();
-        let end = bytes.iter().rposition(|&byte| byte == b'/').unwrap_or(0);
-        Self(OsString::from_vec(bytes[..end].to_vec()))
+        Self::from(&self.bytes()[..self.parent_end()])
     }
 
     fn parents(&self) -> impl Iterator<Item = Self> + use<> {
@@ -318,15 +382,30 @@ impl Plain {
     }
 }
 
-/// The order of [`Path::cmp`] for plain paths. It compares bytes, with `/` as the lowest byte.
+impl Default for Plain {
+    fn default() -> Self {
+        Self::from(&b""[..])
+    }
+}
+
+impl From<&[u8]> for Plain {
+    fn from(bytes: &[u8]) -> Self {
+        Self(bytes.into())
+    }
+}
+
+/// The order of [`Path::cmp`] for plain paths, given in parts. It compares bytes, with `/` as
+/// the lowest byte.
+fn compare(a: &[&[u8]], b: &[&[u8]]) -> Ordering {
+    let key = |byte: &u8| if *byte == b'/' { 0 } else { *byte };
+    let a = a.iter().flat_map(|part| part.iter().map(key));
+    let b = b.iter().flat_map(|part| part.iter().map(key));
+    a.cmp(b)
+}
+
 impl Ord for Plain {
     fn cmp(&self, other: &Self) -> Ordering {
-        let key = |byte: u8| if byte == b'/' { 0 } else { byte };
-        let (a, b) = (self.bytes(), other.bytes());
-        match a.iter().zip(b).find(|(x, y)| x != y) {
-            Some((&x, &y)) => key(x).cmp(&key(y)),
-            None => a.len().cmp(&b.len()),
-        }
+        compare(&[self.bytes()], &[other.bytes()])
     }
 }
 
@@ -336,45 +415,57 @@ impl PartialOrd for Plain {
     }
 }
 
-impl fmt::Debug for Plain {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(Path::new(&self.0), f)
+impl Ord for NotePath {
+    fn cmp(&self, other: &Self) -> Ordering {
+        if self.folder == other.folder {
+            return self.name.0.cmp(&other.name.0);
+        }
+        compare(&self.parts(), &other.parts())
     }
 }
 
-impl AsRef<Path> for NotePath {
-    fn as_ref(&self) -> &Path {
-        Path::new(&self.0.0)
+impl PartialOrd for NotePath {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl fmt::Debug for Plain {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(Path::new(OsStr::from_bytes(self.bytes())), f)
     }
 }
 
 impl AsRef<Path> for FolderPath {
     fn as_ref(&self) -> &Path {
-        Path::new(&self.0.0)
+        Path::new(OsStr::from_bytes(self.0.bytes()))
     }
 }
 
 impl AsRef<Path> for Scope {
     fn as_ref(&self) -> &Path {
-        Path::new(&self.0.0)
+        Path::new(OsStr::from_bytes(self.0.bytes()))
     }
 }
 
 impl fmt::Display for NotePath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Path::new(&self.0.0).display().fmt(f)
+        if !self.folder.is_root() {
+            write!(f, "{}/", self.folder)?;
+        }
+        Path::new(self.name()).display().fmt(f)
     }
 }
 
 impl fmt::Display for FolderPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Path::new(&self.0.0).display().fmt(f)
+        AsRef::<Path>::as_ref(self).display().fmt(f)
     }
 }
 
 impl fmt::Debug for NotePath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
+        fmt::Debug::fmt(&self.to_path(), f)
     }
 }
 
@@ -382,27 +473,6 @@ impl fmt::Debug for FolderPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
-}
-
-/// The count of notes right in each folder. A folder with no notes is not in the map.
-pub(crate) fn folder_counts<'a>(
-    notes: impl Iterator<Item = &'a NotePath>,
-) -> HashMap<FolderPath, usize> {
-    let mut counts: HashMap<&[u8], usize> = HashMap::new();
-    for note in notes {
-        let bytes = note.0.bytes();
-        let end = bytes.len() - note.0.name().len();
-        *counts.entry(&bytes[..end.saturating_sub(1)]).or_default() += 1;
-    }
-    counts
-        .into_iter()
-        .map(|(folder, count)| {
-            (
-                FolderPath(Plain(OsStr::from_bytes(folder).to_owned())),
-                count,
-            )
-        })
-        .collect()
 }
 
 /// Checks the rules for a trimmed typed name. `file_name` is the name on disk for `typed`.
@@ -471,7 +541,34 @@ mod tests {
         ) {
             let (a, b) = (format!("{start}{a}"), format!("{start}/{b}"));
             prop_assert_eq!(folder(&a).cmp(&folder(&b)), Path::new(&a).cmp(Path::new(&b)));
+            let (a, b) = (format!("{a}.md"), format!("{b}.md"));
+            prop_assert_eq!(note(&a).cmp(&note(&b)), Path::new(&a).cmp(Path::new(&b)));
+            prop_assert_eq!(note(&b).cmp(&note(&a)), Path::new(&b).cmp(Path::new(&a)));
         }
+    }
+
+    #[test]
+    fn a_deeper_note_can_come_first() {
+        assert!(note("a/b/c.md") < note("a/b.md"));
+        assert!(Path::new("a/b/c.md") < Path::new("a/b.md"));
+    }
+
+    #[test]
+    fn is_at_compares_the_whole_path() {
+        let plans = note("work/Plans.md");
+        assert!(plans.is_at(Path::new("work/Plans.md")));
+        assert!(!plans.is_at(Path::new("workPlans.md")));
+        assert!(!plans.is_at(Path::new("work/x/Plans.md")));
+        assert!(!plans.is_at(Path::new("/work/Plans.md")));
+        assert!(note("A.md").is_at(Path::new("A.md")));
+        assert!(!note("A.md").is_at(Path::new("x/A.md")));
+    }
+
+    #[test]
+    fn in_folder_keeps_the_name() {
+        let plans = note("work/Plans.md");
+        assert_eq!(plans.in_folder(&folder("home")), note("home/Plans.md"));
+        assert_eq!(plans.in_folder(&FolderPath::root()), note("Plans.md"));
     }
 
     #[test]
@@ -540,10 +637,10 @@ mod tests {
     #[test]
     fn a_note_knows_its_folder_title_and_name() {
         let plans = note("work/2026/Plans.md");
-        assert_eq!(plans.folder(), folder("work/2026"));
+        assert_eq!(*plans.folder(), folder("work/2026"));
         assert_eq!(plans.title(), "Plans");
         assert_eq!(plans.name(), "Plans.md");
-        assert_eq!(note("A.md").folder(), FolderPath::root());
+        assert_eq!(*note("A.md").folder(), FolderPath::root());
         let parents: Vec<_> = plans.parents().collect();
         assert_eq!(
             parents,
@@ -610,18 +707,6 @@ mod tests {
             Some(folder("work/ x "))
         );
         assert_eq!(work.folder_named(OsStr::new(".git")), None);
-    }
-
-    #[test]
-    fn folder_counts_count_the_notes_right_in_each_folder() {
-        let notes = [note("a.md"), note("b.md"), note("w/c.md"), note("w/x/d.md")];
-        let counts = folder_counts(notes.iter());
-        let expected = [
-            (FolderPath::root(), 2),
-            (folder("w"), 1),
-            (folder("w/x"), 1),
-        ];
-        assert_eq!(counts, expected.into_iter().collect());
     }
 
     #[test]

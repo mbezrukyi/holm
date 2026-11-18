@@ -94,7 +94,7 @@ impl Store {
         let mut files = Vec::new();
         self.walk(&scope.folder(), &mut |found| {
             if let Found::Note(rel) = found {
-                match fs::metadata(self.root.join(&rel)) {
+                match fs::metadata(rel.under(&self.root)) {
                     Ok(meta) => files.push((rel, Stamp::of(&meta))),
                     Err(error) => tracing::warn!(%error, path = %rel, "skipped a note"),
                 }
@@ -123,7 +123,7 @@ impl Store {
 
     /// Whether a note file is at `rel`.
     pub(crate) fn exists(&self, rel: &NotePath) -> bool {
-        self.root.join(rel).is_file()
+        rel.under(&self.root).is_file()
     }
 
     /// Every subfolder at or below `scope`, sorted by path. It skips `attachments/` at the root.
@@ -153,7 +153,7 @@ impl Store {
     }
 
     pub(crate) fn read(&self, rel: &NotePath) -> Result<(Note, Stamp)> {
-        let (text, stamp) = read_text(&self.root.join(rel))?;
+        let (text, stamp) = read_text(&rel.under(&self.root))?;
         Ok((note(rel, &Text::parse(&text), stamp), stamp))
     }
 
@@ -163,7 +163,7 @@ impl Store {
         rel: &NotePath,
         edit: impl FnOnce(&mut Text),
     ) -> Result<(Note, Stamp)> {
-        let path = self.root.join(rel);
+        let path = rel.under(&self.root);
         let (old, stamp) = read_text(&path)?;
         let mut text = Text::parse(&old);
         edit(&mut text);
@@ -186,7 +186,7 @@ impl Store {
         let mut done = Vec::new();
         let mut temps = Vec::new();
         for rel in paths {
-            let path = self.root.join(rel);
+            let path = rel.under(&self.root);
             let temp = read_text(&path).and_then(|(old, stamp)| {
                 let Some(new) = edit(rel, &old).filter(|new| *new != old) else {
                     return Ok(None);
@@ -247,7 +247,7 @@ impl Store {
     /// It adds an id when the file has none. When the body stays the same,
     /// the file keeps its old modification time.
     pub(crate) fn save(&self, rel: &NotePath, body: &str) -> Result<(Note, Stamp)> {
-        let path = self.root.join(rel);
+        let path = rel.under(&self.root);
         let (old, stamp) = read_text(&path)?;
         let mut text = Text::parse(&old);
         let mut body = body.to_owned();
@@ -272,7 +272,7 @@ impl Store {
     /// It keeps the id, the tags and the pin. When a file is at the path again,
     /// it saves the body over it like [`Self::save`].
     pub(crate) fn restore(&self, note: &Note) -> Result<(Note, Stamp)> {
-        let path = self.root.join(&note.info.path);
+        let path = note.info.path.under(&self.root);
         let dir = self.root.join(note.info.path.folder());
         let mut text = Text::parse("");
         let id = note.info.id.clone().unwrap_or_else(NoteId::generate);
@@ -294,9 +294,9 @@ impl Store {
     /// It fails with [`Error::NameTaken`] when something in its folder has the name.
     pub(crate) fn create(&self, rel: &NotePath) -> Result<(Note, Stamp)> {
         let folder = rel.folder();
-        self.check_free(&folder, rel.name(), None)?;
-        let dir = self.root.join(&folder);
-        let path = self.root.join(rel);
+        self.check_free(folder, rel.name(), None)?;
+        let dir = self.root.join(folder);
+        let path = rel.under(&self.root);
         let mut text = Text::parse("");
         text.set_id(Some(NoteId::generate().as_str()));
         let file = temp_file(&dir, text.to_string().as_bytes(), None, None)
@@ -371,19 +371,19 @@ impl Store {
         if to == *from {
             return Ok(to);
         }
-        let source = self.root.join(from);
+        let source = from.under(&self.root);
         let (old_folder, folder) = (from.folder(), to.folder());
         let own = (old_folder == folder).then(|| from.name());
-        self.check_free(&folder, to.name(), own)?;
+        self.check_free(folder, to.name(), own)?;
         let (old, stamp) = read_text(&source)?;
-        let text = relink(&old, &self.root, &old_folder, &folder, None).unwrap_or(old);
+        let text = relink(&old, &self.root, old_folder, folder, None).unwrap_or(old);
         let permissions = fs::metadata(&source)
             .map_err(|e| Error::Read {
                 path: source.clone(),
                 source: e,
             })?
             .permissions();
-        let dir = self.root.join(&folder);
+        let dir = self.root.join(folder);
         let temp = temp_file(
             &dir,
             text.as_bytes(),
@@ -391,7 +391,7 @@ impl Store {
             Some(time(stamp.modified)),
         )
         .map_err(|source| write_error(&dir, source))?;
-        let path = self.root.join(&to);
+        let path = to.under(&self.root);
         match temp.persist_noclobber(&path) {
             Ok(_) => {
                 remove(&source)?;
@@ -493,7 +493,7 @@ impl Store {
 
     /// Deletes the note file at `rel`. A note that is already gone is no error.
     pub(crate) fn delete_note(&self, rel: &NotePath) -> Result<()> {
-        let path = self.root.join(rel);
+        let path = rel.under(&self.root);
         remove(&path)?;
         sync_dir(folder_abs(&path)).map_err(|e| write_error(&path, e))
     }
@@ -554,7 +554,7 @@ impl Store {
         let rewritten = self.rewrite(&paths, |rel, old| {
             let folder = rel.folder();
             let old_folder = folder.moved(moved.to, moved.from)?;
-            relink(old, &self.root, &old_folder, &folder, Some(moved))
+            relink(old, &self.root, &old_folder, folder, Some(moved))
         });
         for (_, result) in rewritten {
             if let Err(error) = result {

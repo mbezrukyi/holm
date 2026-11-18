@@ -5,13 +5,12 @@
 mod common;
 
 use std::fs;
-use std::path::Path;
 
 use common::{Folder, folder_path, note_path};
 use holm_core::model::{NoteSet, Order};
 use holm_core::{Core, Error, NameProblem, NotePath};
 
-fn paths<P: AsRef<Path>>(items: impl IntoIterator<Item = P>) -> Vec<String> {
+fn paths<P: std::fmt::Display>(items: impl IntoIterator<Item = P>) -> Vec<String> {
     let mut paths = common::paths(items);
     paths.sort();
     paths
@@ -102,12 +101,8 @@ fn folders_lists_nested_folders_without_attachments() {
         (".git/e", ""),
     ]);
 
-    let folders = folder
-        .core
-        .snapshot()
-        .folders()
-        .map(common::path_buf)
-        .collect::<Vec<_>>();
+    let snapshot = folder.core.snapshot();
+    let folders = snapshot.folders().collect::<Vec<_>>();
 
     assert_eq!(
         paths(folders),

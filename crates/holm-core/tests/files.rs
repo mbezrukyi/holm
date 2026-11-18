@@ -275,12 +275,7 @@ fn create_folder_keeps_the_typed_name_trimmed() {
         Err(Error::Write { .. })
     ));
     assert_eq!(
-        common::paths(
-            core.snapshot()
-                .folders()
-                .map(common::path_buf)
-                .collect::<Vec<_>>()
-        ),
+        common::paths(core.snapshot().folders().collect::<Vec<_>>()),
         ["Ideas: 2026?", "Plans", "work", "work/attachments"]
     );
 }
@@ -388,14 +383,7 @@ fn rename_folder_moves_its_notes_and_keeps_links_that_still_work() {
         ["other.md"]
     );
     assert_eq!(
-        common::paths(
-            folder
-                .core
-                .snapshot()
-                .folders()
-                .map(common::path_buf)
-                .collect::<Vec<_>>()
-        ),
+        common::paths(folder.core.snapshot().folders().collect::<Vec<_>>()),
         ["Job", "Job/sub"]
     );
     assert_index_matches_files(

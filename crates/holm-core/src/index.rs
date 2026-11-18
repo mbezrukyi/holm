@@ -471,9 +471,10 @@ fn shift(
             AND NOT EXISTS (SELECT 1 FROM links WHERE links.note = notes.key AND kind = 'file')
             RETURNING key",
         )?
-        .query_row(params![bytes(from), bytes(to), bytes(to.folder())], |row| {
-            row.get(0)
-        })
+        .query_row(
+            params![note_bytes(from), note_bytes(to), bytes(to.folder())],
+            |row| row.get(0),
+        )
         .optional()?;
     let Some(key) = key else {
         return Ok(None);
@@ -630,7 +631,7 @@ fn links_of(root: &Path, note: &Note) -> Vec<Link> {
                     heading: heading.clone(),
                 },
                 Target::Heading(heading) => LinkTarget::Heading(heading.clone()),
-                Target::File(file) => LinkTarget::File(resolve(root, &folder, file)),
+                Target::File(file) => LinkTarget::File(resolve(root, folder, file)),
                 Target::Web(address) => LinkTarget::Web(address.clone()),
             },
             embedded: link.embedded,
@@ -642,7 +643,7 @@ fn tags_of(conn: &Connection, rel: &NotePath) -> Result<Vec<String>, Fail> {
     let mut statement = conn.prepare_cached(
         "SELECT tag FROM tags JOIN notes ON notes.key = tags.note WHERE notes.path = ?1 ORDER BY pos",
     )?;
-    let rows = statement.query_map([bytes(rel)], |row| row.get(0))?;
+    let rows = statement.query_map([note_bytes(rel)], |row| row.get(0))?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
@@ -672,7 +673,9 @@ fn write(
         None
     } else {
         conn.prepare_cached("SELECT source_hash, links_hash FROM notes WHERE path = ?1")?
-            .query_row([bytes(&info.path)], |row| Ok((row.get(0)?, row.get(1)?)))
+            .query_row([note_bytes(&info.path)], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
             .optional()?
     };
     let (links, links_hash, stored) = match old {
@@ -697,8 +700,8 @@ fn write(
         )?
         .query_row(
             params![
-                bytes(&info.path),
-                bytes(&folder),
+                note_bytes(&info.path),
+                bytes(folder),
                 info.id.as_ref().map(NoteId::as_str),
                 info.title,
                 info.preview,
@@ -779,7 +782,7 @@ fn hash(value: impl Hash) -> i64 {
 fn delete(conn: &Connection, rel: &NotePath) -> Result<Option<Gone>, Fail> {
     let row: Option<(i64, Option<String>)> = conn
         .prepare_cached("SELECT key, id FROM notes WHERE path = ?1")?
-        .query_row([bytes(rel)], |row| Ok((row.get(0)?, row.get(1)?)))
+        .query_row([note_bytes(rel)], |row| Ok((row.get(0)?, row.get(1)?)))
         .optional()?;
     let Some((key, id)) = row else {
         return Ok(None);
@@ -830,6 +833,10 @@ fn link(row: &rusqlite::Row<'_>) -> rusqlite::Result<Link> {
 
 fn bytes(path: impl AsRef<Path>) -> Value {
     Value::Blob(path.as_ref().as_os_str().as_bytes().to_vec())
+}
+
+fn note_bytes(path: &NotePath) -> Value {
+    Value::Blob(path.to_path().into_os_string().into_vec())
 }
 
 fn scope_bytes(scope: &Scope) -> &[u8] {

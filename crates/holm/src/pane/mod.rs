@@ -438,7 +438,7 @@ impl NotePane {
             cx.defer(move |cx| done(Ok(()), cx));
             return;
         };
-        let folder = path.folder();
+        let folder = path.folder().clone();
         let pane = cx.weak_entity();
         let put = move |target: Target, text: String, cx: &mut App| {
             pane.update(cx, |pane, cx| pane.put_link(&target, &text, cx))

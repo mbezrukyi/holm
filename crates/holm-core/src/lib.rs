@@ -327,12 +327,7 @@ impl Core {
     /// - Else as in [`Core::rename_note`].
     pub fn move_note(&self, path: &NotePath, folder: &FolderPath) -> Result<NoteInfo> {
         self.inner.write(|draft| {
-            let to = path
-                .moved(&path.folder(), folder)
-                .ok_or_else(|| Error::BadPath {
-                    path: path.as_ref().to_owned(),
-                })?;
-            let new = self.inner.store.move_note(path, to)?;
+            let new = self.inner.store.move_note(path, path.in_folder(folder))?;
             self.inner.settle(draft, path, &new)
         })
     }
@@ -464,7 +459,7 @@ impl Core {
                 }
             })?;
             note.info.id.ok_or_else(|| Error::Write {
-                path: self.inner.store.root().join(&note.info.path),
+                path: note.info.path.under(self.inner.store.root()),
                 source: std::io::ErrorKind::InvalidData.into(),
             })
         })
@@ -776,7 +771,7 @@ impl Inner {
     fn update(&self, draft: &mut Draft<'_>, note: &Note, stamp: store::Stamp) -> Result<Note> {
         let notes = self.update_all(draft, &[(note.clone(), stamp)])?;
         notes.into_iter().next().ok_or_else(|| Error::Write {
-            path: self.store.root().join(&note.info.path),
+            path: note.info.path.under(self.store.root()),
             source: std::io::ErrorKind::InvalidData.into(),
         })
     }

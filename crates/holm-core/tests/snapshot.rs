@@ -23,7 +23,7 @@ fn paths(notes: Vec<NoteInfo>) -> Vec<String> {
 }
 
 fn folders(snapshot: &Snapshot) -> Vec<String> {
-    common::paths(snapshot.folders().map(common::path_buf))
+    common::paths(snapshot.folders())
 }
 
 fn tag_names(snapshot: &Snapshot) -> Vec<String> {

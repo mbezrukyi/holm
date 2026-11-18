@@ -6,7 +6,7 @@ mod common;
 
 use std::fmt::Write as _;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use common::{Folder, folder_path};
 use holm_core::model::{Link, NoteInfo, NoteSet, Order, Tag};
@@ -137,7 +137,7 @@ fn body(folder: &Folder, words: &[usize], link: usize) -> String {
         write!(
             body,
             "[b](</{}>)",
-            folder.path("").join(&target.path).display()
+            folder.path("").join(target.path.to_path()).display()
         )
         .unwrap();
     }
@@ -201,21 +201,25 @@ fn apply(folder: &mut Folder, edit: &Edit, copies: &mut usize) {
                 let tags = tags(picks).join(", ");
                 let words: Vec<&str> = words.iter().map(|&w| WORDS[w]).collect();
                 let text = format!("---\ntags: [{tags}]\n---\n{}\n", words.join(" "));
-                fs::write(folder.dir.path().join(&path), text).unwrap();
-                folder.feed([path]);
+                fs::write(folder.dir.path().join(path.to_path()), text).unwrap();
+                folder.feed([path.to_path()]);
             }
         }
         Edit::Delete { note } => {
             if let Some(path) = pick(folder, *note) {
-                fs::remove_file(folder.dir.path().join(&path)).unwrap();
-                folder.feed([path]);
+                fs::remove_file(folder.dir.path().join(path.to_path())).unwrap();
+                folder.feed([path.to_path()]);
             }
         }
         Edit::Copy { note } => {
             if let Some(path) = pick(folder, *note) {
                 *copies += 1;
-                let copy = AsRef::<Path>::as_ref(&path).with_file_name(format!("copy {copies}.md"));
-                fs::copy(folder.dir.path().join(&path), folder.dir.path().join(&copy)).unwrap();
+                let copy = path.to_path().with_file_name(format!("copy {copies}.md"));
+                fs::copy(
+                    folder.dir.path().join(path.to_path()),
+                    folder.dir.path().join(&copy),
+                )
+                .unwrap();
                 folder.feed([copy]);
             }
         }
