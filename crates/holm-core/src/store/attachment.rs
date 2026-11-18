@@ -192,15 +192,19 @@ mod tests {
     #[test]
     fn only_the_exact_folder_holds_attachments() {
         assert_eq!(folder(), Some(folder_path("attachments")));
-        assert!(is(&folder_path("attachments")));
-        assert!(!is(&folder_path("Attachments")));
-        assert!(!is(&folder_path("attachments/2026")));
-        assert!(!is(&FolderPath::root()));
         assert!(holds(&folder_path("attachments")));
         assert!(holds(&folder_path("attachments/2026")));
         assert!(!holds(&folder_path("Attachments")));
         assert!(!holds(&folder_path("attachments2")));
         assert!(!holds(&folder_path("work/attachments")));
         assert!(!holds(&FolderPath::root()));
+    }
+
+    #[test]
+    fn only_the_exact_folder_is_the_attachments_folder() {
+        assert!(is(&folder_path("attachments")));
+        assert!(!is(&folder_path("Attachments")));
+        assert!(!is(&folder_path("attachments/2026")));
+        assert!(!is(&FolderPath::root()));
     }
 }
