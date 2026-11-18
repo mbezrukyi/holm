@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, PathPromptOptions, Subscription, Task,
 };
+use holm_core::NotePath;
 use holm_core::model::LinkTarget;
 use holm_editor::{Editor, OpenFile, OpenLink, PasteFiles, PastedFile};
 use holm_markdown::Target;
@@ -24,7 +25,7 @@ use crate::text;
 pub(super) enum LinksEvent {
     /// Open another note, at `heading` when it has one.
     Open {
-        path: PathBuf,
+        path: NotePath,
         heading: Option<String>,
     },
     /// An answer for the message line.
@@ -42,8 +43,8 @@ pub(super) struct Links {
     notes_folder: Entity<NotesFolder>,
     editor: Entity<Editor>,
     backlinks: Entity<Backlinks>,
-    /// The path of the open note, relative to the notes folder.
-    note: Option<PathBuf>,
+    /// The path of the open note.
+    note: Option<NotePath>,
     reading: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -83,7 +84,7 @@ impl Links {
     }
 
     /// Follows the open note to `note`, and reads its links. With no note, it reads nothing.
-    pub(super) fn show(&mut self, note: Option<PathBuf>, cx: &mut Context<Self>) {
+    pub(super) fn show(&mut self, note: Option<NotePath>, cx: &mut Context<Self>) {
         self.note = note;
         self.read(cx);
     }
@@ -178,7 +179,7 @@ impl Links {
     }
 
     /// Opens the note at `path` at `heading`, or at the top when the note has no such heading.
-    fn open_at(&mut self, path: PathBuf, heading: Option<String>, cx: &mut Context<Self>) {
+    fn open_at(&mut self, path: NotePath, heading: Option<String>, cx: &mut Context<Self>) {
         if self.note.as_ref() != Some(&path) {
             cx.emit(LinksEvent::Open { path, heading });
         } else if let Some(heading) = heading {

@@ -2,23 +2,22 @@
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use crate::model::{Link, LinkTarget, NoteInfo, NoteSet, Order, Tag};
-use crate::store::folder_of;
+use crate::paths::{self, FolderPath, NotePath, Scope};
 
 /// The facts of the notes folder at one moment, from [`Core::snapshot`](crate::Core::snapshot).
 /// It never changes.
 ///
-/// It is cheap to clone. All paths are relative to the notes folder, as in
-/// [`Core`](crate::Core).
+/// It is cheap to clone.
 #[derive(Clone, Debug, Default)]
 pub struct Snapshot {
     revision: u64,
-    notes: imbl::HashMap<PathBuf, Arc<Entry>>,
-    ids: imbl::HashMap<String, PathBuf>,
-    folders: imbl::OrdSet<PathBuf>,
+    notes: imbl::HashMap<NotePath, Arc<Entry>>,
+    ids: imbl::HashMap<String, NotePath>,
+    folders: imbl::OrdSet<FolderPath>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -32,7 +31,7 @@ struct Entry {
 /// [`Snapshot::apply`] takes them out first, so a note can move to a path and keep its id.
 #[derive(Debug, Default)]
 pub(crate) struct Delta {
-    pub(crate) removed: Vec<PathBuf>,
+    pub(crate) removed: Vec<NotePath>,
     pub(crate) put: Vec<(NoteInfo, Vec<Link>)>,
 }
 
@@ -62,7 +61,7 @@ impl Snapshot {
     }
 
     /// The paths of the notes of `set`, in `order`. Pinned notes are on top.
-    pub fn paths(&self, set: NoteSet<'_>, order: Order) -> Vec<PathBuf> {
+    pub fn paths(&self, set: NoteSet<'_>, order: Order) -> Vec<NotePath> {
         let mut notes: Vec<&NoteInfo> = self.matching(set).collect();
         sort(&mut notes, order);
         notes.into_iter().map(|note| note.path.clone()).collect()
@@ -112,29 +111,24 @@ impl Snapshot {
         tag_tree(&counts)
     }
 
-    /// The count of notes right in each folder, without the notes of its subfolders. The root
-    /// folder is the empty path. A folder with no notes is not in the map.
-    pub fn folder_counts(&self) -> HashMap<&Path, usize> {
-        let mut counts = HashMap::new();
-        for entry in self.notes.values() {
-            *counts.entry(folder_of(&entry.info.path)).or_default() += 1;
-        }
-        counts
+    /// The count of notes right in each folder, without the notes of its subfolders. A folder
+    /// with no notes is not in the map.
+    pub fn folder_counts(&self) -> HashMap<FolderPath, usize> {
+        paths::folder_counts(self.notes.keys())
     }
 
     /// The links and embedded files in the note at `path`, in the order of its text.
     ///
     /// A note that the snapshot does not know has no links.
-    pub fn links(&self, path: impl AsRef<Path>) -> &[Link] {
+    pub fn links(&self, path: &NotePath) -> &[Link] {
         self.notes
-            .get(path.as_ref())
+            .get(path)
             .map_or(&[], |entry| entry.links.as_slice())
     }
 
     /// The other notes that link to the note at `path`, by its id or by its file path. The
     /// newest change is first, as in [`Snapshot::newest`].
-    pub fn backlinks(&self, path: impl AsRef<Path>) -> Vec<NoteInfo> {
-        let path = path.as_ref();
+    pub fn backlinks(&self, path: &NotePath) -> Vec<NoteInfo> {
         let Some(target) = self.notes.get(path) else {
             return Vec::new();
         };
@@ -143,10 +137,10 @@ impl Snapshot {
             .notes
             .values()
             .filter(|entry| {
-                entry.info.path != path
+                entry.info.path != *path
                     && entry.links.iter().any(|link| match &link.target {
                         LinkTarget::Note { id: to, .. } => Some(to) == id,
-                        LinkTarget::File(file) => file == path,
+                        LinkTarget::File(file) => file.as_path() == AsRef::<Path>::as_ref(path),
                         LinkTarget::Heading(_) | LinkTarget::Web(_) => false,
                     })
             })
@@ -157,8 +151,8 @@ impl Snapshot {
     }
 
     /// The note at `path`, or `None` when no note is there.
-    pub fn note(&self, path: impl AsRef<Path>) -> Option<&NoteInfo> {
-        self.notes.get(path.as_ref()).map(|entry| &entry.info)
+    pub fn note(&self, path: &NotePath) -> Option<&NoteInfo> {
+        self.notes.get(path).map(|entry| &entry.info)
     }
 
     /// The note with `id`, or `None` when no note has it.
@@ -169,17 +163,17 @@ impl Snapshot {
 
     /// The paths of `paths` that the snapshot has a note at, in `order`. Pinned notes are on
     /// top. The others are left out.
-    pub fn sorted(&self, paths: impl IntoIterator<Item = PathBuf>, order: Order) -> Vec<PathBuf> {
+    pub fn sorted(&self, paths: impl IntoIterator<Item = NotePath>, order: Order) -> Vec<NotePath> {
         let mut notes: Vec<&NoteInfo> = paths
             .into_iter()
-            .filter_map(|path| self.note(path))
+            .filter_map(|path| self.note(&path))
             .collect();
         sort(&mut notes, order);
         notes.into_iter().map(|note| note.path.clone()).collect()
     }
 
     /// The paths of `paths` in `set`, in the same order. The paths come from this snapshot.
-    pub fn keep(&self, paths: &[PathBuf], set: NoteSet<'_>) -> Vec<PathBuf> {
+    pub fn keep(&self, paths: &[NotePath], set: NoteSet<'_>) -> Vec<NotePath> {
         paths
             .iter()
             .filter(|path| set.holds_at(path, || self.note(path)))
@@ -190,12 +184,12 @@ impl Snapshot {
     /// Every subfolder of the notes folder, sorted by path.
     ///
     /// Hidden folders, symlinks and the `attachments/` folder at the root are skipped.
-    pub fn folders(&self) -> impl Iterator<Item = &Path> {
-        self.folders.iter().map(PathBuf::as_path)
+    pub fn folders(&self) -> impl Iterator<Item = &FolderPath> {
+        self.folders.iter()
     }
 
     /// A snapshot that holds `notes` and `folders`, with revision 0.
-    pub(crate) fn new(notes: Vec<(NoteInfo, Vec<Link>)>, folders: Vec<PathBuf>) -> Self {
+    pub(crate) fn new(notes: Vec<(NoteInfo, Vec<Link>)>, folders: Vec<FolderPath>) -> Self {
         let mut snapshot = Self {
             folders: folders.into_iter().collect(),
             ..Self::default()
@@ -235,11 +229,11 @@ impl Snapshot {
 
     /// Puts `found` in place of the folders at or below `scope`. It returns whether they changed.
     /// `found` must be sorted.
-    pub(crate) fn set_folders(&mut self, scope: &Path, found: Vec<PathBuf>) -> bool {
-        let old: Vec<PathBuf> = self
+    pub(crate) fn set_folders(&mut self, scope: &Scope, found: Vec<FolderPath>) -> bool {
+        let old: Vec<FolderPath> = self
             .folders
             .iter()
-            .filter(|folder| folder.starts_with(scope))
+            .filter(|folder| scope.holds_folder(folder))
             .cloned()
             .collect();
         if old == found {
@@ -258,7 +252,7 @@ impl Snapshot {
         self
     }
 
-    fn remove(&mut self, path: &Path) -> bool {
+    fn remove(&mut self, path: &NotePath) -> bool {
         let Some(old) = self.notes.remove(path) else {
             return false;
         };
@@ -293,7 +287,7 @@ fn last_change(a: &NoteInfo, b: &NoteInfo) -> Ordering {
 fn newest(a: &NoteInfo, b: &NoteInfo) -> Ordering {
     b.modified
         .cmp(&a.modified)
-        .then_with(|| compare_paths(&a.path, &b.path))
+        .then_with(|| a.path.cmp(&b.path))
 }
 
 fn title_key(note: &NoteInfo) -> (bool, String) {
@@ -301,24 +295,7 @@ fn title_key(note: &NoteInfo) -> (bool, String) {
 }
 
 fn by_title(a: &((bool, String), &NoteInfo), b: &((bool, String), &NoteInfo)) -> Ordering {
-    a.0.cmp(&b.0)
-        .then_with(|| compare_paths(&a.1.path, &b.1.path))
-}
-
-/// The order of [`Path::cmp`], but faster. It compares bytes, with `/` as the lowest byte.
-///
-/// This gives the order of [`Path::cmp`] only for relative paths with no `.` or `..` part, no
-/// `//` and no `/` at the end. Snapshot paths are like this.
-fn compare_paths(a: &Path, b: &Path) -> Ordering {
-    let key = |byte: u8| if byte == b'/' { 0 } else { byte };
-    let (a, b) = (
-        a.as_os_str().as_encoded_bytes(),
-        b.as_os_str().as_encoded_bytes(),
-    );
-    match a.iter().zip(b).find(|(x, y)| x != y) {
-        Some((&x, &y)) => key(x).cmp(&key(y)),
-        None => a.len().cmp(&b.len()),
-    }
+    a.0.cmp(&b.0).then_with(|| a.1.path.cmp(&b.1.path))
 }
 
 /// Builds the tag tree from the count of notes of each tag. A parent tag counts the notes of its
@@ -350,35 +327,4 @@ fn tag_children(
         .collect();
     tags.sort_by_cached_key(|tag| (tag.name.to_lowercase(), tag.name.clone()));
     tags
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::Path;
-
-    use proptest::prelude::*;
-
-    use super::compare_paths;
-
-    /// A relative path with no `.` or `..` part, no `//` and no `/` at the end.
-    fn note_path() -> impl Strategy<Value = String> {
-        let part =
-            "[ !#+,.a-bA-Bé-]{1,4}".prop_filter("not . or ..", |part| part != "." && part != "..");
-        prop::collection::vec(part, 1..4).prop_map(|parts| parts.join("/"))
-    }
-
-    proptest! {
-        #[test]
-        fn same_order_as_path_cmp(a in note_path(), b in note_path()) {
-            let (a, b) = (Path::new(&a), Path::new(&b));
-            prop_assert_eq!(compare_paths(a, b), a.cmp(b));
-        }
-
-        #[test]
-        fn same_order_with_a_shared_start(start in note_path(), a in note_path(), b in note_path()) {
-            let (a, b) = (format!("{start}{a}"), format!("{start}/{b}"));
-            let (a, b) = (Path::new(&a), Path::new(&b));
-            prop_assert_eq!(compare_paths(a, b), a.cmp(b));
-        }
-    }
 }

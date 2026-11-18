@@ -9,7 +9,6 @@
 //! The note takes the focus while the create write runs, because the editor is hidden.
 //! - A refused title keeps the field open.
 
-use std::path::PathBuf;
 use std::rc::Rc;
 
 use gpui_kit::{
@@ -17,6 +16,7 @@ use gpui_kit::{
     IntoElement, MouseButton, Render, Role, StatefulInteractiveElement as _, Subscription,
     TestSupportExt as _, Window,
 };
+use holm_core::FolderPath;
 use holm_core::model::Note;
 
 use crate::name_field::{NameEvent, NameWrite};
@@ -44,7 +44,7 @@ impl NewNote {
     /// A note for `folder` with `tag`, with the focus in its title field.
     pub(crate) fn new(
         notes_folder: Entity<NotesFolder>,
-        folder: PathBuf,
+        folder: FolderPath,
         tag: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,

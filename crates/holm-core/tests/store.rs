@@ -5,13 +5,13 @@
 mod common;
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use common::Folder;
+use common::{Folder, folder_path, note_path};
 use holm_core::model::{NoteSet, Order};
-use holm_core::{Core, Error, NameProblem};
+use holm_core::{Core, Error, NameProblem, NotePath};
 
-fn paths(items: impl IntoIterator<Item = PathBuf>) -> Vec<String> {
+fn paths<P: AsRef<Path>>(items: impl IntoIterator<Item = P>) -> Vec<String> {
     let mut paths = common::paths(items);
     paths.sort();
     paths
@@ -106,7 +106,7 @@ fn folders_lists_nested_folders_without_attachments() {
         .core
         .snapshot()
         .folders()
-        .map(Path::to_path_buf)
+        .map(common::path_buf)
         .collect::<Vec<_>>();
 
     assert_eq!(
@@ -122,9 +122,9 @@ fn read_gives_the_fields_and_the_body() {
         "---\nid: 01JC3X\ntags: [work, work/holm]\npinned: true\nauthor: me\n---\n# Big plans\n\nText.\n",
     )]);
 
-    let note = folder.core.read("work/Plans.md").unwrap();
+    let note = folder.core.read(&note_path("work/Plans.md")).unwrap();
 
-    assert_eq!(note.info.path, Path::new("work/Plans.md"));
+    assert_eq!(note.info.path, note_path("work/Plans.md"));
     assert_eq!(note.info.id.unwrap().as_str(), "01JC3X");
     assert_eq!(note.info.title, "Plans");
     assert_eq!(note.info.tags, ["work", "work/holm"]);
@@ -139,11 +139,11 @@ fn the_title_is_the_file_name_and_never_the_heading() {
         ("Shopping list.md", "milk\n"),
     ]);
 
-    let plans = folder.core.read("Plans.md").unwrap();
+    let plans = folder.core.read(&note_path("Plans.md")).unwrap();
     assert_eq!(plans.info.title, "Plans");
     assert_eq!(plans.info.preview, "Spring plans");
 
-    let note = folder.core.read("Shopping list.md").unwrap();
+    let note = folder.core.read(&note_path("Shopping list.md")).unwrap();
 
     assert_eq!(note.info.title, "Shopping list");
     assert_eq!(note.info.id, None);
@@ -152,15 +152,9 @@ fn the_title_is_the_file_name_and_never_the_heading() {
 }
 
 #[test]
-fn read_refuses_paths_outside_the_notes() {
-    let folder = Folder::new(&[("a.md", ""), (".hidden.md", ""), ("a.txt", "")]);
-
+fn no_note_path_points_outside_the_notes() {
     for path in ["../a.md", "/a.md", ".hidden.md", "a.txt", "./a.md", ""] {
-        let result = folder.core.read(path);
-        assert!(
-            matches!(result, Err(Error::BadPath { .. })),
-            "{path}: {result:?}"
-        );
+        assert_eq!(NotePath::new(path), None, "{path}");
     }
 }
 
@@ -170,11 +164,11 @@ fn read_fails_on_a_missing_note_and_on_bytes_that_are_not_text() {
     fs::write(folder.dir.path().join("bad.md"), [b'a', 0xff]).unwrap();
 
     assert!(matches!(
-        folder.core.read("missing.md"),
+        folder.core.read(&note_path("missing.md")),
         Err(Error::Read { .. })
     ));
     assert!(matches!(
-        folder.core.read("bad.md"),
+        folder.core.read(&note_path("bad.md")),
         Err(Error::NotUtf8 { .. })
     ));
 }
@@ -183,7 +177,10 @@ fn read_fails_on_a_missing_note_and_on_bytes_that_are_not_text() {
 fn save_adds_an_id_on_the_first_write_and_keeps_it() {
     let folder = Folder::new(&[("a.md", "# A\n")]);
 
-    let saved = folder.core.save("a.md", "# A\n\nMore.\n").unwrap();
+    let saved = folder
+        .core
+        .save(&note_path("a.md"), "# A\n\nMore.\n")
+        .unwrap();
 
     let id = saved.info.id.clone().unwrap();
     assert_eq!(id.as_str().len(), 26, "a ULID");
@@ -191,7 +188,15 @@ fn save_adds_an_id_on_the_first_write_and_keeps_it() {
         folder.text("a.md"),
         format!("---\nid: {id}\n---\n# A\n\nMore.\n")
     );
-    assert_eq!(folder.core.save("a.md", "# A\n").unwrap().info.id, Some(id));
+    assert_eq!(
+        folder
+            .core
+            .save(&note_path("a.md"), "# A\n")
+            .unwrap()
+            .info
+            .id,
+        Some(id)
+    );
 }
 
 #[test]
@@ -200,13 +205,13 @@ fn save_writes_the_body_and_keeps_the_frontmatter_of_the_file() {
         "a.md",
         "---\nauthor: me\nid: X1\ntags: [work]\n# a comment\n---\nBody\n",
     )]);
-    folder.core.read("a.md").unwrap();
+    folder.core.read(&note_path("a.md")).unwrap();
     folder.write(
         "a.md",
         "---\nauthor: me\nid: X1\ntags: [work, home]\npinned: true\n# a comment\n---\nBody\n",
     );
 
-    let saved = folder.core.save("a.md", "New body\n").unwrap();
+    let saved = folder.core.save(&note_path("a.md"), "New body\n").unwrap();
 
     assert_eq!(
         folder.text("a.md"),
@@ -221,7 +226,7 @@ fn save_keeps_the_old_time_when_it_only_adds_the_id() {
     let folder = Folder::new(&[("a.md", "Body\n")]);
     let time = folder.set_time("a.md", 1_000_000);
 
-    let saved = folder.core.save("a.md", "Body\n").unwrap();
+    let saved = folder.core.save(&note_path("a.md"), "Body\n").unwrap();
 
     assert!(saved.info.id.is_some());
     assert_eq!(saved.info.modified, time);
@@ -232,7 +237,7 @@ fn save_gives_a_new_time_when_the_body_changes() {
     let folder = Folder::new(&[("a.md", "---\nid: X1\n---\nBody\n")]);
     let time = folder.set_time("a.md", 1_000_000);
 
-    let saved = folder.core.save("a.md", "New body\n").unwrap();
+    let saved = folder.core.save(&note_path("a.md"), "New body\n").unwrap();
 
     assert!(saved.info.modified > time);
 }
@@ -243,17 +248,23 @@ fn save_with_no_change_does_not_write() {
     let folder = Folder::new(&[("a.md", text)]);
     let time = folder.set_time("a.md", 1_000_000);
 
-    folder.core.save("a.md", "Body\n").unwrap();
+    folder.core.save(&note_path("a.md"), "Body\n").unwrap();
 
     assert_eq!(folder.text("a.md"), text, "the flow list stays");
-    assert_eq!(folder.core.read("a.md").unwrap().info.modified, time);
+    assert_eq!(
+        folder.core.read(&note_path("a.md")).unwrap().info.modified,
+        time
+    );
 }
 
 #[test]
 fn save_adds_a_final_line_break_with_the_line_ending_of_the_file() {
     let folder = Folder::new(&[("a.md", "---\r\nid: X1\r\n---\r\nBody\r\n")]);
 
-    folder.core.save("a.md", "Body\r\nMore").unwrap();
+    folder
+        .core
+        .save(&note_path("a.md"), "Body\r\nMore")
+        .unwrap();
 
     assert_eq!(
         folder.text("a.md"),
@@ -269,7 +280,7 @@ fn save_keeps_the_permissions_and_leaves_no_temp_file() {
     let path = folder.dir.path().join("a.md");
     fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
 
-    folder.core.save("a.md", "New\n").unwrap();
+    folder.core.save(&note_path("a.md"), "New\n").unwrap();
 
     let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o640);
@@ -282,7 +293,7 @@ fn save_fails_on_a_missing_note() {
     fs::remove_file(folder.dir.path().join("a.md")).unwrap();
 
     assert!(matches!(
-        folder.core.save("a.md", "New\n"),
+        folder.core.save(&note_path("a.md"), "New\n"),
         Err(Error::Read { .. })
     ));
     assert_eq!(folder.files(), Vec::<String>::new());
@@ -294,7 +305,7 @@ fn restore_writes_a_deleted_note_again_with_its_id_tags_and_pin() {
         "a.md",
         "---\nid: X1\ntags: [work]\npinned: true\n---\n# A\n",
     )]);
-    let mut note = folder.core.read("a.md").unwrap();
+    let mut note = folder.core.read(&note_path("a.md")).unwrap();
     fs::remove_file(folder.path("a.md")).unwrap();
     note.body = "# A\n\nMine.\n".to_owned();
 
@@ -310,7 +321,7 @@ fn restore_writes_a_deleted_note_again_with_its_id_tags_and_pin() {
 #[test]
 fn restore_saves_the_body_over_a_file_that_is_back() {
     let folder = Folder::new(&[("a.md", "---\nid: X1\ntags: [mine]\n---\n# A\n")]);
-    let mut note = folder.core.read("a.md").unwrap();
+    let mut note = folder.core.read(&note_path("a.md")).unwrap();
     folder.write("a.md", "---\nid: X1\ntags: [theirs]\n---\n# Theirs\n");
     note.body = "# Mine\n".to_owned();
 
@@ -326,11 +337,11 @@ fn restore_saves_the_body_over_a_file_that_is_back() {
 fn create_writes_the_title_as_the_file_name() {
     let folder = Folder::new(&[("work/x.md", "")]);
 
-    let first = folder.core.create("", "Plans").unwrap();
-    let nested = folder.core.create("work", "Plans").unwrap();
+    let first = folder.core.create(&folder_path(""), "Plans").unwrap();
+    let nested = folder.core.create(&folder_path("work"), "Plans").unwrap();
 
-    assert_eq!(first.info.path, Path::new("Plans.md"));
-    assert_eq!(nested.info.path, Path::new("work/Plans.md"));
+    assert_eq!(first.info.path, note_path("Plans.md"));
+    assert_eq!(nested.info.path, note_path("work/Plans.md"));
     let id = first.info.id.unwrap();
     assert_ne!(Some(&id), nested.info.id.as_ref());
     assert_eq!(folder.text("Plans.md"), format!("---\nid: {id}\n---\n"));
@@ -341,13 +352,13 @@ fn create_writes_the_title_as_the_file_name() {
 #[test]
 fn create_refuses_a_taken_or_bad_title_and_writes_nothing() {
     let folder = Folder::new(&[("Plans.md", "taken\n")]);
-    let problem = |title: &str| match folder.core.create("", title) {
+    let problem = |title: &str| match folder.core.create(&folder_path(""), title) {
         Err(Error::BadName { problem, .. }) => Some(problem),
         _ => None,
     };
 
     assert!(matches!(
-        folder.core.create("", "plans"),
+        folder.core.create(&folder_path(""), "plans"),
         Err(Error::NameTaken { .. })
     ));
     assert_eq!(problem(""), Some(NameProblem::Empty));
@@ -355,36 +366,33 @@ fn create_refuses_a_taken_or_bad_title_and_writes_nothing() {
     assert_eq!(problem(".hidden"), Some(NameProblem::Dot));
     assert_eq!(problem(&"x".repeat(253)), Some(NameProblem::TooLong));
     assert_eq!(folder.files(), ["Plans.md"]);
-    assert!(folder.core.create("", &"x".repeat(252)).is_ok());
+    assert!(
+        folder
+            .core
+            .create(&folder_path(""), &"x".repeat(252))
+            .is_ok()
+    );
 }
 
 #[test]
 fn create_trims_the_title_and_takes_attachments_at_the_root() {
     let folder = Folder::new(&[]);
 
-    let plans = folder.core.create("", "  Plans  ").unwrap();
-    let attachments = folder.core.create("", "attachments").unwrap();
+    let plans = folder.core.create(&folder_path(""), "  Plans  ").unwrap();
+    let attachments = folder.core.create(&folder_path(""), "attachments").unwrap();
 
-    assert_eq!(plans.info.path, Path::new("Plans.md"));
+    assert_eq!(plans.info.path, note_path("Plans.md"));
     assert_eq!(plans.info.title, "Plans");
-    assert_eq!(attachments.info.path, Path::new("attachments.md"));
+    assert_eq!(attachments.info.path, note_path("attachments.md"));
 }
 
 #[test]
-fn create_fails_in_a_missing_or_hidden_folder() {
+fn create_fails_in_a_missing_folder() {
     let folder = Folder::new(&[]);
 
     assert!(matches!(
-        folder.core.create("missing", "a"),
+        folder.core.create(&folder_path("missing"), "a"),
         Err(Error::Write { .. })
-    ));
-    assert!(matches!(
-        folder.core.create(".git", "a"),
-        Err(Error::BadPath { .. })
-    ));
-    assert!(matches!(
-        folder.core.create("../x", "a"),
-        Err(Error::BadPath { .. })
     ));
 }
 
@@ -395,10 +403,15 @@ fn the_handle_works_from_many_threads() {
     let handles: Vec<_> = (0..8)
         .map(|n| {
             let core = folder.core.clone();
-            std::thread::spawn(move || core.create("", &n.to_string()).unwrap().info.path)
+            std::thread::spawn(move || {
+                core.create(&folder_path(""), &n.to_string())
+                    .unwrap()
+                    .info
+                    .path
+            })
         })
         .collect();
-    let mut created: Vec<PathBuf> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    let mut created: Vec<NotePath> = handles.into_iter().map(|h| h.join().unwrap()).collect();
     created.sort();
     created.dedup();
 

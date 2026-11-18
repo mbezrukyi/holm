@@ -5,9 +5,9 @@
 mod common;
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use common::Folder;
+use common::{Folder, folder_path, note_path};
 use holm_core::model::{DeleteCount, LinkTarget, NoteInfo, NoteSet, Order};
 use holm_core::{Error, NameProblem};
 
@@ -41,7 +41,7 @@ fn file_links(folder: &Folder, path: &str) -> Vec<PathBuf> {
     folder
         .core
         .snapshot()
-        .links(path)
+        .links(&note_path(path))
         .to_vec()
         .into_iter()
         .filter_map(|link| match link.target {
@@ -59,10 +59,10 @@ fn rename_note_renames_the_file_and_keeps_its_text_and_time() {
 
     let info = folder
         .core
-        .rename_note("work/Untitled.md", "Plans")
+        .rename_note(&note_path("work/Untitled.md"), "Plans")
         .unwrap();
 
-    assert_eq!(info.path, Path::new("work/Plans.md"));
+    assert_eq!(info.path, note_path("work/Plans.md"));
     assert_eq!(info.title, "Plans");
     assert_eq!(info.modified, time);
     assert_eq!(folder.text("work/Plans.md"), text);
@@ -73,13 +73,13 @@ fn rename_note_renames_the_file_and_keeps_its_text_and_time() {
 #[test]
 fn rename_note_refuses_a_taken_or_bad_title_and_moves_nothing() {
     let folder = Folder::new(&[("Plans.md", "# Plans\n"), ("a.md", "# A\n")]);
-    let problem = |title: &str| match folder.core.rename_note("a.md", title) {
+    let problem = |title: &str| match folder.core.rename_note(&note_path("a.md"), title) {
         Err(Error::BadName { problem, .. }) => Some(problem),
         _ => None,
     };
 
     assert!(matches!(
-        folder.core.rename_note("a.md", "plans"),
+        folder.core.rename_note(&note_path("a.md"), "plans"),
         Err(Error::NameTaken { .. })
     ));
     assert_eq!(problem("  "), Some(NameProblem::Empty));
@@ -93,12 +93,20 @@ fn rename_note_takes_its_own_name_with_other_capital_letters() {
     let folder = Folder::new(&[("Plans.md", "# Plans\n")]);
 
     assert_eq!(
-        folder.core.rename_note("Plans.md", "Plans").unwrap().path,
-        Path::new("Plans.md")
+        folder
+            .core
+            .rename_note(&note_path("Plans.md"), "Plans")
+            .unwrap()
+            .path,
+        note_path("Plans.md")
     );
     assert_eq!(
-        folder.core.rename_note("Plans.md", "plans").unwrap().path,
-        Path::new("plans.md")
+        folder
+            .core
+            .rename_note(&note_path("Plans.md"), "plans")
+            .unwrap()
+            .path,
+        note_path("plans.md")
     );
     assert_eq!(folder.files(), ["plans.md"]);
 }
@@ -109,7 +117,7 @@ fn a_save_never_renames_the_note() {
 
     folder
         .core
-        .save("Plans.md", "# Spring plans\n\nText\n")
+        .save(&note_path("Plans.md"), "# Spring plans\n\nText\n")
         .unwrap();
 
     assert_eq!(folder.files(), ["Plans.md"]);
@@ -123,14 +131,17 @@ fn a_renamed_note_keeps_its_id_and_its_backlinks() {
         ("b.md", &note("B", "[x](holm:A)\n")),
     ]);
 
-    folder.core.rename_note("a.md", "Target").unwrap();
+    folder
+        .core
+        .rename_note(&note_path("a.md"), "Target")
+        .unwrap();
 
-    let backlinks = folder.core.snapshot().backlinks("Target.md");
+    let backlinks = folder.core.snapshot().backlinks(&note_path("Target.md"));
     assert_eq!(paths(backlinks), ["b.md"]);
     assert_eq!(
         folder
             .core
-            .read("Target.md")
+            .read(&note_path("Target.md"))
             .unwrap()
             .info
             .id
@@ -152,9 +163,12 @@ fn move_note_fixes_its_relative_file_links() {
     let time = folder.set_time("Plans.md", 1_000);
     let before = file_links(&folder, "Plans.md");
 
-    let info = folder.core.move_note("Plans.md", "work/holm").unwrap();
+    let info = folder
+        .core
+        .move_note(&note_path("Plans.md"), &folder_path("work/holm"))
+        .unwrap();
 
-    assert_eq!(info.path, Path::new("work/holm/Plans.md"));
+    assert_eq!(info.path, note_path("work/holm/Plans.md"));
     assert_eq!(info.modified, time);
     let fixed = "\
 # Plans
@@ -175,7 +189,10 @@ fn move_note_keeps_the_text_and_permissions_when_no_link_changes() {
     let folder = Folder::new(&[("a.md", text), ("work/b.md", "")]);
     fs::set_permissions(folder.path("a.md"), fs::Permissions::from_mode(0o600)).unwrap();
 
-    folder.core.move_note("a.md", "work").unwrap();
+    folder
+        .core
+        .move_note(&note_path("a.md"), &folder_path("work"))
+        .unwrap();
 
     assert_eq!(folder.text("work/a.md"), text);
     let mode = fs::metadata(folder.path("work/a.md"))
@@ -195,7 +212,10 @@ fn move_note_into_a_taken_name_fails_and_moves_nothing() {
     ]);
 
     for from in ["a.md", "B.md"] {
-        let error = folder.core.move_note(from, "work").unwrap_err();
+        let error = folder
+            .core
+            .move_note(&note_path(from), &folder_path("work"))
+            .unwrap_err();
         assert!(matches!(error, Error::NameTaken { .. }), "{error:?}");
     }
 
@@ -208,9 +228,12 @@ fn move_note_into_a_taken_name_fails_and_moves_nothing() {
 fn move_note_to_its_own_folder_does_nothing() {
     let folder = Folder::new(&[("work/a.md", "one\n")]);
 
-    let info = folder.core.move_note("work/a.md", "work").unwrap();
+    let info = folder
+        .core
+        .move_note(&note_path("work/a.md"), &folder_path("work"))
+        .unwrap();
 
-    assert_eq!(info.path, Path::new("work/a.md"));
+    assert_eq!(info.path, note_path("work/a.md"));
     assert_eq!(all(&folder), ["work/a.md"]);
 }
 
@@ -218,7 +241,10 @@ fn move_note_to_its_own_folder_does_nothing() {
 fn move_note_to_a_missing_folder_fails_and_keeps_the_note() {
     let folder = Folder::new(&[("a.md", "one\n")]);
 
-    let error = folder.core.move_note("a.md", "missing").unwrap_err();
+    let error = folder
+        .core
+        .move_note(&note_path("a.md"), &folder_path("missing"))
+        .unwrap_err();
 
     assert!(matches!(error, Error::Write { .. }), "{error:?}");
     assert_eq!(folder.text("a.md"), "one\n");
@@ -231,26 +257,28 @@ fn create_folder_keeps_the_typed_name_trimmed() {
 
     let core = &folder.core;
     assert_eq!(
-        core.create_folder("", "Ideas: 2026?").unwrap(),
-        Path::new("Ideas: 2026?")
+        core.create_folder(&folder_path(""), "Ideas: 2026?")
+            .unwrap(),
+        folder_path("Ideas: 2026?")
     );
     assert_eq!(
-        core.create_folder("work", "attachments").unwrap(),
-        Path::new("work/attachments")
+        core.create_folder(&folder_path("work"), "attachments")
+            .unwrap(),
+        folder_path("work/attachments")
     );
     assert_eq!(
-        core.create_folder("", "  Plans  ").unwrap(),
-        Path::new("Plans")
+        core.create_folder(&folder_path(""), "  Plans  ").unwrap(),
+        folder_path("Plans")
     );
     assert!(matches!(
-        core.create_folder("missing", "x"),
+        core.create_folder(&folder_path("missing"), "x"),
         Err(Error::Write { .. })
     ));
     assert_eq!(
         common::paths(
             core.snapshot()
                 .folders()
-                .map(Path::to_path_buf)
+                .map(common::path_buf)
                 .collect::<Vec<_>>()
         ),
         ["Ideas: 2026?", "Plans", "work", "work/attachments"]
@@ -262,7 +290,10 @@ fn create_folder_refuses_a_taken_name() {
     let folder = Folder::new(&[("work/a.md", ""), ("Plans/b.md", ""), ("notes.md", "")]);
 
     for name in ["work", "Work", "plans", "NOTES.md"] {
-        let error = folder.core.create_folder("", name).unwrap_err();
+        let error = folder
+            .core
+            .create_folder(&folder_path(""), name)
+            .unwrap_err();
         assert!(
             matches!(error, Error::NameTaken { .. }),
             "{name}: {error:?}"
@@ -285,13 +316,21 @@ fn create_folder_refuses_a_bad_name() {
         ("Attachments", NameProblem::Attachments),
         (long.as_str(), NameProblem::TooLong),
     ] {
-        let error = folder.core.create_folder("", name).unwrap_err();
+        let error = folder
+            .core
+            .create_folder(&folder_path(""), name)
+            .unwrap_err();
         assert!(
             matches!(error, Error::BadName { problem: found, .. } if found == problem),
             "{name}: {error:?}"
         );
     }
-    assert!(folder.core.create_folder("", &"x".repeat(255)).is_ok());
+    assert!(
+        folder
+            .core
+            .create_folder(&folder_path(""), &"x".repeat(255))
+            .is_ok()
+    );
     assert_eq!(folder.core.snapshot().folders().count(), 1);
 }
 
@@ -300,19 +339,28 @@ fn rename_folder_refuses_a_taken_name_but_takes_its_own_in_other_capitals() {
     let folder = Folder::new(&[("plans/a.md", ""), ("work/b.md", "")]);
 
     for name in ["work", "Work"] {
-        let error = folder.core.rename_folder("plans", name).unwrap_err();
+        let error = folder
+            .core
+            .rename_folder(&folder_path("plans"), name)
+            .unwrap_err();
         assert!(
             matches!(error, Error::NameTaken { .. }),
             "{name}: {error:?}"
         );
     }
-    let error = folder.core.rename_folder("plans", "a/b").unwrap_err();
+    let error = folder
+        .core
+        .rename_folder(&folder_path("plans"), "a/b")
+        .unwrap_err();
     assert!(matches!(error, Error::BadName { .. }), "{error:?}");
     assert_eq!(folder.names(""), ["plans", "work"]);
 
-    let new = folder.core.rename_folder("plans", "Plans").unwrap();
+    let new = folder
+        .core
+        .rename_folder(&folder_path("plans"), "Plans")
+        .unwrap();
 
-    assert_eq!(new, Path::new("Plans"));
+    assert_eq!(new, folder_path("Plans"));
     assert_eq!(folder.names(""), ["Plans", "work"]);
     assert_eq!(all(&folder), ["Plans/a.md", "work/b.md"]);
 }
@@ -327,13 +375,16 @@ fn rename_folder_moves_its_notes_and_keeps_links_that_still_work() {
         ("other.md", &note("O", "[a](holm:A)\n")),
     ]);
 
-    let new = folder.core.rename_folder("work", "Job").unwrap();
+    let new = folder
+        .core
+        .rename_folder(&folder_path("work"), "Job")
+        .unwrap();
 
-    assert_eq!(new, Path::new("Job"));
+    assert_eq!(new, folder_path("Job"));
     let fixed = "![a](../attachments/a.png) [b](b.md) [self](b.md)\n";
     assert_eq!(folder.text("Job/a.md"), note("A", fixed));
     assert_eq!(
-        paths(folder.core.snapshot().backlinks("Job/a.md")),
+        paths(folder.core.snapshot().backlinks(&note_path("Job/a.md"))),
         ["other.md"]
     );
     assert_eq!(
@@ -342,7 +393,7 @@ fn rename_folder_moves_its_notes_and_keeps_links_that_still_work() {
                 .core
                 .snapshot()
                 .folders()
-                .map(Path::to_path_buf)
+                .map(common::path_buf)
                 .collect::<Vec<_>>()
         ),
         ["Job", "Job/sub"]
@@ -363,15 +414,23 @@ fn move_folder_fixes_links_to_files_outside_it() {
     ]);
     let time = folder.set_time("work/a.md", 1_000);
 
-    let new = folder.core.move_folder("work", "archive").unwrap();
+    let new = folder
+        .core
+        .move_folder(&folder_path("work"), &folder_path("archive"))
+        .unwrap();
 
-    assert_eq!(new, Path::new("archive/work"));
+    assert_eq!(new, folder_path("archive/work"));
     assert_eq!(
         folder.text("archive/work/a.md"),
         note("A", "![a](../../attachments/a.png) [b](sub/b.md)\n")
     );
     assert_eq!(
-        folder.core.read("archive/work/a.md").unwrap().info.modified,
+        folder
+            .core
+            .read(&note_path("archive/work/a.md"))
+            .unwrap()
+            .info
+            .modified,
         time
     );
     assert_index_matches_files(
@@ -390,7 +449,10 @@ fn move_folder_into_a_taken_name_fails_and_moves_nothing() {
     ]);
 
     for from in ["work", "plans"] {
-        let error = folder.core.move_folder(from, "archive").unwrap_err();
+        let error = folder
+            .core
+            .move_folder(&folder_path(from), &folder_path("archive"))
+            .unwrap_err();
         assert!(
             matches!(error, Error::NameTaken { .. }),
             "{from}: {error:?}"
@@ -415,20 +477,23 @@ fn some_folders_can_not_move() {
         ("", "work"),
     ] {
         assert!(
-            matches!(core.move_folder(from, to), Err(Error::BadPath { .. })),
+            matches!(
+                core.move_folder(&folder_path(from), &folder_path(to)),
+                Err(Error::BadPath { .. })
+            ),
             "{from} to {to}"
         );
     }
     assert!(matches!(
-        core.rename_folder("attachments", "x"),
+        core.rename_folder(&folder_path("attachments"), "x"),
         Err(Error::BadPath { .. })
     ));
     assert!(matches!(
-        core.rename_folder("missing", "x"),
+        core.rename_folder(&folder_path("missing"), "x"),
         Err(Error::Read { .. })
     ));
     assert!(matches!(
-        core.rename_folder("work/sub/a.md", "x"),
+        core.rename_folder(&folder_path("work/sub/a.md"), "x"),
         Err(Error::Read { .. })
     ));
     assert_eq!(all(&folder), ["work/sub/a.md"]);
@@ -453,13 +518,13 @@ fn delete_note_deletes_only_attachments_that_no_other_note_links() {
     ]);
 
     assert_eq!(
-        folder.core.note_delete_count("a.md").unwrap(),
+        folder.core.note_delete_count(&note_path("a.md")).unwrap(),
         DeleteCount {
             notes: 1,
             attachments: 1
         }
     );
-    folder.core.delete_note("a.md").unwrap();
+    folder.core.delete_note(&note_path("a.md")).unwrap();
 
     assert!(!folder.path("a.md").exists());
     assert!(!folder.path("attachments/only.png").exists());
@@ -473,7 +538,7 @@ fn delete_note_deletes_only_attachments_that_no_other_note_links() {
 fn delete_note_of_a_gone_note_is_no_error() {
     let folder = Folder::new(&[]);
 
-    folder.core.delete_note("gone.md").unwrap();
+    folder.core.delete_note(&note_path("gone.md")).unwrap();
 }
 
 #[test]
@@ -491,13 +556,16 @@ fn delete_folder_deletes_its_notes_and_their_attachments() {
     ]);
 
     assert_eq!(
-        folder.core.folder_delete_count("work").unwrap(),
+        folder
+            .core
+            .folder_delete_count(&folder_path("work"))
+            .unwrap(),
         DeleteCount {
             notes: 2,
             attachments: 1
         }
     );
-    folder.core.delete_folder("work").unwrap();
+    folder.core.delete_folder(&folder_path("work")).unwrap();
 
     assert!(!folder.path("work").exists());
     assert!(!folder.path("attachments/a.png").exists());
@@ -507,7 +575,7 @@ fn delete_folder_deletes_its_notes_and_their_attachments() {
             .core
             .snapshot()
             .folders()
-            .map(Path::to_path_buf)
+            .map(common::path_buf)
             .collect::<Vec<_>>(),
         Vec::<PathBuf>::new()
     );
@@ -518,9 +586,12 @@ fn delete_folder_deletes_its_notes_and_their_attachments() {
 fn some_folders_can_not_be_deleted() {
     let folder = Folder::new(&[("a.md", ""), ("attachments/a.png", "")]);
 
-    for path in ["", "attachments", "../x"] {
+    for path in ["", "attachments"] {
         assert!(
-            matches!(folder.core.delete_folder(path), Err(Error::BadPath { .. })),
+            matches!(
+                folder.core.delete_folder(&folder_path(path)),
+                Err(Error::BadPath { .. })
+            ),
             "{path}"
         );
     }
@@ -537,7 +608,7 @@ fn link_id_adds_only_the_id_line_and_keeps_the_time() {
     let time = folder.set_time("a.md", 1_000);
     folder.reopen();
 
-    let id = folder.core.link_id("a.md").unwrap();
+    let id = folder.core.link_id(&note_path("a.md")).unwrap();
 
     assert_eq!(
         folder.text("a.md"),
@@ -550,8 +621,11 @@ fn link_id_adds_only_the_id_line_and_keeps_the_time() {
             .unwrap(),
         time
     );
-    assert_eq!(folder.core.link_id("a.md").unwrap(), id);
-    assert_eq!(folder.core.link_id("b.md").unwrap().as_str(), "B");
+    assert_eq!(folder.core.link_id(&note_path("a.md")).unwrap(), id);
+    assert_eq!(
+        folder.core.link_id(&note_path("b.md")).unwrap().as_str(),
+        "B"
+    );
     assert_eq!(folder.text("b.md"), note("B", ""));
     let indexed = folder.core.snapshot().notes(NoteSet::All, Order::Title);
     assert_eq!(indexed[0].id.as_ref(), Some(&id));

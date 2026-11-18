@@ -1,10 +1,9 @@
 //! The data of the sidebar: the folder tree rows and the note lists, from one snapshot of the
 //! notes folder.
 
+use holm_core::{FolderPath, Snapshot};
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
 
-use holm_core::Snapshot;
 use holm_core::model::{Change, NoteSet, Order, Tag};
 
 use super::list::NoteList;
@@ -13,7 +12,8 @@ use super::list::NoteList;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Item {
     All,
-    Folder(PathBuf),
+    /// A folder that is not the root.
+    Folder(FolderPath),
     Tag(String),
 }
 
@@ -23,9 +23,9 @@ impl Item {
         match self {
             Self::All => None,
             Self::Folder(path) => path
-                .parent()
-                .filter(|parent| !parent.as_os_str().is_empty())
-                .map(|parent| Self::Folder(parent.to_owned())),
+                .folder()
+                .filter(|parent| !parent.is_root())
+                .map(Self::Folder),
             Self::Tag(name) => name
                 .rsplit_once('/')
                 .map(|(parent, _)| Self::Tag(parent.to_owned())),
@@ -33,10 +33,10 @@ impl Item {
     }
 
     /// The folder for a new note from this item. Notes of "All notes" and tags go in the root.
-    pub(crate) fn folder(&self) -> &Path {
+    pub(crate) fn folder(&self) -> FolderPath {
         match self {
-            Self::Folder(path) => path,
-            Self::All | Self::Tag(_) => Path::new(""),
+            Self::Folder(path) => path.clone(),
+            Self::All | Self::Tag(_) => FolderPath::root(),
         }
     }
 
@@ -54,7 +54,7 @@ impl Item {
         match self {
             Self::All => String::new(),
             Self::Folder(path) => path
-                .file_name()
+                .name()
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_default(),
             Self::Tag(name) => name
@@ -68,7 +68,7 @@ impl Item {
     pub(crate) fn moved(&self, change: &Change) -> Option<Self> {
         match self {
             Self::All => None,
-            Self::Folder(path) => change.path_after(path).map(Self::Folder),
+            Self::Folder(path) => change.folder_after(path).map(Self::Folder),
             Self::Tag(name) => change.tag_after(name).map(Self::Tag),
         }
     }
@@ -116,7 +116,7 @@ pub(crate) struct Tree {
     /// Every note, in the order of the sidebar.
     pub(crate) notes: NoteList,
     /// Every folder, sorted by path, so a folder comes before its children.
-    pub(crate) folders: Vec<PathBuf>,
+    pub(crate) folders: Vec<FolderPath>,
     pub(crate) tags: Vec<Tag>,
 }
 
@@ -125,7 +125,7 @@ impl Tree {
         Self {
             snapshot: snapshot.clone(),
             notes: NoteList::all(snapshot.clone(), order),
-            folders: snapshot.folders().map(Path::to_path_buf).collect(),
+            folders: snapshot.folders().cloned().collect(),
             tags: snapshot.tags(),
         }
     }
@@ -159,7 +159,7 @@ impl Tree {
 
     /// The visible rows: "All notes", then the folders, then the tags. Only the children of
     /// `open` items show. `new_folder` is the parent of the field of a new folder.
-    pub(crate) fn rows(&self, open: &HashSet<Item>, new_folder: Option<&Path>) -> Vec<Row> {
+    pub(crate) fn rows(&self, open: &HashSet<Item>, new_folder: Option<&FolderPath>) -> Vec<Row> {
         let counts = self.snapshot.folder_counts();
         let mut rows = vec![Row {
             item: Item::All,
@@ -171,23 +171,22 @@ impl Tree {
         }];
         for (i, folder) in self.folders.iter().enumerate() {
             let parent_open = folder
-                .ancestors()
-                .skip(1)
-                .take_while(|parent| !parent.as_os_str().is_empty())
-                .all(|parent| open.contains(&Item::Folder(parent.to_owned())));
+                .parents()
+                .take_while(|parent| !parent.is_root())
+                .all(|parent| open.contains(&Item::Folder(parent)));
             if !parent_open {
                 continue;
             }
             let item = Item::Folder(folder.clone());
-            let has_children = new_folder == Some(folder.as_path())
+            let has_children = new_folder == Some(folder)
                 || self
                     .folders
                     .get(i + 1)
-                    .is_some_and(|next| next.starts_with(folder));
+                    .is_some_and(|next| next.is_below(folder));
             rows.push(Row {
                 name: item.name(),
-                depth: folder.components().count() - 1,
-                count: counts.get(folder.as_path()).copied().unwrap_or(0),
+                depth: folder.depth() - 1,
+                count: counts.get(folder).copied().unwrap_or(0),
                 has_children,
                 open: has_children && open.contains(&item),
                 item,
@@ -237,6 +236,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+    use crate::test_paths::folder_path;
 
     /// A notes folder with four notes, and its tree in title order.
     fn tree() -> Tree {
@@ -285,7 +285,7 @@ mod tests {
 
     #[test]
     fn open_items_show_their_children() {
-        let open = HashSet::from([Item::Folder("work".into()), Item::Tag("work".into())]);
+        let open = HashSet::from([Item::Folder(folder_path("work")), Item::Tag("work".into())]);
         let rows = tree().rows(&open, None);
         assert_eq!(
             names(&rows),
@@ -304,11 +304,11 @@ mod tests {
 
     #[test]
     fn an_open_folder_without_child_rows_is_closed() {
-        let open = HashSet::from([Item::Folder("home".into())]);
+        let open = HashSet::from([Item::Folder(folder_path("home"))]);
         let rows = tree().rows(&open, None);
         assert!(!rows[1].has_children && !rows[1].open);
 
-        let rows = tree().rows(&open, Some(Path::new("home")));
+        let rows = tree().rows(&open, Some(&folder_path("home")));
         assert!(rows[1].has_children && rows[1].open);
     }
 
@@ -318,12 +318,12 @@ mod tests {
         let paths = |item: Item| -> Vec<String> {
             tree.list(&item)
                 .notes()
-                .map(|note| note.path.display().to_string())
+                .map(|note| note.path.to_string())
                 .collect()
         };
         assert_eq!(paths(Item::All).len(), 4);
         assert_eq!(
-            paths(Item::Folder("work".into())),
+            paths(Item::Folder(folder_path("work"))),
             ["work/b.md", "work/c.md"]
         );
         assert_eq!(paths(Item::Tag("work".into())), ["a.md", "work/b.md"]);
@@ -333,26 +333,26 @@ mod tests {
     #[test]
     fn items_know_their_parent_and_folder() {
         assert_eq!(
-            Item::Folder("work/deep".into()).parent(),
-            Some(Item::Folder("work".into()))
+            Item::Folder(folder_path("work/deep")).parent(),
+            Some(Item::Folder(folder_path("work")))
         );
-        assert_eq!(Item::Folder("work".into()).parent(), None);
+        assert_eq!(Item::Folder(folder_path("work")).parent(), None);
         assert_eq!(
             Item::Tag("work/holm".into()).parent(),
             Some(Item::Tag("work".into()))
         );
-        assert_eq!(Item::Tag("work/holm".into()).folder(), Path::new(""));
+        assert_eq!(Item::Tag("work/holm".into()).folder(), FolderPath::root());
         assert!(tree().has(&Item::Tag("work/holm".into())));
-        assert!(!tree().has(&Item::Folder("gone".into())));
+        assert!(!tree().has(&Item::Folder(folder_path("gone"))));
     }
 
     #[test]
     fn a_rename_moves_the_item_and_its_children() {
-        let folder = |path: &str| Item::Folder(path.into());
+        let folder = |path: &str| Item::Folder(folder_path(path));
         let tag = |name: &str| Item::Tag(name.into());
         let work = Change::FolderMoved {
-            from: "work".into(),
-            to: "job".into(),
+            from: folder_path("work"),
+            to: folder_path("job"),
         };
         assert_eq!(folder("work").moved(&work), Some(folder("job")));
         assert_eq!(folder("work/deep").moved(&work), Some(folder("job/deep")));
@@ -375,14 +375,14 @@ mod tests {
         let tree = tree();
         let nearest = |item: Item| tree.nearest(&item);
         assert_eq!(
-            nearest(Item::Folder("work/deep".into())),
-            Item::Folder("work/deep".into())
+            nearest(Item::Folder(folder_path("work/deep"))),
+            Item::Folder(folder_path("work/deep"))
         );
         assert_eq!(
-            nearest(Item::Folder("work/gone/deeper".into())),
-            Item::Folder("work".into())
+            nearest(Item::Folder(folder_path("work/gone/deeper"))),
+            Item::Folder(folder_path("work"))
         );
-        assert_eq!(nearest(Item::Folder("gone".into())), Item::All);
+        assert_eq!(nearest(Item::Folder(folder_path("gone"))), Item::All);
         assert_eq!(
             nearest(Item::Tag("work/gone".into())),
             Item::Tag("work".into())

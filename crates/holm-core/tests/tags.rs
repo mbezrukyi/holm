@@ -7,12 +7,12 @@ mod common;
 use std::fs;
 use std::os::unix::fs::PermissionsExt as _;
 
-use common::Folder;
+use common::{Folder, note_path};
 use holm_core::Error;
 use holm_core::model::{NoteSet, Order};
 
 fn tags(folder: &Folder, path: &str) -> Vec<String> {
-    folder.core.read(path).unwrap().info.tags
+    folder.core.read(&note_path(path)).unwrap().info.tags
 }
 
 fn tagged(folder: &Folder, tag: &str) -> Vec<String> {
@@ -28,8 +28,11 @@ fn add_tag_writes_a_clean_tag_and_keeps_the_body_other_fields_and_time() {
     let folder = Folder::new(&[("a.md", "---\nid: A\nauthor: me\n---\n# A\n")]);
     let time = folder.set_time("a.md", 1_000);
 
-    folder.core.add_tag("a.md", "home").unwrap();
-    let info = folder.core.add_tag("a.md", "my work / holm/").unwrap();
+    folder.core.add_tag(&note_path("a.md"), "home").unwrap();
+    let info = folder
+        .core
+        .add_tag(&note_path("a.md"), "my work / holm/")
+        .unwrap();
 
     assert_eq!(info.tags, ["home", "my-work/holm"]);
     assert_eq!(info.modified, time);
@@ -45,7 +48,7 @@ fn add_tag_of_a_tag_the_note_has_does_not_write() {
     let text = "---\nid: A\ntags: [work, home]\n---\n# A\n";
     let folder = Folder::new(&[("a.md", text)]);
 
-    folder.core.add_tag("a.md", "work").unwrap();
+    folder.core.add_tag(&note_path("a.md"), "work").unwrap();
 
     assert_eq!(folder.text("a.md"), text);
 }
@@ -55,7 +58,7 @@ fn add_tag_with_nothing_left_fails() {
     let folder = Folder::new(&[("a.md", "# A\n")]);
 
     assert!(matches!(
-        folder.core.add_tag("a.md", "//"),
+        folder.core.add_tag(&note_path("a.md"), "//"),
         Err(Error::BadTag { .. })
     ));
     assert_eq!(folder.text("a.md"), "# A\n");
@@ -69,7 +72,7 @@ fn remove_tag_keeps_the_other_tags_and_the_child_tags() {
     )]);
     let time = folder.set_time("a.md", 1_000);
 
-    let info = folder.core.remove_tag("a.md", "work").unwrap();
+    let info = folder.core.remove_tag(&note_path("a.md"), "work").unwrap();
 
     assert_eq!(info.tags, ["work/holm", "home"]);
     assert_eq!(info.modified, time);
@@ -79,7 +82,7 @@ fn remove_tag_keeps_the_other_tags_and_the_child_tags() {
 fn remove_tag_of_the_last_tag_removes_the_field() {
     let folder = Folder::new(&[("a.md", "---\nid: A\ntags: [work]\n---\n# A\n")]);
 
-    folder.core.remove_tag("a.md", "work").unwrap();
+    folder.core.remove_tag(&note_path("a.md"), "work").unwrap();
 
     assert_eq!(folder.text("a.md"), "---\nid: A\n---\n# A\n");
     assert_eq!(tagged(&folder, "work"), [] as [String; 0]);
@@ -90,7 +93,7 @@ fn remove_tag_of_a_tag_the_note_does_not_have_does_not_write() {
     let text = "---\nid: A\ntags: [work, home]\n---\n# A\n";
     let folder = Folder::new(&[("a.md", text)]);
 
-    folder.core.remove_tag("a.md", "other").unwrap();
+    folder.core.remove_tag(&note_path("a.md"), "other").unwrap();
 
     assert_eq!(folder.text("a.md"), text);
 }
@@ -99,9 +102,9 @@ fn remove_tag_of_a_tag_the_note_does_not_have_does_not_write() {
 fn tag_writes_keep_a_tag_from_another_tool() {
     let folder = Folder::new(&[("a.md", "---\nid: A\n---\n# A\n")]);
 
-    folder.core.add_tag("a.md", "a").unwrap();
+    folder.core.add_tag(&note_path("a.md"), "a").unwrap();
     folder.write("a.md", "---\nid: A\ntags: [a, b]\n---\n# A\n");
-    folder.core.remove_tag("a.md", "a").unwrap();
+    folder.core.remove_tag(&note_path("a.md"), "a").unwrap();
 
     assert_eq!(tags(&folder, "a.md"), ["b"]);
 }
@@ -111,14 +114,14 @@ fn set_pinned_pins_and_unpins_and_keeps_the_time() {
     let folder = Folder::new(&[("a.md", "---\nid: A\n---\n# A\n"), ("b.md", "# B\n")]);
     let time = folder.set_time("a.md", 1_000);
 
-    let info = folder.core.set_pinned("a.md", true).unwrap();
+    let info = folder.core.set_pinned(&note_path("a.md"), true).unwrap();
     assert!(info.pinned);
     assert_eq!(info.modified, time);
     assert_eq!(folder.text("a.md"), "---\nid: A\npinned: true\n---\n# A\n");
     let first = folder.core.snapshot().notes(NoteSet::All, Order::Title)[0].clone();
     assert!(first.pinned);
 
-    let info = folder.core.set_pinned("a.md", false).unwrap();
+    let info = folder.core.set_pinned(&note_path("a.md"), false).unwrap();
     assert!(!info.pinned);
     assert_eq!(folder.text("a.md"), "---\nid: A\n---\n# A\n");
 }
@@ -138,7 +141,10 @@ fn rename_tag_renames_child_tags_and_keeps_times() {
     assert_eq!(tags(&folder, "a.md"), ["job", "home"]);
     assert_eq!(tags(&folder, "b.md"), ["job/holm"]);
     assert_eq!(tags(&folder, "c.md"), ["workshop"]);
-    assert_eq!(folder.core.read("b.md").unwrap().info.modified, time);
+    assert_eq!(
+        folder.core.read(&note_path("b.md")).unwrap().info.modified,
+        time
+    );
     assert_eq!(tagged(&folder, "work"), [] as [String; 0]);
     assert_eq!(tagged(&folder, "job"), ["a.md", "b.md"]);
 }

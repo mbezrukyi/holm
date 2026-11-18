@@ -5,7 +5,7 @@
 //! in memory until Holm ends.
 
 use std::collections::{HashMap, HashSet};
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::hash::{BuildHasher as _, Hash};
 use std::io;
@@ -15,14 +15,15 @@ use std::sync::{Mutex, PoisonError};
 
 use holm_markdown::{Body, Target};
 use rusqlite::config::DbConfig;
-use rusqlite::types::Value;
+use rusqlite::types::{Type, Value};
 use rusqlite::{Connection, OptionalExtension as _, params};
 
 use crate::error::{Error, Result};
 use crate::model::{Change, Link, LinkTarget, Note, NoteId, NoteInfo};
+use crate::paths::{ATTACHMENTS, NotePath, Scope};
 use crate::relink::resolve;
 use crate::snapshot::Delta;
-use crate::store::{ATTACHMENTS, Stamp, Store, folder_of, time};
+use crate::store::{Stamp, Store, time};
 
 mod search;
 
@@ -89,7 +90,7 @@ pub(crate) struct Removal {
     /// How many notes the delete removes.
     pub(crate) notes: usize,
     /// The attachment files that no other note links.
-    pub(crate) files: Vec<PathBuf>,
+    pub(crate) files: Vec<Scope>,
 }
 
 /// The index file and one connection to it.
@@ -105,7 +106,7 @@ impl Index {
         let path = dir.join(FILE);
         let opened = fs::create_dir_all(dir).map_err(Fail::Io).and_then(|()| {
             let mut conn = connect(&path)?;
-            sync(&mut conn, store, &[PathBuf::new()])?;
+            sync(&mut conn, store, &[Scope::root()])?;
             Ok(conn)
         });
         let conn = match opened {
@@ -120,7 +121,7 @@ impl Index {
     }
 
     /// The paths of the notes whose title, text or tags hold every word of `text`, in no order.
-    pub(crate) fn search(&self, store: &Store, text: &str) -> Result<Vec<PathBuf>> {
+    pub(crate) fn search(&self, store: &Store, text: &str) -> Result<Vec<NotePath>> {
         self.run(store, |conn| Ok(search::find(conn, text)?))
     }
 
@@ -135,8 +136,8 @@ impl Index {
                 "SELECT kind, target, heading, embedded, notes.path FROM links
                 JOIN notes ON notes.key = links.note ORDER BY links.note, pos",
             )?;
-            let mut links: HashMap<PathBuf, Vec<Link>> = HashMap::new();
-            for row in statement.query_map([], |row| Ok((path(row.get(4)?), link(row)?)))? {
+            let mut links: HashMap<NotePath, Vec<Link>> = HashMap::new();
+            for row in statement.query_map([], |row| Ok((note_path(row, 4)?, link(row)?)))? {
                 let (note, link) = row?;
                 links.entry(note).or_default().push(link);
             }
@@ -176,8 +177,8 @@ impl Index {
     }
 
     /// Brings the notes at or below each path in `scopes` up to date with the files.
-    /// The empty path is the whole notes folder. No scope may be inside another.
-    pub(crate) fn refresh(&self, store: &Store, scopes: &[PathBuf]) -> Result<Refresh> {
+    /// No scope may be inside another.
+    pub(crate) fn refresh(&self, store: &Store, scopes: &[Scope]) -> Result<Refresh> {
         self.run(store, |conn| sync(conn, store, scopes))
     }
 
@@ -185,8 +186,8 @@ impl Index {
     ///
     /// The files are the ones in `attachments/` that the notes in `scope` link
     /// and no note outside `scope` links. They may be missing on disk.
-    pub(crate) fn removal(&self, store: &Store, scope: &Path) -> Result<Removal> {
-        let mut prefix = scope.as_os_str().as_bytes().to_vec();
+    pub(crate) fn removal(&self, store: &Store, scope: &Scope) -> Result<Removal> {
+        let mut prefix = scope_bytes(scope).to_vec();
         prefix.push(b'/');
         let attachments = format!("{ATTACHMENTS}/").into_bytes();
         self.run(store, |conn| {
@@ -202,9 +203,13 @@ impl Index {
                 ORDER BY links.target",
             )?;
             let rows = statement.query_map(params![bytes(scope), prefix, attachments], |row| {
-                Ok(path(row.get(0)?))
+                row.get::<_, Vec<u8>>(0)
             })?;
-            let files = rows.collect::<rusqlite::Result<_>>()?;
+            let mut files = Vec::new();
+            for target in rows {
+                let target = OsString::from_vec(target?);
+                files.extend(Scope::new(Path::new(&target)).filter(Scope::is_attachment));
+            }
             Ok(Removal { notes, files })
         })
     }
@@ -277,7 +282,7 @@ fn fresh(path: &Path, store: &Store, fail: &Fail) -> Result<Connection, Fail> {
             let mut conn = Connection::open_in_memory()?;
             settings(&conn)?;
             schema(&mut conn)?;
-            sync(&mut conn, store, &[PathBuf::new()])?;
+            sync(&mut conn, store, &[Scope::root()])?;
             Ok(conn)
         }
         conn => conn,
@@ -327,7 +332,7 @@ fn schema(conn: &mut Connection) -> Result<(), Fail> {
 fn rebuild(path: &Path, store: &Store) -> Result<Connection, Fail> {
     remove(path)?;
     let mut conn = connect(path)?;
-    sync(&mut conn, store, &[PathBuf::new()])?;
+    sync(&mut conn, store, &[Scope::root()])?;
     Ok(conn)
 }
 
@@ -348,26 +353,26 @@ fn remove(path: &Path) -> Result<(), Fail> {
 ///
 /// It handles the files the index knows before new ones. So a known file keeps its id
 /// when a new file has the same id.
-fn sync(conn: &mut Connection, store: &Store, scopes: &[PathBuf]) -> Result<Refresh, Fail> {
+fn sync(conn: &mut Connection, store: &Store, scopes: &[Scope]) -> Result<Refresh, Fail> {
     let mut files = Vec::new();
     for scope in scopes {
         files.extend(store.files(scope)?);
     }
     let tx = conn.transaction()?;
-    let mut known: HashMap<PathBuf, Stamp> = HashMap::new();
+    let mut known: HashMap<NotePath, Stamp> = HashMap::new();
     for scope in scopes {
         known.extend(known_in(&tx, scope)?);
     }
-    let on_disk: HashSet<&Path> = files.iter().map(|(rel, _)| rel.as_path()).collect();
-    let left: Vec<(&Path, Stamp)> = known
+    let on_disk: HashSet<&NotePath> = files.iter().map(|(rel, _)| rel).collect();
+    let left: Vec<(&NotePath, Stamp)> = known
         .iter()
-        .filter(|(rel, _)| !on_disk.contains(rel.as_path()))
-        .map(|(rel, stamp)| (rel.as_path(), *stamp))
+        .filter(|(rel, _)| !on_disk.contains(rel))
+        .map(|(rel, stamp)| (rel, *stamp))
         .collect();
-    let joined: Vec<(&Path, Stamp)> = files
+    let joined: Vec<(&NotePath, Stamp)> = files
         .iter()
         .filter(|(rel, _)| !known.contains_key(rel))
-        .map(|(rel, stamp)| (rel.as_path(), *stamp))
+        .map(|(rel, stamp)| (rel, *stamp))
         .collect();
     let mut moves = Vec::new();
     let mut done = HashSet::new();
@@ -375,17 +380,17 @@ fn sync(conn: &mut Connection, store: &Store, scopes: &[PathBuf]) -> Result<Refr
         if let Some(note) = shift(&tx, from, to)? {
             done.insert(from);
             done.insert(to);
-            moves.push((from.to_owned(), note));
+            moves.push((from.clone(), note));
         }
     }
     let mut gone = Vec::new();
     for (rel, _) in left.iter().filter(|(rel, _)| !done.contains(rel)) {
         gone.extend(delete(&tx, rel)?);
     }
-    let mut todo: Vec<(bool, &Path)> = files
+    let mut todo: Vec<(bool, &NotePath)> = files
         .iter()
-        .filter(|(rel, stamp)| known.get(rel) != Some(stamp) && !done.contains(rel.as_path()))
-        .map(|(rel, _)| (!known.contains_key(rel), rel.as_path()))
+        .filter(|(rel, stamp)| known.get(rel) != Some(stamp) && !done.contains(rel))
+        .map(|(rel, _)| (!known.contains_key(rel), rel))
         .collect();
     todo.sort_unstable();
     let mut written = Vec::new();
@@ -405,7 +410,7 @@ fn sync(conn: &mut Connection, store: &Store, scopes: &[PathBuf]) -> Result<Refr
         }
     }
     tx.commit()?;
-    let mut removed: Vec<PathBuf> = gone.iter().map(|gone| gone.path.clone()).collect();
+    let mut removed: Vec<NotePath> = gone.iter().map(|gone| gone.path.clone()).collect();
     for (from, (info, links)) in &moves {
         removed.push(from.clone());
         put_in.push((info.clone(), links.clone()));
@@ -426,20 +431,17 @@ fn sync(conn: &mut Connection, store: &Store, scopes: &[PathBuf]) -> Result<Refr
 ///
 /// A folder rename keeps the stamps of the files inside it.
 fn pairs<'a>(
-    left: &[(&'a Path, Stamp)],
-    joined: &[(&'a Path, Stamp)],
-) -> Vec<(&'a Path, &'a Path)> {
-    type Key<'a> = (Option<&'a std::ffi::OsStr>, Stamp);
-    let mut sides: HashMap<Key<'a>, (Vec<&'a Path>, Vec<&'a Path>)> = HashMap::new();
+    left: &[(&'a NotePath, Stamp)],
+    joined: &[(&'a NotePath, Stamp)],
+) -> Vec<(&'a NotePath, &'a NotePath)> {
+    type Key<'a> = (&'a OsStr, Stamp);
+    type Sides<'a> = (Vec<&'a NotePath>, Vec<&'a NotePath>);
+    let mut sides: HashMap<Key<'a>, Sides<'a>> = HashMap::new();
     for (rel, stamp) in left {
-        sides
-            .entry((rel.file_name(), *stamp))
-            .or_default()
-            .0
-            .push(rel);
+        sides.entry((rel.name(), *stamp)).or_default().0.push(rel);
     }
     for (rel, stamp) in joined {
-        if let Some(side) = sides.get_mut(&(rel.file_name(), *stamp)) {
+        if let Some(side) = sides.get_mut(&(rel.name(), *stamp)) {
             side.1.push(rel);
         }
     }
@@ -458,17 +460,20 @@ fn pairs<'a>(
 /// A relative file link points to another file after a move, so such a note must be
 /// read again. The index does not keep whether a link was relative, so this
 /// skips every note with a file link.
-fn shift(conn: &Connection, from: &Path, to: &Path) -> Result<Option<(NoteInfo, Vec<Link>)>, Fail> {
+fn shift(
+    conn: &Connection,
+    from: &NotePath,
+    to: &NotePath,
+) -> Result<Option<(NoteInfo, Vec<Link>)>, Fail> {
     let key: Option<i64> = conn
         .prepare_cached(
             "UPDATE notes SET path = ?2, folder = ?3 WHERE path = ?1
             AND NOT EXISTS (SELECT 1 FROM links WHERE links.note = notes.key AND kind = 'file')
             RETURNING key",
         )?
-        .query_row(
-            params![bytes(from), bytes(to), bytes(folder_of(to))],
-            |row| row.get(0),
-        )
+        .query_row(params![bytes(from), bytes(to), bytes(to.folder())], |row| {
+            row.get(0)
+        })
         .optional()?;
     let Some(key) = key else {
         return Ok(None);
@@ -480,22 +485,22 @@ fn shift(conn: &Connection, from: &Path, to: &Path) -> Result<Option<(NoteInfo, 
 }
 
 /// The stamps of the known notes at or below `scope`.
-fn known_in(conn: &Connection, scope: &Path) -> Result<Vec<(PathBuf, Stamp)>, Fail> {
-    let mut prefix = scope.as_os_str().as_bytes().to_vec();
+fn known_in(conn: &Connection, scope: &Scope) -> Result<Vec<(NotePath, Stamp)>, Fail> {
+    let mut prefix = scope_bytes(scope).to_vec();
     prefix.push(b'/');
     let mut statement = conn.prepare_cached(
         "SELECT path, modified, changed, size FROM notes
         WHERE ?1 OR path = ?2 OR substr(path, 1, length(?3)) = ?3",
     )?;
     let rows = statement.query_map(
-        params![scope.as_os_str().is_empty(), bytes(scope), prefix],
+        params![scope == &Scope::root(), bytes(scope), prefix],
         |row| {
             let stamp = Stamp {
                 modified: row.get(1)?,
                 changed: row.get(2)?,
                 size: row.get(3)?,
             };
-            Ok((path(row.get(0)?), stamp))
+            Ok((note_path(row, 0)?, stamp))
         },
     )?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -503,7 +508,7 @@ fn known_in(conn: &Connection, scope: &Path) -> Result<Vec<(PathBuf, Stamp)>, Fa
 
 /// A note that left the index.
 struct Gone {
-    path: PathBuf,
+    path: NotePath,
     id: Option<NoteId>,
     tags: Vec<String>,
 }
@@ -514,7 +519,7 @@ struct Gone {
 /// is a removed note and a new one, as a read would find it.
 fn refresh(
     written: Vec<(NoteInfo, Option<Vec<String>>)>,
-    moves: impl Iterator<Item = (PathBuf, NoteInfo)>,
+    moves: impl Iterator<Item = (NotePath, NoteInfo)>,
     mut gone: Vec<Gone>,
 ) -> Refresh {
     let mut out = Refresh::default();
@@ -567,7 +572,7 @@ fn same_tags(a: &[String], b: &[String]) -> bool {
     a.iter().collect::<HashSet<_>>() == b.iter().collect::<HashSet<_>>()
 }
 
-fn change_path(change: &Change) -> Option<&Path> {
+fn change_path(change: &Change) -> Option<&NotePath> {
     match change {
         Change::Added(note) | Change::Changed(note) | Change::Moved { note, .. } => {
             Some(&note.path)
@@ -596,7 +601,7 @@ fn put(
     {
         if store.exists(&owner) {
             let new_id = NoteId::generate();
-            tracing::info!(%id, new = %new_id, path = %note.info.path.display(), "gave a copied note a new id");
+            tracing::info!(%id, new = %new_id, path = %note.info.path, "gave a copied note a new id");
             match store.edit_fields(&note.info.path, |text| text.set_id(Some(new_id.as_str()))) {
                 Ok((written, written_stamp)) => (note, stamp) = (written, written_stamp),
                 Err(error) => {
@@ -614,7 +619,7 @@ fn put(
 
 /// The links of the note, with file paths from the notes folder.
 fn links_of(root: &Path, note: &Note) -> Vec<Link> {
-    let folder = folder_of(&note.info.path);
+    let folder = note.info.path.folder();
     Body::parse(&note.body)
         .links()
         .iter()
@@ -625,7 +630,7 @@ fn links_of(root: &Path, note: &Note) -> Vec<Link> {
                     heading: heading.clone(),
                 },
                 Target::Heading(heading) => LinkTarget::Heading(heading.clone()),
-                Target::File(file) => LinkTarget::File(resolve(root, folder, file)),
+                Target::File(file) => LinkTarget::File(resolve(root, &folder, file)),
                 Target::Web(address) => LinkTarget::Web(address.clone()),
             },
             embedded: link.embedded,
@@ -633,7 +638,7 @@ fn links_of(root: &Path, note: &Note) -> Vec<Link> {
         .collect()
 }
 
-fn tags_of(conn: &Connection, rel: &Path) -> Result<Vec<String>, Fail> {
+fn tags_of(conn: &Connection, rel: &NotePath) -> Result<Vec<String>, Fail> {
     let mut statement = conn.prepare_cached(
         "SELECT tag FROM tags JOIN notes ON notes.key = tags.note WHERE notes.path = ?1 ORDER BY pos",
     )?;
@@ -641,12 +646,12 @@ fn tags_of(conn: &Connection, rel: &Path) -> Result<Vec<String>, Fail> {
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
-fn owner(conn: &Connection, id: &NoteId) -> Result<Option<PathBuf>, Fail> {
+fn owner(conn: &Connection, id: &NoteId) -> Result<Option<NotePath>, Fail> {
     let owner = conn
         .prepare_cached("SELECT path FROM notes WHERE id = ?1")?
-        .query_row([id.as_str()], |row| row.get(0))
+        .query_row([id.as_str()], |row| note_path(row, 0))
         .optional()?;
-    Ok(owner.map(path))
+    Ok(owner)
 }
 
 /// Writes the rows of one note and returns its links.
@@ -661,8 +666,8 @@ fn write(
     new: bool,
 ) -> Result<Vec<Link>, Fail> {
     let info = &note.info;
-    let folder = folder_of(&info.path);
-    let source_hash = hash((&note.body, folder));
+    let folder = info.path.folder();
+    let source_hash = hash((&note.body, AsRef::<Path>::as_ref(&folder)));
     let old: Option<(i64, i64)> = if new {
         None
     } else {
@@ -693,7 +698,7 @@ fn write(
         .query_row(
             params![
                 bytes(&info.path),
-                bytes(folder),
+                bytes(&folder),
                 info.id.as_ref().map(NoteId::as_str),
                 info.title,
                 info.preview,
@@ -771,7 +776,7 @@ fn hash(value: impl Hash) -> i64 {
 }
 
 /// Removes the note at `rel` from the index, and returns what it was.
-fn delete(conn: &Connection, rel: &Path) -> Result<Option<Gone>, Fail> {
+fn delete(conn: &Connection, rel: &NotePath) -> Result<Option<Gone>, Fail> {
     let row: Option<(i64, Option<String>)> = conn
         .prepare_cached("SELECT key, id FROM notes WHERE path = ?1")?
         .query_row([bytes(rel)], |row| Ok((row.get(0)?, row.get(1)?)))
@@ -784,7 +789,7 @@ fn delete(conn: &Connection, rel: &Path) -> Result<Option<Gone>, Fail> {
     conn.prepare_cached("DELETE FROM notes WHERE key = ?1")?
         .execute([key])?;
     Ok(Some(Gone {
-        path: rel.to_owned(),
+        path: rel.clone(),
         id: id.map(NoteId::from_field),
         tags,
     }))
@@ -793,7 +798,7 @@ fn delete(conn: &Connection, rel: &Path) -> Result<Option<Gone>, Fail> {
 fn note_info(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteInfo> {
     let tags: Option<String> = row.get(6)?;
     Ok(NoteInfo {
-        path: path(row.get(0)?),
+        path: note_path(row, 0)?,
         id: row.get::<_, Option<String>>(1)?.map(NoteId::from_field),
         title: row.get(2)?,
         preview: row.get(5)?,
@@ -823,10 +828,23 @@ fn link(row: &rusqlite::Row<'_>) -> rusqlite::Result<Link> {
     })
 }
 
-fn bytes(path: &Path) -> Value {
-    Value::Blob(path.as_os_str().as_bytes().to_vec())
+fn bytes(path: impl AsRef<Path>) -> Value {
+    Value::Blob(path.as_ref().as_os_str().as_bytes().to_vec())
+}
+
+fn scope_bytes(scope: &Scope) -> &[u8] {
+    AsRef::<Path>::as_ref(scope).as_os_str().as_bytes()
 }
 
 fn path(bytes: Vec<u8>) -> PathBuf {
     PathBuf::from(OsString::from_vec(bytes))
+}
+
+/// The note path in column `index`. A path that is not a note path fails like a broken row, so
+/// the index gets rebuilt.
+fn note_path(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<NotePath> {
+    let bytes: Vec<u8> = row.get(index)?;
+    NotePath::new(OsString::from_vec(bytes)).ok_or_else(|| {
+        rusqlite::Error::FromSqlConversionFailure(index, Type::Blob, "not a note path".into())
+    })
 }

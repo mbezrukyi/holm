@@ -3,7 +3,6 @@
 //! popup under a part of a row.
 
 use std::cell::Cell;
-use std::path::Path;
 use std::rc::Rc;
 
 use gpui_kit::component::input::{Enter, Escape, Input, InputEvent, InputState, MoveDown, MoveUp};
@@ -17,6 +16,7 @@ use gpui_kit::{
     StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _,
     UniformListScrollHandle, Window, div, phi, px, transparent_black, uniform_list,
 };
+use holm_core::NotePath;
 use holm_core::model::NoteInfo;
 
 use crate::icons::Icon;
@@ -123,10 +123,9 @@ impl PickRow {
     }
 }
 
-fn folder(note: &Path) -> Option<SharedString> {
-    note.parent()
-        .filter(|folder| !folder.as_os_str().is_empty())
-        .map(|folder| folder.display().to_string().into())
+fn folder(note: &NotePath) -> Option<SharedString> {
+    let folder = note.folder();
+    (!folder.is_root()).then(|| folder.to_string().into())
 }
 
 /// What a [`PickList`] tells its owner.

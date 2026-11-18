@@ -30,7 +30,7 @@ mod links;
 mod new_note;
 
 use std::borrow::Cow;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -43,6 +43,7 @@ use gpui_kit::{
     px,
 };
 use holm_core::model::{Change, Note, NoteInfo};
+use holm_core::{FolderPath, NotePath};
 use holm_editor::{Changed, Editor, UpFromStart};
 use holm_markdown::Target;
 
@@ -67,13 +68,13 @@ const AUTOSAVE: Duration = Duration::from_millis(500);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PaneEvent {
     /// The pane shows the note at this path.
-    Opened(PathBuf),
+    Opened(NotePath),
     /// The pane shows no note.
     Closed,
     /// Another tool deleted the open note at this path, and the pane has no text to keep.
     /// The app must open another note or call [`NotePane::close`]. The pane cannot pick the
     /// note, because the neighbor comes from the sidebar list.
-    Gone(PathBuf),
+    Gone(NotePath),
 }
 
 /// What happens to the open note when the pane opens another one.
@@ -89,19 +90,19 @@ pub(crate) enum Leave {
 enum Shown {
     Empty,
     /// The note at this path, in the editor.
-    Note(PathBuf),
+    Note(NotePath),
     /// The note after Ctrl+N, before it has a file, in the place of the editor. The editor
     /// keeps the note from before, at `kept`.
     New {
         note: Entity<NewNote>,
-        kept: Option<PathBuf>,
+        kept: Option<NotePath>,
         _subscription: Subscription,
     },
 }
 
 impl Shown {
     /// The note that the user sees and works on.
-    fn note(&self) -> Option<&PathBuf> {
+    fn note(&self) -> Option<&NotePath> {
         match self {
             Self::Note(path) => Some(path),
             Self::Empty | Self::New { .. } => None,
@@ -109,7 +110,7 @@ impl Shown {
     }
 
     /// The note in the editor, also under a new note. Saves, reloads and moves follow it.
-    fn editor(&self) -> Option<&PathBuf> {
+    fn editor(&self) -> Option<&NotePath> {
         match self {
             Self::Note(path) => Some(path),
             Self::New { kept, .. } => kept.as_ref(),
@@ -117,7 +118,7 @@ impl Shown {
         }
     }
 
-    fn editor_mut(&mut self) -> Option<&mut PathBuf> {
+    fn editor_mut(&mut self) -> Option<&mut NotePath> {
         match self {
             Self::Note(path) => Some(path),
             Self::New { kept, .. } => kept.as_mut(),
@@ -134,7 +135,7 @@ pub(crate) struct NotePane {
     root: PathBuf,
     editor: Entity<Editor>,
     tag_row: Entity<TagRow>,
-    title: Entity<TitleField<PathBuf>>,
+    title: Entity<TitleField<NotePath>>,
     backlinks: Entity<Backlinks>,
     links: Entity<Links>,
     shown: Shown,
@@ -175,7 +176,7 @@ impl NotePane {
         let state = line.read(cx).state_bounds();
         let disk_menu = cx.new(|cx| DiskMenu::new(text.clone(), state, window, cx));
         let pane = cx.weak_entity();
-        let rename: NameWrite<PathBuf> = Rc::new(move |title, done, _, cx| {
+        let rename: NameWrite<NotePath> = Rc::new(move |title, done, _, cx| {
             pane.update(cx, |pane, cx| pane.rename(title, done, cx))
                 .ok();
         });
@@ -212,7 +213,7 @@ impl NotePane {
                 pane.change_tag(change.clone(), cx);
             }),
             cx.subscribe(&links, Self::links_event),
-            cx.subscribe(&title, |_, title, event: &NameEvent<PathBuf>, cx| {
+            cx.subscribe(&title, |_, title, event: &NameEvent<NotePath>, cx| {
                 if *event == NameEvent::Blur {
                     title.update(cx, TitleField::close);
                 }
@@ -272,7 +273,7 @@ impl NotePane {
     /// Puts `note` from the disk into the editor. A reload keeps the view and is one undo step.
     fn show(&mut self, note: Note, reload: bool, cx: &mut Context<Self>) {
         self.ending = LineEnding::of(&note.body);
-        let folder = note.info.path.parent().map(|parent| self.root.join(parent));
+        let folder = Some(self.root.join(note.info.path.folder()));
         self.saved = self.editor.update(cx, |editor, cx| {
             if reload {
                 editor.reload_text(&note.body, cx);
@@ -437,7 +438,7 @@ impl NotePane {
             cx.defer(move |cx| done(Ok(()), cx));
             return;
         };
-        let folder = path.parent().map(Path::to_owned).unwrap_or_default();
+        let folder = path.folder();
         let pane = cx.weak_entity();
         let put = move |target: Target, text: String, cx: &mut App| {
             pane.update(cx, |pane, cx| pane.put_link(&target, &text, cx))
@@ -763,10 +764,9 @@ impl NotePane {
             .update(cx, |notes_folder, _| notes_folder.quit());
     }
 
-    /// The path of the note in the editor, also under a new note, relative to the notes
-    /// folder.
-    pub(crate) fn path(&self) -> Option<&Path> {
-        self.shown.editor().map(PathBuf::as_path)
+    /// The path of the note in the editor, also under a new note.
+    pub(crate) fn path(&self) -> Option<&NotePath> {
+        self.shown.editor()
     }
 
     /// Whether the pane shows a new note with no file yet. Speed tests read it with no frame.
@@ -777,13 +777,13 @@ impl NotePane {
 
     /// The note that the user sees. Speed tests read it with no frame.
     #[cfg(test)]
-    pub(crate) fn shown_note(&self) -> Option<&Path> {
-        self.shown.note().map(PathBuf::as_path)
+    pub(crate) fn shown_note(&self) -> Option<&NotePath> {
+        self.shown.note()
     }
 
     /// Opens the note at `path`, and drops a new note. With [`Leave::Keep`], the line first
     /// writes the unsaved text. When that save fails, the pane stays on the note.
-    pub(crate) fn open(&mut self, path: PathBuf, leave: Leave, cx: &mut Context<Self>) {
+    pub(crate) fn open(&mut self, path: NotePath, leave: Leave, cx: &mut Context<Self>) {
         if leave == Leave::Keep && self.shown.note() == Some(&path) {
             return;
         }
@@ -831,13 +831,13 @@ impl NotePane {
         let Some(path) = self.shown.editor_mut() else {
             return;
         };
-        let Some(new) = changes.iter().find_map(|change| change.path_after(path)) else {
+        let Some(new) = changes.iter().find_map(|change| change.note_after(path)) else {
             return;
         };
-        let other_folder = new.parent() != path.parent();
+        let other_folder = new.folder() != path.folder();
         path.clone_from(&new);
         if other_folder {
-            let folder = new.parent().map(|parent| self.root.join(parent));
+            let folder = Some(self.root.join(new.folder()));
             self.editor
                 .update(cx, |editor, cx| editor.set_folder(folder, cx));
         }
@@ -859,7 +859,7 @@ impl NotePane {
     fn rename(
         &mut self,
         title: String,
-        done: Step<holm_core::Result<PathBuf>>,
+        done: Step<holm_core::Result<NotePath>>,
         cx: &mut Context<Self>,
     ) {
         // With no note, the title field is gone too.
@@ -876,7 +876,7 @@ impl NotePane {
     /// only gives its field the focus.
     pub(crate) fn new_note(
         &mut self,
-        folder: PathBuf,
+        folder: FolderPath,
         tag: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,

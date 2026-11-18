@@ -6,6 +6,7 @@
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
@@ -14,10 +15,10 @@ use std::path::Path;
 use crate::error::{Error, NameProblem, Result};
 
 /// The folder for pasted files at the root.
-const ATTACHMENTS: &str = "attachments";
+pub(crate) const ATTACHMENTS: &str = "attachments";
 const NOTE_EXT: &str = ".md";
 /// The longest file name that Linux file systems take.
-const MAX_NAME_BYTES: usize = 255;
+pub(crate) const MAX_NAME_BYTES: usize = 255;
 
 /// The path of a note: a plain path that ends in `.md`, like `work/Plans.md`.
 ///
@@ -30,6 +31,11 @@ pub struct NotePath(Plain);
 /// Its order is the order of [`Path::cmp`].
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct FolderPath(Plain);
+
+/// Any entry in the notes folder: a note, a folder, another file, or a path with nothing
+/// there. The core checks the disk at a scope and below it.
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+pub(crate) struct Scope(Plain);
 
 impl NotePath {
     /// The path, or `None` when it is not a plain path that ends in `.md`.
@@ -72,6 +78,10 @@ impl NotePath {
     /// The folders that hold the note, the nearest first. The root is last.
     pub fn parents(&self) -> impl Iterator<Item = FolderPath> + use<> {
         self.0.parents().map(FolderPath)
+    }
+
+    pub(crate) fn scope(&self) -> Scope {
+        Scope(self.0.clone())
     }
 
     fn from_plain(plain: Plain) -> Option<Self> {
@@ -167,6 +177,61 @@ impl FolderPath {
     /// The folders that hold this folder, the nearest first. The root is last, and has none.
     pub fn parents(&self) -> impl Iterator<Item = Self> + use<> {
         self.0.parents().map(Self)
+    }
+
+    pub(crate) fn scope(&self) -> Scope {
+        Scope(self.0.clone())
+    }
+
+    /// The note with the name `name` from the disk in this folder, or `None` when it is not a
+    /// note name.
+    pub(crate) fn note_named(&self, name: &OsStr) -> Option<NotePath> {
+        Plain::is_part(name.as_bytes())
+            .then(|| self.0.join(name.as_bytes()))
+            .and_then(NotePath::from_plain)
+    }
+
+    /// The folder with the name `name` from the disk in this folder, or `None` when it is
+    /// hidden.
+    pub(crate) fn folder_named(&self, name: &OsStr) -> Option<Self> {
+        Plain::is_part(name.as_bytes()).then(|| Self(self.0.join(name.as_bytes())))
+    }
+}
+
+impl Scope {
+    /// The scope, or `None` when it is not a plain path.
+    pub(crate) fn new(path: &Path) -> Option<Self> {
+        Plain::new(path).map(Self)
+    }
+
+    /// The whole notes folder.
+    pub(crate) fn root() -> Self {
+        Self(Plain::default())
+    }
+
+    /// The scope as a note path, when it is one.
+    pub(crate) fn note(&self) -> Option<NotePath> {
+        NotePath::from_plain(self.0.clone())
+    }
+
+    /// The scope as a folder path. It need not be a folder on disk.
+    pub(crate) fn folder(&self) -> FolderPath {
+        FolderPath(self.0.clone())
+    }
+
+    /// Whether `other` is this scope or below it.
+    pub(crate) fn holds(&self, other: &Self) -> bool {
+        self == other || other.0.is_below(&self.0)
+    }
+
+    /// Whether `folder` is this scope or below it.
+    pub(crate) fn holds_folder(&self, folder: &FolderPath) -> bool {
+        self.0 == folder.0 || folder.0.is_below(&self.0)
+    }
+
+    /// Whether this is a file path in `attachments/` at the root.
+    pub(crate) fn is_attachment(&self) -> bool {
+        self.0.is_below(&Plain(ATTACHMENTS.into()))
     }
 }
 
@@ -289,6 +354,12 @@ impl AsRef<Path> for FolderPath {
     }
 }
 
+impl AsRef<Path> for Scope {
+    fn as_ref(&self) -> &Path {
+        Path::new(&self.0.0)
+    }
+}
+
 impl fmt::Display for NotePath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Path::new(&self.0.0).display().fmt(f)
@@ -311,6 +382,27 @@ impl fmt::Debug for FolderPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
+}
+
+/// The count of notes right in each folder. A folder with no notes is not in the map.
+pub(crate) fn folder_counts<'a>(
+    notes: impl Iterator<Item = &'a NotePath>,
+) -> HashMap<FolderPath, usize> {
+    let mut counts: HashMap<&[u8], usize> = HashMap::new();
+    for note in notes {
+        let bytes = note.0.bytes();
+        let end = bytes.len() - note.0.name().len();
+        *counts.entry(&bytes[..end.saturating_sub(1)]).or_default() += 1;
+    }
+    counts
+        .into_iter()
+        .map(|(folder, count)| {
+            (
+                FolderPath(Plain(OsStr::from_bytes(folder).to_owned())),
+                count,
+            )
+        })
+        .collect()
 }
 
 /// Checks the rules for a trimmed typed name. `file_name` is the name on disk for `typed`.
@@ -505,5 +597,43 @@ mod tests {
             note("a/b.md").moved(&folder("a"), &FolderPath::root()),
             Some(note("b.md"))
         );
+    }
+
+    #[test]
+    fn disk_names_skip_hidden_entries_and_other_files() {
+        let work = folder("work");
+        assert_eq!(work.note_named(OsStr::new("a.md")), Some(note("work/a.md")));
+        assert_eq!(work.note_named(OsStr::new("a.txt")), None);
+        assert_eq!(work.note_named(OsStr::new(".a.md")), None);
+        assert_eq!(
+            work.folder_named(OsStr::new(" x ")),
+            Some(folder("work/ x "))
+        );
+        assert_eq!(work.folder_named(OsStr::new(".git")), None);
+    }
+
+    #[test]
+    fn folder_counts_count_the_notes_right_in_each_folder() {
+        let notes = [note("a.md"), note("b.md"), note("w/c.md"), note("w/x/d.md")];
+        let counts = folder_counts(notes.iter());
+        let expected = [
+            (FolderPath::root(), 2),
+            (folder("w"), 1),
+            (folder("w/x"), 1),
+        ];
+        assert_eq!(counts, expected.into_iter().collect());
+    }
+
+    #[test]
+    fn a_scope_holds_itself_and_what_is_below_it() {
+        let scope = |path: &str| Scope::new(Path::new(path)).unwrap();
+        assert!(scope("work").holds(&scope("work")));
+        assert!(scope("work").holds(&scope("work/a.md")));
+        assert!(!scope("work").holds(&scope("workshop")));
+        assert!(Scope::root().holds(&scope("a")));
+        assert!(scope("attachments/a.png").is_attachment());
+        assert!(!scope("attachments").is_attachment());
+        assert_eq!(scope("a/b.md").note(), Some(note("a/b.md")));
+        assert_eq!(scope("a/b").note(), None);
     }
 }

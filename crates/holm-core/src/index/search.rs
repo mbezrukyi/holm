@@ -5,11 +5,11 @@
 //! and a tag rename on many notes adds one row.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 
 use rusqlite::{Connection, OptionalExtension as _, params};
 
-use super::{hash, path};
+use super::{hash, note_path};
+use crate::paths::NotePath;
 
 /// The tables of this module. `tags` and `notes` belong to the index.
 pub(super) const SCHEMA: &str = "
@@ -83,7 +83,7 @@ pub(super) fn remove(conn: &Connection, key: i64) -> rusqlite::Result<()> {
 }
 
 /// The paths of the notes whose title, text or tags hold every word of `text`, in no order.
-pub(super) fn find(conn: &Connection, text: &str) -> rusqlite::Result<Vec<PathBuf>> {
+pub(super) fn find(conn: &Connection, text: &str) -> rusqlite::Result<Vec<NotePath>> {
     let words = words(text);
     if words.is_empty() {
         return Ok(Vec::new());
@@ -112,7 +112,7 @@ pub(super) fn find(conn: &Connection, text: &str) -> rusqlite::Result<Vec<PathBu
                 "SELECT key, path FROM notes WHERE key IN (SELECT value FROM json_each(?1))",
             )?;
             let rows = statement.query_map([format!("[{}]", keys.join(","))], |row| {
-                Ok((row.get(0)?, path(row.get(1)?)))
+                Ok((row.get(0)?, note_path(row, 1)?))
             })?;
             for row in rows {
                 found.push(row?);
@@ -126,12 +126,12 @@ pub(super) fn find(conn: &Connection, text: &str) -> rusqlite::Result<Vec<PathBu
 }
 
 /// The key and path of each note whose title or text matches the FTS5 `query`.
-fn text_matches(conn: &Connection, query: &str) -> rusqlite::Result<Vec<(i64, PathBuf)>> {
+fn text_matches(conn: &Connection, query: &str) -> rusqlite::Result<Vec<(i64, NotePath)>> {
     let mut statement = conn.prepare_cached(
         "SELECT key, path FROM notes
         WHERE key IN (SELECT rowid FROM text_words WHERE text_words MATCH ?1)",
     )?;
-    let rows = statement.query_map([query], |row| Ok((row.get(0)?, path(row.get(1)?))))?;
+    let rows = statement.query_map([query], |row| Ok((row.get(0)?, note_path(row, 1)?)))?;
     rows.collect()
 }
 

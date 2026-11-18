@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use holm_core::{Core, Feed};
+use holm_core::{Core, Feed, FolderPath, NotePath};
 use tempfile::TempDir;
 
 pub(crate) struct Folder {
@@ -116,9 +116,21 @@ fn write(root: &Path, path: &str, text: &str) {
     fs::write(path, text).unwrap();
 }
 
-pub(crate) fn paths(items: impl IntoIterator<Item = PathBuf>) -> Vec<String> {
+pub(crate) fn paths<P: AsRef<Path>>(items: impl IntoIterator<Item = P>) -> Vec<String> {
     items
         .into_iter()
-        .map(|p| p.to_string_lossy().into_owned())
+        .map(|p| p.as_ref().to_string_lossy().into_owned())
         .collect()
+}
+
+pub(crate) fn note_path(path: &str) -> NotePath {
+    NotePath::new(path).unwrap()
+}
+
+pub(crate) fn folder_path(path: &str) -> FolderPath {
+    FolderPath::new(path).unwrap()
+}
+
+pub(crate) fn path_buf(path: impl AsRef<Path>) -> PathBuf {
+    path.as_ref().to_path_buf()
 }

@@ -907,7 +907,7 @@ fn the_keyboard_moves_through_tree_list_and_editor(cx: &mut TestAppContext) {
 
     let settings = Config::load(fixture.config()).settings().clone();
     assert_eq!(settings.sidebar.view, View::List(Item::All));
-    assert_eq!(settings.last_note, Some(PathBuf::from("Top.md")));
+    assert_eq!(settings.last_note, holm_core::NotePath::new("Top.md"));
 }
 
 #[gpui_kit::test]
@@ -2723,7 +2723,7 @@ fn an_empty_folder_shows_the_empty_pane_and_makes_no_note(cx: &mut TestAppContex
     assert_eq!(focus(cx, handle), "editor");
     assert_eq!(files(&fixture.notes()), ["Plans.md"]);
     let settings = Config::load(fixture.config()).settings().clone();
-    assert_eq!(settings.last_note, Some(PathBuf::from("Plans.md")));
+    assert_eq!(settings.last_note, holm_core::NotePath::new("Plans.md"));
 }
 
 #[gpui_kit::test]
@@ -2866,7 +2866,7 @@ fn a_quit_keeps_the_name_of_the_open_note(cx: &mut TestAppContext) {
     assert_eq!(files(&fixture.notes()), ["Plans.md"]);
     assert!(read(&fixture.notes().join("Plans.md")).ends_with("\n# Spring plans\n"));
     let settings = Config::load(fixture.config()).settings().clone();
-    assert_eq!(settings.last_note, Some(PathBuf::from("Plans.md")));
+    assert_eq!(settings.last_note, holm_core::NotePath::new("Plans.md"));
 }
 
 #[gpui_kit::test]
@@ -2882,7 +2882,7 @@ fn a_window_close_keeps_the_name_of_the_open_note(cx: &mut TestAppContext) {
     assert_eq!(files(&fixture.notes()), ["Plans.md"]);
     assert!(read(&fixture.notes().join("Plans.md")).ends_with("\n# Spring plans\n"));
     let settings = Config::load(fixture.config()).settings().clone();
-    assert_eq!(settings.last_note, Some(PathBuf::from("Plans.md")));
+    assert_eq!(settings.last_note, holm_core::NotePath::new("Plans.md"));
 }
 
 /// Ctrl+N, then `title` and Enter.

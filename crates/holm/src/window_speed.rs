@@ -207,7 +207,7 @@ fn quick_open(what: &str, cx: &mut TestAppContext, handle: AnyWindowHandle, numb
     let title = format!("Note {number}");
     key_until(what, cx, handle, "enter", move |pane| {
         pane.shown_note()
-            .is_some_and(|path| path.file_stem().is_some_and(|stem| stem == title.as_str()))
+            .is_some_and(|path| path.title() == title.as_str())
     });
 }
 

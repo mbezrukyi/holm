@@ -8,8 +8,8 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use holm_core::Core;
 use holm_core::model::{NoteSet, Order};
+use holm_core::{Core, NotePath};
 use tempfile::TempDir;
 
 const NOTES: usize = 5_000;
@@ -93,12 +93,7 @@ fn sidebar_folders(bencher: divan::Bencher<'_, '_>) {
     let notes = notes_folder();
     let index = tempfile::tempdir().unwrap();
     let core = open(notes.path(), index.path());
-    bencher.bench_local(|| {
-        core.snapshot()
-            .folders()
-            .map(Path::to_path_buf)
-            .collect::<Vec<_>>()
-    });
+    bencher.bench_local(|| core.snapshot().folders().cloned().collect::<Vec<_>>());
 }
 
 #[divan::bench(sample_count = 50)]
@@ -136,6 +131,7 @@ fn save(bencher: divan::Bencher<'_, '_>, size: usize) {
     } else {
         "folder 1/Note 1.md"
     };
+    let path = &NotePath::new(path).unwrap();
     let mut body = core.read(path).unwrap().body;
     bencher.bench_local(|| {
         body.push_str("word ");
@@ -171,7 +167,7 @@ fn add_or_remove_tag(bencher: divan::Bencher<'_, '_>) {
     let mut flip = false;
     bencher.bench_local(|| {
         flip = !flip;
-        let path = "folder 1/Note 1.md";
+        let path = &NotePath::new("folder 1/Note 1.md").unwrap();
         if flip {
             core.add_tag(path, "new").unwrap()
         } else {

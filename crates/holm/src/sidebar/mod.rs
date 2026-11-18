@@ -13,7 +13,6 @@ mod tree;
 
 use std::collections::HashSet;
 use std::ops::Range;
-use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::SystemTime;
 
@@ -28,6 +27,7 @@ use gpui_kit::{
     uniform_list,
 };
 use holm_core::model::{Change, NoteInfo, Order};
+use holm_core::{FolderPath, NotePath};
 
 use crate::dialog::{Ask, Confirm};
 use crate::error::AppError;
@@ -55,15 +55,15 @@ enum Entry {
 /// A note or a folder, for a delete or a move.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Target {
-    Note(PathBuf),
-    Folder(PathBuf),
+    Note(NotePath),
+    Folder(FolderPath),
 }
 
 /// What the sidebar asks of the app.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SidebarEvent {
     /// Open this note in the editor.
-    Open(PathBuf),
+    Open(NotePath),
     FocusEditor,
     /// Open the title field of the open note.
     RenameNote,
@@ -90,10 +90,10 @@ struct Naming {
 /// What a name field names.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Named {
-    Folder(PathBuf),
+    Folder(FolderPath),
     Tag(String),
     /// A new folder in this parent folder. It exists only after `Enter`.
-    NewFolder(PathBuf),
+    NewFolder(FolderPath),
 }
 
 impl Named {
@@ -108,10 +108,9 @@ impl Named {
 
     fn moved(&self, change: &Change) -> Option<Self> {
         match self {
-            Self::Folder(path) => change.path_after(path).map(Self::Folder),
+            Self::Folder(path) => change.folder_after(path).map(Self::Folder),
             Self::Tag(tag) => change.tag_after(tag).map(Self::Tag),
-            Self::NewFolder(parent) if parent.as_os_str().is_empty() => None,
-            Self::NewFolder(parent) => change.path_after(parent).map(Self::NewFolder),
+            Self::NewFolder(parent) => change.folder_after(parent).map(Self::NewFolder),
         }
     }
 }
@@ -127,10 +126,10 @@ pub(crate) struct Sidebar {
     entries: Vec<Entry>,
     list: NoteList,
     /// The note in the editor. It is the selected row of a list.
-    current: Option<PathBuf>,
+    current: Option<NotePath>,
     /// The note in the editor after it is gone from the notes folder, with its neighbor in the
     /// list before.
-    left: Option<(PathBuf, PathBuf)>,
+    left: Option<(NotePath, NotePath)>,
     field: Option<Naming>,
     confirm: Confirm,
     search: Entity<InputState>,
@@ -148,7 +147,7 @@ impl Sidebar {
         notes_folder: Entity<NotesFolder>,
         order: Order,
         view: View,
-        current: Option<PathBuf>,
+        current: Option<NotePath>,
         confirm: Confirm,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -233,7 +232,7 @@ impl Sidebar {
             naming.named = named;
         }
         if let Some(current) = &mut self.current
-            && let Some(path) = change.path_after(current)
+            && let Some(path) = change.note_after(current)
         {
             *current = path;
         }
@@ -344,7 +343,7 @@ impl Sidebar {
 
     fn rebuild_tree(&mut self) {
         let new_folder = match self.field.as_ref().map(|naming| &naming.named) {
-            Some(Named::NewFolder(parent)) => Some(parent.as_path()),
+            Some(Named::NewFolder(parent)) => Some(parent),
             _ => None,
         };
         self.rows = self.tree.rows(&self.open, new_folder);
@@ -383,16 +382,16 @@ impl Sidebar {
 
     /// Puts the field of a new folder in `parent` as its first child row. A new folder at the
     /// root comes first under the folder label.
-    fn add_new_folder_entry(&mut self, parent: &Path) {
-        let depth = parent.components().count();
+    fn add_new_folder_entry(&mut self, parent: &FolderPath) {
+        let depth = parent.depth();
         let label = self
             .entries
             .iter()
             .position(|entry| matches!(entry, Entry::Label(text::FOLDERS)));
-        let at = if parent.as_os_str().is_empty() {
+        let at = if parent.is_root() {
             label.map(|at| at + 1)
         } else {
-            let item = Item::Folder(parent.to_owned());
+            let item = Item::Folder(parent.clone());
             self.entries
                 .iter()
                 .position(|entry| matches!(entry, Entry::Row(at) if self.rows[*at].item == item))
@@ -408,7 +407,7 @@ impl Sidebar {
     }
 
     /// Marks the note in the editor.
-    pub(crate) fn set_current(&mut self, path: Option<PathBuf>, cx: &mut Context<Self>) {
+    pub(crate) fn set_current(&mut self, path: Option<NotePath>, cx: &mut Context<Self>) {
         self.current = path;
         self.left = None;
         self.scroll_to_selection();
@@ -417,21 +416,21 @@ impl Sidebar {
 
     /// The folder for a new note, and the tag it gets, from the item of the view. A note from
     /// the search results goes in the root folder.
-    pub(crate) fn new_note_place(&self) -> (PathBuf, Option<String>) {
+    pub(crate) fn new_note_place(&self) -> (FolderPath, Option<String>) {
         if self.searching() {
-            return (PathBuf::new(), None);
+            return (FolderPath::root(), None);
         }
         let item = self.view.item();
         let tag = match item {
             Item::Tag(name) => Some(name.clone()),
             Item::All | Item::Folder(_) => None,
         };
-        (item.folder().to_owned(), tag)
+        (item.folder(), tag)
     }
 
     /// The note after `path` in the list, or else the one before it. For the note in the editor
     /// after another tool deleted it, it is its neighbor before the delete.
-    pub(crate) fn neighbor(&self, path: &Path) -> Option<PathBuf> {
+    pub(crate) fn neighbor(&self, path: &NotePath) -> Option<NotePath> {
         let Some(at) = self.list.position(path) else {
             return self
                 .left
@@ -442,7 +441,7 @@ impl Sidebar {
         self.list
             .path(at + 1)
             .or_else(|| at.checked_sub(1).and_then(|before| self.list.path(before)))
-            .map(Path::to_path_buf)
+            .cloned()
     }
 
     /// Every note, in the order of the lists.
@@ -451,7 +450,7 @@ impl Sidebar {
     }
 
     /// Every folder, sorted by path, for the folder picker.
-    pub(crate) fn folders(&self) -> &[PathBuf] {
+    pub(crate) fn folders(&self) -> &[FolderPath] {
         &self.tree.folders
     }
 
@@ -511,11 +510,11 @@ impl Sidebar {
     /// Nothing is on disk before `Enter`.
     pub(crate) fn new_folder(
         &mut self,
-        parent: PathBuf,
+        parent: FolderPath,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let item = if parent.as_os_str().is_empty() {
+        let item = if parent.is_root() {
             Item::All
         } else {
             let item = Item::Folder(parent.clone());
@@ -589,7 +588,7 @@ impl Sidebar {
         let sidebar = cx.weak_entity();
         match named {
             Named::Folder(folder) => {
-                let renamed = move |renamed: holm_core::Result<PathBuf>, cx: &mut App| {
+                let renamed = move |renamed: holm_core::Result<FolderPath>, cx: &mut App| {
                     if renamed.is_ok() {
                         sidebar
                             .update(cx, |_, cx| cx.emit(SidebarEvent::ViewChanged))
@@ -602,7 +601,7 @@ impl Sidebar {
                 });
             }
             Named::NewFolder(parent) => {
-                let created = move |created: holm_core::Result<PathBuf>, cx: &mut App| {
+                let created = move |created: holm_core::Result<FolderPath>, cx: &mut App| {
                     let shown = created.map(|folder| {
                         sidebar
                             .update(cx, |sidebar, cx| {
@@ -784,7 +783,7 @@ impl Sidebar {
         true
     }
 
-    fn choose(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+    fn choose(&mut self, path: NotePath, cx: &mut Context<Self>) {
         self.set_current(Some(path.clone()), cx);
         cx.emit(SidebarEvent::Open(path));
     }
@@ -1059,7 +1058,7 @@ fn when(time: SystemTime) -> String {
 fn item_label(item: &Item) -> String {
     match item {
         Item::All => text::ALL_NOTES.to_owned(),
-        Item::Folder(path) => path.display().to_string(),
+        Item::Folder(path) => path.to_string(),
         Item::Tag(name) => format!("#{name}"),
     }
 }

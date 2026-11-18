@@ -5,7 +5,6 @@
 //! creates a note. `Enter` picks a row, and `Esc` closes the window.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 
 use gpui_kit::component::input::IndentInline;
 use gpui_kit::{
@@ -13,8 +12,8 @@ use gpui_kit::{
     ParentElement, Render, Role, StatefulInteractiveElement as _, Subscription,
     TestSupportExt as _, Window, px,
 };
-use holm_core::Snapshot;
 use holm_core::model::{NoteInfo, NoteSet};
+use holm_core::{NotePath, Snapshot};
 
 use crate::link_rows::{self, Query, Row};
 use crate::notes_folder::NotesFolder;
@@ -25,14 +24,14 @@ use crate::text;
 /// What the link picker starts with.
 pub(crate) struct LinkStart {
     notes: Vec<NoteInfo>,
-    open_note: PathBuf,
+    open_note: NotePath,
     query: String,
 }
 
 impl LinkStart {
     /// The picker lists the notes of `snapshot` as [`Snapshot::newest`] gives them.
     /// The link goes into `open_note`. The field starts with `query`.
-    pub(crate) fn new(snapshot: &Snapshot, open_note: PathBuf, query: String) -> Self {
+    pub(crate) fn new(snapshot: &Snapshot, open_note: NotePath, query: String) -> Self {
         Self {
             notes: snapshot.newest(NoteSet::All),
             open_note,
@@ -53,7 +52,7 @@ pub(crate) enum LinkPickerEvent {
 pub(crate) enum LinkChoice {
     /// A note, or a heading in it.
     Note {
-        path: PathBuf,
+        path: NotePath,
         title: String,
         heading: Option<String>,
     },
@@ -66,14 +65,14 @@ pub(crate) enum LinkChoice {
 pub(crate) struct LinkPicker {
     notes_folder: Entity<NotesFolder>,
     notes: PickNotes,
-    open_note: PathBuf,
+    open_note: NotePath,
     list: Entity<PickList>,
     rows: Vec<Row>,
     /// The note of the heading rows, or `None` for the open note.
     heading_note: Option<usize>,
     /// The headings of each note that the field named.
-    headings: HashMap<PathBuf, Vec<String>>,
-    loading: HashSet<PathBuf>,
+    headings: HashMap<NotePath, Vec<String>>,
+    loading: HashSet<NotePath>,
     _list: Subscription,
 }
 
@@ -170,7 +169,7 @@ impl LinkPicker {
         self.list.update(cx, |list, cx| list.set_rows(shown, cx));
     }
 
-    fn headings_loaded(&mut self, path: PathBuf, headings: Vec<String>, cx: &mut Context<Self>) {
+    fn headings_loaded(&mut self, path: NotePath, headings: Vec<String>, cx: &mut Context<Self>) {
         self.loading.remove(&path);
         self.headings.insert(path, headings);
         self.query_changed(cx);
@@ -202,7 +201,7 @@ impl LinkPicker {
             .collect()
     }
 
-    fn load_headings(&self, path: PathBuf, cx: &mut Context<Self>) {
+    fn load_headings(&self, path: NotePath, cx: &mut Context<Self>) {
         let job = self.notes_folder.read(cx).headings(path.clone(), cx);
         cx.spawn(async move |this, cx| {
             let headings = job.await.unwrap_or_else(|error| {

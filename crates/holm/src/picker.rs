@@ -1,13 +1,13 @@
 //! The folder picker for a move. It shows the folders whose path holds the typed text.
 //! `↑` and `↓` pick a folder, `Enter` moves there, `Esc` cancels.
 
-use std::path::{Path, PathBuf};
-
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _, IntoElement,
     ParentElement, Render, Role, StatefulInteractiveElement as _, Subscription,
     TestSupportExt as _, Window, px,
 };
+
+use holm_core::FolderPath;
 
 use crate::icons::Icon;
 use crate::popup::{self, PickEvent, PickList, PickRow};
@@ -17,14 +17,14 @@ use crate::text;
 /// The answer of the picker.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PickerEvent {
-    Move { target: Target, folder: PathBuf },
+    Move { target: Target, folder: FolderPath },
     Cancel,
 }
 
 pub(crate) struct FolderPicker {
     target: Target,
-    /// The root folder first, as the empty path.
-    folders: Vec<PathBuf>,
+    /// The root folder first.
+    folders: Vec<FolderPath>,
     list: Entity<PickList>,
     /// The place in `folders` of each row.
     rows: Vec<usize>,
@@ -37,28 +37,29 @@ impl FolderPicker {
     /// focus.
     pub(crate) fn new(
         target: Target,
-        folders: &[PathBuf],
+        folders: &[FolderPath],
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let (path, inside) = match &target {
-            Target::Note(path) => (path.as_path(), None),
-            Target::Folder(path) => (path.as_path(), Some(path.as_path())),
+        let (home, inside) = match &target {
+            Target::Note(path) => (Some(path.folder()), None),
+            Target::Folder(path) => (path.folder(), Some(path)),
         };
-        let home = path.parent().unwrap_or(Path::new(""));
-        let folders = std::iter::once(PathBuf::new())
+        let folders = std::iter::once(FolderPath::root())
             .chain(folders.iter().cloned())
             .filter(|folder| {
-                folder != home && inside.is_none_or(|inside| !folder.starts_with(inside))
+                home.as_ref() != Some(folder)
+                    && inside.is_none_or(|inside| folder != inside && !folder.is_below(inside))
             })
             .collect();
         let name = match &target {
-            Target::Note(path) => path.file_stem(),
-            Target::Folder(path) => path.file_name(),
-        }
-        .unwrap_or_default()
-        .to_string_lossy()
-        .into_owned();
+            Target::Note(path) => path.title().into_owned(),
+            Target::Folder(path) => path
+                .name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+        };
         let list = cx.new(|cx| PickList::new(text::move_to(&name), text::NO_FOLDER, window, cx));
         let subscription = cx.subscribe(&list, |this, _, event: &PickEvent, cx| match event {
             PickEvent::Query => this.query_changed(cx),
@@ -104,11 +105,11 @@ impl FolderPicker {
 }
 
 /// The name that a row shows for `folder`: its path, or a name for the root folder.
-fn name(folder: &Path) -> String {
-    if folder.as_os_str().is_empty() {
+fn name(folder: &FolderPath) -> String {
+    if folder.is_root() {
         text::ROOT_FOLDER.to_owned()
     } else {
-        folder.display().to_string()
+        folder.to_string()
     }
 }
 

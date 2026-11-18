@@ -1,10 +1,9 @@
 //! A note list of the sidebar: the paths of its notes, and the snapshot that knows each one.
 
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use holm_core::Snapshot;
 use holm_core::model::{NoteInfo, NoteSet, Order};
+use holm_core::{NotePath, Snapshot};
 
 /// The notes of one list, in the order of the list. Each path has a note in the snapshot.
 ///
@@ -12,12 +11,12 @@ use holm_core::model::{NoteInfo, NoteSet, Order};
 #[derive(Clone, Debug, Default)]
 pub(crate) struct NoteList {
     snapshot: Snapshot,
-    paths: Arc<[PathBuf]>,
+    paths: Arc<[NotePath]>,
 }
 
 impl NoteList {
     /// The notes at `paths` that `snapshot` has, in `order`.
-    pub(crate) fn new(snapshot: Snapshot, paths: Vec<PathBuf>, order: Order) -> Self {
+    pub(crate) fn new(snapshot: Snapshot, paths: Vec<NotePath>, order: Order) -> Self {
         let paths = snapshot.sorted(paths, order).into();
         Self { snapshot, paths }
     }
@@ -44,15 +43,15 @@ impl NoteList {
         self.paths.is_empty()
     }
 
-    pub(crate) fn path(&self, at: usize) -> Option<&Path> {
-        self.paths.get(at).map(PathBuf::as_path)
+    pub(crate) fn path(&self, at: usize) -> Option<&NotePath> {
+        self.paths.get(at)
     }
 
     pub(crate) fn note(&self, at: usize) -> Option<&NoteInfo> {
         self.snapshot.note(self.paths.get(at)?)
     }
 
-    pub(crate) fn position(&self, path: &Path) -> Option<usize> {
+    pub(crate) fn position(&self, path: &NotePath) -> Option<usize> {
         self.paths.iter().position(|known| known == path)
     }
 

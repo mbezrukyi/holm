@@ -6,7 +6,7 @@
 //! Holm makes no note by itself. When the open note is gone, the pane opens its neighbor in
 //! the sidebar list. With no note left, it shows the empty pane.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
@@ -15,8 +15,8 @@ use gpui_kit::{
     InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseMoveEvent, MouseUpEvent,
     ParentElement, Pixels, Render, Styled, Subscription, Window, div, px,
 };
-use holm_core::Snapshot;
 use holm_core::model::{Note, NoteSet, Order};
+use holm_core::{FolderPath, NotePath, Snapshot};
 
 use crate::config::{Config, SidebarSettings};
 use crate::dialog::{self, Ask, Confirm, Dialog};
@@ -177,7 +177,7 @@ impl NotesView {
     }
 
     /// Opens `next`, or shows the empty pane.
-    fn show_next(&mut self, next: Option<PathBuf>, _: &mut Window, cx: &mut Context<Self>) {
+    fn show_next(&mut self, next: Option<NotePath>, _: &mut Window, cx: &mut Context<Self>) {
         self.pane.update(cx, |pane, cx| match next {
             Some(next) => pane.open(next, Leave::Drop, cx),
             None => pane.close(cx),
@@ -392,7 +392,7 @@ impl NotesView {
         }
     }
 
-    fn show_folder(&mut self, folder: PathBuf, _: &mut Window, cx: &mut Context<Self>) {
+    fn show_folder(&mut self, folder: FolderPath, _: &mut Window, cx: &mut Context<Self>) {
         self.sidebar.update(cx, |sidebar, cx| {
             sidebar.show_in_tree(Item::Folder(folder), cx);
         });
@@ -417,7 +417,7 @@ impl NotesView {
                         .map(|note| note.title.clone())
                         .unwrap_or_default(),
                     Target::Folder(path) => path
-                        .file_name()
+                        .name()
                         .unwrap_or_default()
                         .to_string_lossy()
                         .into_owned(),
@@ -437,10 +437,10 @@ impl NotesView {
     }
 
     fn delete(&mut self, target: Target, window: &mut Window, cx: &mut Context<Self>) {
-        let open = self.pane.read(cx).path().map(Path::to_owned);
+        let open = self.pane.read(cx).path().cloned();
         let open_gone = open.as_ref().is_some_and(|open| match &target {
             Target::Note(path) => path == open,
-            Target::Folder(folder) => open.starts_with(folder),
+            Target::Folder(folder) => open.is_below(folder),
         });
         let neighbor = open.and_then(|open| self.sidebar.read(cx).neighbor(&open));
         let order = self.config.read(cx).settings().note_order;
@@ -471,7 +471,7 @@ impl NotesView {
     fn new_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let parent = match self.sidebar.read(cx).view().item() {
             Item::Folder(folder) => folder.clone(),
-            Item::All | Item::Tag(_) => PathBuf::new(),
+            Item::All | Item::Tag(_) => FolderPath::root(),
         };
         self.hidden = false;
         self.sidebar
@@ -644,7 +644,7 @@ impl NotesView {
             hidden: self.hidden,
             view: self.sidebar.read(cx).view().clone(),
         };
-        settings.last_note = self.pane.read(cx).path().map(Path::to_owned);
+        settings.last_note = self.pane.read(cx).path().cloned();
         if &settings != self.config.read(cx).settings() {
             self.save_settings(settings, cx);
         }
@@ -723,7 +723,7 @@ fn whole(width: Pixels) -> u16 {
 
 /// The note to open after the open one is gone: `neighbor` when it still exists, else the
 /// first note in `order`. With no notes, it is `None`.
-fn next_note(snapshot: &Snapshot, neighbor: Option<PathBuf>, order: Order) -> Option<PathBuf> {
+fn next_note(snapshot: &Snapshot, neighbor: Option<NotePath>, order: Order) -> Option<NotePath> {
     if let Some(next) = neighbor.filter(|next| snapshot.note(next).is_some()) {
         return Some(next);
     }

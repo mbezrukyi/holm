@@ -4,7 +4,7 @@ use std::ffi::OsStr;
 use std::fs::{self, File, Metadata, Permissions};
 use std::io;
 use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use holm_markdown::Note as Text;
@@ -13,17 +13,13 @@ use tempfile::NamedTempFile;
 
 use sha2::{Digest as _, Sha256};
 
-use crate::error::{Error, NameProblem, Result};
+use crate::error::{Error, Result};
 use crate::model::{Note, NoteId, NoteInfo};
+use crate::paths::{ATTACHMENTS, FolderPath, NotePath, Scope};
 use crate::relink::{Moved, relink};
 
-/// The folder for pasted files at the root. The folder list skips it.
-pub(crate) const ATTACHMENTS: &str = "attachments";
-const NOTE_EXT: &str = ".md";
-/// The longest file name that Linux file systems take.
-const MAX_NAME_BYTES: usize = 255;
 /// Longest file stem in bytes. It leaves room for the hash and the extension of an
-/// attachment under [`MAX_NAME_BYTES`].
+/// attachment under [`MAX_NAME_BYTES`](crate::paths::MAX_NAME_BYTES).
 const MAX_STEM_BYTES: usize = 240;
 /// The bytes of the content hash in an attachment name: 8 hex digits.
 const HASH_BYTES: usize = 4;
@@ -70,12 +66,11 @@ impl Store {
             return Err(fail(io::ErrorKind::NotADirectory.into()));
         }
         let store = Self { root };
-        store.walk(Path::new(""), &mut |rel, kind| {
-            if kind == Kind::Temp {
-                let path = store.root.join(rel);
-                if let Err(error) = fs::remove_file(&path) {
-                    tracing::warn!(%error, path = %path.display(), "kept a temp file");
-                }
+        store.walk(&FolderPath::root(), &mut |found| {
+            if let Found::Temp(path) = found
+                && let Err(error) = fs::remove_file(&path)
+            {
+                tracing::warn!(%error, path = %path.display(), "kept a temp file");
             }
         })?;
         Ok(store)
@@ -86,104 +81,89 @@ impl Store {
         &self.root
     }
 
-    /// Every note file at or below `scope`, with its stamp. The empty path is the whole notes folder.
+    /// Every note file at or below `scope`, with its stamp.
     ///
     /// `scope` can be a note, a folder, or a path with nothing there.
     /// A subfolder or a file that can't be read is left out with a log line.
-    pub(crate) fn files(&self, scope: &Path) -> Result<Vec<(PathBuf, Stamp)>> {
-        if !scope.as_os_str().is_empty() {
-            match self.entry(scope) {
-                Entry::Note(stamp) => return Ok(vec![(scope.to_owned(), stamp)]),
-                Entry::Folder => {}
-                Entry::Other | Entry::Missing => return Ok(Vec::new()),
-            }
+    pub(crate) fn files(&self, scope: &Scope) -> Result<Vec<(NotePath, Stamp)>> {
+        match self.entry(scope) {
+            Entry::Note(note, stamp) => return Ok(vec![(note, stamp)]),
+            Entry::Folder => {}
+            Entry::Other | Entry::Missing => return Ok(Vec::new()),
         }
         let mut files = Vec::new();
-        self.walk(scope, &mut |rel, kind| {
-            if kind == Kind::Note {
-                match fs::metadata(self.root.join(rel)) {
-                    Ok(meta) => files.push((rel.to_owned(), Stamp::of(&meta))),
-                    Err(error) => tracing::warn!(%error, path = %rel.display(), "skipped a note"),
+        self.walk(&scope.folder(), &mut |found| {
+            if let Found::Note(rel) = found {
+                match fs::metadata(self.root.join(&rel)) {
+                    Ok(meta) => files.push((rel, Stamp::of(&meta))),
+                    Err(error) => tracing::warn!(%error, path = %rel, "skipped a note"),
                 }
             }
         })?;
         Ok(files)
     }
 
-    /// What is at `rel` now. `rel` must be a plain path, as [`Store::check_folder`] allows.
+    /// What is at `scope` now. The root is a folder.
     ///
     /// Like the folder walk, it does not follow symlinks.
-    pub(crate) fn entry(&self, rel: &Path) -> Entry {
-        let real_dir =
-            |dir: &Path| fs::symlink_metadata(self.root.join(dir)).is_ok_and(|meta| meta.is_dir());
-        let mut parents = rel.ancestors().skip(1);
-        if !parents.all(real_dir) {
+    pub(crate) fn entry(&self, scope: &Scope) -> Entry {
+        let real_dir = |dir: FolderPath| {
+            fs::symlink_metadata(self.root.join(dir)).is_ok_and(|meta| meta.is_dir())
+        };
+        if !scope.folder().parents().all(real_dir) {
             return Entry::Missing;
         }
-        match fs::symlink_metadata(self.root.join(rel)) {
-            Ok(meta) if meta.is_dir() => Entry::Folder,
-            Ok(meta) if meta.is_file() && is_md(rel) => Entry::Note(Stamp::of(&meta)),
-            Ok(_) => Entry::Other,
-            Err(_) => Entry::Missing,
+        match (fs::symlink_metadata(self.root.join(scope)), scope.note()) {
+            (Ok(meta), _) if meta.is_dir() => Entry::Folder,
+            (Ok(meta), Some(note)) if meta.is_file() => Entry::Note(note, Stamp::of(&meta)),
+            (Ok(_), _) => Entry::Other,
+            (Err(_), _) => Entry::Missing,
         }
     }
 
     /// Whether a note file is at `rel`.
-    pub(crate) fn exists(&self, rel: &Path) -> bool {
-        self.note_path(rel).is_ok_and(|path| path.is_file())
-    }
-
-    /// Checks that `rel` is a note path inside the notes folder.
-    pub(crate) fn check_note(rel: &Path) -> Result<()> {
-        if is_md(rel) {
-            plain_path(rel).map(drop)
-        } else {
-            Err(bad_path(rel))
-        }
-    }
-
-    /// Checks that `rel` is a folder path inside the notes folder.
-    pub(crate) fn check_folder(rel: &Path) -> Result<()> {
-        plain_path(rel).map(drop)
+    pub(crate) fn exists(&self, rel: &NotePath) -> bool {
+        self.root.join(rel).is_file()
     }
 
     /// Every subfolder at or below `scope`, sorted by path. It skips `attachments/` at the root.
     ///
-    /// The empty path is the whole notes folder. `scope` can be a note, a folder,
-    /// or a path with nothing there.
-    pub(crate) fn folders(&self, scope: &Path) -> Result<Vec<PathBuf>> {
-        let listed = |rel: &Path| rel != Path::new(ATTACHMENTS);
+    /// `scope` can be a note, a folder, or a path with nothing there.
+    pub(crate) fn folders(&self, scope: &Scope) -> Result<Vec<FolderPath>> {
+        let listed = |rel: &FolderPath| rel.as_ref() != Path::new(ATTACHMENTS);
         let mut folders = Vec::new();
-        if !scope.as_os_str().is_empty() {
-            if plain_path(scope).is_err() || self.entry(scope) != Entry::Folder {
+        let start = scope.folder();
+        if !start.is_root() {
+            if self.entry(scope) != Entry::Folder {
                 return Ok(folders);
             }
-            if listed(scope) {
-                folders.push(scope.to_owned());
+            if listed(&start) {
+                folders.push(start.clone());
             }
         }
-        self.walk(scope, &mut |rel, kind| {
-            if kind == Kind::Folder && listed(rel) {
-                folders.push(rel.to_owned());
+        self.walk(&start, &mut |found| {
+            if let Found::Folder(rel) = found
+                && listed(&rel)
+            {
+                folders.push(rel);
             }
         })?;
         folders.sort();
         Ok(folders)
     }
 
-    pub(crate) fn read(&self, rel: &Path) -> Result<(Note, Stamp)> {
-        let path = self.note_path(rel)?;
-        let (text, stamp) = read_text(&path)?;
+    pub(crate) fn read(&self, rel: &NotePath) -> Result<(Note, Stamp)> {
+        let (text, stamp) = read_text(&self.root.join(rel))?;
         Ok((note(rel, &Text::parse(&text), stamp), stamp))
     }
 
     /// Changes the frontmatter of the note with `edit` and keeps its modification time.
     pub(crate) fn edit_fields(
         &self,
-        rel: &Path,
+        rel: &NotePath,
         edit: impl FnOnce(&mut Text),
     ) -> Result<(Note, Stamp)> {
-        let path = self.note_path(rel)?;
+        let path = self.root.join(rel);
         let (old, stamp) = read_text(&path)?;
         let mut text = Text::parse(&old);
         edit(&mut text);
@@ -200,14 +180,14 @@ impl Store {
     /// It returns each note that changed or failed. A note that fails keeps its old text.
     pub(crate) fn rewrite(
         &self,
-        paths: &[PathBuf],
-        mut edit: impl FnMut(&Path, &str) -> Option<String>,
-    ) -> Vec<(PathBuf, Result<()>)> {
+        paths: &[NotePath],
+        mut edit: impl FnMut(&NotePath, &str) -> Option<String>,
+    ) -> Vec<(NotePath, Result<()>)> {
         let mut done = Vec::new();
         let mut temps = Vec::new();
         for rel in paths {
-            let temp = self.note_path(rel).and_then(|path| {
-                let (old, stamp) = read_text(&path)?;
+            let path = self.root.join(rel);
+            let temp = read_text(&path).and_then(|(old, stamp)| {
                 let Some(new) = edit(rel, &old).filter(|new| *new != old) else {
                     return Ok(None);
                 };
@@ -222,10 +202,10 @@ impl Store {
                 )
                 .map_err(fail)?;
                 // A closed file, so a big job does not run out of file handles.
-                Ok(Some((path, file.into_temp_path())))
+                Ok(Some(file.into_temp_path()))
             });
             match temp {
-                Ok(Some(temp)) => temps.push((rel.clone(), temp)),
+                Ok(Some(temp)) => temps.push((rel.clone(), (path, temp))),
                 Ok(None) => {}
                 Err(error) => done.push((rel.clone(), Err(error))),
             }
@@ -266,8 +246,8 @@ impl Store {
     ///
     /// It adds an id when the file has none. When the body stays the same,
     /// the file keeps its old modification time.
-    pub(crate) fn save(&self, rel: &Path, body: &str) -> Result<(Note, Stamp)> {
-        let path = self.note_path(rel)?;
+    pub(crate) fn save(&self, rel: &NotePath, body: &str) -> Result<(Note, Stamp)> {
+        let path = self.root.join(rel);
         let (old, stamp) = read_text(&path)?;
         let mut text = Text::parse(&old);
         let mut body = body.to_owned();
@@ -292,33 +272,31 @@ impl Store {
     /// It keeps the id, the tags and the pin. When a file is at the path again,
     /// it saves the body over it like [`Self::save`].
     pub(crate) fn restore(&self, note: &Note) -> Result<(Note, Stamp)> {
-        let path = self.note_path(&note.info.path)?;
-        let dir = path.parent().unwrap_or(&self.root);
+        let path = self.root.join(&note.info.path);
+        let dir = self.root.join(note.info.path.folder());
         let mut text = Text::parse("");
         let id = note.info.id.clone().unwrap_or_else(NoteId::generate);
         text.set_id(Some(id.as_str()));
         text.set_tags(&note.info.tags);
         text.set_pinned(note.info.pinned);
-        let file = temp_file(dir, text.to_string().as_bytes(), None, None)
+        let file = temp_file(&dir, text.to_string().as_bytes(), None, None)
             .map_err(|source| write_error(&path, source))?;
         match file.persist_noclobber(&path) {
-            Ok(_) => sync_dir(dir).map_err(|source| write_error(&path, source))?,
+            Ok(_) => sync_dir(&dir).map_err(|source| write_error(&path, source))?,
             Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => {}
             Err(e) => return Err(write_error(&path, e.error)),
         }
         self.save(&note.info.path, &note.body)
     }
 
-    /// Creates an empty note with a new id as `<title>.md` in `folder`.
+    /// Creates an empty note with a new id at `rel`.
     ///
-    /// `title` follows the rules of [`check_title`]. It fails with [`Error::NameTaken`] when
-    /// something in `folder` has the name.
-    pub(crate) fn create(&self, folder: &Path, title: &str) -> Result<(Note, Stamp)> {
-        let folder = plain_path(folder)?;
-        let rel = folder.join(check_title(title)?);
-        self.check_free(&rel, None)?;
-        let dir = self.root.join(folder);
-        let path = self.root.join(&rel);
+    /// It fails with [`Error::NameTaken`] when something in its folder has the name.
+    pub(crate) fn create(&self, rel: &NotePath) -> Result<(Note, Stamp)> {
+        let folder = rel.folder();
+        self.check_free(&folder, rel.name(), None)?;
+        let dir = self.root.join(&folder);
+        let path = self.root.join(rel);
         let mut text = Text::parse("");
         text.set_id(Some(NoteId::generate().as_str()));
         let file = temp_file(&dir, text.to_string().as_bytes(), None, None)
@@ -330,11 +308,11 @@ impl Store {
             }
             Err(e) => return Err(write_error(&path, e.error)),
         }
-        self.read(&rel)
+        self.read(rel)
     }
 
     /// Copies `content` into `attachments/` at the root as `<stem>-<hash>` + `ext`, and returns
-    /// its path. The hash is a short hash of the content, so a name never clashes.
+    /// its absolute path. The hash is a short hash of the content, so a name never clashes.
     ///
     /// When a file with that name is there, it keeps that file and drops the new copy.
     /// It makes the `attachments/` folder when it is missing.
@@ -344,10 +322,11 @@ impl Store {
         ext: &str,
         content: impl io::Read,
     ) -> Result<PathBuf> {
+        let attachments = FolderPath::root().folder_named(OsStr::new(ATTACHMENTS));
         let dir = self.root.join(ATTACHMENTS);
-        match self.entry(Path::new(ATTACHMENTS)) {
-            Entry::Folder => {}
-            Entry::Missing => {
+        match attachments.map(|folder| self.entry(&folder.scope())) {
+            Some(Entry::Folder) => {}
+            Some(Entry::Missing) => {
                 match fs::create_dir(&dir) {
                     Err(e) if e.kind() != io::ErrorKind::AlreadyExists => {
                         return Err(write_error(&dir, e));
@@ -356,7 +335,7 @@ impl Store {
                 }
                 sync_dir(&self.root).map_err(|e| write_error(&dir, e))?;
             }
-            Entry::Note(_) | Entry::Other => {
+            _ => {
                 return Err(write_error(&dir, io::ErrorKind::NotADirectory.into()));
             }
         }
@@ -379,32 +358,32 @@ impl Store {
             Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => {}
             Err(e) => return Err(write_error(&path, e.error)),
         }
-        Ok(Path::new(ATTACHMENTS).join(name))
+        Ok(path)
     }
 
-    /// Moves the note at `from` to `folder` as `name`, and returns its new path.
-    /// It fixes the relative file links in the note.
+    /// Moves the note at `from` to `to`, and returns `to`. It fixes the relative file links in
+    /// the note.
     ///
-    /// The note keeps its modification time and permissions. When the new path is `from`,
-    /// the note stays where it is. It fails with [`Error::NameTaken`] when something in
-    /// `folder` has the name.
-    pub(crate) fn move_note(&self, from: &Path, folder: &Path, name: &OsStr) -> Result<PathBuf> {
-        let source = self.note_path(from)?;
-        let dir = self.root.join(plain_path(folder)?);
-        let rel = folder.join(name);
-        if rel == from {
-            return Ok(rel);
+    /// The note keeps its modification time and permissions. When `to` is `from`, the note
+    /// stays where it is. It fails with [`Error::NameTaken`] when something in the folder of
+    /// `to` has its name.
+    pub(crate) fn move_note(&self, from: &NotePath, to: NotePath) -> Result<NotePath> {
+        if to == *from {
+            return Ok(to);
         }
-        Self::check_note(&rel)?;
-        self.check_free(&rel, Some(from))?;
+        let source = self.root.join(from);
+        let (old_folder, folder) = (from.folder(), to.folder());
+        let own = (old_folder == folder).then(|| from.name());
+        self.check_free(&folder, to.name(), own)?;
         let (old, stamp) = read_text(&source)?;
-        let text = relink(&old, &self.root, folder_of(from), folder, None).unwrap_or(old);
+        let text = relink(&old, &self.root, &old_folder, &folder, None).unwrap_or(old);
         let permissions = fs::metadata(&source)
             .map_err(|e| Error::Read {
                 path: source.clone(),
                 source: e,
             })?
             .permissions();
+        let dir = self.root.join(&folder);
         let temp = temp_file(
             &dir,
             text.as_bytes(),
@@ -412,13 +391,13 @@ impl Store {
             Some(time(stamp.modified)),
         )
         .map_err(|source| write_error(&dir, source))?;
-        let path = dir.join(name);
+        let path = self.root.join(&to);
         match temp.persist_noclobber(&path) {
             Ok(_) => {
                 remove(&source)?;
                 sync_dir(&dir).map_err(|e| write_error(&path, e))?;
                 sync_dir(folder_abs(&source)).map_err(|e| write_error(&source, e))?;
-                Ok(rel)
+                Ok(to)
             }
             Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => {
                 Err(Error::NameTaken { path })
@@ -429,12 +408,11 @@ impl Store {
 
     /// Creates the folder `name` in `parent`, and returns its path.
     ///
-    /// `name` follows the rules of [`check_name`]. It fails with [`Error::NameTaken`] when
-    /// something in `parent` has the name.
-    pub(crate) fn create_folder(&self, parent: &Path, name: &str) -> Result<PathBuf> {
-        let parent = plain_path(parent)?;
-        let rel = parent.join(check_name(parent, name)?);
-        self.check_free(&rel, None)?;
+    /// `name` follows the rules of [`FolderPath::child`]. It fails with [`Error::NameTaken`]
+    /// when something in `parent` has the name.
+    pub(crate) fn create_folder(&self, parent: &FolderPath, name: &str) -> Result<FolderPath> {
+        let rel = parent.child(name)?;
+        self.check_free(parent, rel.name().unwrap_or_default(), None)?;
         let path = self.root.join(&rel);
         match fs::create_dir(&path) {
             Ok(()) => {
@@ -451,17 +429,25 @@ impl Store {
     /// Names work as in [`Store::create_folder`]. The folder may take its own name with other
     /// capital letters. It fixes the relative file links in the notes inside. A note that can't
     /// be fixed keeps its links, with a log line.
-    pub(crate) fn move_folder(&self, from: &Path, parent: &Path, name: &str) -> Result<PathBuf> {
+    pub(crate) fn move_folder(
+        &self,
+        from: &FolderPath,
+        parent: &FolderPath,
+        name: &str,
+    ) -> Result<FolderPath> {
         self.check_user_folder(from)?;
-        let parent = plain_path(parent)?;
-        if parent.starts_with(from) {
-            return Err(bad_path(parent));
+        if parent == from || parent.is_below(from) {
+            return Err(bad_path(parent.as_ref()));
         }
-        let rel = parent.join(check_name(parent, name)?);
-        if rel == from {
+        let rel = parent.child(name)?;
+        if rel == *from {
             return Ok(rel);
         }
-        self.check_free(&rel, Some(from))?;
+        let own = from
+            .folder()
+            .filter(|folder| folder == parent)
+            .and(from.name());
+        self.check_free(parent, rel.name().unwrap_or_default(), own)?;
         let source = self.root.join(from);
         let path = self.root.join(&rel);
         // An empty folder takes the name first. The rename then replaces it,
@@ -485,25 +471,20 @@ impl Store {
         Ok(rel)
     }
 
-    /// Fails with [`Error::NameTaken`] when an entry next to `rel` has its name, also with other
-    /// capital letters. `own` is the entry that moves to `rel`, so it does not count.
-    fn check_free(&self, rel: &Path, own: Option<&Path>) -> Result<()> {
-        let folder = folder_of(rel);
-        let wanted = rel
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_lowercase();
-        let Ok(entries) = fs::read_dir(self.root.join(folder)) else {
+    /// Fails with [`Error::NameTaken`] when an entry in `folder` has `name`, also with other
+    /// capital letters. `own` is the name of the entry in `folder` that takes `name`, so it
+    /// does not count.
+    fn check_free(&self, folder: &FolderPath, name: &OsStr, own: Option<&OsStr>) -> Result<()> {
+        let wanted = name.to_string_lossy().to_lowercase();
+        let dir = self.root.join(folder);
+        let Ok(entries) = fs::read_dir(&dir) else {
             return Ok(());
         };
         for entry in entries.flatten() {
-            let name = entry.file_name();
-            if name.to_string_lossy().to_lowercase() == wanted
-                && own != Some(folder.join(&name).as_path())
-            {
+            let found = entry.file_name();
+            if found.to_string_lossy().to_lowercase() == wanted && own != Some(found.as_os_str()) {
                 return Err(Error::NameTaken {
-                    path: self.root.join(rel),
+                    path: dir.join(name),
                 });
             }
         }
@@ -511,15 +492,15 @@ impl Store {
     }
 
     /// Deletes the note file at `rel`. A note that is already gone is no error.
-    pub(crate) fn delete_note(&self, rel: &Path) -> Result<()> {
-        let path = self.note_path(rel)?;
+    pub(crate) fn delete_note(&self, rel: &NotePath) -> Result<()> {
+        let path = self.root.join(rel);
         remove(&path)?;
         sync_dir(folder_abs(&path)).map_err(|e| write_error(&path, e))
     }
 
     /// Deletes the folder `rel` with everything in it. A folder that is already gone is no error.
-    pub(crate) fn delete_folder(&self, rel: &Path) -> Result<()> {
-        if self.entry(rel) == Entry::Missing {
+    pub(crate) fn delete_folder(&self, rel: &FolderPath) -> Result<()> {
+        if self.entry(&rel.scope()) == Entry::Missing {
             return Ok(());
         }
         self.check_user_folder(rel)?;
@@ -529,7 +510,7 @@ impl Store {
     }
 
     /// Deletes the file at `rel` when [`Store::is_attachment`] allows it.
-    pub(crate) fn delete_attachment(&self, rel: &Path) -> Result<()> {
+    pub(crate) fn delete_attachment(&self, rel: &Scope) -> Result<()> {
         if self.is_attachment(rel) {
             remove(&self.root.join(rel))?;
         }
@@ -538,27 +519,25 @@ impl Store {
 
     /// Whether `rel` is a file in `attachments/` that is not a note.
     /// A symlink counts as a file. No folder on the way may be a symlink.
-    pub(crate) fn is_attachment(&self, rel: &Path) -> bool {
-        rel.starts_with(ATTACHMENTS)
-            && plain_path(rel).is_ok()
+    pub(crate) fn is_attachment(&self, rel: &Scope) -> bool {
+        rel.is_attachment()
             && self.entry(rel) == Entry::Other
             && fs::symlink_metadata(self.root.join(rel)).is_ok_and(|meta| !meta.is_dir())
     }
 
     /// Checks that `rel` is a folder that the user may move or delete:
     /// a real folder that is not the root and not `attachments/`.
-    fn check_user_folder(&self, rel: &Path) -> Result<()> {
-        plain_path(rel)?;
-        if rel.as_os_str().is_empty() || rel == Path::new(ATTACHMENTS) {
-            return Err(bad_path(rel));
+    fn check_user_folder(&self, rel: &FolderPath) -> Result<()> {
+        if rel.is_root() || rel.as_ref() == Path::new(ATTACHMENTS) {
+            return Err(bad_path(rel.as_ref()));
         }
-        match self.entry(rel) {
+        match self.entry(&rel.scope()) {
             Entry::Folder => Ok(()),
             Entry::Missing => Err(Error::Read {
                 path: self.root.join(rel),
                 source: io::ErrorKind::NotFound.into(),
             }),
-            Entry::Note(_) | Entry::Other => Err(Error::Read {
+            Entry::Note(..) | Entry::Other => Err(Error::Read {
                 path: self.root.join(rel),
                 source: io::ErrorKind::NotADirectory.into(),
             }),
@@ -567,15 +546,15 @@ impl Store {
 
     /// Fixes the relative file links of each note inside a folder that moved.
     fn relink_folder(&self, moved: Moved<'_>) -> Result<()> {
-        let paths: Vec<PathBuf> = self
-            .files(moved.to)?
+        let paths: Vec<NotePath> = self
+            .files(&moved.to.scope())?
             .into_iter()
             .map(|(rel, _)| rel)
             .collect();
         let rewritten = self.rewrite(&paths, |rel, old| {
-            let inside = rel.strip_prefix(moved.to).ok()?;
-            let old_folder = moved.from.join(folder_of(inside));
-            relink(old, &self.root, &old_folder, folder_of(rel), Some(moved))
+            let folder = rel.folder();
+            let old_folder = folder.moved(moved.to, moved.from)?;
+            relink(old, &self.root, &old_folder, &folder, Some(moved))
         });
         for (_, result) in rewritten {
             if let Err(error) = result {
@@ -585,15 +564,15 @@ impl Store {
         Ok(())
     }
 
-    /// Calls `visit` with the relative path of each note, subfolder and Holm temp file below the
-    /// folder `start`. It skips other hidden entries and symlinks, so it can't loop.
-    fn walk(&self, start: &Path, visit: &mut dyn FnMut(&Path, Kind)) -> Result<()> {
-        let mut dirs = vec![start.to_owned()];
+    /// Calls `visit` with each note, subfolder and Holm temp file below the folder `start`.
+    /// It skips other hidden entries and symlinks, so it can't loop.
+    fn walk(&self, start: &FolderPath, visit: &mut dyn FnMut(Found)) -> Result<()> {
+        let mut dirs = vec![start.clone()];
         while let Some(dir) = dirs.pop() {
             let path = self.root.join(&dir);
             let entries = match fs::read_dir(&path) {
                 Ok(entries) => entries,
-                Err(source) if dir.as_os_str().is_empty() => {
+                Err(source) if dir.is_root() => {
                     return Err(Error::Read { path, source });
                 }
                 Err(error) => {
@@ -607,53 +586,48 @@ impl Store {
                 let Ok(kind) = entry.file_type() else {
                     continue;
                 };
-                if is_hidden(&name) {
-                    if kind.is_file() && is_temp(&name) {
-                        visit(&dir.join(&name), Kind::Temp);
+                if kind.is_file() && is_temp(&name) {
+                    visit(Found::Temp(path.join(&name)));
+                } else if kind.is_dir() {
+                    if let Some(rel) = dir.folder_named(&name) {
+                        visit(Found::Folder(rel.clone()));
+                        dirs.push(rel);
                     }
-                    continue;
-                }
-                let rel = dir.join(&name);
-                if kind.is_dir() {
-                    visit(&rel, Kind::Folder);
-                    dirs.push(rel);
-                } else if kind.is_file() && is_md(&rel) {
-                    visit(&rel, Kind::Note);
+                } else if kind.is_file()
+                    && let Some(rel) = dir.note_named(&name)
+                {
+                    visit(Found::Note(rel));
                 }
             }
         }
         Ok(())
     }
-
-    /// The absolute path of a note, after a check of the relative path.
-    fn note_path(&self, rel: &Path) -> Result<PathBuf> {
-        Self::check_note(rel).map(|()| self.root.join(rel))
-    }
 }
 
 /// What is at a path in the notes folder.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Entry {
-    Note(Stamp),
+    Note(NotePath, Stamp),
     Folder,
     /// A file that is not a note, or a symlink.
     Other,
     Missing,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Kind {
-    Note,
-    Folder,
-    Temp,
+/// What the folder walk finds.
+enum Found {
+    Note(NotePath),
+    Folder(FolderPath),
+    /// The absolute path of a Holm temp file.
+    Temp(PathBuf),
 }
 
-fn note(rel: &Path, text: &Text, stamp: Stamp) -> Note {
+fn note(rel: &NotePath, text: &Text, stamp: Stamp) -> Note {
     Note {
         info: NoteInfo {
-            path: rel.to_owned(),
+            path: rel.clone(),
             id: text.id().map(NoteId::from_field),
-            title: title_of(rel),
+            title: rel.title().into_owned(),
             preview: text.preview(),
             tags: text.tags(),
             pinned: text.pinned(),
@@ -663,60 +637,8 @@ fn note(rel: &Path, text: &Text, stamp: Stamp) -> Note {
     }
 }
 
-/// The title of the note at `path`: its file name without `.md`.
-pub fn title_of(path: &Path) -> String {
-    path.file_stem()
-        .map(|stem| stem.to_string_lossy().into_owned())
-        .unwrap_or_default()
-}
-
-/// The folder of a note or folder path. The root folder is the empty path.
-pub(crate) fn folder_of(rel: &Path) -> &Path {
-    rel.parent().unwrap_or(Path::new(""))
-}
-
 fn folder_abs(path: &Path) -> &Path {
     path.parent().unwrap_or(Path::new("/"))
-}
-
-/// Checks a typed folder name, trimmed, for a new entry in `parent`, and returns it.
-pub(crate) fn check_name<'a>(parent: &Path, name: &'a str) -> Result<&'a str> {
-    let name = name.trim();
-    if parent.as_os_str().is_empty() && name.eq_ignore_ascii_case(ATTACHMENTS) {
-        return Err(Error::BadName {
-            name: name.to_owned(),
-            problem: NameProblem::Attachments,
-        });
-    }
-    check_file_name(name, name)?;
-    Ok(name)
-}
-
-/// Checks a typed title, trimmed, and returns its file name `<title>.md`.
-pub(crate) fn check_title(title: &str) -> Result<String> {
-    let title = title.trim();
-    let name = format!("{title}{NOTE_EXT}");
-    check_file_name(title, &name)?;
-    Ok(name)
-}
-
-/// Checks the rules for every trimmed typed name. `file_name` is the name on disk for `typed`.
-fn check_file_name(typed: &str, file_name: &str) -> Result<()> {
-    let problem = if typed.is_empty() {
-        NameProblem::Empty
-    } else if typed.contains('/') {
-        NameProblem::Slash
-    } else if typed.starts_with('.') {
-        NameProblem::Dot
-    } else if file_name.len() > MAX_NAME_BYTES {
-        NameProblem::TooLong
-    } else {
-        return Ok(());
-    };
-    Err(Error::BadName {
-        name: typed.to_owned(),
-        problem,
-    })
 }
 
 /// A file stem from any text, like the name of a pasted file.
@@ -852,26 +774,9 @@ fn sync_dir(dir: &Path) -> io::Result<()> {
     File::open(dir)?.sync_all()
 }
 
-/// Checks that `rel` is a plain relative path with no hidden part.
-fn plain_path(rel: &Path) -> Result<&Path> {
-    let plain = rel.components().all(|part| match part {
-        Component::Normal(name) => !is_hidden(name),
-        _ => false,
-    });
-    if plain { Ok(rel) } else { Err(bad_path(rel)) }
-}
-
-fn is_hidden(name: &OsStr) -> bool {
-    name.as_encoded_bytes().starts_with(b".")
-}
-
 fn is_temp(name: &OsStr) -> bool {
     let name = name.as_encoded_bytes();
     name.starts_with(TEMP_PREFIX.as_bytes()) && name.ends_with(TEMP_SUFFIX.as_bytes())
-}
-
-fn is_md(path: &Path) -> bool {
-    path.extension() == Some(OsStr::new("md"))
 }
 
 fn bad_path(rel: &Path) -> Error {

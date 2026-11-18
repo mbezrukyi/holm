@@ -8,9 +8,9 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use common::Folder;
-use holm_core::Core;
+use common::{Folder, folder_path};
 use holm_core::model::{Link, NoteInfo, NoteSet, Order, Tag};
+use holm_core::{Core, NotePath};
 use proptest::prelude::*;
 
 const WORDS: [&str; 4] = ["apple", "Berry", "café", "dough"];
@@ -79,22 +79,22 @@ struct Answers {
     in_folders: Vec<Vec<NoteInfo>>,
     tags: Vec<Tag>,
     with_tag: Vec<Vec<NoteInfo>>,
-    search: Vec<Vec<PathBuf>>,
+    search: Vec<Vec<NotePath>>,
     links: Vec<Vec<Link>>,
     backlinks: Vec<Vec<NoteInfo>>,
 }
 
 fn answers(core: &Core) -> Answers {
     let notes = core.snapshot().notes(NoteSet::All, Order::LastChange);
-    let paths: Vec<PathBuf> = notes.iter().map(|n| n.path.clone()).collect();
+    let paths: Vec<NotePath> = notes.iter().map(|n| n.path.clone()).collect();
     Answers {
-        folders: core.snapshot().folders().map(Path::to_path_buf).collect(),
+        folders: core.snapshot().folders().map(common::path_buf).collect(),
         by_title: core.snapshot().notes(NoteSet::All, Order::Title),
         in_folders: ["", "work"]
             .iter()
             .map(|f| {
                 core.snapshot()
-                    .notes(NoteSet::In(Path::new(f)), Order::LastChange)
+                    .notes(NoteSet::In(&folder_path(f)), Order::LastChange)
             })
             .collect(),
         tags: core.snapshot().tags(),
@@ -149,7 +149,7 @@ fn tags(picks: &[usize]) -> Vec<String> {
     picks.iter().map(|&t| TAGS[t].to_owned()).collect()
 }
 
-fn pick(folder: &Folder, note: usize) -> Option<PathBuf> {
+fn pick(folder: &Folder, note: usize) -> Option<NotePath> {
     let notes = folder.core.snapshot().notes(NoteSet::All, Order::Title);
     (!notes.is_empty()).then(|| notes[note % notes.len()].path.clone())
 }
@@ -167,7 +167,7 @@ fn apply(folder: &mut Folder, edit: &Edit, copies: &mut usize) {
                 .map(|n| format!("Note {n}"))
                 .find(|title| !folder.path(place).join(format!("{title}.md")).exists())
                 .unwrap();
-            folder.core.create(place, &free).unwrap();
+            folder.core.create(&folder_path(place), &free).unwrap();
         }
         Edit::Save {
             note,
@@ -214,7 +214,7 @@ fn apply(folder: &mut Folder, edit: &Edit, copies: &mut usize) {
         Edit::Copy { note } => {
             if let Some(path) = pick(folder, *note) {
                 *copies += 1;
-                let copy = path.with_file_name(format!("copy {copies}.md"));
+                let copy = AsRef::<Path>::as_ref(&path).with_file_name(format!("copy {copies}.md"));
                 fs::copy(folder.dir.path().join(&path), folder.dir.path().join(&copy)).unwrap();
                 folder.feed([copy]);
             }

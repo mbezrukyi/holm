@@ -5,11 +5,10 @@
 mod common;
 
 use std::fs;
-use std::path::{Path, PathBuf};
 
-use common::Folder;
+use common::{Folder, folder_path, note_path};
 use holm_core::model::{NoteInfo, NoteSet, Order};
-use holm_core::{Core, Result, Snapshot};
+use holm_core::{Core, NotePath, Result, Snapshot};
 
 fn titles(snapshot: &Snapshot) -> Vec<String> {
     snapshot
@@ -24,7 +23,7 @@ fn paths(notes: Vec<NoteInfo>) -> Vec<String> {
 }
 
 fn folders(snapshot: &Snapshot) -> Vec<String> {
-    common::paths(snapshot.folders().map(Path::to_path_buf))
+    common::paths(snapshot.folders().map(common::path_buf))
 }
 
 fn tag_names(snapshot: &Snapshot) -> Vec<String> {
@@ -56,9 +55,9 @@ fn note_writes_show_in_the_snapshot_after_them() {
     ]);
     let core = &folder.core;
 
-    let (note, snapshot) = one_step(core, |core| core.create("work", "Untitled"));
+    let (note, snapshot) = one_step(core, |core| core.create(&folder_path("work"), "Untitled"));
     assert_eq!(
-        paths(snapshot.notes(NoteSet::In(Path::new("work")), Order::Title)),
+        paths(snapshot.notes(NoteSet::In(&folder_path("work")), Order::Title)),
         ["work/Untitled.md"]
     );
 
@@ -66,30 +65,42 @@ fn note_writes_show_in_the_snapshot_after_them() {
         core.save(&note.info.path, "# Ideas\n[plans](holm:P)\n")
     });
     assert_eq!(titles(&snapshot), ["Plans", "Untitled"]);
-    assert_eq!(paths(snapshot.backlinks("Plans.md")), ["work/Untitled.md"]);
-
-    let (info, snapshot) = one_step(core, |core| core.rename_note("work/Untitled.md", "Ideas"));
-    assert_eq!(info.path, Path::new("work/Ideas.md"));
     assert_eq!(
-        paths(snapshot.notes(NoteSet::In(Path::new("work")), Order::Title)),
+        paths(snapshot.backlinks(&note_path("Plans.md"))),
+        ["work/Untitled.md"]
+    );
+
+    let (info, snapshot) = one_step(core, |core| {
+        core.rename_note(&note_path("work/Untitled.md"), "Ideas")
+    });
+    assert_eq!(info.path, note_path("work/Ideas.md"));
+    assert_eq!(
+        paths(snapshot.notes(NoteSet::In(&folder_path("work")), Order::Title)),
         ["work/Ideas.md"]
     );
 
-    let (_, snapshot) = one_step(core, |core| core.move_note("work/Ideas.md", ""));
+    let (_, snapshot) = one_step(core, |core| {
+        core.move_note(&note_path("work/Ideas.md"), &folder_path(""))
+    });
     assert_eq!(
-        paths(snapshot.notes(NoteSet::In(Path::new("")), Order::Title)),
+        paths(snapshot.notes(NoteSet::In(&folder_path("")), Order::Title)),
         ["Ideas.md", "Plans.md"]
     );
-    assert_eq!(paths(snapshot.backlinks("Plans.md")), ["Ideas.md"]);
+    assert_eq!(
+        paths(snapshot.backlinks(&note_path("Plans.md"))),
+        ["Ideas.md"]
+    );
 
-    let (_, snapshot) = one_step(core, |core| core.add_tag("Ideas.md", "work/holm"));
+    let (_, snapshot) = one_step(core, |core| {
+        core.add_tag(&note_path("Ideas.md"), "work/holm")
+    });
     assert_eq!(tag_names(&snapshot), ["work"]);
     assert_eq!(
         paths(snapshot.notes(NoteSet::WithTag("work"), Order::Title)),
         ["Ideas.md"]
     );
 
-    let (_, snapshot) = one_step(core, |core| core.set_pinned("Plans.md", true));
+    let (_, snapshot) = one_step(core, |core| core.set_pinned(&note_path("Plans.md"), true));
     assert_eq!(titles(&snapshot), ["Plans", "Ideas"]);
 
     let (count, snapshot) = one_step(core, |core| core.rename_tag("work", "job"));
@@ -99,16 +110,16 @@ fn note_writes_show_in_the_snapshot_after_them() {
     let (_, snapshot) = one_step(core, |core| core.delete_tag("job"));
     assert_eq!(tag_names(&snapshot), Vec::<String>::new());
 
-    let ((), snapshot) = one_step(core, |core| core.delete_note("Ideas.md"));
+    let ((), snapshot) = one_step(core, |core| core.delete_note(&note_path("Ideas.md")));
     assert_eq!(titles(&snapshot), ["Plans"]);
-    assert_eq!(snapshot.backlinks("Plans.md"), []);
+    assert_eq!(snapshot.backlinks(&note_path("Plans.md")), []);
 
-    let plans = core.read("Plans.md").unwrap();
+    let plans = core.read(&note_path("Plans.md")).unwrap();
     fs::remove_file(folder.path("Plans.md")).unwrap();
     let (_, snapshot) = one_step(core, |core| core.restore(&plans));
     assert_eq!(
         snapshot.note_with_id("P").unwrap().path,
-        Path::new("Plans.md")
+        note_path("Plans.md")
     );
 }
 
@@ -116,11 +127,11 @@ fn note_writes_show_in_the_snapshot_after_them() {
 fn link_id_shows_the_new_id_in_the_snapshot() {
     let folder = Folder::new(&[("a.md", "# A\n")]);
 
-    let (id, snapshot) = one_step(&folder.core, |core| core.link_id("a.md"));
+    let (id, snapshot) = one_step(&folder.core, |core| core.link_id(&note_path("a.md")));
 
     assert_eq!(
         snapshot.note_with_id(id.as_str()).unwrap().path,
-        Path::new("a.md")
+        note_path("a.md")
     );
 }
 
@@ -129,21 +140,23 @@ fn folder_writes_show_in_the_snapshot_after_them() {
     let folder = Folder::new(&[("work/a.md", "# A\n"), ("work/old/b.md", "# B\n")]);
     let core = &folder.core;
 
-    let (new, snapshot) = one_step(core, |core| core.create_folder("", "Home"));
-    assert_eq!(new, PathBuf::from("Home"));
+    let (new, snapshot) = one_step(core, |core| core.create_folder(&folder_path(""), "Home"));
+    assert_eq!(new, folder_path("Home"));
     assert_eq!(folders(&snapshot), ["Home", "work", "work/old"]);
 
-    let (_, snapshot) = one_step(core, |core| core.rename_folder("work", "job"));
+    let (_, snapshot) = one_step(core, |core| core.rename_folder(&folder_path("work"), "job"));
     assert_eq!(folders(&snapshot), ["Home", "job", "job/old"]);
     assert_eq!(
-        paths(snapshot.notes(NoteSet::In(Path::new("job/old")), Order::Title)),
+        paths(snapshot.notes(NoteSet::In(&folder_path("job/old")), Order::Title)),
         ["job/old/b.md"]
     );
 
-    let (_, snapshot) = one_step(core, |core| core.move_folder("job/old", "Home"));
+    let (_, snapshot) = one_step(core, |core| {
+        core.move_folder(&folder_path("job/old"), &folder_path("Home"))
+    });
     assert_eq!(folders(&snapshot), ["Home", "Home/old", "job"]);
 
-    let ((), snapshot) = one_step(core, |core| core.delete_folder("Home"));
+    let ((), snapshot) = one_step(core, |core| core.delete_folder(&folder_path("Home")));
     assert_eq!(folders(&snapshot), ["job"]);
     assert_eq!(titles(&snapshot), ["a"]);
 }
@@ -176,23 +189,35 @@ fn a_feed_batch_with_no_change_keeps_the_revision() {
 #[test]
 fn a_save_with_the_same_text_keeps_the_revision() {
     let folder = Folder::new(&[("A.md", "---\nid: A\ntags: [x]\n---\n# A\n")]);
-    let note = folder.core.read("A.md").unwrap();
+    let note = folder.core.read(&note_path("A.md")).unwrap();
 
-    let written = no_step(&folder.core, |core| core.save("A.md", &note.body));
+    let written = no_step(&folder.core, |core| {
+        core.save(&note_path("A.md"), &note.body)
+    });
 
     assert_eq!(written.unwrap(), note);
-    no_step(&folder.core, |core| core.add_tag("A.md", "x")).unwrap();
-    no_step(&folder.core, |core| core.remove_tag("A.md", "y")).unwrap();
-    no_step(&folder.core, |core| core.rename_note("A.md", "A")).unwrap();
+    no_step(&folder.core, |core| core.add_tag(&note_path("A.md"), "x")).unwrap();
+    no_step(&folder.core, |core| {
+        core.remove_tag(&note_path("A.md"), "y")
+    })
+    .unwrap();
+    no_step(&folder.core, |core| {
+        core.rename_note(&note_path("A.md"), "A")
+    })
+    .unwrap();
 }
 
 #[test]
 fn a_failed_write_keeps_the_revision() {
     let folder = Folder::new(&[("a.md", "# A\n")]);
 
-    let written = no_step(&folder.core, |core| core.add_tag("missing.md", "x"));
+    let written = no_step(&folder.core, |core| {
+        core.add_tag(&note_path("missing.md"), "x")
+    });
     assert!(written.is_err());
-    let written = no_step(&folder.core, |core| core.create_folder("missing", "x"));
+    let written = no_step(&folder.core, |core| {
+        core.create_folder(&folder_path("missing"), "x")
+    });
     assert!(written.is_err());
     let written = no_step(&folder.core, |core| core.rename_tag("x", ""));
     assert!(written.is_err());
@@ -203,7 +228,7 @@ fn an_old_snapshot_stays_as_it_was() {
     let folder = Folder::new(&[("A.md", "")]);
     let old = folder.core.snapshot();
 
-    folder.core.create("", "B").unwrap();
+    folder.core.create(&folder_path(""), "B").unwrap();
 
     assert_eq!(titles(&old), ["A"]);
     assert_eq!(titles(&folder.core.snapshot()), ["A", "B"]);
@@ -217,7 +242,7 @@ fn sorted_puts_known_paths_in_order_and_leaves_out_the_others() {
         ("work/c.md", "---\npinned: true\n---\n"),
     ]);
     let snapshot = folder.core.snapshot();
-    let given = ["b.md", "gone.md", "work/c.md", "A.md", "work"].map(PathBuf::from);
+    let given = ["b.md", "gone.md", "work/c.md", "A.md"].map(note_path);
 
     assert_eq!(
         common::paths(snapshot.sorted(given, Order::Title)),
@@ -225,7 +250,7 @@ fn sorted_puts_known_paths_in_order_and_leaves_out_the_others() {
     );
     assert_eq!(
         snapshot.sorted(Vec::new(), Order::Title),
-        Vec::<PathBuf>::new()
+        Vec::<NotePath>::new()
     );
 }
 
@@ -245,9 +270,9 @@ fn paths_first_matching_keep_and_counts_agree_with_the_note_lists() {
     let snapshot = folder.core.snapshot();
     let sets = [
         NoteSet::All,
-        NoteSet::In(Path::new("")),
-        NoteSet::In(Path::new("work")),
-        NoteSet::In(Path::new("gone")),
+        NoteSet::In(&folder_path("")),
+        NoteSet::In(&folder_path("work")),
+        NoteSet::In(&folder_path("gone")),
         NoteSet::WithTag("work"),
         NoteSet::WithTag("home"),
         NoteSet::WithTag("gone"),
@@ -256,7 +281,7 @@ fn paths_first_matching_keep_and_counts_agree_with_the_note_lists() {
     for set in sets {
         for order in [Order::LastChange, Order::Title] {
             let notes = snapshot.notes(set, order);
-            let expected: Vec<PathBuf> = notes.iter().map(|note| note.path.clone()).collect();
+            let expected: Vec<NotePath> = notes.iter().map(|note| note.path.clone()).collect();
             assert_eq!(snapshot.paths(set, order), expected, "{set:?} {order:?}");
             assert_eq!(
                 snapshot.first(set, order),
@@ -310,7 +335,7 @@ fn newest_and_backlinks_put_the_newest_change_first_with_no_pins_on_top() {
     let snapshot = folder.core.snapshot();
     let linked = ["a/z.md", "a b.md", "a.md", "b.md", "old.md"];
 
-    assert_eq!(paths(snapshot.backlinks("target.md")), linked);
+    assert_eq!(paths(snapshot.backlinks(&note_path("target.md"))), linked);
     assert_eq!(
         paths(snapshot.newest(NoteSet::All)),
         [&linked[..], &["target.md"]].concat()

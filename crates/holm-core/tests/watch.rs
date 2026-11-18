@@ -5,9 +5,11 @@
 
 mod common;
 
+use common::{folder_path, note_path};
+
 use std::cell::RefCell;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::task::Poll;
 use std::time::{Duration, Instant};
@@ -15,7 +17,7 @@ use std::time::{Duration, Instant};
 use futures_core::Stream;
 
 use holm_core::model::{Change, ChangeList, LinkTarget, NoteId, NoteInfo, NoteSet, Order};
-use holm_core::{Changes, Core, Error, Feed};
+use holm_core::{Changes, Core, Error, Feed, NotePath};
 use tempfile::TempDir;
 
 /// A notes folder with a core that sees changes only through its feed.
@@ -67,7 +69,7 @@ impl Fed {
     }
 
     fn info(&self, path: &str) -> NoteInfo {
-        self.core.read(path).unwrap().info
+        self.core.read(&note_path(path)).unwrap().info
     }
 }
 
@@ -125,7 +127,7 @@ fn a_move_in_two_batches_with_the_old_path_first_is_a_remove_and_an_add() {
     assert_eq!(
         fed.take(),
         [
-            Change::Removed("a.md".into()),
+            Change::Removed(note_path("a.md")),
             Change::Added(fed.info("z.md"))
         ]
     );
@@ -138,7 +140,7 @@ fn a_deleted_file_is_removed() {
     fs::remove_file(fed.path("a.md")).unwrap();
     fed.feed.changed(["a.md"]).unwrap();
 
-    assert_eq!(fed.take(), [Change::Removed("a.md".into())]);
+    assert_eq!(fed.take(), [Change::Removed(note_path("a.md"))]);
     assert_eq!(previews(&fed.core), ["B"]);
 }
 
@@ -157,13 +159,13 @@ fn a_moved_note_keeps_its_id_and_its_backlinks() {
     assert_eq!(
         changes[0],
         Change::Moved {
-            from: "a.md".into(),
+            from: note_path("a.md"),
             note: fed.info("work/a.md"),
         }
     );
     assert_eq!(changes[1..], [Change::Folders]);
-    let backlinks = fed.core.snapshot().backlinks("work/a.md");
-    assert_eq!(backlinks[0].path, PathBuf::from("b.md"));
+    let backlinks = fed.core.snapshot().backlinks(&note_path("work/a.md"));
+    assert_eq!(backlinks[0].path, note_path("b.md"));
 }
 
 #[test]
@@ -178,7 +180,7 @@ fn a_move_with_the_new_path_first_is_one_change() {
     assert_eq!(
         fed.take(),
         [Change::Moved {
-            from: "a.md".into(),
+            from: note_path("a.md"),
             note: fed.info("z.md"),
         }]
     );
@@ -188,11 +190,11 @@ fn a_move_with_the_new_path_first_is_one_change() {
 fn holm_s_own_saves_and_new_notes_come_only_as_notes() {
     let fed = Fed::new(&[("a.md", "# A\n")]);
 
-    fed.core.save("a.md", "# A\n\nMore.\n").unwrap();
-    fed.core.add_tag("a.md", "work").unwrap();
-    let new = fed.core.create("", "New").unwrap();
+    fed.core.save(&note_path("a.md"), "# A\n\nMore.\n").unwrap();
+    fed.core.add_tag(&note_path("a.md"), "work").unwrap();
+    let new = fed.core.create(&folder_path(""), "New").unwrap();
     fed.feed
-        .changed([PathBuf::from("a.md"), new.info.path])
+        .changed([PathBuf::from("a.md"), common::path_buf(new.info.path)])
         .unwrap();
 
     assert_eq!(fed.take(), [Change::Notes, Change::Notes, Change::Notes]);
@@ -202,8 +204,11 @@ fn holm_s_own_saves_and_new_notes_come_only_as_notes() {
 fn a_pin_comes_only_as_notes_and_an_attachment_not_at_all() {
     let fed = Fed::new(&[("a.md", "# A\n")]);
 
-    fed.core.set_pinned("a.md", true).unwrap();
-    let image = fed.core.paste_image("a.md", "png", b"png").unwrap();
+    fed.core.set_pinned(&note_path("a.md"), true).unwrap();
+    let image = fed
+        .core
+        .paste_image(&note_path("a.md"), "png", b"png")
+        .unwrap();
     fed.feed
         .changed([PathBuf::from("a.md"), PathBuf::from("attachments"), image])
         .unwrap();
@@ -218,13 +223,17 @@ fn each_own_move_comes_as_one_list_with_its_revision() {
         ("area/b.md", "# B\n"),
     ]);
 
-    let note = fed.core.rename_note("a.md", "C").unwrap();
+    let note = fed.core.rename_note(&note_path("a.md"), "C").unwrap();
     let note_revision = fed.core.snapshot().revision();
-    fed.core.rename_folder("area", "zone").unwrap();
+    fed.core
+        .rename_folder(&folder_path("area"), "zone")
+        .unwrap();
     let folder_revision = fed.core.snapshot().revision();
     fed.core.rename_tag("work", " Job ").unwrap();
     fed.core.rename_tag("gone", "x").unwrap();
-    fed.core.rename_folder("zone", "zone").unwrap();
+    fed.core
+        .rename_folder(&folder_path("zone"), "zone")
+        .unwrap();
 
     let lists: Vec<(u64, Vec<Change>)> = fed
         .lists()
@@ -237,15 +246,15 @@ fn each_own_move_comes_as_one_list_with_its_revision() {
             (
                 note_revision,
                 vec![Change::Moved {
-                    from: "a.md".into(),
+                    from: note_path("a.md"),
                     note,
                 }],
             ),
             (
                 folder_revision,
                 vec![Change::FolderMoved {
-                    from: "area".into(),
-                    to: "zone".into(),
+                    from: folder_path("area"),
+                    to: folder_path("zone"),
                 }],
             ),
             (
@@ -268,8 +277,8 @@ fn each_own_move_comes_as_one_list_with_its_revision() {
 fn each_list_carries_the_snapshot_of_its_revision() {
     let fed = Fed::new(&[("a.md", "# A\n")]);
 
-    fed.core.rename_note("a.md", "B").unwrap();
-    fed.core.create_folder("", "work").unwrap();
+    fed.core.rename_note(&note_path("a.md"), "B").unwrap();
+    fed.core.create_folder(&folder_path(""), "work").unwrap();
     fed.write("c.md", "# C\n");
     fed.feed.changed(["c.md"]).unwrap();
 
@@ -278,8 +287,9 @@ fn each_list_carries_the_snapshot_of_its_revision() {
         .iter()
         .map(|list| {
             let notes = list.snapshot.notes(NoteSet::All, Order::Title);
-            let folders = list.snapshot.folders().map(Path::to_owned).collect();
-            (notes.into_iter().map(|info| info.path).collect(), folders)
+            let folders = list.snapshot.folders().map(common::path_buf).collect();
+            let notes = notes.into_iter().map(|info| common::path_buf(info.path));
+            (notes.collect(), folders)
         })
         .collect();
     let notes = |paths: &[&str]| paths.iter().map(PathBuf::from).collect::<Vec<_>>();
@@ -296,17 +306,37 @@ fn each_list_carries_the_snapshot_of_its_revision() {
 #[test]
 fn a_move_rule_follows_paths_below_a_folder_and_child_tags() {
     let folder = Change::FolderMoved {
-        from: "work".into(),
-        to: "job".into(),
+        from: folder_path("work"),
+        to: folder_path("job"),
     };
-    let after = |change: &Change, path: &str| change.path_after(Path::new(path));
-    assert_eq!(after(&folder, "work"), Some("job".into()));
+    let after = |change: &Change, path: &str| change.folder_after(&folder_path(path));
+    assert_eq!(after(&folder, "work"), Some(folder_path("job")));
+    assert_eq!(after(&folder, "work/deep"), Some(folder_path("job/deep")));
     assert_eq!(
-        after(&folder, "work/deep/a.md"),
-        Some("job/deep/a.md".into())
+        folder.note_after(&note_path("work/deep/a.md")),
+        Some(note_path("job/deep/a.md"))
     );
     assert_eq!(after(&folder, "workshop"), None);
     assert_eq!(folder.tag_after("work"), None);
+
+    let moved = Change::Moved {
+        from: note_path("a.md"),
+        note: NoteInfo {
+            path: note_path("b.md"),
+            id: None,
+            title: "b".into(),
+            preview: String::new(),
+            tags: Vec::new(),
+            pinned: false,
+            modified: std::time::SystemTime::UNIX_EPOCH,
+        },
+    };
+    assert_eq!(
+        moved.note_after(&note_path("a.md")),
+        Some(note_path("b.md"))
+    );
+    assert_eq!(moved.note_after(&note_path("c.md")), None);
+    assert_eq!(moved.folder_after(&folder_path("a")), None);
 
     let tag = Change::TagMoved {
         from: "work".into(),
@@ -338,7 +368,7 @@ fn a_new_folder_adds_its_notes_and_changes_the_folder_list() {
         fed.core
             .snapshot()
             .folders()
-            .map(Path::to_path_buf)
+            .map(common::path_buf)
             .collect::<Vec<_>>(),
         [PathBuf::from("work"), PathBuf::from("work/deep")]
     );
@@ -362,8 +392,8 @@ fn a_deleted_folder_removes_its_notes() {
     assert_eq!(
         changes,
         [
-            Change::Removed("work/deep/b.md".into()),
-            Change::Removed("work/a.md".into()),
+            Change::Removed(note_path("work/deep/b.md")),
+            Change::Removed(note_path("work/a.md")),
             Change::Folders,
         ]
     );
@@ -382,7 +412,7 @@ fn a_renamed_folder_keeps_search_links_and_file_links_of_its_notes() {
         ("b.md", &note("B", "", "[a](holm:A)\n")),
         ("c.md", &note("C", "", "# C\n")),
     ]);
-    let links = fed.core.snapshot().links("work/a.md").to_vec();
+    let links = fed.core.snapshot().links(&note_path("work/a.md")).to_vec();
     fed.take();
 
     fs::rename(fed.path("work"), fed.path("job")).unwrap();
@@ -392,37 +422,37 @@ fn a_renamed_folder_keeps_search_links_and_file_links_of_its_notes() {
         fed.take(),
         [
             Change::Moved {
-                from: "work/a.md".into(),
+                from: note_path("work/a.md"),
                 note: fed.info("job/a.md"),
             },
             Change::Moved {
-                from: "work/pic.md".into(),
+                from: note_path("work/pic.md"),
                 note: fed.info("job/pic.md"),
             },
             Change::Added(fed.info("job/plain.md")),
-            Change::Removed("work/plain.md".into()),
+            Change::Removed(note_path("work/plain.md")),
             Change::Folders,
         ]
     );
     let snapshot = fed.core.snapshot();
     let found = |text| fed.core.search(text).unwrap();
-    assert_eq!(found("potatoes"), [PathBuf::from("job/a.md")]);
-    assert_eq!(found("carrots"), [PathBuf::from("job/plain.md")]);
-    assert_eq!(found("food"), [PathBuf::from("job/a.md")]);
-    assert_eq!(snapshot.links("job/a.md"), links);
-    let back = |path| -> Vec<PathBuf> {
+    assert_eq!(found("potatoes"), [note_path("job/a.md")]);
+    assert_eq!(found("carrots"), [note_path("job/plain.md")]);
+    assert_eq!(found("food"), [note_path("job/a.md")]);
+    assert_eq!(snapshot.links(&note_path("job/a.md")), links);
+    let back = |path: &NotePath| -> Vec<NotePath> {
         let notes = snapshot.backlinks(path);
         notes.into_iter().map(|n| n.path).collect()
     };
-    assert_eq!(back("job/a.md"), [PathBuf::from("b.md")]);
-    assert_eq!(back("c.md"), [PathBuf::from("job/a.md")]);
+    assert_eq!(back(&note_path("job/a.md")), [note_path("b.md")]);
+    assert_eq!(back(&note_path("c.md")), [note_path("job/a.md")]);
     assert_eq!(
-        snapshot.links("job/pic.md")[0].target,
+        snapshot.links(&note_path("job/pic.md"))[0].target,
         LinkTarget::File("job/pic.png".into())
     );
     assert_eq!(
         snapshot.notes(NoteSet::WithTag("food"), Order::Title)[0].path,
-        PathBuf::from("job/a.md")
+        note_path("job/a.md")
     );
 }
 
@@ -443,7 +473,10 @@ fn a_tag_change_sends_a_tags_change() {
 
     fs::remove_file(fed.path("a.md")).unwrap();
     fed.feed.changed(["a.md"]).unwrap();
-    assert_eq!(fed.take(), [Change::Removed("a.md".into()), Change::Tags]);
+    assert_eq!(
+        fed.take(),
+        [Change::Removed(note_path("a.md")), Change::Tags]
+    );
     assert_eq!(fed.core.snapshot().tags(), []);
 }
 
@@ -475,7 +508,7 @@ fn the_empty_path_checks_the_whole_notes_folder() {
         fed.take(),
         [
             Change::Changed(fed.info("a.md")),
-            Change::Removed("b.md".into()),
+            Change::Removed(note_path("b.md")),
             Change::Added(fed.info("work/c.md")),
             Change::Folders,
         ]
@@ -579,7 +612,7 @@ mod real_events {
 
         assert_eq!(
             next(&mut changes),
-            [Change::Changed(core.read("a.md").unwrap().info)]
+            [Change::Changed(core.read(&note_path("a.md")).unwrap().info)]
         );
     }
 
@@ -587,13 +620,13 @@ mod real_events {
     fn a_save_comes_only_as_notes_but_the_next_outside_change_comes() {
         let (dir, _cache, core, mut changes) = open(&[("a.md", "# A\n")]);
 
-        core.save("a.md", "# A\n\nMore.\n").unwrap();
+        core.save(&note_path("a.md"), "# A\n\nMore.\n").unwrap();
         fs::write(dir.path().join("b.md"), "# B\n").unwrap();
 
         assert_eq!(next(&mut changes), [Change::Notes]);
         assert_eq!(
             next(&mut changes),
-            [Change::Added(core.read("b.md").unwrap().info)]
+            [Change::Added(core.read(&note_path("b.md")).unwrap().info)]
         );
     }
 
@@ -606,8 +639,8 @@ mod real_events {
         assert_eq!(
             next(&mut changes),
             [Change::Moved {
-                from: "a.md".into(),
-                note: core.read("b.md").unwrap().info,
+                from: note_path("a.md"),
+                note: core.read(&note_path("b.md")).unwrap().info,
             }]
         );
     }
@@ -622,7 +655,7 @@ mod real_events {
         std::thread::sleep(Duration::from_millis(300));
         let start = core.snapshot().revision();
 
-        core.read("work/b.md").unwrap();
+        core.read(&note_path("work/b.md")).unwrap();
         core.snapshot().notes(NoteSet::All, Order::Title);
         fs::read(dir.path().join("a.md")).unwrap();
         std::thread::sleep(Duration::from_secs(1));
@@ -636,7 +669,7 @@ fn the_revision_grows_with_own_writes_and_outside_changes() {
     let fed = Fed::new(&[("a.md", "# A\n")]);
     let start = fed.core.snapshot().revision();
 
-    fed.core.read("a.md").unwrap();
+    fed.core.read(&note_path("a.md")).unwrap();
     fed.core.snapshot().notes(NoteSet::All, Order::Title);
     assert_eq!(
         fed.core.snapshot().revision(),
@@ -644,7 +677,7 @@ fn the_revision_grows_with_own_writes_and_outside_changes() {
         "reads change nothing"
     );
 
-    fed.core.create("", "New").unwrap();
+    fed.core.create(&folder_path(""), "New").unwrap();
     let created = fed.core.snapshot().revision();
     assert!(created > start);
 

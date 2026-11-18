@@ -4,13 +4,12 @@
 //! Each row shows the folder of its note on the right.
 //! `↑` and `↓` pick a note, `Enter` opens it, and `Esc` closes the window.
 
-use std::path::PathBuf;
-
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _, IntoElement,
     ParentElement, Render, Role, StatefulInteractiveElement as _, Subscription,
     TestSupportExt as _, Window, px,
 };
+use holm_core::NotePath;
 use holm_core::model::NoteInfo;
 
 use crate::pick_notes::{Lowercase, PickNotes};
@@ -20,7 +19,7 @@ use crate::text;
 /// The answer of the window.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum QuickOpenEvent {
-    Open(PathBuf),
+    Open(NotePath),
     Close,
 }
 
@@ -105,10 +104,11 @@ impl Render for QuickOpen {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
     use std::time::SystemTime;
 
     use holm_core::model::NoteInfo;
+
+    use crate::test_paths::note_path;
 
     use super::{MAX_ROWS, PickNotes};
 
@@ -120,7 +120,7 @@ mod tests {
         titles
             .iter()
             .map(|title| NoteInfo {
-                path: PathBuf::from(format!("{title}.md")),
+                path: note_path(&format!("{title}.md")),
                 id: None,
                 title: title.clone(),
                 preview: String::new(),

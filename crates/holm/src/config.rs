@@ -10,6 +10,7 @@ use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
 use holm_core::model::Order;
+use holm_core::{FolderPath, NotePath};
 use holm_editor::WritingHelp;
 use holm_markdown::Color;
 use toml_edit::{Array, DocumentMut, Item, Table, Value};
@@ -47,8 +48,8 @@ pub(crate) struct Settings {
     /// False after "Do not show again" in the delete dialog.
     pub(crate) ask_before_delete: bool,
     pub(crate) sidebar: SidebarSettings,
-    /// The note that was open last, relative to the notes folder.
-    pub(crate) last_note: Option<PathBuf>,
+    /// The note that was open last.
+    pub(crate) last_note: Option<NotePath>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -255,7 +256,7 @@ fn read(document: &DocumentMut) -> Settings {
             }
             "last_note" => {
                 if let Some(path) = get(key, item, Item::as_str) {
-                    settings.last_note = Some(PathBuf::from(path));
+                    settings.last_note = NotePath::new(path);
                 }
             }
             "sidebar" => {
@@ -332,7 +333,7 @@ fn item_from(text: &str) -> Option<SidebarItem> {
     match text.split_once(':') {
         None if text == "all" => Some(SidebarItem::All),
         Some(("folder", path)) if !path.is_empty() => {
-            Some(SidebarItem::Folder(PathBuf::from(path)))
+            FolderPath::new(path).map(SidebarItem::Folder)
         }
         Some(("tag", name)) if !name.is_empty() => Some(SidebarItem::Tag(name.to_owned())),
         _ => None,
@@ -342,7 +343,7 @@ fn item_from(text: &str) -> Option<SidebarItem> {
 /// The text of `item` in the file. A folder path that is not UTF-8 gives `all`.
 fn item_text(item: &SidebarItem) -> String {
     match item {
-        SidebarItem::Folder(path) => match path.to_str() {
+        SidebarItem::Folder(path) => match AsRef::<Path>::as_ref(path).to_str() {
             Some(path) => format!("folder:{path}"),
             None => "all".to_owned(),
         },
@@ -397,7 +398,11 @@ fn write(document: &mut DocumentMut, settings: &Settings) {
         .map(ToString::to_string)
         .collect();
     set(document, "custom_colors", Value::from(colors));
-    match settings.last_note.as_deref().map(Path::to_str) {
+    match settings
+        .last_note
+        .as_ref()
+        .map(|path| AsRef::<Path>::as_ref(path).to_str())
+    {
         Some(Some(path)) => set(document, "last_note", Value::from(path)),
         Some(None) | None => {
             document.remove("last_note");
@@ -450,6 +455,7 @@ fn set(table: &mut Table, key: &str, value: Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_paths::folder_path;
 
     fn load(text: &str) -> (tempfile::TempDir, Config) {
         let dir = tempfile::tempdir().unwrap();
@@ -489,7 +495,7 @@ mod tests {
                 hidden: true,
                 view: View::Tree(SidebarItem::Tag("work/holm".into())),
             },
-            last_note: Some(PathBuf::from("work/Plans.md")),
+            last_note: NotePath::new("work/Plans.md"),
         };
         config.save(settings.clone());
 
@@ -537,7 +543,7 @@ mod tests {
             load("version = 1\n[sidebar]\nview = \"list\"\nitem = \"folder:work\"\n");
         assert_eq!(
             config.settings().sidebar.view,
-            View::List(SidebarItem::Folder("work".into()))
+            View::List(SidebarItem::Folder(folder_path("work")))
         );
         let (_dir, config) = load("version = 1\n[sidebar]\nview = \"tree\"\nitem = \"bad\"\n");
         assert_eq!(config.settings().sidebar.view, View::Tree(SidebarItem::All));

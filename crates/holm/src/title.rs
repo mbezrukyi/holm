@@ -8,7 +8,7 @@
 //! The field closes after [`NameEvent::Written`] and [`NameEvent::Closed`], and it sends each
 //! [`NameEvent`] on to the owner. The owner decides what a blur does.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::h_flex;
@@ -18,6 +18,8 @@ use gpui_kit::{
     IntoElement, MouseButton, ParentElement, Pixels, Render, Role, StatefulInteractiveElement as _,
     Styled, Subscription, TestSupportExt as _, Window, div, px,
 };
+
+use holm_core::NotePath;
 
 use crate::name_field::{Look, NameEvent, NameField, NameWrite};
 use crate::text;
@@ -33,7 +35,7 @@ const LINE_HEIGHT: Pixels = px(14.);
 
 pub(crate) struct TitleField<T> {
     /// The path of the open note.
-    path: Option<PathBuf>,
+    path: Option<NotePath>,
     write: NameWrite<T>,
     home: FocusHandle,
     field: Option<(Entity<NameField<T>>, Subscription)>,
@@ -51,7 +53,7 @@ impl<T: Clone + 'static> TitleField<T> {
     }
 
     /// Shows the path of the open note.
-    pub(crate) fn show(&mut self, path: Option<PathBuf>, cx: &mut Context<Self>) {
+    pub(crate) fn show(&mut self, path: Option<NotePath>, cx: &mut Context<Self>) {
         if self.path != path {
             self.path = path;
             cx.notify();
@@ -60,8 +62,8 @@ impl<T: Clone + 'static> TitleField<T> {
 
     fn title(&self) -> String {
         self.path
-            .as_deref()
-            .map(holm_core::title_of)
+            .as_ref()
+            .map(|path| path.title().into_owned())
             .unwrap_or_default()
     }
 
@@ -109,10 +111,10 @@ impl<T: Clone + 'static> Render for TitleField<T> {
         let theme = cx.theme();
         let folders: Vec<String> = self
             .path
-            .as_deref()
-            .and_then(Path::parent)
-            .map(|parent| {
-                parent
+            .as_ref()
+            .map(|path| {
+                let folder = path.folder();
+                Path::new(folder.as_ref())
                     .iter()
                     .map(|part| part.to_string_lossy().into_owned())
                     .collect()

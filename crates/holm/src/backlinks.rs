@@ -8,8 +8,6 @@
 //!
 //! With no backlinks, the tag row leaves the button out.
 
-use std::path::PathBuf;
-
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -17,6 +15,7 @@ use gpui_kit::{
     IntoElement, KeyDownEvent, MouseButton, ParentElement, Pixels, Render, Role, ScrollHandle,
     StatefulInteractiveElement as _, Styled, TestSupportExt as _, Window, div, px,
 };
+use holm_core::NotePath;
 use holm_core::model::NoteInfo;
 
 use crate::popup::{self, Dropdown};
@@ -32,7 +31,7 @@ const LIST_HEIGHT: Pixels = px(280.);
 
 /// The user picked the note at this path, to open it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct OpenBacklink(pub(crate) PathBuf);
+pub(crate) struct OpenBacklink(pub(crate) NotePath);
 
 pub(crate) struct Backlinks {
     notes: Vec<NoteInfo>,

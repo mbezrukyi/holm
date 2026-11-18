@@ -25,6 +25,8 @@ mod problem_list;
 mod quick_open;
 mod sidebar;
 mod tags;
+#[cfg(test)]
+mod test_paths;
 mod text;
 mod text_field;
 mod theme;

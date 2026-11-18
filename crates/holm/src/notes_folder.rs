@@ -34,7 +34,7 @@ use gpui_kit::{App, AppContext as _, Context, EventEmitter, Task, Window};
 use holm_core::model::{
     Change, ChangeList, DeleteCount, LinkTarget, Note, NoteInfo, NoteSet, Order,
 };
-use holm_core::{Changes, Core, Snapshot};
+use holm_core::{Changes, Core, FolderPath, NotePath, Snapshot};
 use holm_editor::PastedFile;
 
 use crate::error::AppError;
@@ -73,7 +73,7 @@ pub(crate) fn window_step<V: 'static, R: 'static>(
 #[derive(Clone, Debug)]
 pub(crate) enum NoteText {
     /// The new body of the note at `path`. The note keeps its other facts.
-    Save { path: PathBuf, body: String },
+    Save { path: NotePath, body: String },
     /// The note after another tool deleted its file: its last facts and its body.
     Restore { info: NoteInfo, body: String },
 }
@@ -183,7 +183,7 @@ impl NotesFolder {
     /// Reads the note at `path`, after the writes before it.
     pub(crate) fn read(
         &mut self,
-        path: PathBuf,
+        path: NotePath,
         done: impl FnOnce(holm_core::Result<Note>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
@@ -202,9 +202,9 @@ impl NotesFolder {
     /// Gives the note at `path` a new title, and gives its new path.
     pub(crate) fn rename_note(
         &mut self,
-        path: PathBuf,
+        path: NotePath,
         title: String,
-        done: impl FnOnce(holm_core::Result<PathBuf>, &mut App) + 'static,
+        done: impl FnOnce(holm_core::Result<NotePath>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
         self.write(
@@ -217,7 +217,7 @@ impl NotesFolder {
     /// Adds or removes one tag of the note at `path`.
     pub(crate) fn change_tag(
         &mut self,
-        path: PathBuf,
+        path: NotePath,
         change: TagChange,
         done: impl FnOnce(holm_core::Result<()>, &mut App) + 'static,
         cx: &mut Context<Self>,
@@ -238,7 +238,7 @@ impl NotesFolder {
     /// Pins or unpins the note at `path`.
     pub(crate) fn set_pinned(
         &mut self,
-        path: PathBuf,
+        path: NotePath,
         pinned: bool,
         done: impl FnOnce(holm_core::Result<()>, &mut App) + 'static,
         cx: &mut Context<Self>,
@@ -253,7 +253,7 @@ impl NotesFolder {
     /// Creates the note `title` in `folder`, with `tag` when it has one, and gives the note.
     pub(crate) fn create_note(
         &mut self,
-        folder: PathBuf,
+        folder: FolderPath,
         title: String,
         tag: Option<String>,
         done: impl FnOnce(holm_core::Result<Note>, &mut App) + 'static,
@@ -278,7 +278,7 @@ impl NotesFolder {
     /// Creates the note `title` in `folder`, and gives its id for a link.
     pub(crate) fn create_linked_note(
         &mut self,
-        folder: PathBuf,
+        folder: FolderPath,
         title: String,
         done: impl FnOnce(holm_core::Result<String>, &mut App) + 'static,
         cx: &mut Context<Self>,
@@ -296,7 +296,7 @@ impl NotesFolder {
     /// The id of the note at `path`, for a link. A note with no id gets one.
     pub(crate) fn link_id(
         &mut self,
-        path: PathBuf,
+        path: NotePath,
         done: impl FnOnce(holm_core::Result<String>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
@@ -309,9 +309,9 @@ impl NotesFolder {
 
     pub(crate) fn move_note(
         &mut self,
-        path: PathBuf,
-        folder: PathBuf,
-        done: impl FnOnce(holm_core::Result<PathBuf>, &mut App) + 'static,
+        path: NotePath,
+        folder: FolderPath,
+        done: impl FnOnce(holm_core::Result<NotePath>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
         self.write(
@@ -323,9 +323,9 @@ impl NotesFolder {
 
     pub(crate) fn move_folder(
         &mut self,
-        path: PathBuf,
-        folder: PathBuf,
-        done: impl FnOnce(holm_core::Result<PathBuf>, &mut App) + 'static,
+        path: FolderPath,
+        folder: FolderPath,
+        done: impl FnOnce(holm_core::Result<FolderPath>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
         self.write(move |core| core.move_folder(&path, &folder), done, cx);
@@ -333,9 +333,9 @@ impl NotesFolder {
 
     pub(crate) fn rename_folder(
         &mut self,
-        folder: PathBuf,
+        folder: FolderPath,
         name: String,
-        done: impl FnOnce(holm_core::Result<PathBuf>, &mut App) + 'static,
+        done: impl FnOnce(holm_core::Result<FolderPath>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
         self.write(move |core| core.rename_folder(&folder, &name), done, cx);
@@ -343,9 +343,9 @@ impl NotesFolder {
 
     pub(crate) fn create_folder(
         &mut self,
-        parent: PathBuf,
+        parent: FolderPath,
         name: String,
-        done: impl FnOnce(holm_core::Result<PathBuf>, &mut App) + 'static,
+        done: impl FnOnce(holm_core::Result<FolderPath>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
         self.write(move |core| core.create_folder(&parent, &name), done, cx);
@@ -353,7 +353,7 @@ impl NotesFolder {
 
     pub(crate) fn delete_note(
         &mut self,
-        path: PathBuf,
+        path: NotePath,
         done: impl FnOnce(holm_core::Result<()>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
@@ -362,7 +362,7 @@ impl NotesFolder {
 
     pub(crate) fn delete_folder(
         &mut self,
-        path: PathBuf,
+        path: FolderPath,
         done: impl FnOnce(holm_core::Result<()>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
@@ -372,7 +372,7 @@ impl NotesFolder {
     /// What a delete of the note at `path` removes, after the writes before it.
     pub(crate) fn note_delete_count(
         &mut self,
-        path: PathBuf,
+        path: NotePath,
         done: impl FnOnce(holm_core::Result<DeleteCount>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
@@ -382,7 +382,7 @@ impl NotesFolder {
     /// What a delete of the folder at `path` removes, after the writes before it.
     pub(crate) fn folder_delete_count(
         &mut self,
-        path: PathBuf,
+        path: FolderPath,
         done: impl FnOnce(holm_core::Result<DeleteCount>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
@@ -435,7 +435,7 @@ impl NotesFolder {
     /// from the note at `note`.
     pub(crate) fn attach(
         &mut self,
-        note: PathBuf,
+        note: NotePath,
         files: Vec<PastedFile>,
         done: impl FnOnce(Vec<holm_core::Result<PathBuf>>, &mut App) + 'static,
         cx: &mut Context<Self>,
@@ -460,7 +460,7 @@ impl NotesFolder {
     /// The link to each file from the note at `note`, with no copy.
     pub(crate) fn file_links(
         &self,
-        note: PathBuf,
+        note: NotePath,
         files: Vec<PathBuf>,
         cx: &App,
     ) -> Task<Vec<holm_core::Result<PathBuf>>> {
@@ -476,12 +476,16 @@ impl NotesFolder {
     }
 
     /// The paths of the notes that match `query`, in no order. It does not wait for the line.
-    pub(crate) fn search(&self, query: String, cx: &App) -> Task<holm_core::Result<Vec<PathBuf>>> {
+    pub(crate) fn search(&self, query: String, cx: &App) -> Task<holm_core::Result<Vec<NotePath>>> {
         self.look(move |core| core.search(&query), cx)
     }
 
     /// The headings of the note at `path`. It does not wait for the line.
-    pub(crate) fn headings(&self, path: PathBuf, cx: &App) -> Task<holm_core::Result<Vec<String>>> {
+    pub(crate) fn headings(
+        &self,
+        path: NotePath,
+        cx: &App,
+    ) -> Task<holm_core::Result<Vec<String>>> {
         self.look(move |core| core.headings(&path), cx)
     }
 
@@ -489,7 +493,7 @@ impl NotesFolder {
     /// for the line.
     pub(crate) fn broken_links(
         &self,
-        path: PathBuf,
+        path: NotePath,
         cx: &App,
     ) -> Task<holm_core::Result<Vec<LinkTarget>>> {
         self.look(move |core| core.broken_links(&path), cx)
@@ -712,7 +716,7 @@ pub(crate) fn open(
     folder: &Path,
     index_dir: &Path,
     create: bool,
-    last: Option<&Path>,
+    last: Option<&NotePath>,
 ) -> Result<(Core, Option<Note>), AppError> {
     if create && let Err(error) = std::fs::create_dir_all(folder) {
         tracing::warn!(path = %folder.display(), %error, "cannot make the notes folder");
@@ -724,7 +728,7 @@ pub(crate) fn open(
 
 /// The note to open first: the last open note when it still exists, else the last changed
 /// note. With no notes, it is `None`.
-fn first_note(core: &Core, last: Option<&Path>) -> holm_core::Result<Option<Note>> {
+fn first_note(core: &Core, last: Option<&NotePath>) -> holm_core::Result<Option<Note>> {
     if let Some(note) = last.and_then(|last| core.read(last).ok()) {
         return Ok(Some(note));
     }
@@ -759,6 +763,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+    use crate::test_paths::{folder_path, note_path};
 
     fn notes_folder(cx: &mut TestAppContext) -> (TempDir, Entity<NotesFolder>) {
         let dir = tempfile::tempdir().unwrap();
@@ -777,27 +782,28 @@ mod tests {
         notes_folder.update(cx, |notes_folder, cx| {
             let step = |name: &'static str| {
                 let steps = steps.clone();
-                move |result: holm_core::Result<PathBuf>, _: &mut App| {
+                move |result: holm_core::Result<FolderPath>, _: &mut App| {
                     if result.is_ok() {
                         steps.borrow_mut().push(name);
                     }
                 }
             };
-            notes_folder.rename_folder("gone".into(), "x".into(), step("after the fail"), cx);
-            notes_folder.create_folder(PathBuf::new(), "B".into(), step("after the folder"), cx);
+            notes_folder.rename_folder(folder_path("gone"), "x".into(), step("after the fail"), cx);
+            notes_folder.create_folder(
+                FolderPath::root(),
+                "B".into(),
+                step("after the folder"),
+                cx,
+            );
         });
         cx.run_until_parked();
 
         assert_eq!(*steps.borrow(), ["after the folder"]);
         assert!(dir.path().join("notes/B").is_dir());
-        let folders: Vec<PathBuf> = notes_folder.read_with(cx, |notes_folder, _| {
-            notes_folder
-                .snapshot()
-                .folders()
-                .map(Path::to_owned)
-                .collect()
+        let folders: Vec<FolderPath> = notes_folder.read_with(cx, |notes_folder, _| {
+            notes_folder.snapshot().folders().cloned().collect()
         });
-        assert_eq!(folders, [PathBuf::from("B")]);
+        assert_eq!(folders, [folder_path("B")]);
     }
 
     #[gpui_kit::test]
@@ -816,14 +822,14 @@ mod tests {
         notes_folder.update(cx, |notes_folder, cx| {
             let step = |name: &'static str| {
                 let steps = steps.clone();
-                move |result: holm_core::Result<PathBuf>, _: &mut App| {
+                move |result: holm_core::Result<FolderPath>, _: &mut App| {
                     let end = if result.is_ok() { "ok" } else { "failed" };
                     steps.borrow_mut().push(format!("{name} {end}"));
                 }
             };
-            notes_folder.create_folder(PathBuf::new(), "work".into(), step("create"), cx);
-            notes_folder.rename_folder("work".into(), "job".into(), step("rename"), cx);
-            notes_folder.rename_folder("gone".into(), "x".into(), step("fail"), cx);
+            notes_folder.create_folder(FolderPath::root(), "work".into(), step("create"), cx);
+            notes_folder.rename_folder(folder_path("work"), "job".into(), step("rename"), cx);
+            notes_folder.rename_folder(folder_path("gone"), "x".into(), step("fail"), cx);
         });
         cx.run_until_parked();
 
@@ -843,7 +849,7 @@ mod tests {
     fn draft(body: &str) -> Draft {
         Draft {
             text: NoteText::Save {
-                path: "A.md".into(),
+                path: note_path("A.md"),
                 body: body.to_owned(),
             },
             done: Box::new(|_, _| {}),
@@ -855,8 +861,13 @@ mod tests {
         let (dir, notes_folder) = notes_folder(cx);
         notes_folder.update(cx, |notes_folder, cx| {
             notes_folder.set_draft(Some(draft("# A\n\nfirst\n")));
-            notes_folder.change_tag("A.md".into(), TagChange::Add("work".into()), |_, _| {}, cx);
-            notes_folder.create_folder(PathBuf::new(), "B".into(), |_, _| {}, cx);
+            notes_folder.change_tag(
+                note_path("A.md"),
+                TagChange::Add("work".into()),
+                |_, _| {},
+                cx,
+            );
+            notes_folder.create_folder(FolderPath::root(), "B".into(), |_, _| {}, cx);
             notes_folder.set_draft(Some(draft("# A\n\nlast\n")));
             notes_folder.quit();
         });
@@ -874,7 +885,7 @@ mod tests {
         let read = |notes_folder: &mut NotesFolder, cx: &mut Context<NotesFolder>| {
             let bodies = bodies.clone();
             notes_folder.read(
-                "A.md".into(),
+                note_path("A.md"),
                 move |note, _| bodies.borrow_mut().push(note.unwrap().body),
                 cx,
             );
@@ -919,7 +930,7 @@ mod tests {
         let file = dir.path().join("notes/A.md");
         let change = |change: TagChange, cx: &mut TestAppContext| {
             notes_folder.update(cx, |notes_folder, cx| {
-                notes_folder.change_tag("A.md".into(), change, |_, _| {}, cx);
+                notes_folder.change_tag(note_path("A.md"), change, |_, _| {}, cx);
             });
             cx.run_until_parked();
         };

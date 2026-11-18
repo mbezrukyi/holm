@@ -25,7 +25,6 @@
 //! field, and no popup.
 
 use std::ops::Range;
-use std::path::PathBuf;
 
 use gpui_kit::component::input::{
     Enter, Escape, IndentInline, Input, InputEvent, InputState, MoveDown, MoveUp,
@@ -38,6 +37,7 @@ use gpui_kit::{
     ParentElement, Pixels, Render, Role, StatefulInteractiveElement, Styled, Subscription,
     TestSupportExt as _, Toggled, Window, div, px,
 };
+use holm_core::NotePath;
 use holm_core::model::Tag;
 
 use crate::backlinks::{self, Backlinks};
@@ -84,7 +84,7 @@ pub(crate) struct TagRow {
     notes_folder: Entity<NotesFolder>,
     tags: Vec<String>,
     pinned: bool,
-    title: Entity<TitleField<PathBuf>>,
+    title: Entity<TitleField<NotePath>>,
     backlinks: Entity<Backlinks>,
     /// Every tag name in the notes folder, for the list.
     known: Vec<String>,
@@ -103,7 +103,7 @@ impl TagRow {
     /// `text` gets the focus back when the popup closes with it.
     pub(crate) fn new(
         notes_folder: Entity<NotesFolder>,
-        title: Entity<TitleField<PathBuf>>,
+        title: Entity<TitleField<NotePath>>,
         backlinks: Entity<Backlinks>,
         text: FocusHandle,
         window: &mut Window,

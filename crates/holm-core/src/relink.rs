@@ -4,10 +4,12 @@ use std::path::{Component, Path, PathBuf};
 
 use holm_markdown::{Body, Note as Text, Target};
 
+use crate::FolderPath;
+
 /// The path of a file that a note in `folder` links as `file`.
 ///
 /// It is relative to the notes folder `root` when the file is inside it, else absolute.
-pub(crate) fn resolve(root: &Path, folder: &Path, file: &str) -> PathBuf {
+pub(crate) fn resolve(root: &Path, folder: &FolderPath, file: &str) -> PathBuf {
     let full = clean(&root.join(folder).join(file));
     match full.strip_prefix(root) {
         Ok(rel) => rel.to_owned(),
@@ -18,8 +20,8 @@ pub(crate) fn resolve(root: &Path, folder: &Path, file: &str) -> PathBuf {
 /// A folder move: its old path and its new path, relative to the notes folder.
 #[derive(Clone, Copy)]
 pub(crate) struct Moved<'a> {
-    pub(crate) from: &'a Path,
-    pub(crate) to: &'a Path,
+    pub(crate) from: &'a FolderPath,
+    pub(crate) to: &'a FolderPath,
 }
 
 /// The note text with its relative file links fixed, after the note moved
@@ -31,8 +33,8 @@ pub(crate) struct Moved<'a> {
 pub(crate) fn relink(
     text: &str,
     root: &Path,
-    from: &Path,
-    to: &Path,
+    from: &FolderPath,
+    to: &FolderPath,
     moved: Option<Moved<'_>>,
 ) -> Option<String> {
     let mut note = Text::parse(text);

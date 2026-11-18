@@ -176,7 +176,7 @@ impl HolmWindow {
         let budget = self.write_budget;
         let job = cx.background_spawn({
             let folder = folder.clone();
-            async move { notes_folder::open(&*open, &folder, &index_dir, create, last.as_deref()) }
+            async move { notes_folder::open(&*open, &folder, &index_dir, create, last.as_ref()) }
         });
         cx.spawn_in(window, async move |this, cx| {
             let result = job.await;

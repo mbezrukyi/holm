@@ -1,10 +1,10 @@
 //! The types that the [`Core`](crate::Core) handle takes and gives.
 
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::SystemTime;
 
-use crate::Snapshot;
+use crate::{FolderPath, NotePath, Snapshot};
 
 /// The stable id of a note. It lives in the `id:` field of the frontmatter.
 ///
@@ -37,8 +37,8 @@ impl fmt::Display for NoteId {
 /// What a list of notes shows about one note. It has no body.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NoteInfo {
-    /// The path of the file, relative to the notes folder, like `work/Plans.md`.
-    pub path: PathBuf,
+    /// The path of the file, like `work/Plans.md`.
+    pub path: NotePath,
     /// The `id:` field. A note that Holm never wrote can have none.
     pub id: Option<NoteId>,
     /// The file name without `.md`.
@@ -78,7 +78,7 @@ pub enum NoteSet<'a> {
     /// Every note.
     All,
     /// The notes right in a folder, without the notes of its subfolders.
-    In(&'a Path),
+    In(&'a FolderPath),
     /// The notes with a tag or one of its child tags. Tags match exactly, also in capital
     /// letters.
     WithTag(&'a str),
@@ -93,12 +93,12 @@ impl NoteSet<'_> {
     /// Whether the set holds the note at `path`. It calls `note` only when the path can't tell.
     pub(crate) fn holds_at<'n>(
         self,
-        path: &Path,
+        path: &NotePath,
         note: impl FnOnce() -> Option<&'n NoteInfo>,
     ) -> bool {
         match self {
             Self::All => true,
-            Self::In(folder) => crate::store::folder_of(path) == folder,
+            Self::In(folder) => path.is_in(folder),
             Self::WithTag(tag) => note().is_some_and(|note| {
                 note.tags.iter().any(|name| {
                     name.strip_prefix(tag)
@@ -173,20 +173,20 @@ pub enum Change {
     /// A note file whose text or info another tool changed.
     Changed(NoteInfo),
     /// A note file that is gone. The path is where it was.
-    Removed(PathBuf),
+    Removed(NotePath),
     /// A note that is now at another path. From another tool, only a note with an id moves.
     Moved {
         /// The old path.
-        from: PathBuf,
+        from: NotePath,
         /// The note at its new path.
         note: NoteInfo,
     },
     /// A folder that Holm moved, with everything below it.
     FolderMoved {
         /// The old path.
-        from: PathBuf,
+        from: FolderPath,
         /// The new path.
-        to: PathBuf,
+        to: FolderPath,
     },
     /// A tag that Holm renamed, with its child tags.
     TagMoved {
@@ -205,18 +205,21 @@ pub enum Change {
 }
 
 impl Change {
-    /// Where the note or folder at `path` is after this change, when the change moves it.
-    pub fn path_after(&self, path: &Path) -> Option<PathBuf> {
+    /// Where the note at `path` is after this change, or `None` when the change does not move
+    /// it.
+    pub fn note_after(&self, path: &NotePath) -> Option<NotePath> {
         match self {
             Self::Moved { from, note } if from == path => Some(note.path.clone()),
-            Self::FolderMoved { from, to } => {
-                let rest = path.strip_prefix(from).ok()?;
-                Some(if rest.as_os_str().is_empty() {
-                    to.clone()
-                } else {
-                    to.join(rest)
-                })
-            }
+            Self::FolderMoved { from, to } => path.moved(from, to),
+            _ => None,
+        }
+    }
+
+    /// Where the folder at `path` is after this change, or `None` when the change does not move
+    /// it.
+    pub fn folder_after(&self, path: &FolderPath) -> Option<FolderPath> {
+        match self {
+            Self::FolderMoved { from, to } => path.moved(from, to),
             _ => None,
         }
     }

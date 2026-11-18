@@ -6,11 +6,11 @@ mod common;
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt as _;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use common::Folder;
-use holm_core::Core;
+use common::{Folder, folder_path, note_path};
 use holm_core::model::{Link, LinkTarget, NoteInfo, NoteSet, Order, Tag};
+use holm_core::{Core, NotePath};
 
 fn paths(notes: Vec<NoteInfo>) -> Vec<String> {
     common::paths(notes.into_iter().map(|n| n.path))
@@ -92,7 +92,7 @@ fn a_folder_lists_only_its_own_notes() {
         folder
             .core
             .snapshot()
-            .notes(NoteSet::In(Path::new("work")), Order::Title),
+            .notes(NoteSet::In(&folder_path("work")), Order::Title),
     );
     work.sort();
 
@@ -102,7 +102,7 @@ fn a_folder_lists_only_its_own_notes() {
             folder
                 .core
                 .snapshot()
-                .notes(NoteSet::In(Path::new("")), Order::Title)
+                .notes(NoteSet::In(&folder_path("")), Order::Title)
         ),
         ["root.md"]
     );
@@ -110,14 +110,7 @@ fn a_folder_lists_only_its_own_notes() {
         folder
             .core
             .snapshot()
-            .notes(NoteSet::In(Path::new("missing")), Order::Title),
-        Vec::<NoteInfo>::new()
-    );
-    assert_eq!(
-        folder
-            .core
-            .snapshot()
-            .notes(NoteSet::In(Path::new("../x")), Order::Title),
+            .notes(NoteSet::In(&folder_path("missing")), Order::Title),
         Vec::<NoteInfo>::new()
     );
 }
@@ -132,7 +125,7 @@ fn notes_keep_their_fields_in_the_index() {
         .snapshot()
         .notes(NoteSet::All, Order::LastChange);
 
-    assert_eq!(listed, [folder.core.read("a.md").unwrap().info]);
+    assert_eq!(listed, [folder.core.read(&note_path("a.md")).unwrap().info]);
     assert_eq!(listed[0].tags, ["work/holm", "home"]);
     assert_eq!(listed[0].preview, "Buy milk");
 }
@@ -250,7 +243,11 @@ fn links_give_every_link_of_a_note_in_order() {
     let link = |target, embedded| Link { target, embedded };
     let file = |path: &str| LinkTarget::File(PathBuf::from(path));
 
-    let links = folder.core.snapshot().links("work/a.md").to_vec();
+    let links = folder
+        .core
+        .snapshot()
+        .links(&note_path("work/a.md"))
+        .to_vec();
 
     let notes: Vec<(&str, Option<&str>)> = links[..2]
         .iter()
@@ -271,10 +268,13 @@ fn links_give_every_link_of_a_note_in_order() {
         ]
     );
     assert_eq!(
-        folder.core.snapshot().links("missing.md").to_vec(),
+        folder
+            .core
+            .snapshot()
+            .links(&note_path("missing.md"))
+            .to_vec(),
         Vec::<Link>::new()
     );
-    assert_eq!(folder.core.snapshot().links("a.txt"), []);
 }
 
 #[test]
@@ -287,12 +287,12 @@ fn backlinks_come_from_id_links_and_file_links() {
         ("other.md", "[x](holm:01X) [y](target.pdf)\n"),
     ]);
 
-    let mut back = paths(folder.core.snapshot().backlinks("target.md"));
+    let mut back = paths(folder.core.snapshot().backlinks(&note_path("target.md")));
     back.sort();
 
     assert_eq!(back, ["by-heading.md", "by-id.md", "work/by-path.md"]);
     assert_eq!(
-        folder.core.snapshot().backlinks("other.md"),
+        folder.core.snapshot().backlinks(&note_path("other.md")),
         Vec::<NoteInfo>::new()
     );
 }
@@ -300,10 +300,13 @@ fn backlinks_come_from_id_links_and_file_links() {
 #[test]
 fn save_and_create_update_the_index() {
     let folder = Folder::new(&[("a.md", "# A\n")]);
-    folder.core.add_tag("a.md", "food").unwrap();
+    folder.core.add_tag(&note_path("a.md"), "food").unwrap();
 
-    let saved = folder.core.save("a.md", "# A\nPotatoes\n").unwrap();
-    let created = folder.core.create("", "New").unwrap();
+    let saved = folder
+        .core
+        .save(&note_path("a.md"), "# A\nPotatoes\n")
+        .unwrap();
+    let created = folder.core.create(&folder_path(""), "New").unwrap();
 
     assert_eq!(found(&folder, "potato"), ["a.md"]);
     assert_eq!(folder.core.snapshot().tags(), [tag("food", 1, vec![])]);
@@ -328,7 +331,15 @@ fn open_picks_up_changes_made_while_holm_was_closed() {
     all.sort();
     assert_eq!(all, ["edited.md", "kept.md", "work/added.md"]);
     assert_eq!(found(&folder, "words"), ["edited.md"]);
-    assert_eq!(folder.core.read("edited.md").unwrap().info.preview, "After");
+    assert_eq!(
+        folder
+            .core
+            .read(&note_path("edited.md"))
+            .unwrap()
+            .info
+            .preview,
+        "After"
+    );
     assert_eq!(folder.core.snapshot().tags(), [tag("new", 1, vec![])]);
 }
 
@@ -355,8 +366,8 @@ fn a_copied_note_gets_a_new_id_and_the_known_note_keeps_its_id() {
 
     folder.reopen();
 
-    let a = folder.core.read("a.md").unwrap();
-    let b = folder.core.read("b.md").unwrap();
+    let a = folder.core.read(&note_path("a.md")).unwrap();
+    let b = folder.core.read(&note_path("b.md")).unwrap();
     assert_eq!(b.info.id.unwrap().as_str(), "01SAME");
     let new = a.info.id.unwrap();
     assert_ne!(new.as_str(), "01SAME");
@@ -382,8 +393,8 @@ fn the_first_of_two_new_notes_with_the_same_id_keeps_it() {
         ("b.md", &note("01SAME", "", "")),
     ]);
 
-    let a = folder.core.read("a.md").unwrap();
-    let b = folder.core.read("b.md").unwrap();
+    let a = folder.core.read(&note_path("a.md")).unwrap();
+    let b = folder.core.read(&note_path("b.md")).unwrap();
 
     assert_eq!(a.info.id.unwrap().as_str(), "01SAME");
     assert_ne!(b.info.id.unwrap().as_str(), "01SAME");
@@ -402,7 +413,7 @@ fn a_note_moved_while_holm_was_closed_keeps_its_id() {
 
     assert_eq!(folder.text("work/a.md"), note("01MOVE", "", "# A\n"));
     assert_eq!(
-        paths(folder.core.snapshot().backlinks("work/a.md")),
+        paths(folder.core.snapshot().backlinks(&note_path("work/a.md"))),
         ["link.md"]
     );
 }
@@ -412,7 +423,7 @@ fn saving_a_note_with_the_id_of_a_deleted_note_keeps_the_id() {
     let folder = Folder::new(&[("a.md", &note("01GONE", "", ""))]);
     fs::remove_file(folder.path("a.md")).unwrap();
     folder.write("b.md", &note("01GONE", "", ""));
-    let saved = folder.core.save("b.md", "Text\n").unwrap();
+    let saved = folder.core.save(&note_path("b.md"), "Text\n").unwrap();
 
     assert_eq!(saved.info.id.unwrap().as_str(), "01GONE");
     assert_eq!(
@@ -455,17 +466,42 @@ fn an_index_with_another_shape_is_rebuilt() {
 }
 
 #[test]
+fn an_index_row_with_a_bad_path_never_reaches_the_snapshot() {
+    let folder = Folder::new(&[("a.md", "# A\n"), ("b.md", "# B\n")]);
+    let cache = tempfile::tempdir().unwrap();
+    drop(Core::open(folder.dir.path(), cache.path()).unwrap());
+    rusqlite::Connection::open(cache.path().join("index.sqlite"))
+        .unwrap()
+        .execute_batch(
+            "UPDATE notes SET path = CAST('../b.md' AS BLOB) WHERE path = CAST('b.md' AS BLOB);",
+        )
+        .unwrap();
+
+    let core = Core::open(folder.dir.path(), cache.path()).unwrap();
+
+    assert_eq!(
+        paths(core.snapshot().notes(NoteSet::All, Order::Title)),
+        ["a.md", "b.md"]
+    );
+}
+
+#[test]
 fn the_index_lives_in_memory_when_its_folder_cannot_be_written() {
     let folder = Folder::new(&[("a.md", "old\n")]);
     let cache = tempfile::tempdir().unwrap();
     fs::set_permissions(cache.path(), fs::Permissions::from_mode(0o555)).unwrap();
 
     let core = Core::open(folder.dir.path(), cache.path()).unwrap();
-    let saved = core.save("a.md", "new\n");
+    let saved = core.save(&note_path("a.md"), "new\n");
 
     fs::set_permissions(cache.path(), fs::Permissions::from_mode(0o755)).unwrap();
     saved.unwrap();
-    let preview = core.snapshot().note("a.md").unwrap().preview.clone();
+    let preview = core
+        .snapshot()
+        .note(&note_path("a.md"))
+        .unwrap()
+        .preview
+        .clone();
     assert_eq!(preview, "new");
     assert!(!cache.path().join("index.sqlite").exists());
 }
@@ -474,7 +510,7 @@ fn the_index_lives_in_memory_when_its_folder_cannot_be_written() {
 fn notes_in_attachments_and_odd_names_round_trip() {
     let folder = Folder::new(&[("attachments/a b.md", ""), ("ünï cödé.md", "")]);
 
-    let mut all: Vec<PathBuf> = folder
+    let mut all: Vec<NotePath> = folder
         .core
         .snapshot()
         .notes(NoteSet::All, Order::Title)
@@ -485,9 +521,6 @@ fn notes_in_attachments_and_odd_names_round_trip() {
 
     assert_eq!(
         all,
-        [
-            PathBuf::from("attachments/a b.md"),
-            PathBuf::from("ünï cödé.md")
-        ]
+        [note_path("attachments/a b.md"), note_path("ünï cödé.md")]
     );
 }

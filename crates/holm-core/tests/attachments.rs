@@ -7,7 +7,7 @@ mod common;
 use std::fs;
 use std::path::Path;
 
-use common::Folder;
+use common::{Folder, note_path};
 use holm_core::Error;
 
 #[test]
@@ -17,7 +17,10 @@ fn attach_file_copies_the_file_and_returns_the_path_from_the_note() {
     let file = outside.path().join("photo.jpg");
     fs::write(&file, b"jpg").unwrap();
 
-    let path = folder.core.attach_file("work/b.md", &file).unwrap();
+    let path = folder
+        .core
+        .attach_file(&note_path("work/b.md"), &file)
+        .unwrap();
 
     assert_eq!(path, Path::new("../attachments/photo-f8146b6c.jpg"));
     assert_eq!(
@@ -38,9 +41,9 @@ fn the_same_file_twice_is_one_copy_and_two_files_are_two() {
     fs::create_dir(outside.path().join("other")).unwrap();
     fs::write(&other, b"other jpg").unwrap();
 
-    let first = folder.core.attach_file("a.md", &file).unwrap();
-    let again = folder.core.attach_file("a.md", &file).unwrap();
-    let second = folder.core.attach_file("a.md", &other).unwrap();
+    let first = folder.core.attach_file(&note_path("a.md"), &file).unwrap();
+    let again = folder.core.attach_file(&note_path("a.md"), &file).unwrap();
+    let second = folder.core.attach_file(&note_path("a.md"), &other).unwrap();
 
     assert_eq!(first, Path::new("attachments/photo-f8146b6c.jpg"));
     assert_eq!(again, first);
@@ -63,33 +66,34 @@ fn attach_file_names_a_hidden_file_and_a_file_with_no_extension() {
     fs::write(&plain, "").unwrap();
 
     assert_eq!(
-        folder.core.attach_file("a.md", &hidden).unwrap(),
+        folder
+            .core
+            .attach_file(&note_path("a.md"), &hidden)
+            .unwrap(),
         Path::new("attachments/-config-e3b0c442")
     );
     assert_eq!(
-        folder.core.attach_file("a.md", &plain).unwrap(),
+        folder.core.attach_file(&note_path("a.md"), &plain).unwrap(),
         Path::new("attachments/README-e3b0c442")
     );
 }
 
 #[test]
-fn attach_file_refuses_a_folder_a_missing_file_and_a_bad_note_path() {
+fn attach_file_refuses_a_folder_and_a_missing_file() {
     let folder = Folder::new(&[("a.md", "# A\n")]);
     let outside = tempfile::tempdir().unwrap();
     let file = outside.path().join("x.png");
     fs::write(&file, "").unwrap();
 
     let results = [
-        folder.core.attach_file("a.md", outside.path()),
+        folder.core.attach_file(&note_path("a.md"), outside.path()),
         folder
             .core
-            .attach_file("a.md", outside.path().join("gone.png")),
+            .attach_file(&note_path("a.md"), outside.path().join("gone.png")),
     ];
     for result in results {
         assert!(matches!(result, Err(Error::Read { .. })), "{result:?}");
     }
-    let result = folder.core.attach_file("../a.md", &file);
-    assert!(matches!(result, Err(Error::BadPath { .. })), "{result:?}");
     assert!(!folder.path("attachments").exists());
 }
 
@@ -100,7 +104,7 @@ fn attach_file_fails_when_attachments_is_a_file() {
     let file = outside.path().join("x.png");
     fs::write(&file, "").unwrap();
 
-    let result = folder.core.attach_file("a.md", &file);
+    let result = folder.core.attach_file(&note_path("a.md"), &file);
 
     assert!(matches!(result, Err(Error::Write { .. })), "{result:?}");
 }
@@ -109,7 +113,10 @@ fn attach_file_fails_when_attachments_is_a_file() {
 fn paste_image_names_the_file_by_its_content() {
     let folder = Folder::new(&[("work/a.md", "# A\n")]);
 
-    let path = folder.core.paste_image("work/a.md", "png", b"png").unwrap();
+    let path = folder
+        .core
+        .paste_image(&note_path("work/a.md"), "png", b"png")
+        .unwrap();
 
     assert_eq!(path, Path::new("../attachments/Pasted image-8f8cbb7d.png"));
     assert_eq!(
@@ -122,14 +129,17 @@ fn paste_image_names_the_file_by_its_content() {
 fn attachments_do_not_show_as_folders_or_notes() {
     let folder = Folder::new(&[("a.md", "# A\n")]);
 
-    folder.core.paste_image("a.md", "png", b"png").unwrap();
+    folder
+        .core
+        .paste_image(&note_path("a.md"), "png", b"png")
+        .unwrap();
 
     assert_eq!(
         folder
             .core
             .snapshot()
             .folders()
-            .map(Path::to_path_buf)
+            .map(common::path_buf)
             .collect::<Vec<_>>(),
         [] as [std::path::PathBuf; 0]
     );

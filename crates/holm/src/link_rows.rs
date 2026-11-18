@@ -132,10 +132,11 @@ fn score(pattern: &Lowercase<'_>, text: &Lowercase<'_>) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
     use std::time::SystemTime;
 
     use holm_core::model::NoteInfo;
+
+    use crate::test_paths::note_path;
 
     use super::*;
 
@@ -143,7 +144,7 @@ mod tests {
         titles
             .iter()
             .map(|title| NoteInfo {
-                path: PathBuf::from(format!("{title}.md")),
+                path: note_path(&format!("{title}.md")),
                 id: None,
                 title: (*title).to_owned(),
                 preview: String::new(),
