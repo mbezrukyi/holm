@@ -140,8 +140,14 @@ impl NotesView {
         }
     }
 
-    /// Starts the name field of a tag in the sidebar, for a rename in all notes.
-    fn rename_tag(&mut self, tag: TagName, window: &mut Window, cx: &mut Context<Self>) {
+    /// `F2` on a tag line: shows the sidebar and starts the name field of the tag.
+    fn rename_tag_from_line(
+        &mut self,
+        RenameTag(tag): &RenameTag,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let tag = tag.clone();
         self.hidden = false;
         self.keep_state(cx);
         self.focus_sidebar(window, cx);
@@ -151,20 +157,23 @@ impl NotesView {
             window,
             cx,
             NotesFolder::wait,
-            move |this, (), window, cx| {
-                let notes = cx.weak_entity();
-                let rename: TagRename = Rc::new(move |from, to, done, window, cx| {
-                    notes
-                        .update(cx, |this, cx| {
-                            this.ask_rename_tag(from, to, done, window, cx);
-                        })
-                        .ok();
-                });
-                this.sidebar.update(cx, |sidebar, cx| {
-                    sidebar.rename_tag(tag, rename, window, cx);
-                });
-            },
+            move |this, (), window, cx| this.rename_tag(tag, window, cx),
         );
+    }
+
+    /// Starts the name field of a tag in the sidebar, for a rename in all notes.
+    fn rename_tag(&mut self, tag: TagName, window: &mut Window, cx: &mut Context<Self>) {
+        let notes = cx.weak_entity();
+        let rename: TagRename = Rc::new(move |from, to, done, window, cx| {
+            notes
+                .update(cx, |this, cx| {
+                    this.ask_rename_tag(from, to, done, window, cx);
+                })
+                .ok();
+        });
+        self.sidebar.update(cx, |sidebar, cx| {
+            sidebar.rename_tag(tag, rename, window, cx);
+        });
     }
 
     /// The write of the tag name field: it counts the notes, asks, and renames.
@@ -705,9 +714,7 @@ impl Render for NotesView {
             .size_full()
             .relative()
             .on_key_down(cx.listener(Self::key_down))
-            .on_action(cx.listener(|this, RenameTag(tag): &RenameTag, window, cx| {
-                this.rename_tag(tag.clone(), window, cx);
-            }))
+            .on_action(cx.listener(Self::rename_tag_from_line))
             .on_mouse_move(cx.listener(Self::mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::mouse_up))
