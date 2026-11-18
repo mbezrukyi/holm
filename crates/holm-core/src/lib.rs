@@ -152,7 +152,7 @@ impl Core {
     ///
     /// [`Error::Index`] as in [`Core::open`].
     pub fn search(&self, text: &str) -> Result<Vec<NotePath>> {
-        self.inner.index.search(&self.inner.store, text)
+        self.inner.index.search(text)
     }
 
     /// The text of each heading in the note at `path`, in order.
@@ -678,7 +678,7 @@ impl Core {
 
     fn build(store: Store, index_dir: &Path, watcher: Option<watch::Watcher>) -> Result<Self> {
         let index = Index::open(index_dir, &store)?;
-        let snapshot = Snapshot::new(index.entries(&store)?, store.folders(&FolderPath::root())?);
+        let snapshot = Snapshot::new(index.entries()?, store.folders(&FolderPath::root())?);
         let inner = Inner {
             store,
             index,
@@ -796,7 +796,7 @@ impl Inner {
         draft: &mut Draft<'_>,
         notes: &[(Note, store::Stamp)],
     ) -> Result<Vec<Note>> {
-        let (notes, delta) = self.index.update(&self.store, notes)?;
+        let (notes, delta) = self.index.update(notes)?;
         if draft.notes(delta) {
             draft.wrote_notes();
         }
@@ -855,7 +855,7 @@ impl Inner {
 
     /// The count of a delete of `node`, and the attachment files it removes.
     fn removal(&self, node: &Node) -> Result<(DeleteCount, Vec<PathBuf>)> {
-        let removal = self.index.removal(&self.store, node)?;
+        let removal = self.index.removal(node)?;
         let files = self.store.attachments(removal.files);
         let count = DeleteCount {
             notes: removal.notes,
@@ -910,7 +910,7 @@ impl Inner {
     /// Updates the index and the draft at each path after Holm's own change, and returns
     /// whether a note changed. It adds no change to the list, so the write adds its own.
     fn refresh(&self, draft: &mut Draft<'_>, nodes: Vec<Node>) -> Result<bool> {
-        let refresh = self.index.refresh(&self.store, &Nodes::new(nodes))?;
+        let refresh = self.index.refresh(&Nodes::new(nodes))?;
         Ok(draft.notes(refresh.delta))
     }
 
@@ -922,7 +922,7 @@ impl Inner {
             if nodes.is_empty() {
                 return Ok(());
             }
-            let refresh = self.index.refresh(&self.store, &nodes)?;
+            let refresh = self.index.refresh(&nodes)?;
             draft.notes(refresh.delta);
             let mut folders = false;
             for node in &nodes {

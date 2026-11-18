@@ -25,7 +25,7 @@ const TEMP_PREFIX: &str = ".holm-";
 const TEMP_SUFFIX: &str = ".tmp";
 
 /// The note files in one notes folder.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Store {
     root: PathBuf,
 }

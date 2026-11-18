@@ -100,10 +100,13 @@ pub(crate) struct Removal {
 pub(crate) struct Index {
     path: PathBuf,
     conn: Mutex<Connection>,
+    store: Store,
 }
 
 impl Index {
     /// Opens the index in `dir` and brings it up to date with the files.
+    ///
+    /// The index reads and writes the note files through `store`.
     pub(crate) fn open(dir: &Path, store: &Store) -> Result<Self> {
         let path = dir.join(FILE);
         let opened = fs::create_dir_all(dir).map_err(Fail::Io).and_then(|()| {
@@ -119,17 +122,18 @@ impl Index {
         Ok(Self {
             path,
             conn: Mutex::new(conn),
+            store: store.clone(),
         })
     }
 
     /// The paths of the notes whose title, text or tags hold every word of `text`, in no order.
-    pub(crate) fn search(&self, store: &Store, text: &str) -> Result<Vec<NotePath>> {
-        self.run(store, |conn| Ok(search::find(conn, text)?))
+    pub(crate) fn search(&self, text: &str) -> Result<Vec<NotePath>> {
+        self.run(|conn| Ok(search::find(conn, text)?))
     }
 
     /// Every note with its links, in no order.
-    pub(crate) fn entries(&self, store: &Store) -> Result<Vec<(NoteInfo, Vec<Link>)>> {
-        self.run(store, |conn| {
+    pub(crate) fn entries(&self) -> Result<Vec<(NoteInfo, Vec<Link>)>> {
+        self.run(|conn| {
             let mut reader = NoteReader::default();
             let mut statement = conn.prepare_cached(&format!("{NOTE_INFO} ORDER BY key"))?;
             let notes = statement
@@ -160,18 +164,14 @@ impl Index {
     /// and returns them in the same order.
     ///
     /// When another note file has the same id, a note gets a new id.
-    pub(crate) fn update(
-        &self,
-        store: &Store,
-        notes: &[(Note, Stamp)],
-    ) -> Result<(Vec<Note>, Delta)> {
-        self.run(store, |conn| {
+    pub(crate) fn update(&self, notes: &[(Note, Stamp)]) -> Result<(Vec<Note>, Delta)> {
+        self.run(|conn| {
             let tx = conn.transaction()?;
             let mut gone = Vec::new();
             let mut put_notes = Vec::with_capacity(notes.len());
             let mut delta = Delta::default();
             for (note, stamp) in notes {
-                let (note, links) = put(&tx, store, note.clone(), *stamp, false, &mut gone)?;
+                let (note, links) = put(&tx, &self.store, note.clone(), *stamp, false, &mut gone)?;
                 delta.put.push((note.info.clone(), links));
                 put_notes.push(note);
             }
@@ -182,19 +182,19 @@ impl Index {
     }
 
     /// Brings the notes at or below each of `nodes` up to date with the files.
-    pub(crate) fn refresh(&self, store: &Store, nodes: &Nodes) -> Result<Refresh> {
-        self.run(store, |conn| sync(conn, store, nodes))
+    pub(crate) fn refresh(&self, nodes: &Nodes) -> Result<Refresh> {
+        self.run(|conn| sync(conn, &self.store, nodes))
     }
 
     /// What a delete of `node` removes: a note, or a folder with all its notes.
     ///
     /// The files are the file link targets that the notes in `node` link and no note outside
     /// `node` links. They may be missing on disk.
-    pub(crate) fn removal(&self, store: &Store, node: &Node) -> Result<Removal> {
+    pub(crate) fn removal(&self, node: &Node) -> Result<Removal> {
         let path = node_bytes(node);
         let mut prefix = path.clone();
         prefix.push(b'/');
-        self.run(store, |conn| {
+        self.run(|conn| {
             let notes = known_in(conn, node)?.len();
             let mut statement = conn.prepare_cached(
                 "SELECT DISTINCT links.target FROM links JOIN notes ON notes.key = links.note
@@ -217,11 +217,11 @@ impl Index {
     }
 
     /// Runs `op`. When SQLite fails, it rebuilds the index and runs `op` again.
-    fn run<T>(&self, store: &Store, op: impl Fn(&mut Connection) -> Result<T, Fail>) -> Result<T> {
+    fn run<T>(&self, op: impl Fn(&mut Connection) -> Result<T, Fail>) -> Result<T> {
         let mut conn = self.conn.lock().unwrap_or_else(PoisonError::into_inner);
         match op(&mut conn) {
             Err(Fail::Core(error)) => Err(Fail::Core(error)),
-            Err(fail) => fresh(&self.path, store, &fail).and_then(|fresh| {
+            Err(fail) => fresh(&self.path, &self.store, &fail).and_then(|fresh| {
                 *conn = fresh;
                 op(&mut conn)
             }),
