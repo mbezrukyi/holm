@@ -8,6 +8,7 @@ mod index;
 pub mod model;
 mod nodes;
 mod paths;
+mod reconcile;
 mod relink;
 mod retag;
 #[cfg(feature = "test-support")]
