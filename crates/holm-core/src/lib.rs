@@ -618,7 +618,8 @@ impl Core {
         if !source.metadata().map_err(read_error)?.is_file() {
             return Err(read_error(std::io::ErrorKind::IsADirectory.into()));
         }
-        let stem = store::file_stem(&file.file_stem().unwrap_or_default().to_string_lossy());
+        let stem =
+            store::attachment::file_stem(&file.file_stem().unwrap_or_default().to_string_lossy());
         let ext = file
             .extension()
             .map(|ext| format!(".{}", ext.to_string_lossy()))
@@ -635,7 +636,7 @@ impl Core {
     ///
     /// [`Error::Write`] when the image can't be written.
     pub fn paste_image(&self, note: &NotePath, extension: &str, bytes: &[u8]) -> Result<PathBuf> {
-        let ext = format!(".{}", store::file_stem(extension));
+        let ext = format!(".{}", store::attachment::file_stem(extension));
         self.attach(note, OsStr::new(PASTED_IMAGE), &ext, bytes)
     }
 
