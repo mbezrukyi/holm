@@ -42,9 +42,9 @@ use holm_core::model::Tag;
 use holm_core::{NotePath, TagName};
 
 use crate::backlinks::{self, Backlinks};
+use crate::core_door::CoreDoor;
 use crate::fold::Fold;
 use crate::lowercase::Lowercase;
-use crate::notes_folder::NotesFolder;
 use crate::popup::{self, Dropdown};
 use crate::text;
 use crate::title::TitleField;
@@ -83,7 +83,7 @@ enum Line {
 }
 
 pub(crate) struct TagRow {
-    notes_folder: Entity<NotesFolder>,
+    core_door: Entity<CoreDoor>,
     tags: Vec<TagName>,
     pinned: bool,
     title: Entity<TitleField<NotePath>>,
@@ -104,7 +104,7 @@ pub(crate) struct TagRow {
 impl TagRow {
     /// `text` gets the focus back when the popup closes with it.
     pub(crate) fn new(
-        notes_folder: Entity<NotesFolder>,
+        core_door: Entity<CoreDoor>,
         title: Entity<TitleField<NotePath>>,
         backlinks: Entity<Backlinks>,
         text: FocusHandle,
@@ -127,7 +127,7 @@ impl TagRow {
             }),
         ];
         Self {
-            notes_folder,
+            core_door,
             tags: Vec::new(),
             pinned: false,
             title,
@@ -164,7 +164,7 @@ impl TagRow {
         self.clear(window, cx);
         self.cursor = cursor.filter(|at| *at < self.tags.len());
         self.input.update(cx, |input, cx| input.focus(window, cx));
-        let tags = self.notes_folder.read(cx).snapshot().tags();
+        let tags = self.core_door.read(cx).snapshot().tags();
         self.known.clear();
         flatten(&tags, &mut self.known);
         cx.notify();

@@ -16,8 +16,8 @@ use holm_editor::{Editor, OpenFile, OpenLink, PasteFiles, PastedFile};
 use holm_markdown::Target;
 
 use crate::backlinks::Backlinks;
+use crate::core_door::{CoreDoor, FolderEvent};
 use crate::error::AppError;
-use crate::notes_folder::{FolderEvent, NotesFolder};
 use crate::text;
 
 /// What the links tell the pane.
@@ -40,7 +40,7 @@ pub(crate) enum Pick {
 }
 
 pub(super) struct Links {
-    notes_folder: Entity<NotesFolder>,
+    core_door: Entity<CoreDoor>,
     editor: Entity<Editor>,
     backlinks: Entity<Backlinks>,
     /// The path of the open note.
@@ -52,13 +52,13 @@ pub(super) struct Links {
 impl Links {
     /// [`Self::show`] reads the links, and puts the backlinks in `backlinks`.
     pub(super) fn new(
-        notes_folder: Entity<NotesFolder>,
+        core_door: Entity<CoreDoor>,
         editor: Entity<Editor>,
         backlinks: Entity<Backlinks>,
         cx: &mut Context<Self>,
     ) -> Self {
         let subscriptions = vec![
-            cx.subscribe(&notes_folder, |links, _, event: &FolderEvent, cx| {
+            cx.subscribe(&core_door, |links, _, event: &FolderEvent, cx| {
                 if !event.is_empty() {
                     links.read(cx);
                 }
@@ -74,7 +74,7 @@ impl Links {
             }),
         ];
         Self {
-            notes_folder,
+            core_door,
             editor,
             backlinks,
             note: None,
@@ -112,9 +112,9 @@ impl Links {
             };
             let names = files.iter().map(|file| file_name(file)).collect();
             let Ok(paths) = links.update(cx, |links, cx| {
-                links.notes_folder.update(cx, |notes_folder, cx| {
-                    notes_folder.file_links(note, files, cx)
-                })
+                links
+                    .core_door
+                    .update(cx, |core_door, cx| core_door.file_links(note, files, cx))
             }) else {
                 return;
             };
@@ -134,9 +134,9 @@ impl Links {
                 .update(cx, |list, cx| list.show(Vec::new(), cx));
             return;
         };
-        let notes_folder = self.notes_folder.read(cx);
-        let backlinks = notes_folder.snapshot().backlinks(&path);
-        let broken = notes_folder.broken_links(path.clone(), cx);
+        let core_door = self.core_door.read(cx);
+        let backlinks = core_door.snapshot().backlinks(&path);
+        let broken = core_door.broken_links(path.clone(), cx);
         let job = cx.background_spawn(async move {
             Ok::<_, holm_core::Error>((path, backlinks, broken.await?))
         });
@@ -174,7 +174,7 @@ impl Links {
             }
             Target::Heading(_) | Target::File(_) => return,
         };
-        match self.notes_folder.read(cx).snapshot().note_with_id(&id) {
+        match self.core_door.read(cx).snapshot().note_with_id(&id) {
             Some(note) => self.open_at(note.path.clone(), heading, cx),
             None => cx.emit(LinksEvent::Error(text::NOTE_GONE)),
         }
@@ -206,8 +206,8 @@ impl Links {
             })
             .collect();
         let links = cx.weak_entity();
-        self.notes_folder.update(cx, |notes_folder, cx| {
-            notes_folder.attach(
+        self.core_door.update(cx, |core_door, cx| {
+            core_door.attach(
                 note,
                 files,
                 move |copies, cx| {

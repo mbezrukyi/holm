@@ -22,11 +22,11 @@ use holm_core::model::{Note, Order};
 use holm_core::{FolderPath, NotePath, TagName};
 
 use crate::config::{Config, SidebarSettings};
+use crate::core_door::{CoreDoor, Done, JobFailed, Step, window_step};
 use crate::dialog::{self, Ask, Dialog};
 use crate::error::AppError;
 use crate::link_picker::{LinkPicker, LinkPickerEvent, LinkStart};
 use crate::message_line::MessageLine;
-use crate::notes_folder::{Done, JobFailed, NotesFolder, Step, window_step};
 use crate::pane::{Leave, NotePane, PaneEvent, Pick};
 use crate::picker::{FolderPicker, PickerEvent};
 use crate::quick_open::{QuickOpen, QuickOpenEvent};
@@ -39,7 +39,7 @@ const MAX_WIDTH: f32 = 600.;
 const MIN_EDITOR: f32 = 360.;
 
 pub(crate) struct NotesView {
-    notes_folder: Entity<NotesFolder>,
+    core_door: Entity<CoreDoor>,
     config: Entity<Config>,
     sidebar: Entity<Sidebar>,
     pane: Entity<NotePane>,
@@ -58,9 +58,9 @@ pub(crate) struct NotesView {
 }
 
 impl NotesView {
-    /// The view of `notes_folder` with `note` open. Its note lists keep `order`.
+    /// The view of `core_door` with `note` open. Its note lists keep `order`.
     pub(crate) fn new(
-        notes_folder: Entity<NotesFolder>,
+        core_door: Entity<CoreDoor>,
         note: Option<Note>,
         order: Order,
         config: Entity<Config>,
@@ -69,10 +69,10 @@ impl NotesView {
         cx: &mut Context<Self>,
     ) -> Self {
         let settings = config.read(cx).settings().clone();
-        let pane = cx.new(|cx| NotePane::new(notes_folder.clone(), line.clone(), note, window, cx));
+        let pane = cx.new(|cx| NotePane::new(core_door.clone(), line.clone(), note, window, cx));
         let sidebar = cx.new(|cx| {
             Sidebar::new(
-                notes_folder.clone(),
+                core_door.clone(),
                 pane.clone(),
                 order,
                 &settings.sidebar.view,
@@ -81,19 +81,19 @@ impl NotesView {
             )
         });
         let subscriptions = vec![
-            cx.observe(&notes_folder, |this, notes_folder, cx| {
-                let writing = notes_folder.read(cx).writing();
+            cx.observe(&core_door, |this, core_door, cx| {
+                let writing = core_door.read(cx).writing();
                 this.line
                     .update(cx, |line, cx| line.set_writing(writing, cx));
             }),
-            cx.subscribe(&notes_folder, |this, _, JobFailed(answer), cx| {
+            cx.subscribe(&core_door, |this, _, JobFailed(answer), cx| {
                 this.line.update(cx, |line, cx| line.show(*answer, cx));
             }),
             cx.subscribe_in(&sidebar, window, Self::sidebar_event),
             cx.subscribe_in(&pane, window, Self::pane_event),
         ];
         let mut this = Self {
-            notes_folder,
+            core_door,
             config,
             sidebar,
             pane,
@@ -152,12 +152,9 @@ impl NotesView {
         self.focus_sidebar(window, cx);
         cx.notify();
         // A new tag may still wait in the write line.
-        self.write(
-            window,
-            cx,
-            NotesFolder::wait,
-            move |this, (), window, cx| this.rename_tag(tag, window, cx),
-        );
+        self.write(window, cx, CoreDoor::wait, move |this, (), window, cx| {
+            this.rename_tag(tag, window, cx);
+        });
     }
 
     /// Starts the name field of a tag in the sidebar, for a rename in all notes.
@@ -208,14 +205,14 @@ impl NotesView {
                         return;
                     }
                     let renamed = Done::result(move |renamed, cx| done(renamed.map(drop), cx));
-                    this.notes_folder.update(cx, |notes_folder, cx| {
-                        notes_folder.rename_tag(from, to, renamed, cx);
+                    this.core_door.update(cx, |core_door, cx| {
+                        core_door.rename_tag(from, to, renamed, cx);
                     });
                 });
             },
         );
-        self.notes_folder.update(cx, |notes_folder, cx| {
-            notes_folder.tag_rename_count(counted_from, to, Done::result(counted), cx);
+        self.core_door.update(cx, |core_door, cx| {
+            core_door.tag_rename_count(counted_from, to, Done::result(counted), cx);
         });
     }
 
@@ -262,7 +259,7 @@ impl NotesView {
                     cx,
                     {
                         let tag = tag.clone();
-                        |notes_folder, done, cx| notes_folder.tag_delete_count(tag, done, cx)
+                        |core_door, done, cx| core_door.tag_delete_count(tag, done, cx)
                     },
                     move |this, notes, window, cx| {
                         let ask = Ask::DeleteTag {
@@ -274,7 +271,7 @@ impl NotesView {
                                 this.write(
                                     window,
                                     cx,
-                                    |notes_folder, done, cx| notes_folder.delete_tag(tag, done, cx),
+                                    |core_door, done, cx| core_door.delete_tag(tag, done, cx),
                                     |_, _, _, _| {},
                                 );
                             }
@@ -335,13 +332,13 @@ impl NotesView {
             Target::Note(path) => self.write(
                 window,
                 cx,
-                |notes_folder, done, cx| notes_folder.move_note(path, folder, done, cx),
+                |core_door, done, cx| core_door.move_note(path, folder, done, cx),
                 |this, _, _, cx| this.keep_state(cx),
             ),
             Target::Folder(path) => self.write(
                 window,
                 cx,
-                |notes_folder, done, cx| notes_folder.move_folder(path, folder, done, cx),
+                |core_door, done, cx| core_door.move_folder(path, folder, done, cx),
                 |this, to, window, cx| {
                     this.show_folder(to, window, cx);
                     this.keep_state(cx);
@@ -367,9 +364,9 @@ impl NotesView {
     }
 
     fn show_link_picker(&mut self, start: LinkStart, window: &mut Window, cx: &mut Context<Self>) {
-        let notes_folder = self.notes_folder.clone();
+        let core_door = self.core_door.clone();
         self.before_popup = window.focused(cx);
-        let picker = cx.new(|cx| LinkPicker::new(notes_folder, start, window, cx));
+        let picker = cx.new(|cx| LinkPicker::new(core_door, start, window, cx));
         self.subscriptions
             .push(cx.subscribe_in(&picker, window, Self::link_picker_event));
         self.link_picker = Some(picker);
@@ -444,14 +441,14 @@ impl NotesView {
         self.write(
             window,
             cx,
-            |notes_folder, done, cx| match counted {
-                Target::Note(path) => notes_folder.note_delete_count(path, done, cx),
-                Target::Folder(path) => notes_folder.folder_delete_count(path, done, cx),
+            |core_door, done, cx| match counted {
+                Target::Note(path) => core_door.note_delete_count(path, done, cx),
+                Target::Folder(path) => core_door.folder_delete_count(path, done, cx),
             },
             move |this, count, window, cx| {
                 let name = match &target {
                     Target::Note(path) => this
-                        .notes_folder
+                        .core_door
                         .read(cx)
                         .snapshot()
                         .note(path)
@@ -486,9 +483,9 @@ impl NotesView {
         self.write(
             window,
             cx,
-            |notes_folder, done, cx| match target {
-                Target::Note(path) => notes_folder.delete_note(path, done, cx),
-                Target::Folder(path) => notes_folder.delete_folder(path, done, cx),
+            |core_door, done, cx| match target {
+                Target::Note(path) => core_door.delete_note(path, done, cx),
+                Target::Folder(path) => core_door.delete_folder(path, done, cx),
             },
             move |this, (), window, cx| {
                 if let Some(gone) = gone {
@@ -531,15 +528,15 @@ impl NotesView {
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-        start: impl FnOnce(&mut NotesFolder, Done<T>, &mut Context<NotesFolder>),
+        start: impl FnOnce(&mut CoreDoor, Done<T>, &mut Context<CoreDoor>),
         done: impl FnOnce(&mut Self, T, &mut Window, &mut Context<Self>) + 'static,
     ) {
         let done = Done::value(window_step(window, cx, move |this, value, window, cx| {
             done(this, value, window, cx);
             cx.notify();
         }));
-        self.notes_folder
-            .update(cx, |notes_folder, cx| start(notes_folder, done, cx));
+        self.core_door
+            .update(cx, |core_door, cx| start(core_door, done, cx));
     }
 
     fn focus_editor(&self, window: &mut Window, cx: &mut Context<Self>) {

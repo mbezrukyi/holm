@@ -15,8 +15,8 @@ use gpui_kit::{
 use holm_core::model::{NoteInfo, NoteSet};
 use holm_core::{NotePath, Snapshot};
 
+use crate::core_door::CoreDoor;
 use crate::link_rows::{self, Query, Row};
-use crate::notes_folder::NotesFolder;
 use crate::pick_notes::PickNotes;
 use crate::popup::{self, PickEvent, PickList, PickRow};
 use crate::text;
@@ -65,7 +65,7 @@ pub(crate) enum LinkChoice {
 }
 
 pub(crate) struct LinkPicker {
-    notes_folder: Entity<NotesFolder>,
+    core_door: Entity<CoreDoor>,
     notes: PickNotes,
     open_note: NotePath,
     list: Entity<PickList>,
@@ -81,7 +81,7 @@ pub(crate) struct LinkPicker {
 impl LinkPicker {
     /// The field gets the focus.
     pub(crate) fn new(
-        notes_folder: Entity<NotesFolder>,
+        core_door: Entity<CoreDoor>,
         start: LinkStart,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -97,7 +97,7 @@ impl LinkPicker {
             PickEvent::Close => cx.emit(LinkPickerEvent::Close),
         });
         let mut this = Self {
-            notes_folder,
+            core_door,
             notes: PickNotes::new(start.notes),
             open_note: start.open_note,
             list,
@@ -204,7 +204,7 @@ impl LinkPicker {
     }
 
     fn load_headings(&self, path: NotePath, cx: &mut Context<Self>) {
-        let job = self.notes_folder.read(cx).headings(path.clone(), cx);
+        let job = self.core_door.read(cx).headings(path.clone(), cx);
         cx.spawn(async move |this, cx| {
             let headings = job.await.unwrap_or_else(|error| {
                 let error = crate::error::AppError::from(error);

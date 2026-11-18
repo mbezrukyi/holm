@@ -19,13 +19,13 @@ use gpui_kit::{
 use holm_core::Core;
 
 use crate::config::{Config, Theme};
+use crate::core_door::CoreDoor;
 use crate::error::AppError;
 use crate::log::Log;
 use crate::message_line::MessageLine;
 use crate::notes::NotesView;
-use crate::notes_folder::NotesFolder;
 use crate::path_text::PathText;
-use crate::{notes_folder, text, theme};
+use crate::{core_door, text, theme};
 
 pub(crate) const APP_ID: &str = "io.github.mbezrukyi.Holm";
 
@@ -179,7 +179,7 @@ impl HolmWindow {
             cx.background_spawn({
                 let folder = folder.clone();
                 async move {
-                    notes_folder::open(&*open, &folder, &index_dir, create, last.as_ref(), order)
+                    core_door::open(&*open, &folder, &index_dir, create, last.as_ref(), order)
                 }
             });
         cx.spawn_in(window, async move |this, cx| {
@@ -189,10 +189,10 @@ impl HolmWindow {
                     Ok((core, note)) => {
                         let folder = folder.clone();
                         let config = this.config.clone();
-                        let notes_folder =
-                            cx.new(|cx| NotesFolder::new(core, folder, budget, window, cx));
+                        let core_door =
+                            cx.new(|cx| CoreDoor::new(core, folder, budget, window, cx));
                         Stage::Open(cx.new(|cx| {
-                            NotesView::new(notes_folder, note, order, config, line, window, cx)
+                            NotesView::new(core_door, note, order, config, line, window, cx)
                         }))
                     }
                     Err(error) => {

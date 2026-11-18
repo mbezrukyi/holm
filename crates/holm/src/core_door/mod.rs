@@ -1,35 +1,32 @@
-//! The app's only door to the notes folder.
+//! The app's only door to the core.
 //!
-//! [`NotesFolder`] holds the latest [`Snapshot`] and runs every read and write of the core.
-//! Writes, and reads that must see them, wait in one line and run one at a time, in the order
-//! the UI asked for them. A failed write does not stop the line.
+//! [`CoreDoor`] holds the latest [`Snapshot`] and runs every read and write of the core.
+//! Writes, and reads that must see them, are jobs. They wait in the write line and run one at
+//! a time, in the order the UI asked for them. A failed job does not stop the line.
 //!
-//! Each write ends in one update. The entity sets the snapshot after it and sends one
+//! Each job ends in one update. The entity sets the snapshot after it and sends one
 //! [`FolderEvent`] with the changes up to that snapshot. Then, in the same update, the caller
-//! gets the result. So no frame shows a state between them.
+//! gets the result. So no frame falls between them.
 //!
 //! A call waits on the UI thread for the jobs before it and its own, up to a budget. A job that
-//! ends in time ends in the update of the call, so no frame shows a state between the key and
-//! the end of its write. A late job ends in a later update, and [`NotesFolder::writing`] is true
-//! until then.
+//! ends in time ends in the update of the call, so no frame falls between the key and the end
+//! of its job. A late job ends in a later update, and [`CoreDoor::writing`] is true until then.
 //!
-//! It holds one [`Draft`]: the unsaved editor text of the open note. Before each job, the line
-//! writes the draft. So no job sees a note file older than the editor text. The draft keeps the
-//! text until a write of it succeeds, and each write of it ends in one [`SaveEvent`].
+//! It holds one [`Draft`]: the unsaved editor text of the open note. Before each job, the write
+//! line writes the draft. So no job sees a note file older than the editor text. The draft
+//! keeps the text until a write of it succeeds, and each write of it ends in one [`SaveEvent`].
 //!
 //! A change list from outside Holm wakes it when no job runs, and it sends one event. During a
 //! job, the lists wait for the event of the job. When its window closes or the app quits, it runs
-//! every write that waits in the line, and then writes the draft.
+//! every job that waits in the write line, and then writes the draft.
 //!
 //! Each job of the line, the search and the file links are work of the user. When one fails, it
 //! sends one [`JobFailed`] with the answer for the message line. So a caller gets only the
 //! value, unless it owns the error. The draft is Holm's own work, and its fail is a
 //! [`SaveEvent`]. The other reads give their error, for the log.
 
-use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::{self, Poll};
 use std::time::{Duration, Instant};
 
@@ -45,14 +42,16 @@ use holm_editor::PastedFile;
 use crate::error::AppError;
 use crate::tags::TagChange;
 use draft::{Draft, Written};
+use write_line::{End, Work, WriteLine};
 
 mod draft;
+mod write_line;
 
-/// What the notes folder tells the views: a write of Holm ended, or changes from outside came
-/// in. Each write sends one, also a failed write.
+/// What the core door tells the views: a job of Holm ended, or changes from outside came in.
+/// Each job sends one, also a failed job.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct FolderEvent {
-    /// The changes of every revision up to [`NotesFolder::snapshot`], in order, each with
+    /// The changes of every revision up to [`CoreDoor::snapshot`], in order, each with
     /// its source. It is empty when the snapshot did not change.
     changes: Vec<(Source, Change)>,
 }
@@ -134,58 +133,23 @@ pub(crate) enum SaveEvent {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct NotSaved;
 
-/// The work of one entry of the line. It runs off the UI thread, and gives the error of a
-/// failed job for the log at quit.
-type Job = Box<dyn FnOnce(&Core) -> Option<String> + Send>;
-
-/// The end of one entry of the line, on the UI thread after its job and its event: it gives
-/// the result to the caller.
-type End = Box<dyn FnOnce(&mut NotesFolder, &mut Context<NotesFolder>)>;
-
-/// One entry of the line. Its number grows with each entry.
-struct Entry {
-    number: u64,
-    job: Job,
-    end: End,
-}
-
-/// The entry whose job runs.
-struct Turn {
-    number: u64,
-    end: End,
-    /// It comes when the job ends. It is gone when the quit drain ran the job.
-    done: oneshot::Receiver<()>,
-    /// It ends the turn when the job ends after its call.
-    _wake: Task<()>,
-}
-
-pub(crate) struct NotesFolder {
+pub(crate) struct CoreDoor {
     core: Core,
     root: PathBuf,
     snapshot: Snapshot,
     changes: ChangeLists,
     /// How long a call waits for its job.
     budget: Duration,
-    line: VecDeque<Entry>,
-    next_number: u64,
-    /// The number of the last entry that ended.
-    ended: u64,
-    /// The last entry that is past its budget, until it ends.
-    late: Option<u64>,
-    /// The job that left the line. Its thread holds the lock while it runs, so the quit drain
-    /// waits for it, or runs it when the thread did not start yet.
-    running: Arc<Mutex<Option<Job>>>,
-    turn: Option<Turn>,
+    write_line: WriteLine,
     draft: Draft,
-    /// After the quit drain, no job runs.
-    closed: bool,
     watch: Task<()>,
     _ends: [Subscription; 2],
 }
 
-impl NotesFolder {
-    /// The notes folder at `root`, which `core` opened. A call waits up to `budget` for its job.
-    /// The line drains when `window` closes, when the app quits, or when the entity goes.
+impl CoreDoor {
+    /// The door to the notes folder at `root`, which `core` opened. A call waits up to `budget`
+    /// for its job. The write line drains when `window` closes, when the app quits, or when the
+    /// entity goes.
     pub(crate) fn new(
         core: Core,
         root: PathBuf,
@@ -193,18 +157,18 @@ impl NotesFolder {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        cx.on_release(|folder, _| folder.drain()).detach();
+        cx.on_release(|door, _| door.drain()).detach();
         // The platform window can keep views alive after a close, and with them this entity.
         let window = window.window_handle().window_id();
-        let folder = cx.weak_entity();
+        let door = cx.weak_entity();
         let ends = [
             cx.on_window_closed(move |cx, closed| {
                 if closed == window {
-                    folder.update(cx, |folder, _| folder.drain()).ok();
+                    door.update(cx, |door, _| door.drain()).ok();
                 }
             }),
-            cx.on_app_quit(|folder, _| {
-                folder.drain();
+            cx.on_app_quit(|door, _| {
+                door.drain();
                 std::future::ready(())
             }),
         ];
@@ -212,17 +176,11 @@ impl NotesFolder {
         Self {
             changes,
             snapshot,
+            write_line: WriteLine::new(core.clone()),
             core,
             root,
             budget,
-            line: VecDeque::new(),
-            next_number: 1,
-            ended: 0,
-            late: None,
-            running: Arc::default(),
-            turn: None,
             draft: Draft::default(),
-            closed: false,
             watch: Self::watch(cx),
             _ends: ends,
         }
@@ -240,7 +198,7 @@ impl NotesFolder {
 
     /// Whether a job is past its budget.
     pub(crate) fn writing(&self) -> bool {
-        self.late.is_some()
+        self.write_line.is_late()
     }
 
     /// The editor text of the note at `path` is now `body`. It writes nothing yet.
@@ -258,7 +216,7 @@ impl NotesFolder {
         self.draft.unsaved()
     }
 
-    /// Puts the draft in the line now. It does not wait for the job.
+    /// Puts the draft in the write line now. It does not wait for the job.
     pub(crate) fn save_text(&mut self, cx: &mut Context<Self>) {
         self.push_draft();
         self.run(None, cx);
@@ -272,15 +230,15 @@ impl NotesFolder {
         cx: &mut Context<Self>,
     ) {
         self.push_draft();
-        let end: End = Box::new(move |folder, cx| {
-            let saved = if folder.draft.failed() {
+        let end: End = Box::new(move |door, cx| {
+            let saved = if door.draft.failed() {
                 Err(NotSaved)
             } else {
                 Ok(())
             };
             cx.defer(move |cx| done(saved, cx));
         });
-        let number = self.push_entry(Box::new(|_| None), end);
+        let number = self.write_line.push(Box::new(|_| None), end);
         self.run(Some(number), cx);
     }
 
@@ -566,10 +524,9 @@ impl NotesFolder {
             },
             cx,
         );
-        cx.spawn(async move |folder, cx| {
+        cx.spawn(async move |door, cx| {
             let links = job.await;
-            folder
-                .update(cx, |_, cx| each_answered(links, cx))
+            door.update(cx, |_, cx| each_answered(links, cx))
                 .unwrap_or_default()
         })
     }
@@ -583,10 +540,9 @@ impl NotesFolder {
         cx: &mut Context<Self>,
     ) -> Task<Option<SearchResults>> {
         let job = self.look(move |core| core.search(&query, order), cx);
-        cx.spawn(async move |folder, cx| {
+        cx.spawn(async move |door, cx| {
             let found = job.await;
-            folder
-                .update(cx, |_, cx| answered(found, cx).ok())
+            door.update(cx, |_, cx| answered(found, cx).ok())
                 .ok()
                 .flatten()
         })
@@ -611,8 +567,8 @@ impl NotesFolder {
         self.look(move |core| core.broken_links(&path), cx)
     }
 
-    /// Puts `job` in the line, and waits for it up to the budget. When it ends, the entity sets
-    /// the snapshot after it and sends the event. Then `done` gets its result, in the same
+    /// Puts `job` in the write line, and waits for it up to the budget. When it ends, the entity
+    /// sets the snapshot after it and sends the event. Then `done` gets its result, in the same
     /// update. When the entity is gone first, `done` never runs.
     fn write<T: Send + 'static>(
         &mut self,
@@ -648,34 +604,34 @@ impl NotesFolder {
             return;
         };
         let (send, mut receive) = oneshot::channel();
-        let job: Job = Box::new(move |core: &Core| {
+        let work: Work = Box::new(move |core: &Core| {
             let failure = write.text.write(core).err().map(AppError::from);
             let chain = failure.as_ref().map(|error| crate::chain(error));
             send.send(failure).ok();
             chain
         });
         let version = write.version;
-        let end: End = Box::new(move |folder, cx| {
+        let end: End = Box::new(move |door, cx| {
             let Ok(Some(failure)) = receive.try_recv() else {
                 return;
             };
-            match (folder.draft.written(version, failure.is_none()), failure) {
+            match (door.draft.written(version, failure.is_none()), failure) {
                 (Written::Saved, _) => cx.emit(SaveEvent::Saved),
                 (Written::Failed, Some(error)) => cx.emit(SaveEvent::Failed(error)),
                 _ => {}
             }
         });
-        self.push_entry(job, end);
+        self.write_line.push(work, end);
     }
 
-    /// Puts `job` at the end of the line, and gives the number of its entry.
+    /// Puts `job` at the end of the write line, and gives its number.
     fn push<T: Send + 'static>(
         &mut self,
         job: impl FnOnce(&Core) -> holm_core::Result<T> + Send + 'static,
         end: impl FnOnce(holm_core::Result<T>, &mut Context<Self>) + 'static,
     ) -> u64 {
         let (send, mut receive) = oneshot::channel();
-        let job: Job = Box::new(move |core: &Core| {
+        let work: Work = Box::new(move |core: &Core| {
             let result = job(core);
             let failure = result.as_ref().err().map(|error| crate::chain(error));
             send.send(result).ok();
@@ -686,15 +642,7 @@ impl NotesFolder {
                 end(result, cx);
             }
         });
-        self.push_entry(job, end)
-    }
-
-    /// Puts an entry at the end of the line, and gives its number.
-    fn push_entry(&mut self, job: Job, end: End) -> u64 {
-        let number = self.next_number;
-        self.next_number += 1;
-        self.line.push_back(Entry { number, job, end });
-        number
+        self.write_line.push(work, end)
     }
 
     /// Runs a read that needs no order, off the UI thread.
@@ -707,125 +655,55 @@ impl NotesFolder {
         cx.background_spawn(async move { job(&core) })
     }
 
-    /// Runs the jobs of the line. With `until`, it waits on this thread up to the budget, until
-    /// the entry `until` ends. A job that does not end in time ends later, in its own update.
+    /// Runs the jobs of the write line. With `until`, it waits on this thread up to the budget,
+    /// until the job `until` ends. A job that does not end in time ends later, in its own update.
     fn run(&mut self, until: Option<u64>, cx: &mut Context<Self>) {
         let deadline = Instant::now() + self.budget;
         loop {
-            if self.turn.is_none() && !self.start(cx) {
+            if !self.write_line.is_running() && !self.write_line.start(cx) {
                 return;
             }
-            let Some(until) = until.filter(|until| self.ended < *until) else {
+            let Some(until) = until.filter(|until| !self.write_line.has_ended(*until)) else {
                 return;
             };
             let left = deadline.saturating_duration_since(Instant::now());
-            let done = match &mut self.turn {
-                Some(turn) if !left.is_zero() => cx
-                    .foreground_executor()
-                    .block_with_timeout(left, &mut turn.done)
-                    .ok(),
-                _ => None,
-            };
-            let Some(done) = done else {
-                if self.late < Some(until) {
-                    self.late = Some(until);
-                    cx.notify();
-                }
+            let Some(ran) = self.write_line.wait(until, left, cx) else {
                 return;
             };
-            self.end_turn(done.is_ok(), cx);
+            self.end_job(ran, cx);
         }
     }
 
-    /// Starts the first job of the line, and gives whether it did.
-    fn start(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.closed {
-            return false;
-        }
-        let Some(Entry { number, job, end }) = self.line.pop_front() else {
-            return false;
-        };
-        *lock(&self.running) = Some(job);
-        let core = self.core.clone();
-        let running = self.running.clone();
-        let (send, done) = oneshot::channel();
-        let work = cx.background_spawn(async move {
-            let mut slot = lock(&running);
-            if let Some(job) = slot.take() {
-                job(&core);
-                send.send(()).ok();
-            }
-        });
-        let wake = cx.spawn(async move |folder, cx| {
-            work.await;
-            folder
-                .update(cx, |folder, cx| {
-                    let ran = folder
-                        .turn
-                        .as_mut()
-                        .is_some_and(|turn| matches!(turn.done.try_recv(), Ok(Some(()))));
-                    folder.end_turn(ran, cx);
-                    folder.run(None, cx);
-                })
-                .ok();
-        });
-        self.turn = Some(Turn {
-            number,
-            end,
-            done,
-            _wake: wake,
-        });
-        true
-    }
-
-    /// Ends the entry whose job ends. When the job `ran` on its thread, it takes every list
-    /// that waits and sends one event. Then the watch starts again.
-    fn end_turn(&mut self, ran: bool, cx: &mut Context<Self>) {
-        let Some(turn) = self.turn.take() else {
+    /// Ends the running job. When its work `ran` on its thread, it takes every list that waits
+    /// and sends one event. Then the watch starts again.
+    fn end_job(&mut self, ran: bool, cx: &mut Context<Self>) {
+        let Some(end) = self.write_line.end(cx) else {
             return;
         };
-        self.ended = turn.number;
         if ran {
             let lists: Vec<ChangeList> = std::iter::from_fn(|| self.changes.try_next()).collect();
             let event = self.keep(lists);
             cx.emit(event);
-            (turn.end)(self, cx);
-        }
-        if self.late.is_some_and(|late| late <= self.ended) {
-            self.late = None;
-            cx.notify();
+            end(self, cx);
         }
         self.watch = Self::watch(cx);
     }
 
-    /// Runs every job that waits, and then writes the draft. Later jobs do not run. It works on
-    /// the UI thread, because no task runs after the window is gone.
+    /// Runs every job that waits, and then writes the draft. Later jobs do not run.
     fn drain(&mut self) {
-        self.closed = true;
-        let draft: Option<Job> = self.draft.take().map(|text| {
+        let draft = self.draft.take().map(|text| {
             Box::new(move |core: &Core| text.write(core).err().map(|error| crate::chain(&error)))
-                as Job
+                as Work
         });
-        let mut slot = lock(&self.running);
-        let jobs = slot
-            .take()
-            .into_iter()
-            .chain(self.line.drain(..).map(|entry| entry.job))
-            .chain(draft);
-        for job in jobs {
-            if let Some(failure) = job(&self.core) {
-                tracing::warn!(error = %failure, "a write at quit failed");
-            }
-        }
+        self.write_line.drain(draft);
     }
 
-    /// Wakes on each change list while no job runs. A job ends it, and [`Self::end_turn`]
+    /// Wakes on each change list while no job runs. A job ends it, and [`Self::end_job`]
     /// starts a new one.
     fn watch(cx: &mut Context<Self>) -> Task<()> {
-        cx.spawn(async move |folder, cx| {
+        cx.spawn(async move |door, cx| {
             std::future::poll_fn(|waker| {
-                folder
-                    .update(cx, |folder, cx| folder.wake(waker, cx))
+                door.update(cx, |door, cx| door.wake(waker, cx))
                     .unwrap_or(Poll::Ready(()))
             })
             .await;
@@ -834,7 +712,7 @@ impl NotesFolder {
 
     /// Takes every list that waits and sends one event. During a job, it takes nothing.
     fn wake(&mut self, waker: &mut task::Context<'_>, cx: &mut Context<Self>) -> Poll<()> {
-        if self.turn.is_some() {
+        if self.write_line.is_running() {
             return Poll::Ready(());
         }
         let mut lists = Vec::new();
@@ -862,15 +740,15 @@ impl NotesFolder {
     }
 }
 
-impl EventEmitter<FolderEvent> for NotesFolder {}
+impl EventEmitter<FolderEvent> for CoreDoor {}
 
-impl EventEmitter<SaveEvent> for NotesFolder {}
+impl EventEmitter<SaveEvent> for CoreDoor {}
 
-impl EventEmitter<JobFailed> for NotesFolder {}
+impl EventEmitter<JobFailed> for CoreDoor {}
 
 /// Gives the result with the app error. A failure goes to the log, and its answer to
 /// [`JobFailed`].
-fn answered<T>(result: holm_core::Result<T>, cx: &mut Context<NotesFolder>) -> Result<T, AppError> {
+fn answered<T>(result: holm_core::Result<T>, cx: &mut Context<CoreDoor>) -> Result<T, AppError> {
     result.map_err(|error| {
         let error = AppError::from(error);
         tracing::warn!(error = %crate::chain(&error), "a job of the user failed");
@@ -882,7 +760,7 @@ fn answered<T>(result: holm_core::Result<T>, cx: &mut Context<NotesFolder>) -> R
 /// The value of each result, or `None` after its failure went to [`answered`].
 fn each_answered<T>(
     results: Vec<holm_core::Result<T>>,
-    cx: &mut Context<NotesFolder>,
+    cx: &mut Context<CoreDoor>,
 ) -> Vec<Option<T>> {
     results
         .into_iter()
@@ -923,11 +801,6 @@ fn first_note(
     }
 }
 
-/// A lock that still works after a panic in another thread. A job leaves no half state.
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, reason = "tests")]
@@ -942,26 +815,26 @@ mod tests {
     use super::*;
     use crate::test_paths::{folder_path, note_path, tag_name};
 
-    fn notes_folder(cx: &mut TestAppContext) -> (TempDir, Entity<NotesFolder>) {
+    fn core_door(cx: &mut TestAppContext) -> (TempDir, Entity<CoreDoor>) {
         let dir = tempfile::tempdir().unwrap();
         let notes = dir.path().join("notes");
         fs::create_dir(&notes).unwrap();
         fs::write(notes.join("A.md"), "# A\n").unwrap();
         let (core, _) = Core::open_with_feed(&notes, dir.path().join("index")).unwrap();
         let window = cx.add_window(|_, _| gpui_kit::Empty);
-        let notes_folder = window
+        let core_door = window
             .update(cx, |_, window, cx| {
-                cx.new(|cx| NotesFolder::new(core, notes, Duration::ZERO, window, cx))
+                cx.new(|cx| CoreDoor::new(core, notes, Duration::ZERO, window, cx))
             })
             .unwrap();
-        (dir, notes_folder)
+        (dir, core_door)
     }
 
     #[gpui_kit::test]
     fn a_write_after_a_failed_write_still_runs(cx: &mut TestAppContext) {
-        let (dir, notes_folder) = notes_folder(cx);
+        let (dir, core_door) = core_door(cx);
         let steps = Rc::new(RefCell::new(Vec::new()));
-        notes_folder.update(cx, |notes_folder, cx| {
+        core_door.update(cx, |core_door, cx| {
             let step = |name: &'static str| {
                 let steps = steps.clone();
                 Done::result(move |result: Result<FolderPath, AppError>, _: &mut App| {
@@ -970,41 +843,36 @@ mod tests {
                     }
                 })
             };
-            notes_folder.rename_folder(folder_path("gone"), "x".into(), step("after the fail"), cx);
-            notes_folder.create_folder(
-                FolderPath::root(),
-                "B".into(),
-                step("after the folder"),
-                cx,
-            );
+            core_door.rename_folder(folder_path("gone"), "x".into(), step("after the fail"), cx);
+            core_door.create_folder(FolderPath::root(), "B".into(), step("after the folder"), cx);
         });
         cx.run_until_parked();
 
         assert_eq!(*steps.borrow(), ["after the folder"]);
         assert!(dir.path().join("notes/B").is_dir());
-        let folders: Vec<FolderPath> = notes_folder.read_with(cx, |notes_folder, _| {
-            notes_folder.snapshot().folders().cloned().collect()
+        let folders: Vec<FolderPath> = core_door.read_with(cx, |core_door, _| {
+            core_door.snapshot().folders().cloned().collect()
         });
         assert_eq!(folders, [folder_path("B")]);
     }
 
     #[gpui_kit::test]
     fn a_failed_job_sends_its_answer_and_skips_its_value_step(cx: &mut TestAppContext) {
-        let (_dir, notes_folder) = notes_folder(cx);
+        let (_dir, core_door) = core_door(cx);
         let steps = Rc::new(RefCell::new(Vec::new()));
         cx.update(|cx| {
             let steps = steps.clone();
-            cx.subscribe(&notes_folder, move |_, JobFailed(answer), _| {
+            cx.subscribe(&core_door, move |_, JobFailed(answer), _| {
                 steps.borrow_mut().push(format!("answer {answer}"));
             })
             .detach();
         });
-        notes_folder.update(cx, |notes_folder, cx| {
+        core_door.update(cx, |core_door, cx| {
             let value = {
                 let steps = steps.clone();
                 Done::value(move |_, _| steps.borrow_mut().push("value".to_owned()))
             };
-            notes_folder.rename_folder(folder_path("gone"), "x".into(), value, cx);
+            core_door.rename_folder(folder_path("gone"), "x".into(), value, cx);
             let result = {
                 let steps = steps.clone();
                 Done::result(move |result: Result<FolderPath, AppError>, _| {
@@ -1012,7 +880,7 @@ mod tests {
                     steps.borrow_mut().push(format!("result {message:?}"));
                 })
             };
-            notes_folder.rename_folder(folder_path("gone"), "x".into(), result, cx);
+            core_door.rename_folder(folder_path("gone"), "x".into(), result, cx);
         });
         cx.run_until_parked();
 
@@ -1029,18 +897,18 @@ mod tests {
 
     #[gpui_kit::test]
     fn each_write_sends_its_moves_and_then_gives_its_result(cx: &mut TestAppContext) {
-        let (_dir, notes_folder) = notes_folder(cx);
+        let (_dir, core_door) = core_door(cx);
         let steps = Rc::new(RefCell::new(Vec::new()));
         cx.update(|cx| {
             let steps = steps.clone();
-            cx.subscribe(&notes_folder, move |_, event: &FolderEvent, _| {
+            cx.subscribe(&core_door, move |_, event: &FolderEvent, _| {
                 steps
                     .borrow_mut()
                     .push(format!("event {:?}", event.changes().collect::<Vec<_>>()));
             })
             .detach();
         });
-        notes_folder.update(cx, |notes_folder, cx| {
+        core_door.update(cx, |core_door, cx| {
             let step = |name: &'static str| {
                 let steps = steps.clone();
                 Done::result(move |result: Result<FolderPath, AppError>, _: &mut App| {
@@ -1048,9 +916,9 @@ mod tests {
                     steps.borrow_mut().push(format!("{name} {end}"));
                 })
             };
-            notes_folder.create_folder(FolderPath::root(), "work".into(), step("create"), cx);
-            notes_folder.rename_folder(folder_path("work"), "job".into(), step("rename"), cx);
-            notes_folder.rename_folder(folder_path("gone"), "x".into(), step("fail"), cx);
+            core_door.create_folder(FolderPath::root(), "work".into(), step("create"), cx);
+            core_door.rename_folder(folder_path("work"), "job".into(), step("rename"), cx);
+            core_door.rename_folder(folder_path("gone"), "x".into(), step("fail"), cx);
         });
         cx.run_until_parked();
 
@@ -1069,17 +937,17 @@ mod tests {
 
     #[gpui_kit::test]
     fn the_writes_in_the_line_reach_the_files_at_quit_with_the_draft_last(cx: &mut TestAppContext) {
-        let (dir, notes_folder) = notes_folder(cx);
-        notes_folder.update(cx, |notes_folder, cx| {
-            notes_folder.set_text(note_path("A.md"), "# A\n\nfirst\n".into());
-            notes_folder.change_tag(
+        let (dir, core_door) = core_door(cx);
+        core_door.update(cx, |core_door, cx| {
+            core_door.set_text(note_path("A.md"), "# A\n\nfirst\n".into());
+            core_door.change_tag(
                 note_path("A.md"),
                 TagChange::Add(tag_name("work")),
                 Done::value(|(), _| {}),
                 cx,
             );
-            notes_folder.create_folder(FolderPath::root(), "B".into(), Done::value(|_, _| {}), cx);
-            notes_folder.set_text(note_path("A.md"), "# A\n\nlast\n".into());
+            core_door.create_folder(FolderPath::root(), "B".into(), Done::value(|_, _| {}), cx);
+            core_door.set_text(note_path("A.md"), "# A\n\nlast\n".into());
         });
         cx.quit();
 
@@ -1091,25 +959,25 @@ mod tests {
 
     #[gpui_kit::test]
     fn a_job_sees_the_draft_and_a_newer_draft_waits_for_the_next_job(cx: &mut TestAppContext) {
-        let (_dir, notes_folder) = notes_folder(cx);
+        let (_dir, core_door) = core_door(cx);
         let bodies = Rc::new(RefCell::new(Vec::new()));
-        let read = |notes_folder: &mut NotesFolder, cx: &mut Context<NotesFolder>| {
+        let read = |core_door: &mut CoreDoor, cx: &mut Context<CoreDoor>| {
             let bodies = bodies.clone();
-            notes_folder.read(
+            core_door.read(
                 note_path("A.md"),
                 Done::value(move |note: Note, _| bodies.borrow_mut().push(note.body)),
                 cx,
             );
         };
-        notes_folder.update(cx, |notes_folder, cx| {
-            notes_folder.set_text(note_path("A.md"), "# A\n\nold\n".into());
-            notes_folder.set_text(note_path("A.md"), "# A\n\nnew\n".into());
-            read(notes_folder, cx);
-            read(notes_folder, cx);
-            notes_folder.set_text(note_path("A.md"), "# A\n\nlater\n".into());
+        core_door.update(cx, |core_door, cx| {
+            core_door.set_text(note_path("A.md"), "# A\n\nold\n".into());
+            core_door.set_text(note_path("A.md"), "# A\n\nnew\n".into());
+            read(core_door, cx);
+            read(core_door, cx);
+            core_door.set_text(note_path("A.md"), "# A\n\nlater\n".into());
         });
         cx.run_until_parked();
-        notes_folder.update(cx, |notes_folder, cx| read(notes_folder, cx));
+        core_door.update(cx, |core_door, cx| read(core_door, cx));
         cx.run_until_parked();
 
         assert_eq!(
@@ -1120,7 +988,7 @@ mod tests {
 
     #[gpui_kit::test]
     fn a_failed_save_keeps_the_text_for_the_next_save(cx: &mut TestAppContext) {
-        let (dir, notes_folder) = notes_folder(cx);
+        let (dir, core_door) = core_door(cx);
         let notes = dir.path().join("notes");
         let read_only = |read_only: bool| {
             let mut permissions = fs::metadata(&notes).unwrap().permissions();
@@ -1130,7 +998,7 @@ mod tests {
         let steps = Rc::new(RefCell::new(Vec::new()));
         cx.update(|cx| {
             let steps = steps.clone();
-            cx.subscribe(&notes_folder, move |_, event: &SaveEvent, _| {
+            cx.subscribe(&core_door, move |_, event: &SaveEvent, _| {
                 let end = match event {
                     SaveEvent::Saved => "saved",
                     SaveEvent::Failed(_) => "failed",
@@ -1141,8 +1009,8 @@ mod tests {
         });
         let wait = |cx: &mut TestAppContext| {
             let steps = steps.clone();
-            notes_folder.update(cx, |notes_folder, cx| {
-                notes_folder.wait_saved(
+            core_door.update(cx, |core_door, cx| {
+                core_door.wait_saved(
                     move |saved, _| steps.borrow_mut().push(format!("wait {saved:?}")),
                     cx,
                 );
@@ -1151,17 +1019,17 @@ mod tests {
         };
 
         read_only(true);
-        notes_folder.update(cx, |notes_folder, cx| {
-            notes_folder.set_text(note_path("A.md"), "# A\n\nmine\n".into());
-            notes_folder.save_text(cx);
+        core_door.update(cx, |core_door, cx| {
+            core_door.set_text(note_path("A.md"), "# A\n\nmine\n".into());
+            core_door.save_text(cx);
         });
         cx.run_until_parked();
         wait(cx);
-        assert!(notes_folder.read_with(cx, |notes_folder, _| notes_folder.unsaved()));
+        assert!(core_door.read_with(cx, |core_door, _| core_door.unsaved()));
 
         read_only(false);
         wait(cx);
-        assert!(!notes_folder.read_with(cx, |notes_folder, _| notes_folder.unsaved()));
+        assert!(!core_door.read_with(cx, |core_door, _| core_door.unsaved()));
         assert_eq!(
             *steps.borrow(),
             [
@@ -1178,13 +1046,13 @@ mod tests {
 
     #[gpui_kit::test]
     fn a_save_keeps_a_tag_from_another_tool(cx: &mut TestAppContext) {
-        let (dir, notes_folder) = notes_folder(cx);
+        let (dir, core_door) = core_door(cx);
         let file = dir.path().join("notes/A.md");
         fs::write(&file, "---\ntags: [theirs]\n---\n# A\n").unwrap();
 
-        notes_folder.update(cx, |notes_folder, cx| {
-            notes_folder.set_text(note_path("A.md"), "# A\n\nmine\n".into());
-            notes_folder.save_text(cx);
+        core_door.update(cx, |core_door, cx| {
+            core_door.set_text(note_path("A.md"), "# A\n\nmine\n".into());
+            core_door.save_text(cx);
         });
         cx.run_until_parked();
 
@@ -1195,11 +1063,11 @@ mod tests {
 
     #[gpui_kit::test]
     fn a_tag_removal_keeps_a_tag_from_another_tool(cx: &mut TestAppContext) {
-        let (dir, notes_folder) = notes_folder(cx);
+        let (dir, core_door) = core_door(cx);
         let file = dir.path().join("notes/A.md");
         let change = |change: TagChange, cx: &mut TestAppContext| {
-            notes_folder.update(cx, |notes_folder, cx| {
-                notes_folder.change_tag(note_path("A.md"), change, Done::value(|(), _| {}), cx);
+            core_door.update(cx, |core_door, cx| {
+                core_door.change_tag(note_path("A.md"), change, Done::value(|(), _| {}), cx);
             });
             cx.run_until_parked();
         };

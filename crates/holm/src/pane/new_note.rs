@@ -19,8 +19,8 @@ use gpui_kit::{
 use holm_core::model::Note;
 use holm_core::{FolderPath, TagName};
 
+use crate::core_door::{CoreDoor, Done};
 use crate::name_field::{NameEvent, NameWrite};
-use crate::notes_folder::{Done, NotesFolder};
 use crate::tags;
 use crate::text;
 use crate::title::TitleField;
@@ -43,7 +43,7 @@ pub(crate) struct NewNote {
 impl NewNote {
     /// A note for `folder` with `tag`, with the focus in its title field.
     pub(crate) fn new(
-        notes_folder: Entity<NotesFolder>,
+        core_door: Entity<CoreDoor>,
         folder: FolderPath,
         tag: Option<TagName>,
         window: &mut Window,
@@ -52,8 +52,8 @@ impl NewNote {
         let create_tag = tag.clone();
         let write: NameWrite<Note> = Rc::new(move |title, done, _, cx| {
             let (folder, tag) = (folder.clone(), create_tag.clone());
-            notes_folder.update(cx, |notes_folder, cx| {
-                notes_folder.create_note(folder, title, tag, Done::result(done), cx);
+            core_door.update(cx, |core_door, cx| {
+                core_door.create_note(folder, title, tag, Done::result(done), cx);
             });
         });
         let focus = cx.focus_handle();

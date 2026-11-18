@@ -47,11 +47,11 @@ use holm_editor::{Changed, Editor, UpFromStart};
 use holm_markdown::Target;
 
 use crate::backlinks::{Backlinks, OpenBacklink};
+use crate::core_door::{CoreDoor, Done, FolderEvent, NotSaved, SaveEvent, Step, window_step};
 use crate::error::AppError;
 use crate::link_picker::{LinkChoice, LinkStart};
 use crate::message_line::{MessageLine, OpenState};
 use crate::name_field::{NameEvent, NameWrite};
-use crate::notes_folder::{Done, FolderEvent, NotSaved, NotesFolder, SaveEvent, Step, window_step};
 use crate::tags::{TagChange, TagRow};
 use crate::title::TitleField;
 use crate::{text, theme};
@@ -129,7 +129,7 @@ impl Shown {
 }
 
 pub(crate) struct NotePane {
-    notes_folder: Entity<NotesFolder>,
+    core_door: Entity<CoreDoor>,
     line: Entity<MessageLine>,
     disk_menu: Entity<DiskMenu>,
     editor: Entity<Editor>,
@@ -161,7 +161,7 @@ pub(crate) struct NotePane {
 
 impl NotePane {
     pub(crate) fn new(
-        notes_folder: Entity<NotesFolder>,
+        core_door: Entity<CoreDoor>,
         line: Entity<MessageLine>,
         note: Option<Note>,
         window: &mut Window,
@@ -180,7 +180,7 @@ impl NotePane {
         let title = cx.new(|_| TitleField::new(rename, text.clone()));
         let tag_row = cx.new(|cx| {
             TagRow::new(
-                notes_folder.clone(),
+                core_door.clone(),
                 title.clone(),
                 backlinks.clone(),
                 text,
@@ -192,16 +192,16 @@ impl NotePane {
             editor.set_start(Some(tag_row.clone().into()), cx);
         });
         let links =
-            cx.new(|cx| Links::new(notes_folder.clone(), editor.clone(), backlinks.clone(), cx));
+            cx.new(|cx| Links::new(core_door.clone(), editor.clone(), backlinks.clone(), cx));
         let subscriptions = vec![
-            cx.subscribe(&notes_folder, |pane, _, event: &FolderEvent, cx| {
+            cx.subscribe(&core_door, |pane, _, event: &FolderEvent, cx| {
                 pane.follow(event, cx);
                 for change in event.outside() {
                     pane.outside_change(change, cx);
                 }
                 pane.show_fields(cx);
             }),
-            cx.subscribe(&notes_folder, |pane, _, event: &SaveEvent, cx| {
+            cx.subscribe(&core_door, |pane, _, event: &SaveEvent, cx| {
                 pane.save_end(event, cx);
             }),
             cx.subscribe(&editor, |pane, _, _: &Changed, cx| pane.edited(cx)),
@@ -240,7 +240,7 @@ impl NotePane {
         let appearance = theme::appearance(cx);
         editor.update(cx, |editor, cx| editor.set_appearance(appearance, cx));
         let mut pane = Self {
-            notes_folder,
+            core_door,
             line,
             disk_menu,
             editor,
@@ -270,12 +270,7 @@ impl NotePane {
     /// Puts `note` from the disk into the editor. A reload keeps the view and is one undo step.
     fn show(&mut self, note: Note, reload: bool, cx: &mut Context<Self>) {
         self.ending = LineEnding::of(&note.body);
-        let folder = Some(
-            self.notes_folder
-                .read(cx)
-                .root()
-                .join(note.info.path.folder()),
-        );
+        let folder = Some(self.core_door.read(cx).root().join(note.info.path.folder()));
         self.editor.update(cx, |editor, cx| {
             if reload {
                 editor.reload_text(&note.body, cx);
@@ -318,8 +313,8 @@ impl NotePane {
         self.opening += 1;
         self.settle(cx);
         self.editor.update(cx, |editor, cx| editor.set_text("", cx));
-        self.notes_folder
-            .update(cx, |notes_folder, _| notes_folder.drop_text());
+        self.core_door
+            .update(cx, |core_door, _| core_door.drop_text());
         self.links.update(cx, |links, cx| links.show(None, cx));
         self.show_fields(cx);
         cx.notify();
@@ -410,7 +405,7 @@ impl NotePane {
         self.replace_link = link.as_ref().is_some_and(|link| !link.embedded);
         let target = link.map(|link| link.target);
         let done = Done::value(step(cx, move |pane: &mut Self, (), cx| {
-            let snapshot = pane.notes_folder.read(cx).snapshot();
+            let snapshot = pane.core_door.read(cx).snapshot();
             let query = match target {
                 Some(Target::Note { id, heading }) => match snapshot.note_with_id(&id) {
                     Some(note) => match heading {
@@ -424,8 +419,8 @@ impl NotePane {
             };
             done(LinkStart::new(snapshot, open_note, query), cx);
         }));
-        self.notes_folder
-            .update(cx, |notes_folder, cx| notes_folder.wait(done, cx));
+        self.core_door
+            .update(cx, |core_door, cx| core_door.wait(done, cx));
     }
 
     /// Makes the link that the user picked in the link picker, and puts it at the cursor.
@@ -447,8 +442,8 @@ impl NotePane {
                 path,
                 title,
                 heading,
-            } => self.notes_folder.update(cx, |notes_folder, cx| {
-                notes_folder.link_id(
+            } => self.core_door.update(cx, |core_door, cx| {
+                core_door.link_id(
                     path,
                     Done::value(move |id, cx| {
                         let text = heading.clone().unwrap_or(title);
@@ -462,8 +457,8 @@ impl NotePane {
                 self.put_link(&Target::Heading(heading.clone()), &heading, cx);
                 cx.defer(move |cx| done((), cx));
             }
-            LinkChoice::Create(title) => self.notes_folder.update(cx, |notes_folder, cx| {
-                notes_folder.create_linked_note(
+            LinkChoice::Create(title) => self.core_door.update(cx, |core_door, cx| {
+                core_door.create_linked_note(
                     folder,
                     title.clone(),
                     Done::value(move |id, cx| {
@@ -496,7 +491,7 @@ impl NotePane {
         let Some(path) = path else {
             return;
         };
-        if let Some(info) = self.notes_folder.read(cx).snapshot().note(&path) {
+        if let Some(info) = self.core_door.read(cx).snapshot().note(&path) {
             self.last_info = Some(info.clone());
         }
         if let Some(info) = &self.last_info {
@@ -510,8 +505,8 @@ impl NotePane {
             return;
         };
         // The event of the write shows the fields.
-        self.notes_folder.update(cx, |notes_folder, cx| {
-            notes_folder.change_tag(path, change, Done::value(|(), _| {}), cx);
+        self.core_door.update(cx, |core_door, cx| {
+            core_door.change_tag(path, change, Done::value(|(), _| {}), cx);
         });
     }
 
@@ -538,13 +533,13 @@ impl NotePane {
             return;
         };
         let pinned = !self.last_info.as_ref().is_some_and(|info| info.pinned);
-        self.notes_folder.update(cx, |notes_folder, cx| {
-            notes_folder.set_pinned(path, pinned, Done::value(|(), _| {}), cx);
+        self.core_door.update(cx, |core_door, cx| {
+            core_door.set_pinned(path, pinned, Done::value(|(), _| {}), cx);
         });
     }
 
     fn unsaved(&self, cx: &App) -> bool {
-        self.notes_folder.read(cx).unsaved()
+        self.core_door.read(cx).unsaved()
     }
 
     /// Gives the editor text to the draft of the notes folder, and saves it soon.
@@ -554,8 +549,8 @@ impl NotePane {
                 .ending
                 .to_disk(self.editor.read(cx).text())
                 .into_owned();
-            self.notes_folder
-                .update(cx, |notes_folder, _| notes_folder.set_text(path, body));
+            self.core_door
+                .update(cx, |core_door, _| core_door.set_text(path, body));
         }
         self.schedule_save(cx);
     }
@@ -578,7 +573,7 @@ impl NotePane {
     /// writes the note again after an outside delete.
     fn save(&mut self, cx: &mut Context<Self>) {
         self.autosave = None;
-        self.notes_folder.update(cx, NotesFolder::save_text);
+        self.core_door.update(cx, CoreDoor::save_text);
     }
 
     /// A close of the window: gives whether the window may close now. With unsaved text, the
@@ -607,8 +602,8 @@ impl NotePane {
                 .detach();
             }
         });
-        self.notes_folder
-            .update(cx, |notes_folder, cx| notes_folder.wait_saved(done, cx));
+        self.core_door
+            .update(cx, |core_door, cx| core_door.wait_saved(done, cx));
         false
     }
 
@@ -681,11 +676,11 @@ impl NotePane {
             }
         }));
         // The line must not write the text that the reload drops.
-        self.notes_folder.update(cx, |notes_folder, cx| {
+        self.core_door.update(cx, |core_door, cx| {
             if discard {
-                notes_folder.drop_text();
+                core_door.drop_text();
             }
-            notes_folder.read(path, done, cx);
+            core_door.read(path, done, cx);
         });
     }
 
@@ -756,12 +751,12 @@ impl NotePane {
                         }
                     },
                 );
-                self.notes_folder
-                    .update(cx, |notes_folder, cx| notes_folder.wait_saved(read, cx));
+                self.core_door
+                    .update(cx, |core_door, cx| core_door.wait_saved(read, cx));
             }
             Leave::Drop => {
-                self.notes_folder
-                    .update(cx, |notes_folder, _| notes_folder.drop_text());
+                self.core_door
+                    .update(cx, |core_door, _| core_door.drop_text());
                 self.read_note(path, opening, cx);
             }
         }
@@ -778,8 +773,8 @@ impl NotePane {
                 }
             }
         }));
-        self.notes_folder
-            .update(cx, |notes_folder, cx| notes_folder.read(path, done, cx));
+        self.core_door
+            .update(cx, |core_door, cx| core_door.read(path, done, cx));
     }
 
     fn opened(&mut self, note: Note, cx: &mut Context<Self>) {
@@ -821,7 +816,7 @@ impl NotePane {
         path.clone_from(&new);
         cx.emit(PaneEvent::Opened(new.clone()));
         if other_folder {
-            let folder = Some(self.notes_folder.read(cx).root().join(new.folder()));
+            let folder = Some(self.core_door.read(cx).root().join(new.folder()));
             self.editor
                 .update(cx, |editor, cx| editor.set_folder(folder, cx));
         }
@@ -850,8 +845,8 @@ impl NotePane {
         let Some(path) = self.shown.note().cloned() else {
             return;
         };
-        self.notes_folder.update(cx, |notes_folder, cx| {
-            notes_folder.rename_note(path, title, Done::result(done), cx);
+        self.core_door.update(cx, |core_door, cx| {
+            core_door.rename_note(path, title, Done::result(done), cx);
         });
     }
 
@@ -880,8 +875,8 @@ impl NotePane {
                     return;
                 }
                 pane.title.update(cx, TitleField::close);
-                let notes_folder = pane.notes_folder.clone();
-                let note = cx.new(|cx| NewNote::new(notes_folder, folder, tag, window, cx));
+                let core_door = pane.core_door.clone();
+                let note = cx.new(|cx| NewNote::new(core_door, folder, tag, window, cx));
                 let subscription = cx.subscribe_in(&note, window, Self::new_note_event);
                 pane.shown = Shown::New {
                     note,
@@ -891,8 +886,8 @@ impl NotePane {
                 cx.notify();
             },
         );
-        self.notes_folder
-            .update(cx, |notes_folder, cx| notes_folder.wait_saved(start, cx));
+        self.core_door
+            .update(cx, |core_door, cx| core_door.wait_saved(start, cx));
     }
 
     fn new_note_event(

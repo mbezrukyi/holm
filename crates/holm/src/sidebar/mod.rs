@@ -30,10 +30,10 @@ use holm_core::model::{Change, NoteInfo, NoteSet, Order};
 use holm_core::{FolderPath, NotePath, TagName};
 
 use crate::config::SidebarView;
+use crate::core_door::{CoreDoor, Done, FolderEvent, Step};
 use crate::error::AppError;
 use crate::icons::Icon;
 use crate::name_field::{Look, NameEvent, NameField, NameWrite};
-use crate::notes_folder::{Done, FolderEvent, NotesFolder, Step};
 use crate::pane::{NotePane, PaneEvent};
 use crate::text;
 
@@ -121,7 +121,7 @@ impl Named {
 }
 
 pub(crate) struct Sidebar {
-    notes_folder: Entity<NotesFolder>,
+    core_door: Entity<CoreDoor>,
     order: Order,
     tree: Tree,
     view: View,
@@ -148,14 +148,14 @@ pub(crate) struct Sidebar {
 
 impl Sidebar {
     pub(crate) fn new(
-        notes_folder: Entity<NotesFolder>,
+        core_door: Entity<CoreDoor>,
         pane: Entity<NotePane>,
         order: Order,
         view: &SidebarView,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let changed = cx.subscribe(&notes_folder, |sidebar, _, event: &FolderEvent, cx| {
+        let changed = cx.subscribe(&core_door, |sidebar, _, event: &FolderEvent, cx| {
             sidebar.changed(event, cx);
         });
         let opened = cx.subscribe(&pane, |sidebar, _, event: &PaneEvent, cx| {
@@ -174,7 +174,7 @@ impl Sidebar {
             }
         });
         let mut sidebar = Self {
-            notes_folder,
+            core_door,
             order,
             tree: Tree::default(),
             view: View::from(view),
@@ -242,7 +242,7 @@ impl Sidebar {
     /// Builds the tree from the snapshot of the notes folder. An item that is gone leaves the
     /// view and the open items.
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        let snapshot = self.notes_folder.read(cx).snapshot();
+        let snapshot = self.core_door.read(cx).snapshot();
         self.tree = Tree::new(snapshot, self.order);
         let item = self.tree.nearest(self.view.item());
         if &item != self.view.item() {
@@ -275,8 +275,8 @@ impl Sidebar {
             return;
         }
         let (query, order) = (self.query.clone(), self.order);
-        let search = self.notes_folder.update(cx, |notes_folder, cx| {
-            notes_folder.search(query.clone(), order, cx)
+        let search = self.core_door.update(cx, |core_door, cx| {
+            core_door.search(query.clone(), order, cx)
         });
         self.finding = Some(cx.spawn(async move |sidebar, cx| {
             let found = search.await.map(NoteList::new);
@@ -422,7 +422,7 @@ impl Sidebar {
     /// The note to open after the open note `gone` is gone: its neighbor in the list when
     /// it still exists, else the first note. With no notes, it is `None`.
     pub(crate) fn next_note(&self, gone: &NotePath, cx: &App) -> Option<NotePath> {
-        let snapshot = self.notes_folder.read(cx).snapshot();
+        let snapshot = self.core_door.read(cx).snapshot();
         if let Some(next) = self
             .neighbor(gone)
             .filter(|next| snapshot.note(next).is_some())
@@ -621,8 +621,8 @@ impl Sidebar {
             }
             done(renamed.map(drop), cx);
         });
-        self.notes_folder.update(cx, |notes_folder, cx| {
-            notes_folder.rename_folder(folder, name, renamed, cx);
+        self.core_door.update(cx, |core_door, cx| {
+            core_door.rename_folder(folder, name, renamed, cx);
         });
     }
 
@@ -644,8 +644,8 @@ impl Sidebar {
             });
             done(shown, cx);
         });
-        self.notes_folder.update(cx, |notes_folder, cx| {
-            notes_folder.create_folder(parent, name, created, cx);
+        self.core_door.update(cx, |core_door, cx| {
+            core_door.create_folder(parent, name, created, cx);
         });
     }
 

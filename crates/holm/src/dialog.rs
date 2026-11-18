@@ -18,7 +18,7 @@ use gpui_kit::{
 use holm_core::TagName;
 use holm_core::model::DeleteCount;
 
-use crate::notes_folder::Step;
+use crate::core_door::Step;
 use crate::{popup, text};
 
 /// The change that the dialog asks about.

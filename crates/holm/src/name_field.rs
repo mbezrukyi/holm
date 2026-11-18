@@ -22,8 +22,8 @@ use gpui_kit::{
     Render, SharedString, Subscription, Window,
 };
 
+use crate::core_door::{Step, window_step};
 use crate::error::AppError;
-use crate::notes_folder::{Step, window_step};
 use crate::text_field::{FieldEvent, TextField};
 
 /// Writes a typed name, and ends with the result of the write. It shows the answer of a fail.

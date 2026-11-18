@@ -4,6 +4,7 @@
 
 mod backlinks;
 mod config;
+mod core_door;
 mod crash;
 mod dialog;
 mod error;
@@ -16,7 +17,6 @@ mod lowercase;
 mod message_line;
 mod name_field;
 mod notes;
-mod notes_folder;
 mod pane;
 mod path_text;
 mod pick_notes;
