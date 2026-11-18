@@ -2248,6 +2248,43 @@ fn search_lists_the_notes_that_match_and_esc_returns(cx: &mut TestAppContext) {
     assert_eq!(focus(cx, handle), "search");
 }
 
+/// The rows of the note list after each task, each change once.
+fn list_steps(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<Vec<String>> {
+    let mut steps = vec![notes_list(cx, handle)];
+    while cx.executor().tick() {
+        let now = notes_list(cx, handle);
+        if steps.last() != Some(&now) {
+            steps.push(now);
+        }
+    }
+    steps
+}
+
+#[gpui_kit::test]
+fn a_search_during_an_outside_rename_keeps_the_note_in_every_frame(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    fs::write(notes_dir.join("Home.md"), "# Home\n").unwrap();
+    fs::write(notes_dir.join("Trip.md"), "# Trip\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-shift-f");
+    cx.simulate_input(handle, "tri");
+    settle(cx);
+    assert_eq!(notes_list(cx, handle), ["Trip"]);
+
+    // The core has the rename, and the sidebar has not seen it yet.
+    fs::rename(notes_dir.join("Trip.md"), notes_dir.join("Trips.md")).unwrap();
+    let feed = fixture.feed.lock().unwrap();
+    feed.as_ref()
+        .unwrap()
+        .changed(["Trip.md", "Trips.md"])
+        .unwrap();
+    drop(feed);
+    press(cx, handle, "p");
+
+    assert_eq!(list_steps(cx, handle), [vec!["Trip"], vec!["Trips"]]);
+}
+
 #[gpui_kit::test]
 fn quick_open_opens_a_note_by_its_title(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
