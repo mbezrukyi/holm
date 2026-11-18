@@ -18,7 +18,7 @@ use gpui_kit::{
 };
 use holm_core::Core;
 
-use crate::config::{Config, Settings, Theme};
+use crate::config::{Config, Theme};
 use crate::error::AppError;
 use crate::log::Log;
 use crate::message_line::MessageLine;
@@ -220,14 +220,14 @@ impl HolmWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let settings = Settings {
-            notes_folder: Some(folder.clone()),
-            last_note: None,
-            ..self.config.read(cx).settings().clone()
-        };
         self.config.update(cx, |config, cx| {
-            config.save(settings);
-            cx.notify();
+            config.change(
+                |settings| {
+                    settings.notes_folder = Some(folder.clone());
+                    settings.last_note = None;
+                },
+                cx,
+            );
         });
         self.open_folder(folder, create, window, cx);
     }

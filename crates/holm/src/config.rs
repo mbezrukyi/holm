@@ -9,6 +9,7 @@ use std::fs;
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
+use gpui_kit::Context;
 use holm_core::model::Order;
 use holm_core::{FolderPath, NotePath, TagName};
 use holm_editor::WritingHelp;
@@ -140,9 +141,20 @@ impl Config {
         (self.state == State::Broken || self.save_failed).then_some(text::CONFIG_WRITE)
     }
 
+    /// Applies `change` to the settings, writes them as [`Config::save`] does, and notifies the
+    /// observers. Settings that stay the same are not written.
+    pub(crate) fn change(&mut self, change: impl FnOnce(&mut Settings), cx: &mut Context<Self>) {
+        let mut settings = self.settings.clone();
+        change(&mut settings);
+        if settings != self.settings {
+            self.save(settings);
+            cx.notify();
+        }
+    }
+
     /// Keeps `settings` and writes them to the file. It does not write a broken file or a file
     /// with a newer version. A folder path that is not UTF-8 stays out of the file.
-    pub(crate) fn save(&mut self, settings: Settings) {
+    fn save(&mut self, settings: Settings) {
         self.settings = settings;
         if self.state != State::Writable {
             tracing::info!(path = %self.path.display(), "the config file stays as it is");

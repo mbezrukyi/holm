@@ -307,9 +307,9 @@ impl NotesView {
                 this.focus_sidebar(window, cx);
                 cx.notify();
                 if answer.confirm && answer.do_not_ask {
-                    let mut settings = this.config.read(cx).settings().clone();
-                    settings.ask_before_delete = false;
-                    this.save_settings(settings, cx);
+                    this.config.update(cx, |config, cx| {
+                        config.change(|settings| settings.ask_before_delete = false, cx);
+                    });
                 }
                 then(this, answer.confirm, window, cx);
             },
@@ -653,22 +653,20 @@ impl NotesView {
 
     /// Keeps the sidebar state and the open note in the config.
     fn keep_state(&mut self, cx: &mut Context<Self>) {
-        let mut settings = self.config.read(cx).settings().clone();
-        settings.sidebar = SidebarSettings {
+        let sidebar = SidebarSettings {
             width: whole(self.width),
             hidden: self.hidden,
             view: self.sidebar.read(cx).view().clone(),
         };
-        settings.last_note = self.pane.read(cx).path().cloned();
-        if &settings != self.config.read(cx).settings() {
-            self.save_settings(settings, cx);
-        }
-    }
-
-    fn save_settings(&mut self, settings: crate::config::Settings, cx: &mut Context<Self>) {
+        let last_note = self.pane.read(cx).path().cloned();
         self.config.update(cx, |config, cx| {
-            config.save(settings);
-            cx.notify();
+            config.change(
+                |settings| {
+                    settings.sidebar = sidebar;
+                    settings.last_note = last_note;
+                },
+                cx,
+            );
         });
     }
 }
