@@ -13,9 +13,9 @@
 //! the end of its write. A late job ends in a later update, and [`NotesFolder::writing`] is true
 //! until then.
 //!
-//! It holds one draft: the unsaved editor text of the open note. Before each job, the line
-//! writes the draft. So no job sees a note file older than the editor text. A draft and its
-//! save never wait.
+//! It holds one [`Draft`]: the unsaved editor text of the open note. Before each job, the line
+//! writes the draft. So no job sees a note file older than the editor text. The draft keeps the
+//! text until a write of it succeeds, and each write of it ends in one [`SaveEvent`].
 //!
 //! A change list from outside Holm wakes it when no job runs, and it sends one event. During a
 //! job, the lists wait for the event of the job. At quit, it runs every write that waits in the
@@ -32,14 +32,16 @@ use futures_channel::oneshot;
 use futures_core::Stream;
 use gpui_kit::{App, AppContext as _, Context, EventEmitter, Task, Window};
 use holm_core::model::{
-    Change, ChangeList, DeleteCount, LinkTarget, Note, NoteInfo, NoteSet, Order, SearchResults,
-    Source,
+    Change, ChangeList, DeleteCount, LinkTarget, Note, NoteSet, Order, SearchResults, Source,
 };
 use holm_core::{Changes, Core, FolderPath, NotePath, Snapshot, TagName};
 use holm_editor::PastedFile;
 
 use crate::error::AppError;
 use crate::tags::TagChange;
+use draft::{Draft, Written};
+
+mod draft;
 
 /// What the notes folder tells the views: a write of Holm ended, or changes from outside came
 /// in. Each write sends one, also a failed write.
@@ -90,20 +92,19 @@ pub(crate) fn window_step<V: 'static, R: 'static>(
     })
 }
 
-/// The editor text of a note, for a write.
-#[derive(Clone, Debug)]
-pub(crate) enum NoteText {
-    /// The new body of the note at `path`. The note keeps its other facts.
-    Save { path: NotePath, body: String },
-    /// The note after another tool deleted its file: its last facts and its body.
-    Restore { info: NoteInfo, body: String },
+/// The end of a write of the draft. It comes after the [`FolderEvent`] of the write.
+#[derive(Debug)]
+pub(crate) enum SaveEvent {
+    /// The text of the write is on disk.
+    Saved,
+    /// The write failed. The draft keeps the text, and the next job writes it again.
+    Failed(AppError),
 }
 
-/// The unsaved editor text of the open note, and the step that gets the end of its save.
-pub(crate) struct Draft {
-    pub(crate) text: NoteText,
-    pub(crate) done: Step<holm_core::Result<()>>,
-}
+/// The editor text is not on disk, because the last write of the draft failed. The
+/// [`SaveEvent`] of that write has the error.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct NotSaved;
 
 /// The work of one entry of the line. It runs off the UI thread, and gives the error of a
 /// failed job for the log at quit.
@@ -111,7 +112,7 @@ type Job = Box<dyn FnOnce(&Core) -> Option<String> + Send>;
 
 /// The end of one entry of the line, on the UI thread after its job and its event: it gives
 /// the result to the caller.
-type End = Box<dyn FnOnce(&mut Context<NotesFolder>)>;
+type End = Box<dyn FnOnce(&mut NotesFolder, &mut Context<NotesFolder>)>;
 
 /// One entry of the line. Its number grows with each entry.
 struct Entry {
@@ -146,7 +147,7 @@ pub(crate) struct NotesFolder {
     /// waits for it, or runs it when the thread did not start yet.
     running: Arc<Mutex<Option<Job>>>,
     turn: Option<Turn>,
-    draft: Option<Draft>,
+    draft: Draft,
     /// After the quit drain, no job runs.
     closed: bool,
     watch: Task<()>,
@@ -167,7 +168,7 @@ impl NotesFolder {
             late: None,
             running: Arc::default(),
             turn: None,
-            draft: None,
+            draft: Draft::default(),
             closed: false,
             watch: Self::watch(cx),
         }
@@ -183,22 +184,51 @@ impl NotesFolder {
         self.late.is_some()
     }
 
-    /// Keeps `draft` in the place of the last draft, whose step then never runs. It writes
-    /// nothing yet.
-    pub(crate) fn set_draft(&mut self, draft: Option<Draft>) {
-        self.draft = draft;
+    /// The editor text of the note at `path` is now `body`. It writes nothing yet.
+    pub(crate) fn set_text(&mut self, path: NotePath, body: String) {
+        self.draft.set(path, body);
     }
 
-    /// Puts the draft in the line now. It does not wait for the job.
-    pub(crate) fn save_draft(&mut self, cx: &mut Context<Self>) {
-        self.push_draft();
-        self.run(None, cx);
+    /// Drops the editor text with no write.
+    pub(crate) fn drop_text(&mut self) {
+        self.draft.drop_text();
+    }
+
+    /// Whether the draft has text that is not on disk.
+    pub(crate) fn unsaved(&self) -> bool {
+        self.draft.unsaved()
     }
 
     /// At quit: runs every write in the line, then writes the draft. Later writes do not run.
     /// It works on the UI thread, because no task runs after the window is gone.
     pub(crate) fn quit(&mut self) {
         self.drain();
+    }
+
+    /// Puts the draft in the line now. It does not wait for the job.
+    pub(crate) fn save_text(&mut self, cx: &mut Context<Self>) {
+        self.push_draft();
+        self.run(None, cx);
+    }
+
+    /// Writes the draft, and ends after the writes before it. `done` gets [`NotSaved`] when
+    /// the write of the draft failed.
+    pub(crate) fn wait_saved(
+        &mut self,
+        done: impl FnOnce(Result<(), NotSaved>, &mut App) + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        self.push_draft();
+        let end: End = Box::new(move |folder, cx| {
+            let saved = if folder.draft.failed() {
+                Err(NotSaved)
+            } else {
+                Ok(())
+            };
+            cx.defer(move |cx| done(saved, cx));
+        });
+        let number = self.push_entry(Box::new(|_| None), end);
+        self.run(Some(number), cx);
     }
 
     /// Reads the note at `path`, after the writes before it.
@@ -540,9 +570,28 @@ impl NotesFolder {
     }
 
     fn push_draft(&mut self) {
-        if let Some(Draft { text, done }) = self.draft.take() {
-            self.push(move |core| write_text(core, text), done);
-        }
+        let Some(write) = self.draft.write() else {
+            return;
+        };
+        let (send, mut receive) = oneshot::channel();
+        let job: Job = Box::new(move |core: &Core| {
+            let failure = write.text.write(core).err().map(AppError::from);
+            let chain = failure.as_ref().map(|error| crate::chain(error));
+            send.send(failure).ok();
+            chain
+        });
+        let version = write.version;
+        let end: End = Box::new(move |folder, cx| {
+            let Ok(Some(failure)) = receive.try_recv() else {
+                return;
+            };
+            match (folder.draft.written(version, failure.is_none()), failure) {
+                (Written::Saved, _) => cx.emit(SaveEvent::Saved),
+                (Written::Failed, Some(error)) => cx.emit(SaveEvent::Failed(error)),
+                _ => {}
+            }
+        });
+        self.push_entry(job, end);
     }
 
     /// Puts `job` at the end of the line, and gives the number of its entry.
@@ -558,12 +607,17 @@ impl NotesFolder {
             send.send(result).ok();
             failure
         });
-        let end: End = Box::new(move |cx: &mut Context<Self>| {
+        let end: End = Box::new(move |_, cx: &mut Context<Self>| {
             if let Ok(Some(result)) = receive.try_recv() {
                 // A deferred step runs after the views took the event, in the same update.
                 cx.defer(move |cx| done(result, cx));
             }
         });
+        self.push_entry(job, end)
+    }
+
+    /// Puts an entry at the end of the line, and gives its number.
+    fn push_entry(&mut self, job: Job, end: End) -> u64 {
         let number = self.next_number;
         self.next_number += 1;
         self.line.push_back(Entry { number, job, end });
@@ -662,7 +716,7 @@ impl NotesFolder {
             let lists: Vec<ChangeList> = std::iter::from_fn(|| self.changes.try_next()).collect();
             let event = self.keep(lists);
             cx.emit(event);
-            (turn.end)(cx);
+            (turn.end)(self, cx);
         }
         if self.late.is_some_and(|late| late <= self.ended) {
             self.late = None;
@@ -674,12 +728,9 @@ impl NotesFolder {
     /// Runs every job that waits, and then writes the draft, on this thread.
     fn drain(&mut self) {
         self.closed = true;
-        let draft: Option<Job> = self.draft.take().map(|Draft { text, .. }| {
-            Box::new(move |core: &Core| {
-                write_text(core, text)
-                    .err()
-                    .map(|error| crate::chain(&error))
-            }) as Job
+        let draft: Option<Job> = self.draft.take().map(|text| {
+            Box::new(move |core: &Core| text.write(core).err().map(|error| crate::chain(&error)))
+                as Job
         });
         let mut slot = lock(&self.running);
         let jobs = slot
@@ -727,6 +778,9 @@ impl NotesFolder {
     fn keep(&mut self, lists: Vec<ChangeList>) -> FolderEvent {
         let mut changes = Vec::new();
         for list in lists {
+            for change in &list.changes {
+                self.draft.follow(list.source, change, &self.snapshot);
+            }
             self.snapshot = list.snapshot;
             changes.extend(list.changes.into_iter().map(|change| (list.source, change)));
         }
@@ -735,6 +789,8 @@ impl NotesFolder {
 }
 
 impl EventEmitter<FolderEvent> for NotesFolder {}
+
+impl EventEmitter<SaveEvent> for NotesFolder {}
 
 /// Opens the core and gives the note to show first, if any. `create` makes the folder first.
 pub(crate) fn open(
@@ -761,14 +817,6 @@ fn first_note(core: &Core, last: Option<&NotePath>) -> holm_core::Result<Option<
     match core.snapshot().first(NoteSet::All, Order::LastChange) {
         Some(info) => core.read(&info.path).map(Some),
         None => Ok(None),
-    }
-}
-
-/// Saves the body of `text`. A save keeps the other facts that the core has for the note.
-fn write_text(core: &Core, text: NoteText) -> holm_core::Result<()> {
-    match text {
-        NoteText::Save { path, body } => core.save(&path, &body).map(drop),
-        NoteText::Restore { info, body } => core.restore(&Note { info, body }).map(drop),
     }
 }
 
@@ -872,21 +920,11 @@ mod tests {
         );
     }
 
-    fn draft(body: &str) -> Draft {
-        Draft {
-            text: NoteText::Save {
-                path: note_path("A.md"),
-                body: body.to_owned(),
-            },
-            done: Box::new(|_, _| {}),
-        }
-    }
-
     #[gpui_kit::test]
     fn the_writes_in_the_line_reach_the_files_at_quit_with_the_draft_last(cx: &mut TestAppContext) {
         let (dir, notes_folder) = notes_folder(cx);
         notes_folder.update(cx, |notes_folder, cx| {
-            notes_folder.set_draft(Some(draft("# A\n\nfirst\n")));
+            notes_folder.set_text(note_path("A.md"), "# A\n\nfirst\n".into());
             notes_folder.change_tag(
                 note_path("A.md"),
                 TagChange::Add(tag_name("work")),
@@ -894,7 +932,7 @@ mod tests {
                 cx,
             );
             notes_folder.create_folder(FolderPath::root(), "B".into(), |_, _| {}, cx);
-            notes_folder.set_draft(Some(draft("# A\n\nlast\n")));
+            notes_folder.set_text(note_path("A.md"), "# A\n\nlast\n".into());
             notes_folder.quit();
         });
 
@@ -917,11 +955,11 @@ mod tests {
             );
         };
         notes_folder.update(cx, |notes_folder, cx| {
-            notes_folder.set_draft(Some(draft("# A\n\nold\n")));
-            notes_folder.set_draft(Some(draft("# A\n\nnew\n")));
+            notes_folder.set_text(note_path("A.md"), "# A\n\nold\n".into());
+            notes_folder.set_text(note_path("A.md"), "# A\n\nnew\n".into());
             read(notes_folder, cx);
             read(notes_folder, cx);
-            notes_folder.set_draft(Some(draft("# A\n\nlater\n")));
+            notes_folder.set_text(note_path("A.md"), "# A\n\nlater\n".into());
         });
         cx.run_until_parked();
         notes_folder.update(cx, |notes_folder, cx| read(notes_folder, cx));
@@ -934,14 +972,72 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn a_failed_save_keeps_the_text_for_the_next_save(cx: &mut TestAppContext) {
+        let (dir, notes_folder) = notes_folder(cx);
+        let notes = dir.path().join("notes");
+        let read_only = |read_only: bool| {
+            let mut permissions = fs::metadata(&notes).unwrap().permissions();
+            permissions.set_readonly(read_only);
+            fs::set_permissions(&notes, permissions).unwrap();
+        };
+        let steps = Rc::new(RefCell::new(Vec::new()));
+        cx.update(|cx| {
+            let steps = steps.clone();
+            cx.subscribe(&notes_folder, move |_, event: &SaveEvent, _| {
+                let end = match event {
+                    SaveEvent::Saved => "saved",
+                    SaveEvent::Failed(_) => "failed",
+                };
+                steps.borrow_mut().push(end.to_owned());
+            })
+            .detach();
+        });
+        let wait = |cx: &mut TestAppContext| {
+            let steps = steps.clone();
+            notes_folder.update(cx, |notes_folder, cx| {
+                notes_folder.wait_saved(
+                    move |saved, _| steps.borrow_mut().push(format!("wait {saved:?}")),
+                    cx,
+                );
+            });
+            cx.run_until_parked();
+        };
+
+        read_only(true);
+        notes_folder.update(cx, |notes_folder, cx| {
+            notes_folder.set_text(note_path("A.md"), "# A\n\nmine\n".into());
+            notes_folder.save_text(cx);
+        });
+        cx.run_until_parked();
+        wait(cx);
+        assert!(notes_folder.read_with(cx, |notes_folder, _| notes_folder.unsaved()));
+
+        read_only(false);
+        wait(cx);
+        assert!(!notes_folder.read_with(cx, |notes_folder, _| notes_folder.unsaved()));
+        assert_eq!(
+            *steps.borrow(),
+            [
+                "failed",
+                "failed",
+                "wait Err(NotSaved)",
+                "saved",
+                "wait Ok(())"
+            ]
+        );
+        let text = fs::read_to_string(notes.join("A.md")).unwrap();
+        assert!(text.ends_with("\n---\n# A\n\nmine\n"), "{text}");
+    }
+
+    #[gpui_kit::test]
     fn a_save_keeps_a_tag_from_another_tool(cx: &mut TestAppContext) {
         let (dir, notes_folder) = notes_folder(cx);
         let file = dir.path().join("notes/A.md");
         fs::write(&file, "---\ntags: [theirs]\n---\n# A\n").unwrap();
 
         notes_folder.update(cx, |notes_folder, cx| {
-            notes_folder.set_draft(Some(draft("# A\n\nmine\n")));
-            notes_folder.save_draft(cx);
+            notes_folder.set_text(note_path("A.md"), "# A\n\nmine\n".into());
+            notes_folder.save_text(cx);
         });
         cx.run_until_parked();
 

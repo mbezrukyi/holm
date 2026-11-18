@@ -52,7 +52,7 @@ use crate::error::AppError;
 use crate::link_picker::{LinkChoice, LinkStart};
 use crate::message_line::{MessageLine, OpenState};
 use crate::name_field::{NameEvent, NameWrite};
-use crate::notes_folder::{Draft, FolderEvent, NoteText, NotesFolder, Step, window_step};
+use crate::notes_folder::{FolderEvent, NotSaved, NotesFolder, SaveEvent, Step, window_step};
 use crate::tags::{TagChange, TagRow};
 use crate::title::TitleField;
 use crate::{text, theme};
@@ -139,12 +139,9 @@ pub(crate) struct NotePane {
     backlinks: Entity<Backlinks>,
     links: Entity<Links>,
     shown: Shown,
-    /// The facts of the open note in the last snapshot that had it. A restore after an
-    /// outside delete writes them again.
+    /// The facts of the open note in the last snapshot that had it.
     last_info: Option<NoteInfo>,
     ending: LineEnding,
-    /// The editor text that matches the file on disk.
-    saved: String,
     autosave: Option<Task<()>>,
     /// Another tool changed or deleted the note while the editor had unsaved changes.
     disk: Option<Disk>,
@@ -202,8 +199,10 @@ impl NotePane {
                 for change in event.outside() {
                     pane.outside_change(change, cx);
                 }
-                pane.put_draft(cx);
                 pane.show_fields(cx);
+            }),
+            cx.subscribe(&notes_folder, |pane, _, event: &SaveEvent, cx| {
+                pane.save_end(event, cx);
             }),
             cx.subscribe(&editor, |pane, _, _: &Changed, cx| pane.edited(cx)),
             cx.subscribe_in(&editor, window, |pane, _, _: &UpFromStart, window, cx| {
@@ -254,7 +253,6 @@ impl NotePane {
             shown: Shown::Empty,
             last_info: None,
             ending: LineEnding::Lf,
-            saved: String::new(),
             autosave: None,
             disk: None,
             not_saved: None,
@@ -274,14 +272,13 @@ impl NotePane {
     fn show(&mut self, note: Note, reload: bool, cx: &mut Context<Self>) {
         self.ending = LineEnding::of(&note.body);
         let folder = Some(self.root.join(note.info.path.folder()));
-        self.saved = self.editor.update(cx, |editor, cx| {
+        self.editor.update(cx, |editor, cx| {
             if reload {
                 editor.reload_text(&note.body, cx);
             } else {
                 editor.set_text(&note.body, cx);
                 editor.set_folder(folder, cx);
             }
-            editor.text().to_owned()
         });
         let path = note.info.path.clone();
         if !reload {
@@ -316,8 +313,8 @@ impl NotePane {
         self.opening += 1;
         self.settle(cx);
         self.editor.update(cx, |editor, cx| editor.set_text("", cx));
-        self.saved = String::new();
-        self.put_draft(cx);
+        self.notes_folder
+            .update(cx, |notes_folder, _| notes_folder.drop_text());
         self.links.update(cx, |links, cx| links.show(None, cx));
         self.show_fields(cx);
         cx.notify();
@@ -380,7 +377,7 @@ impl NotePane {
         match (disk, choice) {
             (Disk::Changed, Choice::KeepMine) => self.keep_mine(cx),
             (Disk::Deleted, Choice::KeepMine) => self.keep_deleted(cx),
-            (_, Choice::Reload) => self.reload(cx),
+            (_, Choice::Reload) => self.reload(true, cx),
             (_, Choice::Close) => self.close_deleted(cx),
         }
     }
@@ -560,12 +557,20 @@ impl NotePane {
         })
     }
 
-    fn is_dirty(&self, cx: &App) -> bool {
-        self.editor.read(cx).text() != self.saved
+    fn unsaved(&self, cx: &App) -> bool {
+        self.notes_folder.read(cx).unsaved()
     }
 
+    /// Gives the editor text to the draft of the notes folder, and saves it soon.
     fn edited(&mut self, cx: &mut Context<Self>) {
-        self.put_draft(cx);
+        if let Some(path) = self.shown.editor().cloned() {
+            let body = self
+                .ending
+                .to_disk(self.editor.read(cx).text())
+                .into_owned();
+            self.notes_folder
+                .update(cx, |notes_folder, _| notes_folder.set_text(path, body));
+        }
         self.schedule_save(cx);
     }
 
@@ -587,27 +592,7 @@ impl NotePane {
     /// writes the note again after an outside delete.
     fn save(&mut self, cx: &mut Context<Self>) {
         self.autosave = None;
-        self.put_draft(cx);
-        self.notes_folder.update(cx, NotesFolder::save_draft);
-    }
-
-    /// Makes the unsaved text the draft of the notes folder. With no unsaved text, the notes
-    /// folder has no draft.
-    fn put_draft(&mut self, cx: &mut Context<Self>) {
-        let text = if self.is_dirty(cx) {
-            self.note_text(cx)
-        } else {
-            None
-        };
-        let draft = text.map(|text| {
-            let shown = self.editor.read(cx).text().to_owned();
-            Draft {
-                text,
-                done: step(cx, move |pane, result, cx| pane.saved(shown, result, cx)),
-            }
-        });
-        self.notes_folder
-            .update(cx, |notes_folder, _| notes_folder.set_draft(draft));
+        self.notes_folder.update(cx, NotesFolder::save_text);
     }
 
     /// A close of the window: gives whether the window may close now. With unsaved text, the
@@ -617,14 +602,14 @@ impl NotePane {
         if self.closing {
             return false;
         }
-        if !self.is_dirty(cx) || self.line.read(cx).message() == Some(text::CLOSE_AGAIN) {
+        if !self.unsaved(cx) || self.line.read(cx).message() == Some(text::CLOSE_AGAIN) {
             return true;
         }
         self.closing = true;
         let window = window.window_handle();
-        let done = step(cx, move |pane, _: holm_core::Result<()>, cx| {
+        let done = step(cx, move |pane, saved: Result<(), NotSaved>, cx| {
             pane.closing = false;
-            if pane.is_dirty(cx) {
+            if saved.is_err() {
                 pane.answer(text::CLOSE_AGAIN, cx);
             } else {
                 // The close handler of the window may still run, so the window goes later.
@@ -637,41 +622,22 @@ impl NotePane {
             }
         });
         self.notes_folder
-            .update(cx, |notes_folder, cx| notes_folder.wait(done, cx));
+            .update(cx, |notes_folder, cx| notes_folder.wait_saved(done, cx));
         false
     }
 
-    /// The editor text of the open note, for a write: a restore after an outside delete,
-    /// else a save.
-    fn note_text(&self, cx: &App) -> Option<NoteText> {
-        let path = self.shown.editor().cloned()?;
-        let body = self
-            .ending
-            .to_disk(self.editor.read(cx).text())
-            .into_owned();
-        Some(if self.disk == Some(Disk::Deleted) {
-            let mut info = self.last_info.clone()?;
-            info.path = path;
-            NoteText::Restore { info, body }
-        } else {
-            NoteText::Save { path, body }
-        })
-    }
-
-    /// Takes the end of a save of `text`. After a failed save, the unsaved text is the draft
-    /// again, so the next job tries again.
-    fn saved(&mut self, text: String, result: holm_core::Result<()>, cx: &mut Context<Self>) {
-        match result {
-            Ok(()) => {
-                self.saved = text;
+    /// Takes the end of a write of the editor text. After a failed write, the notes folder
+    /// keeps the text, so the next job tries again.
+    fn save_end(&mut self, event: &SaveEvent, cx: &mut Context<Self>) {
+        match event {
+            SaveEvent::Saved => {
                 self.settle(cx);
-                if self.is_dirty(cx) {
+                if self.unsaved(cx) {
                     self.schedule_save(cx);
                 }
             }
-            Err(error) => {
-                let error = AppError::from(error);
-                tracing::warn!(error = %crate::chain(&error), "cannot save the note");
+            SaveEvent::Failed(error) => {
+                tracing::warn!(error = %crate::chain(error), "cannot save the note");
                 // Only the first fail since the last good save shows the reason.
                 if self.not_saved.is_none() {
                     self.answer(error.message(), cx);
@@ -680,7 +646,6 @@ impl NotePane {
                 self.show_state(cx);
             }
         }
-        self.put_draft(cx);
         cx.notify();
     }
 
@@ -689,14 +654,14 @@ impl NotePane {
         let Some(path) = self.shown.editor() else {
             return;
         };
-        let unsaved = self.is_dirty(cx);
+        let unsaved = self.unsaved(cx);
         match change {
             Change::Changed(changed) if changed == path => {
                 if unsaved {
                     self.set_disk(Some(Disk::Changed), cx);
                 } else {
                     self.set_disk(None, cx);
-                    self.reload(cx);
+                    self.reload(false, cx);
                 }
             }
             Change::Removed(gone) if gone == path => {
@@ -711,7 +676,9 @@ impl NotePane {
         }
     }
 
-    fn reload(&mut self, cx: &mut Context<Self>) {
+    /// Reads the note again. With `discard`, it drops the unsaved text first, and gives it
+    /// back when the read fails.
+    fn reload(&mut self, discard: bool, cx: &mut Context<Self>) {
         let Some(path) = self.shown.editor().cloned() else {
             return;
         };
@@ -726,13 +693,17 @@ impl NotePane {
                     let error = AppError::from(error);
                     tracing::warn!(error = %crate::chain(&error), "cannot reload the note");
                     pane.answer(error.message(), cx);
-                    pane.put_draft(cx);
+                    if discard {
+                        pane.edited(cx);
+                    }
                 }
             }
         });
-        // A reload drops the unsaved text, so the line must not write it first.
+        // The line must not write the text that the reload drops.
         self.notes_folder.update(cx, |notes_folder, cx| {
-            notes_folder.set_draft(None);
+            if discard {
+                notes_folder.drop_text();
+            }
             notes_folder.read(path, done, cx);
         });
     }
@@ -793,19 +764,36 @@ impl NotePane {
         }
         self.opening += 1;
         let opening = self.opening;
+        match leave {
+            Leave::Keep => {
+                let read = step(
+                    cx,
+                    move |pane: &mut Self, saved: Result<(), NotSaved>, cx| {
+                        if pane.opening == opening && saved.is_ok() {
+                            pane.read_note(path, opening, cx);
+                        }
+                    },
+                );
+                self.notes_folder
+                    .update(cx, |notes_folder, cx| notes_folder.wait_saved(read, cx));
+            }
+            Leave::Drop => {
+                self.notes_folder
+                    .update(cx, |notes_folder, _| notes_folder.drop_text());
+                self.read_note(path, opening, cx);
+            }
+        }
+    }
+
+    /// Reads the note at `path` and shows it, when no newer open came after `opening`.
+    fn read_note(&mut self, path: NotePath, opening: u64, cx: &mut Context<Self>) {
         let done = step(cx, move |pane: &mut Self, read, cx| {
-            // Unsaved text after the read means its save failed.
-            let keeps_text = leave == Leave::Keep && pane.is_dirty(cx);
-            if pane.opening == opening && !keeps_text {
+            if pane.opening == opening {
                 pane.opened(read, cx);
             }
         });
-        self.notes_folder.update(cx, |notes_folder, cx| {
-            if leave == Leave::Drop {
-                notes_folder.set_draft(None);
-            }
-            notes_folder.read(path, done, cx);
-        });
+        self.notes_folder
+            .update(cx, |notes_folder, cx| notes_folder.read(path, done, cx));
     }
 
     fn opened(&mut self, read: holm_core::Result<Note>, cx: &mut Context<Self>) {
@@ -827,7 +815,7 @@ impl NotePane {
     /// folder can change the file links in the note, so the pane reads it again when it has
     /// no unsaved text.
     fn follow(&mut self, event: &FolderEvent, cx: &mut Context<Self>) {
-        let unsaved = self.is_dirty(cx);
+        let unsaved = self.unsaved(cx);
         let Some(path) = self.shown.editor_mut() else {
             return;
         };
@@ -842,7 +830,7 @@ impl NotePane {
                 .update(cx, |editor, cx| editor.set_folder(folder, cx));
         }
         if other_folder && !unsaved {
-            self.reload(cx);
+            self.reload(false, cx);
         } else {
             self.links.update(cx, |links, cx| links.show(Some(new), cx));
         }
@@ -890,8 +878,8 @@ impl NotePane {
         let start = window_step(
             window,
             cx,
-            move |pane: &mut Self, _: holm_core::Result<()>, window, cx| {
-                if pane.opening != opening || pane.is_dirty(cx) {
+            move |pane: &mut Self, saved: Result<(), NotSaved>, window, cx| {
+                if pane.opening != opening || saved.is_err() {
                     return;
                 }
                 pane.title.update(cx, TitleField::close);
@@ -907,7 +895,7 @@ impl NotePane {
             },
         );
         self.notes_folder
-            .update(cx, |notes_folder, cx| notes_folder.wait(start, cx));
+            .update(cx, |notes_folder, cx| notes_folder.wait_saved(start, cx));
     }
 
     fn new_note_event(
