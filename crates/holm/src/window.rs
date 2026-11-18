@@ -42,7 +42,7 @@ pub(crate) struct Startup {
     /// Whether the last run ended in a panic.
     pub(crate) crashed: bool,
     pub(crate) log: Log,
-    /// How long a file action waits for its write before the next frame.
+    /// How long a file action waits for its job before the next frame.
     pub(crate) write_budget: Duration,
 }
 

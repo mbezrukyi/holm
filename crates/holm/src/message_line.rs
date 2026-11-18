@@ -2,11 +2,11 @@
 //! shows only when it has a message or a state.
 //!
 //! - The left side shows one answer or start message. A new one takes its place. The next key
-//!   clears it, and the key still does its own job.
+//!   clears it, and the key still works as usual.
 //! - `Ctrl+Shift+E` opens the problem list, wherever the focus is.
 //! - The right side shows a state, like "Not saved", after a mark. A click on it sends
 //!   [`OpenState`].
-//! - While a write is late, the right side shows "Writing…" in place of the state. It takes
+//! - While a job is late, the right side shows "Writing…" in place of the state. It takes
 //!   no clicks.
 //! - Right before the state, with no gap, a gray mark counts the problems of Holm. A click on
 //!   it opens the [`ProblemList`].

@@ -1,7 +1,7 @@
-//! The open notes folder: the sidebar, the editor pane, and the file actions between them.
+//! The notes view: the sidebar, the editor pane, and the file actions between them.
 //!
-//! Each file action goes in the write line of the notes folder. The line writes the unsaved
-//! text of the pane first. The sidebar shows each new snapshot by itself.
+//! Each file action goes in the write line of the core door. The write line writes the
+//! unsaved text of the pane first. The sidebar shows each new snapshot by itself.
 //!
 //! Every change that counts notes or asks the user runs here. The sidebar sends an event for
 //! it. A name field of the sidebar writes by itself, and the field of a tag writes through
@@ -174,7 +174,7 @@ impl NotesView {
         });
     }
 
-    /// The write of the tag name field: it counts the notes, asks, and renames.
+    /// The job of the tag name field: it counts the notes, asks, and renames.
     fn ask_rename_tag(
         &mut self,
         from: TagName,
@@ -498,14 +498,14 @@ impl NotesView {
         );
     }
 
-    /// Ctrl+N: a new note in the folder of the view, with its tag.
+    /// Ctrl+N: a new note in the folder of the sidebar view, with its tag.
     fn new_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (folder, tag) = self.sidebar.read(cx).new_note_place();
         self.pane
             .update(cx, |pane, cx| pane.new_note(folder, tag, window, cx));
     }
 
-    /// Ctrl+Shift+N: an empty name field for a new folder in the folder of the view.
+    /// Ctrl+Shift+N: an empty name field for a new folder in the folder of the sidebar view.
     fn new_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.hidden = false;
         self.sidebar
@@ -524,8 +524,8 @@ impl NotesView {
         self.pane.update(cx, |pane, cx| pane.may_close(window, cx))
     }
 
-    /// Puts the write of `start` in the line. `done` gets its value in the update where the
-    /// write ends.
+    /// Puts the job of `start` in the write line. `done` gets its value in the update where
+    /// the job ends.
     fn write<T: 'static>(
         &mut self,
         window: &mut Window,

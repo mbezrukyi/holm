@@ -1,19 +1,19 @@
 //! A field for a name that Holm may refuse, like a title or a folder name.
 //!
-//! The field opens for a new name or for a rename. It takes the write of its owner. `Enter`
-//! sends the typed name to the write, and the field waits for its end. While it waits, the field
+//! The field opens for a new name or for a rename. It takes the job of its owner. `Enter`
+//! sends the typed name to the job, and the field waits for its end. While it waits, the field
 //! keeps its look and the focus, and takes no keys.
 //!
-//! - The write works: the focus goes to the home of the owner, and the field sends
-//!   [`NameEvent::Written`] with the value of the write.
+//! - The job works: the focus goes to the home of the owner, and the field sends
+//!   [`NameEvent::Written`] with the value of the job.
 //! - Holm refuses the name: the field opens again with its text.
 //! - Another fail: the field sends [`NameEvent::Closed`].
 //!
-//! The write shows the answer of a fail.
+//! The job shows the answer of a fail.
 //!
 //! `Enter` with the unchanged name of a rename writes nothing, and sends [`NameEvent::Closed`].
 //! So does `Esc`, and the focus goes home. When the field loses the focus, it sends
-//! [`NameEvent::Blur`]. While a write runs, the field sends neither.
+//! [`NameEvent::Blur`]. While a job runs, the field sends neither.
 
 use std::rc::Rc;
 
@@ -26,7 +26,7 @@ use crate::core_door::{Then, window_step};
 use crate::error::AppError;
 use crate::text_field::{FieldEvent, TextField};
 
-/// Writes a typed name, and ends with the result of the write. It shows the answer of a fail.
+/// Writes a typed name, and ends with the result of the job. It shows the answer of a fail.
 pub(crate) type NameWrite<T> = Rc<dyn Fn(String, Then<Result<T, AppError>>, &mut Window, &mut App)>;
 
 /// What the field tells its owner. After [`NameEvent::Written`] and [`NameEvent::Closed`], the
@@ -45,7 +45,7 @@ pub(crate) struct NameField<T> {
     write: NameWrite<T>,
     /// It gets the focus after `Esc` or the end of the field.
     home: FocusHandle,
-    /// The write of the typed name runs.
+    /// The job of the typed name runs.
     writing: bool,
     _subscription: Subscription,
 }
@@ -144,7 +144,7 @@ impl<T: Clone + 'static> NameField<T> {
         }
         self.set_writing(true, cx);
         let ended = window_step(window, cx, Self::ended);
-        // A write may end at once, and the field can't take its end in its own update.
+        // A job may end at once, and the field can't take its end in its own update.
         let done: Then<Result<T, AppError>> =
             Box::new(move |result, cx| cx.defer(move |cx| ended(result, cx)));
         let write = self.write.clone();
@@ -156,7 +156,7 @@ impl<T: Clone + 'static> NameField<T> {
         self.field.update(cx, |field, _| field.set_locked(writing));
     }
 
-    /// Gives the focus home, unless the user moved it while the write ran.
+    /// Gives the focus home, unless the user moved it while the job ran.
     fn go_home(&self, window: &mut Window, cx: &mut App) {
         if self.field.focus_handle(cx).is_focused(window) {
             window.focus(&self.home, cx);
@@ -203,7 +203,7 @@ mod tests {
 
     type Events = Rc<RefCell<Vec<NameEvent<String>>>>;
 
-    /// A write that refuses the first name, and then writes each name.
+    /// A job that refuses the first name, and then writes each name.
     fn refuse_once() -> NameWrite<String> {
         let calls = Rc::new(Cell::new(0));
         Rc::new(move |name, done, _, cx| {

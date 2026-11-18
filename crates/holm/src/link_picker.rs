@@ -42,7 +42,7 @@ impl LinkStart {
     }
 }
 
-/// The answer of the window.
+/// The result of the window.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum LinkPickerEvent {
     Pick(LinkChoice),

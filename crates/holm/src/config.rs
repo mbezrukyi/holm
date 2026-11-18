@@ -76,12 +76,12 @@ impl Default for SidebarSettings {
 /// The sidebar view as the settings keep it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SavedSidebarView {
-    /// The note list of `item`, or else the folder tree with `item` selected.
+    /// The note list of `item`, or else the tree with `item` selected.
     pub(crate) list: bool,
     pub(crate) item: SidebarItem,
 }
 
-/// An item of the folder tree, as the settings keep it.
+/// An item of the tree, as the settings keep it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SidebarItem {
     All,

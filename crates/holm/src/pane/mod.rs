@@ -1,7 +1,7 @@
 //! The editor pane: one note in the editor, with autosave. With no open note, it shows the
 //! empty pane.
 //!
-//! The pane keeps its unsaved text in the draft of the notes folder. The write line writes the
+//! The pane keeps its unsaved text in the draft of the core door. The write line writes the
 //! draft before each job, so each file action sees the text. The pane also saves a short time
 //! after the user stops typing, and when the app quits. A close of the window saves first.
 //! When that save fails, the window stays open until a second close.
@@ -391,8 +391,9 @@ impl NotePane {
         self.links.update(cx, |links, cx| links.pick(pick, cx));
     }
 
-    /// Ctrl+K: gives `done` what the link picker starts with, after the line writes the unsaved
-    /// text. In a note link, the field starts with its target, and the pick changes that link.
+    /// Ctrl+K: gives `done` what the link picker starts with, after the write line writes the
+    /// unsaved text. In a note link, the field starts with its target, and the pick changes that
+    /// link.
     /// With no open note, it does nothing.
     pub(crate) fn start_link(
         &mut self,
@@ -505,7 +506,7 @@ impl NotePane {
         let Some(path) = self.content.note().cloned() else {
             return;
         };
-        // The event of the write shows the fields.
+        // The event of the job shows the fields.
         self.core_door.update(cx, |core_door, cx| {
             core_door.change_tag(path, change, Done::value(|(), _| {}), cx);
         });
@@ -543,7 +544,7 @@ impl NotePane {
         self.core_door.read(cx).unsaved()
     }
 
-    /// Gives the editor text to the draft of the notes folder, and saves it soon.
+    /// Gives the editor text to the draft of the core door, and saves it soon.
     fn edited(&mut self, cx: &mut Context<Self>) {
         if let Some(path) = self.content.editor().cloned() {
             let body = self
@@ -608,7 +609,7 @@ impl NotePane {
         false
     }
 
-    /// Takes the end of a write of the editor text. After a failed write, the notes folder
+    /// Takes the end of a write of the editor text. After a failed write, the core door
     /// keeps the text, so the next job tries again.
     fn save_end(&mut self, event: &SaveEvent, cx: &mut Context<Self>) {
         match event {
@@ -676,7 +677,7 @@ impl NotePane {
                 Err(_) => {}
             }
         }));
-        // The line must not write the text that the reload drops.
+        // The write line must not write the text that the reload drops.
         self.core_door.update(cx, |core_door, cx| {
             if discard {
                 core_door.drop_text();
@@ -723,8 +724,8 @@ impl NotePane {
         self.content.note()
     }
 
-    /// Opens the note at `path`, and drops a new note. With [`Leave::Keep`], the line first
-    /// writes the unsaved text. When that save fails, the pane stays on the note.
+    /// Opens the note at `path`, and drops a new note. With [`Leave::Keep`], the write
+    /// line first writes the unsaved text. When that save fails, the pane stays on the note.
     pub(crate) fn open(&mut self, path: NotePath, leave: Leave, cx: &mut Context<Self>) {
         if leave == Leave::Keep && self.content.note() == Some(&path) {
             self.stop_opening(cx);
@@ -851,7 +852,7 @@ impl NotePane {
         });
     }
 
-    /// Ctrl+N: after the line writes the unsaved text, shows a new note for `folder`, with
+    /// Ctrl+N: after the write line writes the unsaved text, shows a new note for `folder`, with
     /// `tag` when it has one. When the save fails, the pane stays on the note. Another Ctrl+N on a new note
     /// only gives its field the focus.
     pub(crate) fn new_note(
@@ -914,7 +915,7 @@ impl NotePane {
     }
 }
 
-/// A `done` step for a write of the notes folder: it runs `step` on the pane, when the pane
+/// A `done` step for a job of the core door: it runs `step` on the pane, when the pane
 /// still exists.
 fn step<R: 'static>(
     cx: &Context<NotePane>,

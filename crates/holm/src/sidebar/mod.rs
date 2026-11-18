@@ -1,12 +1,12 @@
-//! The sidebar: one panel that shows the folder tree or the note list of one tree item.
+//! The sidebar: one panel that shows the tree or the note list of one tree item.
 //!
 //! The tree has "All notes", then the folders, then the tags. In a list, `↑` and `↓` open each
-//! note at once. A name field of a folder writes its name through the notes folder. The name
+//! note at once. A name field of a folder writes its name through the core door. The name
 //! field of a tag writes through its owner. For other changes, the sidebar sends a
 //! [`SidebarEvent`].
 //!
 //! The search field sits at the top. While it holds text, the note list shows the notes that
-//! match it, and `Esc` clears it and shows the last view again.
+//! match it, and `Esc` clears it and shows the last sidebar view again.
 
 mod list;
 mod tree;
@@ -76,7 +76,7 @@ pub(crate) enum SidebarEvent {
     RenameTag(TagName),
     /// Remove a tag from all notes, with the dialog.
     DeleteTag(TagName),
-    /// The view changed. The app keeps it in the config.
+    /// The sidebar view changed. The app keeps it in the config.
     ViewChanged,
 }
 
@@ -201,7 +201,7 @@ impl Sidebar {
         SavedSidebarView::from(&self.view)
     }
 
-    /// Takes the end of a write or of outside changes: it follows the moves, and then shows
+    /// Takes the end of a job or of outside changes: it follows the moves, and then shows
     /// the snapshot.
     fn changed(&mut self, event: &FolderEvent, cx: &mut Context<Self>) {
         if event.is_empty() {
@@ -217,7 +217,7 @@ impl Sidebar {
         }
     }
 
-    /// Moves the view, the open items and the name field with `change`, when it is a move.
+    /// Moves the sidebar view, the open items and the name field with `change`, when it is a move.
     fn follow(&mut self, change: &Change, cx: &mut Context<Self>) {
         let view = match &self.view {
             SidebarView::Tree(item) => item.moved(change).map(SidebarView::Tree),
@@ -239,8 +239,8 @@ impl Sidebar {
         }
     }
 
-    /// Builds the tree from the snapshot of the notes folder. An item that is gone leaves the
-    /// view and the open items.
+    /// Builds the lists from the snapshot of the core door. An item that is gone leaves the
+    /// sidebar view and the open items.
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let snapshot = self.core_door.read(cx).snapshot();
         self.lists = Lists::new(snapshot, self.order);
@@ -305,7 +305,7 @@ impl Sidebar {
         });
     }
 
-    /// Empties the search field, so the last view shows again. The list gets the focus.
+    /// Empties the search field, so the last sidebar view shows again. The list gets the focus.
     fn clear_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.query.clear();
         self.search
@@ -405,8 +405,8 @@ impl Sidebar {
         cx.notify();
     }
 
-    /// The folder for a new note, and the tag it gets, from the item of the view. A note from
-    /// the search results goes in the root folder.
+    /// The folder for a new note, and the tag it gets, from the item of the sidebar view. A note
+    /// from the search results goes in the root folder.
     pub(crate) fn new_note_place(&self) -> (FolderPath, Option<TagName>) {
         if self.searching() {
             return (FolderPath::root(), None);
@@ -500,7 +500,7 @@ impl Sidebar {
 
     /// Starts the name field of a tag in the tree, with its full name, so a rename can also move
     /// the tag under another parent. `rename` writes the typed name. It does nothing while the
-    /// write of a name field runs.
+    /// job of a name field runs.
     pub(crate) fn rename_tag(
         &mut self,
         tag: TagName,
@@ -509,7 +509,7 @@ impl Sidebar {
         cx: &mut Context<Self>,
     ) {
         let sidebar = cx.weak_entity();
-        // The name field follows moves, so the write takes the tag it names at `Enter`.
+        // The name field follows moves, so the job takes the tag it names at `Enter`.
         let write: NameWrite<()> = Rc::new(move |name, done, window, cx| {
             match sidebar.read_with(cx, |sidebar, _| sidebar.named()) {
                 Ok(Some(Named::Tag(from))) => rename(from, name, done, window, cx),
@@ -528,7 +528,7 @@ impl Sidebar {
         self.open_name_field(Named::Folder(folder), Some(&text), item, write, window, cx);
     }
 
-    /// Starts an empty name field for a new folder in the folder of the view, as its first
+    /// Starts an empty name field for a new folder in the folder of the sidebar view, as its first
     /// child row. Nothing is on disk before `Enter`.
     pub(crate) fn new_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let parent = self.view.item().folder();
@@ -588,7 +588,7 @@ impl Sidebar {
         self.show_in_tree(item, cx);
     }
 
-    /// The write of a folder name field. The name field follows moves, so the write takes the
+    /// The job of a folder name field. The name field follows moves, so the job takes the
     /// folder it names at `Enter`.
     fn folder_write(cx: &Context<Self>) -> NameWrite<()> {
         let sidebar = cx.weak_entity();
@@ -649,7 +649,7 @@ impl Sidebar {
         });
     }
 
-    /// Whether the write of a name field runs.
+    /// Whether the job of a name field runs.
     fn writing(&self, cx: &App) -> bool {
         self.field
             .as_ref()

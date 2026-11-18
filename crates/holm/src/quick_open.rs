@@ -17,7 +17,7 @@ use crate::pick_notes::PickNotes;
 use crate::popup::{self, PickEvent, PickList, PickRow};
 use crate::text;
 
-/// The answer of the window.
+/// The result of the window.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum QuickOpenEvent {
     Open(NotePath),

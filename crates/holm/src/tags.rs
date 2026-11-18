@@ -496,7 +496,7 @@ pub(crate) fn new_note_row(
         .child(Fold::new(px(6.), chips, |_| div().into_any_element()).tail(Some(title)))
 }
 
-/// Every tag name in the tree, parents first.
+/// Every tag name of the nested tags, parents first.
 fn flatten(tags: &[Tag], names: &mut Vec<TagName>) {
     for tag in tags {
         names.push(tag.name.clone());

@@ -1,5 +1,4 @@
-//! The data of the sidebar: the folder tree rows and the note lists, from one snapshot of the
-//! notes folder.
+//! The data of the sidebar: the tree rows and the note lists, from one snapshot.
 
 use holm_core::{FolderPath, Snapshot, TagName};
 use std::collections::HashSet;
@@ -9,7 +8,7 @@ use holm_core::model::{Change, NoteSet, Order, Tag};
 use super::list::NoteList;
 use crate::config::{SavedSidebarView, SidebarItem};
 
-/// An item of the folder tree. Each item has a note list.
+/// An item of the tree. Each item has a note list.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Item {
     All,
@@ -70,7 +69,7 @@ impl Item {
     }
 }
 
-/// What the sidebar shows: the folder tree with a selected item, or the note list of an item.
+/// The sidebar view: the tree with a selected item, or the note list of an item.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SidebarView {
     Tree(Item),
@@ -125,7 +124,7 @@ impl SidebarView {
     }
 }
 
-/// One row of the folder tree.
+/// One row of the tree.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TreeRow {
     pub(crate) item: Item,
@@ -169,7 +168,7 @@ impl Lists {
         }
     }
 
-    /// Whether the tree still has `item`.
+    /// Whether the lists still have `item`.
     pub(crate) fn has(&self, item: &Item) -> bool {
         match item {
             Item::All => true,
@@ -178,7 +177,7 @@ impl Lists {
         }
     }
 
-    /// `item` if the tree has it, or else its nearest parent in the tree, or "All notes".
+    /// `item` if the lists have it, or else its nearest parent in the tree, or "All notes".
     pub(crate) fn nearest(&self, item: &Item) -> Item {
         let mut item = item.clone();
         while !self.has(&item) {

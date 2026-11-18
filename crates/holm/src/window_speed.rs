@@ -183,7 +183,7 @@ fn quick_open(what: &str, cx: &mut TestAppContext, handle: AnyWindowHandle, numb
     });
 }
 
-/// Ctrl+N and an open of a note, while a tag rename of all notes runs. The write budget is zero,
+/// Ctrl+N and an open of a note, while a tag rename of all notes runs. The budget is zero,
 /// so the rename does not end in the update of its key.
 #[gpui_kit::test]
 #[ignore = "prints times for a person to read"]

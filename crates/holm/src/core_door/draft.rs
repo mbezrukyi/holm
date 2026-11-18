@@ -70,7 +70,7 @@ pub(super) struct Draft {
     version: u64,
     /// The version at which the draft took its note. A write before it is of another text.
     since: u64,
-    /// The version of the write in the line, until it ends.
+    /// The version of the save in the write line, until it ends.
     writing: Option<u64>,
     /// The last write of the text failed.
     failed: bool,
@@ -108,8 +108,8 @@ impl Draft {
         self.failed
     }
 
-    /// The write to put in the line before a job. It is `None` with no text, or when the line
-    /// already holds a write of this text.
+    /// The save to put in the write line before a job. It is `None` with no text, or when the
+    /// write line already holds a save of this text.
     pub(super) fn write(&mut self) -> Option<DraftSave> {
         let text = self.text.clone()?;
         if self.writing == Some(self.version) {

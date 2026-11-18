@@ -2,8 +2,8 @@
 //! `Work › 2026 › Plans`. A long path cuts folders from the left, never the title. The folders
 //! are only text.
 //!
-//! The title field takes the place of the title. It is a [`NameField`] with the write of the
-//! owner. The title, the field and the name of a running write share one text element, so the
+//! The title field takes the place of the title. It is a [`NameField`] with the job of the
+//! owner. The title, the field and the name of a running job share one text element, so the
 //! path does not move when the field opens or closes.
 //! The field closes after [`NameEvent::Written`] and [`NameEvent::Closed`], and it sends each
 //! [`NameEvent`] on to the owner. The owner decides what a blur does.

@@ -6,7 +6,7 @@
 //! - `Enter` writes `<title>.md`, and sends [`NewNoteEvent::Created`].
 //! - `Esc`, or a fail that is not about the title, sends [`NewNoteEvent::Cancelled`].
 //!
-//! The note takes the focus while the create write runs, because the editor is hidden.
+//! The note takes the focus while the create job runs, because the editor is hidden.
 //! - A refused title keeps the field open.
 
 use std::rc::Rc;

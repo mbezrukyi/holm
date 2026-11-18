@@ -16,7 +16,7 @@ use crate::popup::{self, PickEvent, PickList, PickRow};
 use crate::sidebar::Target;
 use crate::text;
 
-/// The answer of the picker.
+/// The result of the picker.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PickerEvent {
     Move { target: Target, folder: FolderPath },

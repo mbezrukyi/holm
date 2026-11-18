@@ -71,9 +71,9 @@ struct Locked {
 impl Core {
     /// Opens the notes folder and brings the index in `index_dir` up to date with the files.
     ///
-    /// Then it watches the notes folder. Changes from other tools update the index
-    /// and the snapshot, and go to each [`ChangeLists`]. When the watch can't start, the core works without it,
-    /// with a log line.
+    /// Then it watches the notes folder. Changes from other tools update the index and the
+    /// snapshot, and go to each [`ChangeLists`]. When the watch can't start, the core works
+    /// without it, with a log line.
     ///
     /// Then it keeps the facts of the notes folder in memory, as a [`Snapshot`].
     ///
