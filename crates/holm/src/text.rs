@@ -2,6 +2,8 @@
 
 use std::path::Path;
 
+use holm_core::TagName;
+
 use crate::path_text::PathText;
 
 pub(crate) const NOTES_FOLDER: &str = "Holm can't open the notes folder.";
@@ -87,9 +89,14 @@ pub(crate) const PATH_GAP: &str = " › ";
 /// The mark between the path and the backlinks count.
 pub(crate) const PATH_DOT: &str = "·";
 
+/// A tag as the screen shows it: `#work/holm`.
+pub(crate) fn tag_label(tag: &TagName) -> String {
+    format!("#{tag}")
+}
+
 /// The line in the tag popup that adds a new tag.
-pub(crate) fn add_tag_line(tag: &str) -> String {
-    format!("Add #{tag}")
+pub(crate) fn add_tag_line(tag: &TagName) -> String {
+    format!("Add {}", tag_label(tag))
 }
 pub(crate) const RENAME: &str = "Rename";
 pub(crate) const FOLDERS: &str = "FOLDERS";
@@ -128,17 +135,20 @@ fn count(n: usize, one: &str, many: &str) -> String {
 }
 
 /// The question before a tag rename in all notes.
-pub(crate) fn rename_tag_question(from: &str, to: &str, notes: usize) -> String {
+pub(crate) fn rename_tag_question(from: &TagName, to: &TagName, notes: usize) -> String {
     format!(
-        "Rename “#{from}” to “#{to}”? This changes {}.",
+        "Rename “{}” to “{}”? This changes {}.",
+        tag_label(from),
+        tag_label(to),
         count(notes, "note", "notes")
     )
 }
 
 /// The question before a tag delete in all notes.
-pub(crate) fn delete_tag_question(tag: &str, notes: usize) -> String {
+pub(crate) fn delete_tag_question(tag: &TagName, notes: usize) -> String {
     format!(
-        "Remove “#{tag}” from all notes? This changes {}.",
+        "Remove “{}” from all notes? This changes {}.",
+        tag_label(tag),
         count(notes, "note", "notes")
     )
 }

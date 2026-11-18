@@ -184,6 +184,7 @@ mod tests {
 
     use super::*;
     use crate::store::Stamp;
+    use crate::tag::TagName;
 
     const STAMP: Stamp = Stamp {
         modified: 1,
@@ -205,7 +206,7 @@ mod tests {
             id: id.map(|id| NoteId::from_field(id.to_owned())),
             title: String::new(),
             preview: String::new(),
-            tags: tags.iter().map(|tag| (*tag).to_owned()).collect(),
+            tags: tags.iter().map(|tag| TagName::new(tag).unwrap()).collect(),
             pinned: false,
             modified: SystemTime::UNIX_EPOCH,
         }

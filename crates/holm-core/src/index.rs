@@ -22,6 +22,7 @@ use crate::paths::{NotePath, NoteReader};
 use crate::reconcile::Settled;
 use crate::relink;
 use crate::store::{Stamp, time};
+use crate::tag::TagName;
 
 mod search;
 
@@ -360,7 +361,7 @@ fn write(
     let mut add_tag =
         conn.prepare_cached("INSERT INTO tags (note, pos, tag) VALUES (?1, ?2, ?3)")?;
     for (pos, tag) in (0_i64..).zip(&info.tags) {
-        add_tag.execute(params![key, pos, tag])?;
+        add_tag.execute(params![key, pos, tag.as_str()])?;
     }
     let links = match links {
         None => stored_links(conn, key)?,
@@ -442,7 +443,11 @@ fn note_info(reader: &mut NoteReader, row: &rusqlite::Row<'_>) -> rusqlite::Resu
         title: row.get(2)?,
         preview: row.get(5)?,
         tags: tags
-            .map(|tags| tags.split('\n').map(str::to_owned).collect())
+            .map(|tags| {
+                tags.split('\n')
+                    .map(|tag| TagName::from_written(tag.to_owned()))
+                    .collect()
+            })
             .unwrap_or_default(),
         pinned: row.get(3)?,
         modified: time(row.get(4)?),

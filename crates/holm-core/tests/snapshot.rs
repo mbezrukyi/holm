@@ -6,9 +6,9 @@ mod common;
 
 use std::fs;
 
-use common::{Folder, folder_path, note_path};
+use common::{Folder, folder_path, note_path, tag_name};
 use holm_core::model::{NoteInfo, NoteSet, Order};
-use holm_core::{Core, NotePath, Result, Snapshot};
+use holm_core::{Core, NotePath, Result, Snapshot, TagName};
 
 fn titles(snapshot: &Snapshot) -> Vec<String> {
     snapshot
@@ -26,7 +26,7 @@ fn folders(snapshot: &Snapshot) -> Vec<String> {
     common::paths(snapshot.folders())
 }
 
-fn tag_names(snapshot: &Snapshot) -> Vec<String> {
+fn tag_names(snapshot: &Snapshot) -> Vec<TagName> {
     snapshot.tags().into_iter().map(|tag| tag.name).collect()
 }
 
@@ -92,23 +92,25 @@ fn note_writes_show_in_the_snapshot_after_them() {
     );
 
     let (_, snapshot) = one_step(core, |core| {
-        core.add_tag(&note_path("Ideas.md"), "work/holm")
+        core.add_tag(&note_path("Ideas.md"), &tag_name("work/holm"))
     });
     assert_eq!(tag_names(&snapshot), ["work"]);
     assert_eq!(
-        paths(snapshot.notes(NoteSet::WithTag("work"), Order::Title)),
+        paths(snapshot.notes(NoteSet::WithTag(&tag_name("work")), Order::Title)),
         ["Ideas.md"]
     );
 
     let (_, snapshot) = one_step(core, |core| core.set_pinned(&note_path("Plans.md"), true));
     assert_eq!(titles(&snapshot), ["Plans", "Ideas"]);
 
-    let (count, snapshot) = one_step(core, |core| core.rename_tag("work", "job"));
+    let (count, snapshot) = one_step(core, |core| {
+        core.rename_tag(&tag_name("work"), &tag_name("job"))
+    });
     assert_eq!(count, 1);
     assert_eq!(tag_names(&snapshot), ["job"]);
 
-    let (_, snapshot) = one_step(core, |core| core.delete_tag("job"));
-    assert_eq!(tag_names(&snapshot), Vec::<String>::new());
+    let (_, snapshot) = one_step(core, |core| core.delete_tag(&tag_name("job")));
+    assert_eq!(tag_names(&snapshot), [] as [TagName; 0]);
 
     let ((), snapshot) = one_step(core, |core| core.delete_note(&note_path("Ideas.md")));
     assert_eq!(titles(&snapshot), ["Plans"]);
@@ -196,9 +198,12 @@ fn a_save_with_the_same_text_keeps_the_revision() {
     });
 
     assert_eq!(written.unwrap(), note);
-    no_step(&folder.core, |core| core.add_tag(&note_path("A.md"), "x")).unwrap();
     no_step(&folder.core, |core| {
-        core.remove_tag(&note_path("A.md"), "y")
+        core.add_tag(&note_path("A.md"), &tag_name("x"))
+    })
+    .unwrap();
+    no_step(&folder.core, |core| {
+        core.remove_tag(&note_path("A.md"), &tag_name("y"))
     })
     .unwrap();
     no_step(&folder.core, |core| {
@@ -212,14 +217,12 @@ fn a_failed_write_keeps_the_revision() {
     let folder = Folder::new(&[("a.md", "# A\n")]);
 
     let written = no_step(&folder.core, |core| {
-        core.add_tag(&note_path("missing.md"), "x")
+        core.add_tag(&note_path("missing.md"), &tag_name("x"))
     });
     assert!(written.is_err());
     let written = no_step(&folder.core, |core| {
         core.create_folder(&folder_path("missing"), "x")
     });
-    assert!(written.is_err());
-    let written = no_step(&folder.core, |core| core.rename_tag("x", ""));
     assert!(written.is_err());
 }
 
@@ -253,9 +256,9 @@ fn paths_first_matching_keep_and_counts_agree_with_the_note_lists() {
         NoteSet::In(&folder_path("")),
         NoteSet::In(&folder_path("work")),
         NoteSet::In(&folder_path("gone")),
-        NoteSet::WithTag("work"),
-        NoteSet::WithTag("home"),
-        NoteSet::WithTag("gone"),
+        NoteSet::WithTag(&tag_name("work")),
+        NoteSet::WithTag(&tag_name("home")),
+        NoteSet::WithTag(&tag_name("gone")),
     ];
 
     for set in sets {

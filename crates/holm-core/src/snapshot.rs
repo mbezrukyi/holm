@@ -9,6 +9,7 @@ use std::sync::Arc;
 use crate::model::{Link, LinkTarget, NoteInfo, NoteSet, Order, Tag};
 use crate::nodes::Node;
 use crate::paths::{FolderPath, NotePath};
+use crate::tag::{self, TagName};
 
 /// The facts of the notes folder at one moment, from [`Core::snapshot`](crate::Core::snapshot).
 /// It never changes.
@@ -106,8 +107,7 @@ impl Snapshot {
         for entry in self.notes.values() {
             names.clear();
             for tag in &entry.info.tags {
-                let ends = tag.match_indices('/').map(|(i, _)| i).chain([tag.len()]);
-                names.extend(ends.map(|end| &tag[..end]));
+                names.extend(tag.names());
             }
             names.sort_unstable();
             names.dedup();
@@ -353,8 +353,7 @@ fn by_title(a: &((bool, String), &NoteInfo), b: &((bool, String), &NoteInfo)) ->
 fn tag_tree(counts: &BTreeMap<&str, usize>) -> Vec<Tag> {
     let mut children: HashMap<Option<&str>, Vec<&str>> = HashMap::new();
     for name in counts.keys() {
-        let parent = name.rsplit_once('/').map(|(parent, _)| parent);
-        children.entry(parent).or_default().push(name);
+        children.entry(tag::parent(name)).or_default().push(name);
     }
     tag_children(None, counts, &children)
 }
@@ -370,11 +369,11 @@ fn tag_children(
         .into_iter()
         .flatten()
         .map(|name| Tag {
-            name: (*name).to_owned(),
+            name: TagName::from_written((*name).to_owned()),
             notes: counts.get(name).copied().unwrap_or(0),
             children: tag_children(Some(name), counts, children),
         })
         .collect();
-    tags.sort_by_cached_key(|tag| (tag.name.to_lowercase(), tag.name.clone()));
+    tags.sort_by_cached_key(|tag| (tag.name.as_str().to_lowercase(), tag.name.clone()));
     tags
 }

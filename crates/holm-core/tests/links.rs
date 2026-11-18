@@ -8,7 +8,7 @@ mod common;
 use std::fs;
 use std::path::PathBuf;
 
-use common::{Folder, folder_path, note_path};
+use common::{Folder, folder_path, note_path, tag_name};
 use holm_core::Error;
 use holm_core::model::{Link, LinkTarget};
 
@@ -52,7 +52,10 @@ fn a_tag_change_keeps_the_links() {
         .links(&note_path("work/a.md"))
         .to_vec();
 
-    folder.core.add_tag(&note_path("work/a.md"), "new").unwrap();
+    folder
+        .core
+        .add_tag(&note_path("work/a.md"), &tag_name("new"))
+        .unwrap();
 
     assert_eq!(links_everywhere(&mut folder, "work/a.md"), before);
     assert_eq!(before[0], file("work/x.pdf"));

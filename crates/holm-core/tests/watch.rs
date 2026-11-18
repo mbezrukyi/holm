@@ -5,7 +5,7 @@
 
 mod common;
 
-use common::{folder_path, note_path};
+use common::{folder_path, note_path, tag_name};
 
 use std::cell::RefCell;
 use std::fs;
@@ -198,7 +198,10 @@ fn holm_s_own_saves_and_new_notes_come_from_holm() {
     let fed = Fed::new(&[("a.md", "# A\n")]);
 
     let saved = fed.core.save(&note_path("a.md"), "# A\n\nMore.\n").unwrap();
-    let tagged = fed.core.add_tag(&note_path("a.md"), "work").unwrap();
+    let tagged = fed
+        .core
+        .add_tag(&note_path("a.md"), &tag_name("work"))
+        .unwrap();
     let new = fed.core.create(&folder_path(""), "New").unwrap();
     fed.feed
         .changed([
@@ -254,8 +257,12 @@ fn each_own_move_comes_as_one_list_with_its_revision() {
         .rename_folder(&folder_path("area"), "zone")
         .unwrap();
     let folder_revision = fed.core.snapshot().revision();
-    fed.core.rename_tag("work", " Job ").unwrap();
-    fed.core.rename_tag("gone", "x").unwrap();
+    fed.core
+        .rename_tag(&tag_name("work"), &tag_name("Job"))
+        .unwrap();
+    fed.core
+        .rename_tag(&tag_name("gone"), &tag_name("x"))
+        .unwrap();
     fed.core
         .rename_folder(&folder_path("zone"), "zone")
         .unwrap();
@@ -289,8 +296,8 @@ fn each_own_move_comes_as_one_list_with_its_revision() {
                 fed.core.snapshot().revision(),
                 vec![
                     Change::TagMoved {
-                        from: "work".into(),
-                        to: "Job".into(),
+                        from: tag_name("work"),
+                        to: tag_name("Job"),
                     },
                     Change::Changed(note_path("C.md")),
                     Change::Tags,
@@ -368,7 +375,7 @@ fn a_move_rule_follows_paths_below_a_folder_and_child_tags() {
         Some(note_path("job/deep/a.md"))
     );
     assert_eq!(after(&folder, "workshop"), None);
-    assert_eq!(folder.tag_after("work"), None);
+    assert_eq!(folder.tag_after(&tag_name("work")), None);
 
     let moved = Change::Moved {
         from: note_path("a.md"),
@@ -382,12 +389,15 @@ fn a_move_rule_follows_paths_below_a_folder_and_child_tags() {
     assert_eq!(moved.folder_after(&folder_path("a")), None);
 
     let tag = Change::TagMoved {
-        from: "work".into(),
-        to: "home/job".into(),
+        from: tag_name("work"),
+        to: tag_name("home/job"),
     };
-    assert_eq!(tag.tag_after("work"), Some("home/job".into()));
-    assert_eq!(tag.tag_after("work/holm"), Some("home/job/holm".into()));
-    assert_eq!(tag.tag_after("workshop"), None);
+    assert_eq!(tag.tag_after(&tag_name("work")), Some(tag_name("home/job")));
+    assert_eq!(
+        tag.tag_after(&tag_name("work/holm")),
+        Some(tag_name("home/job/holm"))
+    );
+    assert_eq!(tag.tag_after(&tag_name("workshop")), None);
     assert_eq!(after(&tag, "work"), None);
 }
 
@@ -494,7 +504,7 @@ fn a_renamed_folder_keeps_search_links_and_file_links_of_its_notes() {
         LinkTarget::File("job/pic.png".into())
     );
     assert_eq!(
-        snapshot.notes(NoteSet::WithTag("food"), Order::Title)[0].path,
+        snapshot.notes(NoteSet::WithTag(&tag_name("food")), Order::Title)[0].path,
         note_path("job/a.md")
     );
 }

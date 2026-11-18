@@ -43,7 +43,7 @@ use gpui_kit::{
     px,
 };
 use holm_core::model::{Change, Note, NoteInfo};
-use holm_core::{FolderPath, NotePath};
+use holm_core::{FolderPath, NotePath, TagName};
 use holm_editor::{Changed, Editor, UpFromStart};
 use holm_markdown::Target;
 
@@ -877,7 +877,7 @@ impl NotePane {
     pub(crate) fn new_note(
         &mut self,
         folder: FolderPath,
-        tag: Option<String>,
+        tag: Option<TagName>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {

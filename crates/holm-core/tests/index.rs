@@ -8,7 +8,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::PathBuf;
 
-use common::{Folder, folder_path, note_path};
+use common::{Folder, folder_path, note_path, tag_name};
 use holm_core::model::{Link, LinkTarget, NoteInfo, NoteSet, Order, Tag};
 use holm_core::{Core, NotePath};
 
@@ -28,7 +28,7 @@ fn note(id: &str, extra: &str, body: &str) -> String {
 
 fn tag(name: &str, notes: usize, children: Vec<Tag>) -> Tag {
     Tag {
-        name: name.to_owned(),
+        name: tag_name(name),
         notes,
         children,
     }
@@ -170,7 +170,7 @@ fn a_tag_lists_the_notes_of_its_child_tags_too() {
         folder
             .core
             .snapshot()
-            .notes(NoteSet::WithTag("work"), Order::Title),
+            .notes(NoteSet::WithTag(&tag_name("work")), Order::Title),
     );
     work.sort();
 
@@ -180,7 +180,7 @@ fn a_tag_lists_the_notes_of_its_child_tags_too() {
             folder
                 .core
                 .snapshot()
-                .notes(NoteSet::WithTag("work/holm"), Order::Title)
+                .notes(NoteSet::WithTag(&tag_name("work/holm")), Order::Title)
         ),
         ["a.md"]
     );
@@ -188,7 +188,7 @@ fn a_tag_lists_the_notes_of_its_child_tags_too() {
         folder
             .core
             .snapshot()
-            .notes(NoteSet::WithTag("wor"), Order::Title),
+            .notes(NoteSet::WithTag(&tag_name("wor")), Order::Title),
         Vec::<NoteInfo>::new()
     );
 }
@@ -227,7 +227,10 @@ fn search_finds_words_in_titles_text_and_tags() {
 fn search_follows_a_tag_change_and_keeps_the_text() {
     let folder = Folder::new(&[("a.md", "---\ntags: [work]\n---\n# Garden\n")]);
 
-    folder.core.rename_tag("work", "home").unwrap();
+    folder
+        .core
+        .rename_tag(&tag_name("work"), &tag_name("home"))
+        .unwrap();
 
     assert_eq!(found(&folder, "work"), Vec::<String>::new());
     assert_eq!(found(&folder, "home garden"), ["a.md"]);
@@ -300,7 +303,10 @@ fn backlinks_come_from_id_links_and_file_links() {
 #[test]
 fn save_and_create_update_the_index() {
     let folder = Folder::new(&[("a.md", "# A\n")]);
-    folder.core.add_tag(&note_path("a.md"), "food").unwrap();
+    folder
+        .core
+        .add_tag(&note_path("a.md"), &tag_name("food"))
+        .unwrap();
 
     let saved = folder
         .core

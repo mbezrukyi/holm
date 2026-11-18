@@ -4,7 +4,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use crate::{FolderPath, NotePath, Snapshot};
+use crate::{FolderPath, NotePath, Snapshot, TagName};
 
 /// The stable id of a note. It lives in the `id:` field of the frontmatter.
 ///
@@ -46,7 +46,7 @@ pub struct NoteInfo {
     /// The first line of text of the body, with no Markdown syntax. It can be empty.
     pub preview: String,
     /// The `tags:` field, normalized, with no repeats.
-    pub tags: Vec<String>,
+    pub tags: Vec<TagName>,
     /// Whether the frontmatter has `pinned: true`.
     pub pinned: bool,
     /// The modification time of the file.
@@ -79,9 +79,8 @@ pub enum NoteSet<'a> {
     All,
     /// The notes right in a folder, without the notes of its subfolders.
     In(&'a FolderPath),
-    /// The notes with a tag or one of its child tags. Tags match exactly, also in capital
-    /// letters.
-    WithTag(&'a str),
+    /// The notes with a tag or one of its child tags.
+    WithTag(&'a TagName),
 }
 
 impl NoteSet<'_> {
@@ -99,12 +98,9 @@ impl NoteSet<'_> {
         match self {
             Self::All => true,
             Self::In(folder) => path.is_in(folder),
-            Self::WithTag(tag) => note().is_some_and(|note| {
-                note.tags.iter().any(|name| {
-                    name.strip_prefix(tag)
-                        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
-                })
-            }),
+            Self::WithTag(tag) => {
+                note().is_some_and(|note| note.tags.iter().any(|name| tag.holds(name)))
+            }
         }
     }
 }
@@ -113,7 +109,7 @@ impl NoteSet<'_> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tag {
     /// The full name, like `work/holm`.
-    pub name: String,
+    pub name: TagName,
     /// How many notes have this tag or one of its child tags.
     pub notes: usize,
     /// The child tags, like `work/holm` under `work`, sorted by name.
@@ -192,9 +188,9 @@ pub enum Change {
     /// A tag that Holm renamed, with its child tags.
     TagMoved {
         /// The old name.
-        from: String,
+        from: TagName,
         /// The new name.
-        to: String,
+        to: TagName,
     },
     /// The list from [`Snapshot::folders`](crate::Snapshot::folders) changed.
     Folders,
@@ -223,15 +219,11 @@ impl Change {
     }
 
     /// The name of `tag` after this change, when the change renames it or a parent tag.
-    pub fn tag_after(&self, tag: &str) -> Option<String> {
-        let Self::TagMoved { from, to } = self else {
-            return None;
-        };
-        if tag == from {
-            return Some(to.clone());
+    pub fn tag_after(&self, tag: &TagName) -> Option<TagName> {
+        match self {
+            Self::TagMoved { from, to } => tag.moved(from, to),
+            _ => None,
         }
-        let rest = tag.strip_prefix(from.as_str())?.strip_prefix('/')?;
-        Some(format!("{to}/{rest}"))
     }
 }
 

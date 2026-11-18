@@ -10,7 +10,7 @@ use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
 use holm_core::model::Order;
-use holm_core::{FolderPath, NotePath};
+use holm_core::{FolderPath, NotePath, TagName};
 use holm_editor::WritingHelp;
 use holm_markdown::Color;
 use toml_edit::{Array, DocumentMut, Item, Table, Value};
@@ -335,7 +335,7 @@ fn item_from(text: &str) -> Option<SidebarItem> {
         Some(("folder", path)) if !path.is_empty() => {
             FolderPath::new(path).map(SidebarItem::Folder)
         }
-        Some(("tag", name)) if !name.is_empty() => Some(SidebarItem::Tag(name.to_owned())),
+        Some(("tag", name)) => TagName::new(name).map(SidebarItem::Tag),
         _ => None,
     }
 }
@@ -455,7 +455,7 @@ fn set(table: &mut Table, key: &str, value: Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_paths::folder_path;
+    use crate::test_paths::{folder_path, tag_name};
 
     fn load(text: &str) -> (tempfile::TempDir, Config) {
         let dir = tempfile::tempdir().unwrap();
@@ -493,7 +493,7 @@ mod tests {
             sidebar: SidebarSettings {
                 width: 310,
                 hidden: true,
-                view: View::Tree(SidebarItem::Tag("work/holm".into())),
+                view: View::Tree(SidebarItem::Tag(tag_name("work/holm"))),
             },
             last_note: NotePath::new("work/Plans.md"),
         };

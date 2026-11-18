@@ -1,7 +1,7 @@
 //! The data of the sidebar: the folder tree rows and the note lists, from one snapshot of the
 //! notes folder.
 
-use holm_core::{FolderPath, Snapshot};
+use holm_core::{FolderPath, Snapshot, TagName};
 use std::collections::HashSet;
 
 use holm_core::model::{Change, NoteSet, Order, Tag};
@@ -14,7 +14,7 @@ pub(crate) enum Item {
     All,
     /// A folder that is not the root.
     Folder(FolderPath),
-    Tag(String),
+    Tag(TagName),
 }
 
 impl Item {
@@ -26,9 +26,7 @@ impl Item {
                 .folder()
                 .filter(|parent| !parent.is_root())
                 .map(Self::Folder),
-            Self::Tag(name) => name
-                .rsplit_once('/')
-                .map(|(parent, _)| Self::Tag(parent.to_owned())),
+            Self::Tag(name) => name.parent().map(Self::Tag),
         }
     }
 
@@ -57,10 +55,7 @@ impl Item {
                 .name()
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_default(),
-            Self::Tag(name) => name
-                .rsplit_once('/')
-                .map_or(name.as_str(), |(_, name)| name)
-                .to_owned(),
+            Self::Tag(name) => name.last_part().to_owned(),
         }
     }
 
@@ -216,11 +211,11 @@ fn tag_rows(tags: &[Tag], depth: usize, open: &HashSet<Item>, rows: &mut Vec<Row
     }
 }
 
-fn find_tag<'a>(tags: &'a [Tag], name: &str) -> Option<&'a Tag> {
+fn find_tag<'a>(tags: &'a [Tag], name: &TagName) -> Option<&'a Tag> {
     tags.iter().find_map(|tag| {
-        if tag.name == name {
+        if tag.name == *name {
             Some(tag)
-        } else if name.starts_with(&format!("{}/", tag.name)) {
+        } else if tag.name.holds(name) {
             find_tag(&tag.children, name)
         } else {
             None
@@ -236,7 +231,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::test_paths::folder_path;
+    use crate::test_paths::{folder_path, tag_name};
 
     /// A notes folder with four notes, and its tree in title order.
     fn tree() -> Tree {
@@ -285,7 +280,10 @@ mod tests {
 
     #[test]
     fn open_items_show_their_children() {
-        let open = HashSet::from([Item::Folder(folder_path("work")), Item::Tag("work".into())]);
+        let open = HashSet::from([
+            Item::Folder(folder_path("work")),
+            Item::Tag(tag_name("work")),
+        ]);
         let rows = tree().rows(&open, None);
         assert_eq!(
             names(&rows),
@@ -326,8 +324,8 @@ mod tests {
             paths(Item::Folder(folder_path("work"))),
             ["work/b.md", "work/c.md"]
         );
-        assert_eq!(paths(Item::Tag("work".into())), ["a.md", "work/b.md"]);
-        assert_eq!(paths(Item::Tag("work/holm".into())), ["work/b.md"]);
+        assert_eq!(paths(Item::Tag(tag_name("work"))), ["a.md", "work/b.md"]);
+        assert_eq!(paths(Item::Tag(tag_name("work/holm"))), ["work/b.md"]);
     }
 
     #[test]
@@ -338,18 +336,21 @@ mod tests {
         );
         assert_eq!(Item::Folder(folder_path("work")).parent(), None);
         assert_eq!(
-            Item::Tag("work/holm".into()).parent(),
-            Some(Item::Tag("work".into()))
+            Item::Tag(tag_name("work/holm")).parent(),
+            Some(Item::Tag(tag_name("work")))
         );
-        assert_eq!(Item::Tag("work/holm".into()).folder(), FolderPath::root());
-        assert!(tree().has(&Item::Tag("work/holm".into())));
+        assert_eq!(
+            Item::Tag(tag_name("work/holm")).folder(),
+            FolderPath::root()
+        );
+        assert!(tree().has(&Item::Tag(tag_name("work/holm"))));
         assert!(!tree().has(&Item::Folder(folder_path("gone"))));
     }
 
     #[test]
     fn a_rename_moves_the_item_and_its_children() {
         let folder = |path: &str| Item::Folder(folder_path(path));
-        let tag = |name: &str| Item::Tag(name.into());
+        let tag = |name: &str| Item::Tag(tag_name(name));
         let work = Change::FolderMoved {
             from: folder_path("work"),
             to: folder_path("job"),
@@ -360,8 +361,8 @@ mod tests {
         assert_eq!(tag("work").moved(&work), None);
         assert_eq!(Item::All.moved(&work), None);
         let work = Change::TagMoved {
-            from: "work".into(),
-            to: "home/job".into(),
+            from: tag_name("work"),
+            to: tag_name("home/job"),
         };
         assert_eq!(tag("work").moved(&work), Some(tag("home/job")));
         assert_eq!(tag("work/holm").moved(&work), Some(tag("home/job/holm")));
@@ -384,9 +385,9 @@ mod tests {
         );
         assert_eq!(nearest(Item::Folder(folder_path("gone"))), Item::All);
         assert_eq!(
-            nearest(Item::Tag("work/gone".into())),
-            Item::Tag("work".into())
+            nearest(Item::Tag(tag_name("work/gone"))),
+            Item::Tag(tag_name("work"))
         );
-        assert_eq!(nearest(Item::Tag("gone/holm".into())), Item::All);
+        assert_eq!(nearest(Item::Tag(tag_name("gone/holm"))), Item::All);
     }
 }

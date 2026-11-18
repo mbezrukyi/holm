@@ -10,7 +10,7 @@ use std::process::Command;
 
 use holm_core::model::{NoteSet, Order};
 use holm_core::sample::{self, NOTES};
-use holm_core::{Core, NotePath};
+use holm_core::{Core, NotePath, TagName};
 use tempfile::TempDir;
 
 fn main() {
@@ -137,14 +137,15 @@ fn add_or_remove_tag(bencher: divan::Bencher<'_, '_>) {
     let notes = notes_folder();
     let index = tempfile::tempdir().unwrap();
     let core = open(notes.path(), index.path());
+    let new = TagName::new("new").unwrap();
     let mut flip = false;
     bencher.bench_local(|| {
         flip = !flip;
         let path = &NotePath::new("folder 1/Note 1.md").unwrap();
         if flip {
-            core.add_tag(path, "new").unwrap()
+            core.add_tag(path, &new).unwrap()
         } else {
-            core.remove_tag(path, "new").unwrap()
+            core.remove_tag(path, &new).unwrap()
         }
     });
 }
@@ -179,10 +180,11 @@ fn rename_tag_on_disk(bencher: divan::Bencher<'_, '_>) {
         fs::write(path, text).unwrap();
     }
     let core = open(notes.path(), index.path());
+    let (old, new) = (TagName::new("old").unwrap(), TagName::new("new").unwrap());
     let mut flip = false;
     bencher.bench_local(|| {
         flip = !flip;
-        let (from, to) = if flip { ("old", "new") } else { ("new", "old") };
+        let (from, to) = if flip { (&old, &new) } else { (&new, &old) };
         assert_eq!(core.rename_tag(from, to).unwrap(), 1_000);
     });
 }

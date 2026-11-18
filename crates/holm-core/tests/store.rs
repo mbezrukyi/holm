@@ -142,7 +142,7 @@ fn the_title_is_the_file_name_and_never_the_heading() {
 
     assert_eq!(note.info.title, "Shopping list");
     assert_eq!(note.info.id, None);
-    assert_eq!(note.info.tags, Vec::<String>::new());
+    assert_eq!(note.info.tags, [] as [&str; 0]);
     assert!(!note.info.pinned);
 }
 

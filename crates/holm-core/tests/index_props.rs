@@ -9,9 +9,9 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
 
-use common::{Folder, folder_path};
+use common::{Folder, folder_path, tag_name};
 use holm_core::model::{Link, NoteInfo, NoteSet, Order, Tag};
-use holm_core::{Core, NotePath};
+use holm_core::{Core, NotePath, TagName};
 use proptest::prelude::*;
 
 const WORDS: [&str; 4] = ["apple", "Berry", "café", "dough"];
@@ -103,7 +103,7 @@ fn answers(core: &Core) -> Answers {
             .iter()
             .map(|t| {
                 core.snapshot()
-                    .notes(NoteSet::WithTag(t), Order::LastChange)
+                    .notes(NoteSet::WithTag(&tag_name(t)), Order::LastChange)
             })
             .collect(),
         search: WORDS
@@ -178,7 +178,7 @@ fn apply(folder: &mut Folder, edit: &Edit, copies: &mut usize) {
                 let body = body(folder, words, *link);
                 folder.core.save(&path, &body).unwrap();
                 for tag in tags(picks) {
-                    let tag = holm_markdown::normalize_tag(&tag).unwrap();
+                    let tag = TagName::typed(&tag).unwrap();
                     let has = folder.core.read(&path).unwrap().info.tags.contains(&tag);
                     let info = if has {
                         folder.core.remove_tag(&path, &tag)

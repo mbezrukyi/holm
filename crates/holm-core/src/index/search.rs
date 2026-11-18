@@ -14,6 +14,7 @@ use rusqlite::{Connection, OptionalExtension as _, params};
 use super::{hash, note_path};
 use crate::paths::NotePath;
 use crate::paths::NoteReader;
+use crate::tag::TagName;
 
 /// The tables of this module. `tags` and `notes` belong to the index.
 pub(super) const SCHEMA: &str = "
@@ -48,7 +49,7 @@ pub(super) fn put(
     key: i64,
     title: &str,
     body: &str,
-    tags: &[String],
+    tags: &[TagName],
 ) -> rusqlite::Result<()> {
     let hash = hash((title, body));
     let old: Option<i64> = conn
@@ -69,10 +70,10 @@ pub(super) fn put(
     for tag in tags {
         let added = conn
             .prepare_cached("INSERT INTO tag_names (name) VALUES (?1) ON CONFLICT DO NOTHING")?
-            .execute([tag])?;
+            .execute([tag.as_str()])?;
         if added > 0 {
             conn.prepare_cached("INSERT INTO tag_words (rowid, name) VALUES (?1, ?2)")?
-                .execute(params![conn.last_insert_rowid(), tag])?;
+                .execute(params![conn.last_insert_rowid(), tag.as_str()])?;
         }
     }
     Ok(())

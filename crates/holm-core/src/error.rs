@@ -53,10 +53,11 @@ pub enum Error {
         /// The path as the caller gave it.
         path: PathBuf,
     },
-    /// The tag name is empty, or it is not written as Holm writes tags.
+    /// Nothing is left of a typed tag name after [`TagName::typed`](crate::TagName::typed)
+    /// cleans it.
     #[error("{tag:?} is not a tag name")]
     BadTag {
-        /// The tag as the caller gave it.
+        /// The tag as the person typed it.
         tag: String,
     },
     /// Something in the folder already has this name, also when only the capital letters differ.

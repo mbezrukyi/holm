@@ -16,6 +16,7 @@ use crate::model::{Note, NoteId, NoteInfo};
 use crate::nodes::Node;
 use crate::paths::{FolderPath, Name, NotePath};
 use crate::relink::{Moved, relink};
+use crate::tag::TagName;
 
 pub(crate) mod attachment;
 
@@ -584,7 +585,7 @@ fn note(rel: &NotePath, text: &Text, stamp: Stamp) -> Note {
             id: text.id().map(NoteId::from_field),
             title: rel.title().into_owned(),
             preview: text.preview(),
-            tags: text.tags(),
+            tags: TagName::of_note(text),
             pinned: text.pinned(),
             modified: time(stamp.modified),
         },

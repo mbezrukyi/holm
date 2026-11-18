@@ -37,8 +37,8 @@ use gpui_kit::{
     ParentElement, Pixels, Render, Role, StatefulInteractiveElement, Styled, Subscription,
     TestSupportExt as _, Toggled, Window, div, px,
 };
-use holm_core::NotePath;
 use holm_core::model::Tag;
+use holm_core::{NotePath, TagName};
 
 use crate::backlinks::{self, Backlinks};
 use crate::fold::Fold;
@@ -61,33 +61,33 @@ const TAIL_GAP: Pixels = px(6.);
 /// The user added or removed one tag of the note.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TagChange {
-    Add(String),
-    Remove(String),
+    Add(TagName),
+    Remove(TagName),
 }
 
 /// The user pressed `F2` on the line of this tag. As an action, it goes up the element
 /// tree to the app.
 #[derive(Clone, Debug, PartialEq, Eq, Action)]
 #[action(namespace = holm, no_json)]
-pub(crate) struct RenameTag(pub(crate) String);
+pub(crate) struct RenameTag(pub(crate) TagName);
 
 /// One line of the list in the popup.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Line {
     /// A tag, and whether the note has it.
-    Tag { name: String, on: bool },
+    Tag { name: TagName, on: bool },
     /// A typed tag that no other line has.
-    Add(String),
+    Add(TagName),
 }
 
 pub(crate) struct TagRow {
     notes_folder: Entity<NotesFolder>,
-    tags: Vec<String>,
+    tags: Vec<TagName>,
     pinned: bool,
     title: Entity<TitleField<NotePath>>,
     backlinks: Entity<Backlinks>,
     /// Every tag name in the notes folder, for the list.
-    known: Vec<String>,
+    known: Vec<TagName>,
     /// Whether the popup is open.
     open: bool,
     /// The line under the cursor. With `None`, `Enter` adds the typed tag.
@@ -141,7 +141,7 @@ impl TagRow {
     }
 
     /// Shows the tags and the pin of the open note.
-    pub(crate) fn show(&mut self, tags: &[String], pinned: bool, cx: &mut Context<Self>) {
+    pub(crate) fn show(&mut self, tags: &[TagName], pinned: bool, cx: &mut Context<Self>) {
         if self.tags != tags || self.pinned != pinned {
             self.tags = tags.to_vec();
             self.pinned = pinned;
@@ -189,7 +189,7 @@ impl TagRow {
     /// The lines of the list, from the typed text.
     fn lines(&self) -> Vec<Line> {
         let typed = self.typed();
-        let line = |name: &String, on| Line::Tag {
+        let line = |name: &TagName, on| Line::Tag {
             name: name.clone(),
             on,
         };
@@ -197,7 +197,7 @@ impl TagRow {
             return self.tags.iter().map(|name| line(name, true)).collect();
         }
         let lower = typed.to_lowercase();
-        let matches = |name: &&String| name.to_lowercase().contains(&lower);
+        let matches = |name: &&TagName| name.as_str().to_lowercase().contains(&lower);
         let mut lines: Vec<Line> = self
             .tags
             .iter()
@@ -212,7 +212,7 @@ impl TagRow {
                 .take(SUGGESTIONS)
                 .map(|name| line(name, false)),
         );
-        if let Some(name) = holm_markdown::normalize_tag(typed) {
+        if let Ok(name) = TagName::typed(typed) {
             let listed = lines
                 .iter()
                 .any(|line| matches!(line, Line::Tag { name: listed, .. } if *listed == name));
@@ -249,7 +249,7 @@ impl TagRow {
     fn choose(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let line = match self.cursor {
             Some(at) => self.lines().get(at).cloned(),
-            None => holm_markdown::normalize_tag(self.typed()).map(Line::Add),
+            None => TagName::typed(self.typed()).ok().map(Line::Add),
         };
         match line {
             Some(Line::Tag { name, on: true }) => cx.emit(TagChange::Remove(name)),
@@ -327,7 +327,7 @@ impl TagRow {
             .test_support()
     }
 
-    fn row_chip(at: usize, tag: &str, cx: &Context<Self>) -> impl IntoElement {
+    fn row_chip(at: usize, tag: &TagName, cx: &Context<Self>) -> impl IntoElement {
         chip(at, tag, cx).on_mouse_down(
             MouseButton::Left,
             cx.listener(move |row, _, window, cx| {
@@ -357,7 +357,7 @@ impl TagRow {
             let current = self.cursor == Some(at);
             let (label, mark, toggled) = match line {
                 Line::Tag { name, on } => (
-                    format!("#{name}"),
+                    text::tag_label(&name),
                     if on { "✓" } else { "" },
                     Some(if on { Toggled::True } else { Toggled::False }),
                 ),
@@ -465,12 +465,12 @@ fn frame() -> impl StatefulInteractiveElement + ParentElement + Styled + IntoEle
 }
 
 /// The chip of `tag`, the tag at `at` in the row.
-fn chip(at: usize, tag: &str, cx: &App) -> impl InteractiveElement + IntoElement + use<> {
+fn chip(at: usize, tag: &TagName, cx: &App) -> impl InteractiveElement + IntoElement + use<> {
     let theme = cx.theme();
     div()
         .id(ElementId::NamedInteger("tag-chip".into(), at as u64))
         .role(Role::ListItem)
-        .aria_label(tag.to_owned())
+        .aria_label(tag.to_string())
         .test_support()
         .max_w(CHIP_WIDTH)
         .truncate()
@@ -479,12 +479,12 @@ fn chip(at: usize, tag: &str, cx: &App) -> impl InteractiveElement + IntoElement
         .text_size(px(12.))
         .bg(theme.secondary)
         .text_color(theme.secondary_foreground)
-        .child(format!("#{tag}"))
+        .child(text::tag_label(tag))
 }
 
 /// The tag row of a note with no file yet: its tag, and `title` at the right end.
 pub(crate) fn new_note_row(
-    tag: Option<&str>,
+    tag: Option<&TagName>,
     title: AnyElement,
     cx: &App,
 ) -> impl IntoElement + use<> {
@@ -495,7 +495,7 @@ pub(crate) fn new_note_row(
 }
 
 /// Every tag name in the tree, parents first.
-fn flatten(tags: &[Tag], names: &mut Vec<String>) {
+fn flatten(tags: &[Tag], names: &mut Vec<TagName>) {
     for tag in tags {
         names.push(tag.name.clone());
         flatten(&tag.children, names);

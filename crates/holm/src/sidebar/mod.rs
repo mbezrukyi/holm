@@ -27,7 +27,7 @@ use gpui_kit::{
     uniform_list,
 };
 use holm_core::model::{Change, NoteInfo, Order};
-use holm_core::{FolderPath, NotePath};
+use holm_core::{FolderPath, NotePath, TagName};
 
 use crate::dialog::{Ask, Confirm};
 use crate::error::AppError;
@@ -72,7 +72,7 @@ pub(crate) enum SidebarEvent {
     /// Move, with the folder picker.
     Move(Target),
     /// Remove a tag from all notes, with the dialog.
-    DeleteTag(String),
+    DeleteTag(TagName),
     /// The view changed, or a folder rename moved the open note. The app keeps both in the
     /// config.
     ViewChanged,
@@ -91,7 +91,7 @@ struct Naming {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Named {
     Folder(FolderPath),
-    Tag(String),
+    Tag(TagName),
     /// A new folder in this parent folder. It exists only after `Enter`.
     NewFolder(FolderPath),
 }
@@ -409,7 +409,7 @@ impl Sidebar {
 
     /// The folder for a new note, and the tag it gets, from the item of the view. A note from
     /// the search results goes in the root folder.
-    pub(crate) fn new_note_place(&self) -> (FolderPath, Option<String>) {
+    pub(crate) fn new_note_place(&self) -> (FolderPath, Option<TagName>) {
         if self.searching() {
             return (FolderPath::root(), None);
         }
@@ -493,7 +493,7 @@ impl Sidebar {
             return;
         };
         let name = match &named {
-            Named::Tag(tag) => tag.clone(),
+            Named::Tag(tag) => tag.to_string(),
             Named::Folder(_) | Named::NewFolder(_) => item.name(),
         };
         self.open_name_field(named, Some(&name), item, window, cx);
@@ -609,6 +609,13 @@ impl Sidebar {
                 });
             }
             Named::Tag(from) if !name.trim().is_empty() => {
+                let name = match TagName::typed(&name) {
+                    Ok(name) => name,
+                    Err(error) => {
+                        done(Err(error), cx);
+                        return;
+                    }
+                };
                 let confirm = self.confirm.clone();
                 let window = window.window_handle();
                 let notes_folder = self.notes_folder.clone();
@@ -1052,7 +1059,7 @@ fn item_label(item: &Item) -> String {
     match item {
         Item::All => text::ALL_NOTES.to_owned(),
         Item::Folder(path) => path.to_string(),
-        Item::Tag(name) => format!("#{name}"),
+        Item::Tag(name) => text::tag_label(name),
     }
 }
 
@@ -1114,7 +1121,7 @@ impl Render for Sidebar {
                 let name = match item {
                     Item::All => text::ALL_NOTES.to_owned(),
                     Item::Folder(_) => item.name(),
-                    Item::Tag(name) => format!("#{name}"),
+                    Item::Tag(name) => text::tag_label(name),
                 };
                 let label = item_label(item);
                 let item = item.clone();

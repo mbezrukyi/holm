@@ -16,8 +16,8 @@ use gpui_kit::{
     IntoElement, MouseButton, Render, Role, StatefulInteractiveElement as _, Subscription,
     TestSupportExt as _, Window,
 };
-use holm_core::FolderPath;
 use holm_core::model::Note;
+use holm_core::{FolderPath, TagName};
 
 use crate::name_field::{NameEvent, NameWrite};
 use crate::notes_folder::NotesFolder;
@@ -34,7 +34,7 @@ pub(crate) enum NewNoteEvent {
 }
 
 pub(crate) struct NewNote {
-    tag: Option<String>,
+    tag: Option<TagName>,
     title: Entity<TitleField<Note>>,
     focus: FocusHandle,
     _subscription: Subscription,
@@ -45,7 +45,7 @@ impl NewNote {
     pub(crate) fn new(
         notes_folder: Entity<NotesFolder>,
         folder: FolderPath,
-        tag: Option<String>,
+        tag: Option<TagName>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -83,11 +83,7 @@ impl EventEmitter<NewNoteEvent> for NewNote {}
 
 impl Render for NewNote {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let row = tags::new_note_row(
-            self.tag.as_deref(),
-            self.title.clone().into_any_element(),
-            cx,
-        );
+        let row = tags::new_note_row(self.tag.as_ref(), self.title.clone().into_any_element(), cx);
         holm_editor::text_column(row)
             .id("new-note")
             .role(Role::Group)

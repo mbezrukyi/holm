@@ -35,7 +35,7 @@ use holm_core::model::{
     Change, ChangeList, DeleteCount, LinkTarget, Note, NoteInfo, NoteSet, Order, SearchResults,
     Source,
 };
-use holm_core::{Changes, Core, FolderPath, NotePath, Snapshot};
+use holm_core::{Changes, Core, FolderPath, NotePath, Snapshot, TagName};
 use holm_editor::PastedFile;
 
 use crate::error::AppError;
@@ -276,7 +276,7 @@ impl NotesFolder {
         &mut self,
         folder: FolderPath,
         title: String,
-        tag: Option<String>,
+        tag: Option<TagName>,
         done: impl FnOnce(holm_core::Result<Note>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
@@ -413,8 +413,8 @@ impl NotesFolder {
     /// Renames a tag in all notes, and gives the number of changed notes.
     pub(crate) fn rename_tag(
         &mut self,
-        from: String,
-        to: String,
+        from: TagName,
+        to: TagName,
         done: impl FnOnce(holm_core::Result<usize>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
@@ -424,18 +424,18 @@ impl NotesFolder {
     /// The number of notes that a tag rename changes, after the writes before it.
     pub(crate) fn tag_rename_count(
         &mut self,
-        from: String,
-        to: String,
+        from: TagName,
+        to: TagName,
         done: impl FnOnce(holm_core::Result<usize>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.write(move |core| core.tag_rename_count(&from, &to), done, cx);
+        self.write(move |core| Ok(core.tag_rename_count(&from, &to)), done, cx);
     }
 
     /// Removes a tag from all notes, and gives the number of changed notes.
     pub(crate) fn delete_tag(
         &mut self,
-        tag: String,
+        tag: TagName,
         done: impl FnOnce(holm_core::Result<usize>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
@@ -445,11 +445,11 @@ impl NotesFolder {
     /// The number of notes that a tag delete changes, after the writes before it.
     pub(crate) fn tag_delete_count(
         &mut self,
-        tag: String,
+        tag: TagName,
         done: impl FnOnce(holm_core::Result<usize>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.write(move |core| core.tag_delete_count(&tag), done, cx);
+        self.write(move |core| Ok(core.tag_delete_count(&tag)), done, cx);
     }
 
     /// Copies pasted or dropped files into `attachments/`, and gives the link to each copy
@@ -789,7 +789,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::test_paths::{folder_path, note_path};
+    use crate::test_paths::{folder_path, note_path, tag_name};
 
     fn notes_folder(cx: &mut TestAppContext) -> (TempDir, Entity<NotesFolder>) {
         let dir = tempfile::tempdir().unwrap();
@@ -889,7 +889,7 @@ mod tests {
             notes_folder.set_draft(Some(draft("# A\n\nfirst\n")));
             notes_folder.change_tag(
                 note_path("A.md"),
-                TagChange::Add("work".into()),
+                TagChange::Add(tag_name("work")),
                 |_, _| {},
                 cx,
             );
@@ -961,9 +961,9 @@ mod tests {
             cx.run_until_parked();
         };
 
-        change(TagChange::Add("a".into()), cx);
+        change(TagChange::Add(tag_name("a")), cx);
         fs::write(&file, "---\ntags: [a, b]\n---\n# A\n").unwrap();
-        change(TagChange::Remove("a".into()), cx);
+        change(TagChange::Remove(tag_name("a")), cx);
 
         let tags = holm_markdown::Note::parse(&fs::read_to_string(&file).unwrap()).tags();
         assert_eq!(tags, ["b"]);

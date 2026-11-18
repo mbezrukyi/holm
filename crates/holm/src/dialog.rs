@@ -16,6 +16,7 @@ use gpui_kit::{
 };
 use std::rc::Rc;
 
+use holm_core::TagName;
 use holm_core::model::DeleteCount;
 
 use crate::notes_folder::Step;
@@ -28,12 +29,12 @@ pub(crate) enum Ask {
     Delete { name: String, count: DeleteCount },
     /// Rename a tag in all notes.
     RenameTag {
-        from: String,
-        to: String,
+        from: TagName,
+        to: TagName,
         notes: usize,
     },
     /// Remove a tag from all notes.
-    DeleteTag { tag: String, notes: usize },
+    DeleteTag { tag: TagName, notes: usize },
 }
 
 /// Shows the dialog for an [`Ask`], and gives its step whether the user confirmed.

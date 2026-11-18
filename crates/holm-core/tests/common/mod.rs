@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use holm_core::{Core, Feed, FolderPath, NotePath};
+use holm_core::{Core, Feed, FolderPath, NotePath, TagName};
 use tempfile::TempDir;
 
 pub(crate) struct Folder {
@@ -127,6 +127,10 @@ pub(crate) fn note_path(path: &str) -> NotePath {
 
 pub(crate) fn folder_path(path: &str) -> FolderPath {
     FolderPath::new(path).unwrap()
+}
+
+pub(crate) fn tag_name(name: &str) -> TagName {
+    TagName::new(name).unwrap()
 }
 
 pub(crate) fn path_buf(path: impl Display) -> PathBuf {

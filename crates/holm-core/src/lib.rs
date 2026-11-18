@@ -17,6 +17,7 @@ pub mod sample;
 mod scan;
 mod snapshot;
 mod store;
+mod tag;
 mod watch;
 
 use std::collections::{HashMap, hash_map};
@@ -33,6 +34,7 @@ use futures_core::Stream;
 pub use error::{Error, NameProblem, Result};
 pub use paths::{FolderPath, NotePath};
 pub use snapshot::Snapshot;
+pub use tag::TagName;
 pub use watch::Feed;
 
 use diff::Touched;
@@ -500,21 +502,19 @@ impl Core {
 
     /// Adds the tag to the note and returns it. Its body, other tags and modification time stay.
     ///
-    /// The tag is cleaned like a typed tag. A note that has it already does not change.
+    /// A note that has it already does not change.
     ///
     /// # Errors
     ///
-    /// - [`Error::BadTag`] when nothing is left of `tag`.
     /// - [`Error::Read`] or [`Error::NotUtf8`] when the file can't be read as text.
     /// - [`Error::Write`] when the file can't be written. The old file then stays.
-    pub fn add_tag(&self, path: &NotePath, tag: &str) -> Result<NoteInfo> {
+    pub fn add_tag(&self, path: &NotePath, tag: &TagName) -> Result<NoteInfo> {
         self.inner.write(|pending| {
-            let tag = retag::clean(tag)?;
             pending
                 .edit_fields(path, |text| {
-                    let mut tags = text.tags();
-                    if !tags.contains(&tag) {
-                        tags.push(tag);
+                    let mut tags = TagName::of_note(text);
+                    if !tags.contains(tag) {
+                        tags.push(tag.clone());
                         text.set_tags(&tags);
                     }
                 })
@@ -527,14 +527,12 @@ impl Core {
     ///
     /// # Errors
     ///
-    /// - [`Error::BadTag`] when `tag` is not a tag name.
-    /// - The errors of [`Core::add_tag`] for the file.
-    pub fn remove_tag(&self, path: &NotePath, tag: &str) -> Result<NoteInfo> {
+    /// The errors of [`Core::add_tag`] for the file.
+    pub fn remove_tag(&self, path: &NotePath, tag: &TagName) -> Result<NoteInfo> {
         self.inner.write(|pending| {
-            let tag = retag::check(tag)?;
             pending
                 .edit_fields(path, |text| {
-                    let mut tags = text.tags();
+                    let mut tags = TagName::of_note(text);
                     let count = tags.len();
                     tags.retain(|other| other != tag);
                     if tags.len() != count {
@@ -563,19 +561,15 @@ impl Core {
     }
 
     /// How many notes [`Core::rename_tag`] changes.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::BadTag`] as in [`Core::rename_tag`].
-    pub fn tag_rename_count(&self, from: &str, to: &str) -> Result<usize> {
-        Ok(self.tag_edit_count(&TagEdit::rename(from, to)?))
+    pub fn tag_rename_count(&self, from: &TagName, to: &TagName) -> usize {
+        self.tag_edit_count(&TagEdit::Rename { from, to })
     }
 
     /// Renames the tag `from` to `to` in every note, and returns how many notes changed.
     ///
     /// Child tags follow: `work` to `job` makes `work/holm` into `job/holm`.
     /// When a note already has the new name, the two tags merge.
-    /// `to` is cleaned like a typed tag. The notes keep their modification times.
+    /// The notes keep their modification times.
     ///
     /// A note that can't be changed keeps its tags, with a log line. The other notes still change.
     /// Each note changes in one step, but the whole job does not. After a crash, some notes can
@@ -583,20 +577,15 @@ impl Core {
     ///
     /// # Errors
     ///
-    /// - [`Error::BadTag`] when `from` is not a tag name, or nothing is left of `to`.
-    /// - The first error of a note, as in [`Core::add_tag`].
-    pub fn rename_tag(&self, from: &str, to: &str) -> Result<usize> {
+    /// The first error of a note, as in [`Core::add_tag`].
+    pub fn rename_tag(&self, from: &TagName, to: &TagName) -> Result<usize> {
         self.inner
-            .write(|pending| pending.edit_tag(&TagEdit::rename(from, to)?))
+            .write(|pending| pending.edit_tag(&TagEdit::Rename { from, to }))
     }
 
     /// How many notes [`Core::delete_tag`] changes.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::BadTag`] when `tag` is not a tag name.
-    pub fn tag_delete_count(&self, tag: &str) -> Result<usize> {
-        Ok(self.tag_edit_count(&TagEdit::delete(tag)?))
+    pub fn tag_delete_count(&self, tag: &TagName) -> usize {
+        self.tag_edit_count(&TagEdit::Delete(tag))
     }
 
     /// Removes the tag and its child tags from every note, and returns how many notes changed.
@@ -605,11 +594,10 @@ impl Core {
     ///
     /// # Errors
     ///
-    /// - [`Error::BadTag`] when `tag` is not a tag name.
-    /// - The first error of a note, as in [`Core::add_tag`].
-    pub fn delete_tag(&self, tag: &str) -> Result<usize> {
+    /// The first error of a note, as in [`Core::add_tag`].
+    pub fn delete_tag(&self, tag: &TagName) -> Result<usize> {
         self.inner
-            .write(|pending| pending.edit_tag(&TagEdit::delete(tag)?))
+            .write(|pending| pending.edit_tag(&TagEdit::Delete(tag)))
     }
 
     /// Copies the file into `attachments/` at the root of the notes folder,
@@ -766,7 +754,7 @@ impl Pending<'_> {
         let store = &self.disk.store;
         let rewritten = store.rewrite(&paths, |_, old| {
             let mut text = holm_markdown::Note::parse(old);
-            let tags = text.tags();
+            let tags = TagName::of_note(&text);
             let new = edit.apply(&tags);
             (new != tags).then(|| {
                 text.set_tags(&new);
@@ -793,8 +781,8 @@ impl Pending<'_> {
             && from != to
         {
             self.touched.moved(Change::TagMoved {
-                from: (*from).to_owned(),
-                to: to.clone(),
+                from: (*from).clone(),
+                to: (*to).clone(),
             });
         }
         first_error.map_or(Ok(changed), Err)
