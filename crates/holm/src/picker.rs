@@ -1,4 +1,5 @@
-//! The folder picker for a move. It shows the folders whose path holds the typed text.
+//! The folder picker for a move. It shows the folders whose path holds the typed text, with no
+//! regard to capital letters.
 //! `↑` and `↓` pick a folder, `Enter` moves there, `Esc` cancels.
 
 use gpui_kit::{
@@ -10,6 +11,7 @@ use gpui_kit::{
 use holm_core::FolderPath;
 
 use crate::icons::Icon;
+use crate::lowercase::Lowercase;
 use crate::popup::{self, PickEvent, PickList, PickRow};
 use crate::sidebar::Target;
 use crate::text;
@@ -87,12 +89,12 @@ impl FolderPicker {
     }
 
     fn query_changed(&mut self, cx: &mut Context<Self>) {
-        let query = self.list.read(cx).query(cx).trim().to_lowercase();
+        let query = Lowercase::new(self.list.read(cx).query(cx).trim());
         self.rows = self
             .folders
             .iter()
             .enumerate()
-            .filter(|(_, folder)| name(folder).to_lowercase().contains(&query))
+            .filter(|(_, folder)| Lowercase::new(&name(folder)).holds(&query))
             .map(|(at, _)| at)
             .collect();
         let shown = self

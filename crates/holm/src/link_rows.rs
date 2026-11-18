@@ -3,7 +3,8 @@
 //! The field matches note titles with fuzzy matching. A `#` after an exact title switches to the
 //! headings of that note. A field that starts with `#` lists the headings of the open note.
 
-use crate::pick_notes::{Lowercase, PickNotes};
+use crate::lowercase::Lowercase;
+use crate::pick_notes::PickNotes;
 
 /// What the field asks for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

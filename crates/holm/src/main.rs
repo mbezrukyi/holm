@@ -12,6 +12,7 @@ mod icons;
 mod link_picker;
 mod link_rows;
 mod log;
+mod lowercase;
 mod message_line;
 mod name_field;
 mod notes;

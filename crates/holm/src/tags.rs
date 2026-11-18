@@ -2,7 +2,8 @@
 //!
 //! The row only shows the tags. A popup under it edits them, so the row never changes size.
 //! The popup holds the field and one list. With an empty field, the list holds the tags of
-//! the note, each with a `✓`. Typing filters it and adds the other known tags without a `✓`.
+//! the note, each with a `✓`. Typing keeps the tags whose name holds the typed text, with no
+//! regard to capital letters. It adds the other known tags that match, without a `✓`.
 //! A typed name that no line has shows as an "Add" line. The popup changes no files itself.
 //! It sends each added or removed tag as a [`TagChange`].
 //!
@@ -42,6 +43,7 @@ use holm_core::{NotePath, TagName};
 
 use crate::backlinks::{self, Backlinks};
 use crate::fold::Fold;
+use crate::lowercase::Lowercase;
 use crate::notes_folder::NotesFolder;
 use crate::popup::{self, Dropdown};
 use crate::text;
@@ -196,8 +198,8 @@ impl TagRow {
         if typed.is_empty() {
             return self.tags.iter().map(|name| line(name, true)).collect();
         }
-        let lower = typed.to_lowercase();
-        let matches = |name: &&TagName| name.as_str().to_lowercase().contains(&lower);
+        let typed_lower = Lowercase::new(typed);
+        let matches = |name: &&TagName| Lowercase::new(name.as_str()).holds(&typed_lower);
         let mut lines: Vec<Line> = self
             .tags
             .iter()

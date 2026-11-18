@@ -12,7 +12,8 @@ use gpui_kit::{
 use holm_core::NotePath;
 use holm_core::model::NoteInfo;
 
-use crate::pick_notes::{Lowercase, PickNotes};
+use crate::lowercase::Lowercase;
+use crate::pick_notes::PickNotes;
 use crate::popup::{self, PickEvent, PickList, PickRow};
 use crate::text;
 
@@ -79,7 +80,7 @@ fn rows(query: &str, notes: &PickNotes) -> Vec<usize> {
     notes
         .titles()
         .enumerate()
-        .filter(|(_, title)| title.as_str().contains(query.as_str()))
+        .filter(|(_, title)| title.holds(&query))
         .map(|(at, _)| at)
         .take(MAX_ROWS)
         .collect()
