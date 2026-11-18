@@ -4,7 +4,7 @@ use std::path::{Component, Path, PathBuf};
 
 use holm_markdown::{Body, Note as Text, Target};
 
-use crate::FolderPath;
+use crate::{FolderPath, NotePath};
 
 /// The path of a file that a note in `folder` links as `file`.
 ///
@@ -14,6 +14,20 @@ pub(crate) fn resolve(root: &Path, folder: &FolderPath, file: &str) -> PathBuf {
     match full.strip_prefix(root) {
         Ok(rel) => rel.to_owned(),
         Err(_) => full,
+    }
+}
+
+/// The path for a link from the note `note` to the absolute path `file`.
+///
+/// A file inside the notes folder `root` gets a path from the folder of the note.
+/// A file outside gets its absolute path. The path has no `.` and `..` parts.
+/// It does not look at the disk.
+pub(crate) fn link(root: &Path, note: &NotePath, file: &Path) -> PathBuf {
+    let file = clean(file);
+    if file.starts_with(root) {
+        relative(&root.join(note.folder()), &file)
+    } else {
+        file
     }
 }
 
@@ -96,7 +110,7 @@ fn clean(path: &Path) -> PathBuf {
 }
 
 /// The path from the folder `base` to `target`. Both are absolute and clean.
-pub(crate) fn relative(base: &Path, target: &Path) -> PathBuf {
+fn relative(base: &Path, target: &Path) -> PathBuf {
     let base: Vec<_> = base.components().collect();
     let target: Vec<_> = target.components().collect();
     let common = base.iter().zip(&target).take_while(|(a, b)| a == b).count();

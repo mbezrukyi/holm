@@ -181,6 +181,22 @@ fn file_link_is_relative_inside_and_absolute_outside() {
 }
 
 #[test]
+fn file_link_to_a_missing_file_outside_is_clean_and_absolute() {
+    let folder = Folder::new(&[("work/a.md", "")]);
+    let root = fs::canonicalize(folder.path("")).unwrap();
+
+    let link = folder
+        .core
+        .file_link(
+            &note_path("work/a.md"),
+            root.join("x/../../away/missing.pdf"),
+        )
+        .unwrap();
+
+    assert_eq!(link, root.parent().unwrap().join("away/missing.pdf"));
+}
+
+#[test]
 fn paste_image_keeps_the_format() {
     let folder = Folder::new(&[("a.md", "")]);
 

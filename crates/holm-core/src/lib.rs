@@ -209,7 +209,7 @@ impl Core {
     }
 
     /// The path for a link from the note at `note` to `file`, with no copy. A file inside the
-    /// notes folder gets a path from the folder of the note. A file outside keeps its absolute
+    /// notes folder gets a path from the folder of the note. A file outside gets its absolute
     /// path.
     ///
     /// # Errors
@@ -223,12 +223,7 @@ impl Core {
             });
         }
         let file = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_owned());
-        let root = self.inner.store.root();
-        if file.starts_with(root) {
-            Ok(relink::relative(&root.join(note.folder()), &file))
-        } else {
-            Ok(file)
-        }
+        Ok(relink::link(self.inner.store.root(), note, &file))
     }
 
     /// Reads one note.
@@ -643,8 +638,7 @@ impl Core {
         content: impl std::io::Read,
     ) -> Result<PathBuf> {
         let file = self.inner.store.add_attachment(stem, ext, content)?;
-        let folder = self.inner.store.root().join(note.folder());
-        Ok(relink::relative(&folder, &file))
+        Ok(relink::link(self.inner.store.root(), note, &file))
     }
 
     fn tag_edit_count(&self, edit: &TagEdit<'_>) -> usize {
