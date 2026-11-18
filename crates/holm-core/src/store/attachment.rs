@@ -4,7 +4,7 @@
 //! `Attachments/` is a user folder. A new folder name takes the name in any case, like a name
 //! clash.
 
-use std::ffi::OsStr;
+use std::fmt::Write as _;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -44,15 +44,19 @@ fn holds(folder: &FolderPath) -> bool {
 }
 
 impl Store {
-    /// Copies `content` into the attachment folder as `<stem>-<hash>` + `ext`, and returns
-    /// its absolute path. The hash is a short hash of the content, so a name never clashes.
+    /// Copies `content` into the attachment folder as `<stem>-<hash>.<ext>`, and returns its
+    /// absolute path. The hash is a short hash of the content, so a name never clashes.
+    /// With no `ext`, the name has no `.` either.
+    ///
+    /// The stem and the extension keep their text, but `/` and a leading `.` become `-`.
+    /// A very long stem or extension stops at [`MAX_STEM_BYTES`].
     ///
     /// When a file with that name is there, it keeps that file and drops the new copy.
     /// It makes the folder when it is missing.
     pub(crate) fn add_attachment(
         &self,
-        stem: &OsStr,
-        ext: &str,
+        stem: &str,
+        ext: Option<&str>,
         content: impl io::Read,
     ) -> Result<PathBuf> {
         let Some(folder) = folder() else {
@@ -81,12 +85,15 @@ impl Store {
         let file =
             temp_file(&dir, &mut hashed, None, None).map_err(|source| write_error(&dir, source))?;
         let hash = hashed.hash.finalize();
-        let mut name = stem.to_owned();
-        name.push("-");
+        let mut name = file_stem(stem);
+        name.push('-');
         for byte in &hash[..HASH_BYTES] {
-            name.push(format!("{byte:02x}"));
+            let _ = write!(name, "{byte:02x}");
         }
-        name.push(ext);
+        if let Some(ext) = ext {
+            name.push('.');
+            name.push_str(&file_stem(ext));
+        }
         let path = dir.join(&name);
         match file.persist_noclobber(&path) {
             Ok(_) => sync_dir(&dir).map_err(|e| write_error(&path, e))?,
@@ -120,7 +127,7 @@ impl Store {
 ///
 /// It keeps the text as it is, but replaces `/` and a leading `.` with `-`.
 /// It also cuts a very long text to [`MAX_STEM_BYTES`].
-pub(crate) fn file_stem(text: &str) -> String {
+fn file_stem(text: &str) -> String {
     let mut stem = text.replace('/', "-");
     if stem.starts_with('.') {
         stem.replace_range(..1, "-");

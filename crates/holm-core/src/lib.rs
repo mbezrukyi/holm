@@ -14,7 +14,7 @@ mod store;
 mod watch;
 
 use std::collections::{HashMap, hash_map};
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -599,9 +599,9 @@ impl Core {
     /// Copies the file into `attachments/` at the root of the notes folder,
     /// and returns its path from the folder of `note`, for a link.
     ///
-    /// The copy is `<stem>-<hash>.<ext>`, with a short hash of the content: `photo-3fa9c2e1.png`.
-    /// So the same file twice is one copy, and two files never clash.
-    /// A leading `.` becomes `-`. Holm makes `attachments/` when it is missing.
+    /// The copy has a short hash of the content in its name, like `photo-3fa9c2e1.png`.
+    /// So the same file twice is one copy. A leading `.` becomes `-`.
+    /// Holm makes `attachments/` when it is missing.
     /// The note itself does not change, and neither does the snapshot.
     ///
     /// # Errors
@@ -618,33 +618,28 @@ impl Core {
         if !source.metadata().map_err(read_error)?.is_file() {
             return Err(read_error(std::io::ErrorKind::IsADirectory.into()));
         }
-        let stem =
-            store::attachment::file_stem(&file.file_stem().unwrap_or_default().to_string_lossy());
-        let ext = file
-            .extension()
-            .map(|ext| format!(".{}", ext.to_string_lossy()))
-            .unwrap_or_default();
-        self.attach(note, &OsString::from(stem), &ext, source)
+        let stem = file.file_stem().unwrap_or_default().to_string_lossy();
+        let ext = file.extension().map(OsStr::to_string_lossy);
+        self.attach(note, &stem, ext.as_deref(), source)
     }
 
     /// Saves a pasted image into `attachments/`, and returns its path from the folder
     /// of `note`, for a link. `extension` names the image format, like `png`.
     ///
-    /// The name is `Pasted image-<hash>.<extension>`. Else it works as [`Core::attach_file`].
+    /// The name is like `Pasted image-3fa9c2e1.png`. Else it works as [`Core::attach_file`].
     ///
     /// # Errors
     ///
     /// [`Error::Write`] when the image can't be written.
     pub fn paste_image(&self, note: &NotePath, extension: &str, bytes: &[u8]) -> Result<PathBuf> {
-        let ext = format!(".{}", store::attachment::file_stem(extension));
-        self.attach(note, OsStr::new(PASTED_IMAGE), &ext, bytes)
+        self.attach(note, PASTED_IMAGE, Some(extension), bytes)
     }
 
     fn attach(
         &self,
         note: &NotePath,
-        stem: &OsStr,
-        ext: &str,
+        stem: &str,
+        ext: Option<&str>,
         content: impl std::io::Read,
     ) -> Result<PathBuf> {
         let file = self.inner.store.add_attachment(stem, ext, content)?;
