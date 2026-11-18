@@ -7,7 +7,7 @@ use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use holm_markdown::Note as Text;
+use holm_markdown::NoteFile;
 use rustix::fs::{Mode, OFlags};
 use tempfile::NamedTempFile;
 
@@ -187,18 +187,18 @@ impl Store {
 
     pub(crate) fn read(&self, rel: &NotePath) -> Result<(Note, Stamp)> {
         let (text, stamp) = read_text(&self.root.join(rel))?;
-        Ok((note(rel, &Text::parse(&text), stamp), stamp))
+        Ok((note(rel, &NoteFile::parse(&text), stamp), stamp))
     }
 
     /// Changes the frontmatter of the note with `edit` and keeps its modification time.
     pub(crate) fn edit_fields(
         &self,
         rel: &NotePath,
-        edit: impl FnOnce(&mut Text),
+        edit: impl FnOnce(&mut NoteFile),
     ) -> Result<(Note, Stamp)> {
         let path = self.root.join(rel);
         let (old, stamp) = read_text(&path)?;
-        let mut text = Text::parse(&old);
+        let mut text = NoteFile::parse(&old);
         edit(&mut text);
         write(&path, &old, &text.to_string(), Some(stamp))?;
         self.read(rel)
@@ -282,7 +282,7 @@ impl Store {
     pub(crate) fn save(&self, rel: &NotePath, body: &str) -> Result<(Note, Stamp)> {
         let path = self.root.join(rel);
         let (old, stamp) = read_text(&path)?;
-        let mut text = Text::parse(&old);
+        let mut text = NoteFile::parse(&old);
         let mut body = body.to_owned();
         if !body.is_empty() && !body.ends_with('\n') {
             body.push_str(text.line_ending().as_str());
@@ -307,7 +307,7 @@ impl Store {
     pub(crate) fn restore(&self, note: &Note) -> Result<(Note, Stamp)> {
         let path = self.root.join(&note.info.path);
         let dir = self.root.join(note.info.path.folder());
-        let mut text = Text::parse("");
+        let mut text = NoteFile::parse("");
         let id = note.info.id.clone().unwrap_or_else(NoteId::generate);
         text.set_id(Some(id.as_str()));
         text.set_tags(&note.info.tags);
@@ -330,7 +330,7 @@ impl Store {
         self.check_free(folder, rel.name(), None)?;
         let dir = self.root.join(folder);
         let path = self.root.join(rel);
-        let mut text = Text::parse("");
+        let mut text = NoteFile::parse("");
         text.set_id(Some(NoteId::generate().as_str()));
         let file = temp_file(&dir, text.to_string().as_bytes(), None, None)
             .map_err(|source| write_error(&dir, source))?;
@@ -590,7 +590,7 @@ enum Found {
     Temp(PathBuf),
 }
 
-fn note(rel: &NotePath, text: &Text, stamp: Stamp) -> Note {
+fn note(rel: &NotePath, text: &NoteFile, stamp: Stamp) -> Note {
     Note {
         info: NoteInfo {
             path: rel.clone(),

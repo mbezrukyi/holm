@@ -108,7 +108,7 @@ impl Write<'_> {
     fn edit_fields(
         &mut self,
         path: &NotePath,
-        edit: impl FnOnce(&mut holm_markdown::Note),
+        edit: impl FnOnce(&mut holm_markdown::NoteFile),
     ) -> Result<Note> {
         let (note, stamp) = self.disk.store.edit_fields(path, edit)?;
         self.update(&note, stamp)
@@ -196,7 +196,7 @@ impl Write<'_> {
             .paths(NoteSet::WithTag(edit.tag()), Order::Title);
         let store = &self.disk.store;
         let rewritten = store.rewrite(&paths, |_, old| {
-            let mut text = holm_markdown::Note::parse(old);
+            let mut text = holm_markdown::NoteFile::parse(old);
             let tags = TagName::of_note(&text);
             let new = edit.apply(&tags);
             (new != tags).then(|| {

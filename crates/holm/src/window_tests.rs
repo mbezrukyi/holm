@@ -812,7 +812,7 @@ fn popup_open(cx: &mut TestAppContext, handle: AnyWindowHandle) -> bool {
 
 /// The tags and the pin in the file of a note.
 fn fields(path: &Path) -> (Vec<String>, bool) {
-    let note = holm_markdown::Note::parse(&read(path));
+    let note = holm_markdown::NoteFile::parse(&read(path));
     (note.tags(), note.pinned())
 }
 
@@ -2444,7 +2444,7 @@ fn a_click_outside_a_popup_never_reaches_the_parts_under_it(cx: &mut TestAppCont
 
 /// The id in the frontmatter of a note file.
 fn id_of(path: &Path) -> String {
-    holm_markdown::Note::parse(&read(path))
+    holm_markdown::NoteFile::parse(&read(path))
         .id()
         .expect("the note has an id")
 }
@@ -2509,7 +2509,10 @@ fn the_link_picker_links_notes_headings_and_new_notes(cx: &mut TestAppContext) {
     assert_eq!(options(cx), ["Create “Gamma”*"]);
     keys(cx, handle, "enter");
     let gamma_path = notes.join("Gamma.md");
-    assert_eq!(holm_markdown::Note::parse(&read(&gamma_path)).body(), "");
+    assert_eq!(
+        holm_markdown::NoteFile::parse(&read(&gamma_path)).body(),
+        ""
+    );
     let gamma = id_of(&gamma_path);
     let text = editor_text(cx, handle);
     assert!(text.starts_with("# Alpha\n"));

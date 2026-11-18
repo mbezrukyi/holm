@@ -34,28 +34,28 @@ impl LineEnding {
 
 /// The text of one note, split into frontmatter and body.
 ///
-/// [`Note::parse`] never fails, and its [`Display`](fmt::Display) gives back the same bytes.
+/// [`NoteFile::parse`] never fails, and its [`Display`](fmt::Display) gives back the same bytes.
 /// The setters change only Holm's own fields: `id`, `tags` and `pinned`.
 /// Every other line stays in its place with its exact text.
 ///
 /// ```
-/// use holm_markdown::Note;
+/// use holm_markdown::NoteFile;
 ///
 /// let text = "---\nauthor: me\n---\n# Plans\n";
-/// let mut note = Note::parse(text);
+/// let mut note = NoteFile::parse(text);
 /// assert_eq!(note.preview(), "Plans");
 ///
 /// note.set_tags(&["work/holm"]);
 /// assert_eq!(note.to_string(), "---\ntags:\n  - work/holm\nauthor: me\n---\n# Plans\n");
 /// ```
 #[derive(Clone, Debug)]
-pub struct Note {
+pub struct NoteFile {
     frontmatter: Option<Frontmatter>,
     body: String,
     line_ending: LineEnding,
 }
 
-impl Note {
+impl NoteFile {
     /// Splits the text of a note.
     ///
     /// A frontmatter starts with a `---` line at the very top and ends with a `---` or `...` line.
@@ -104,9 +104,9 @@ impl Note {
     /// It is empty when the body has no text. A long line is cut to 200 chars.
     ///
     /// ```
-    /// use holm_markdown::Note;
+    /// use holm_markdown::NoteFile;
     ///
-    /// let note = Note::parse("\n- Buy **milk**\n");
+    /// let note = NoteFile::parse("\n- Buy **milk**\n");
     /// assert_eq!(note.preview(), "Buy milk");
     /// ```
     pub fn preview(&self) -> String {
@@ -161,7 +161,7 @@ impl Note {
     }
 }
 
-impl fmt::Display for Note {
+impl fmt::Display for NoteFile {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(frontmatter) = &self.frontmatter {
             write!(f, "{frontmatter}")?;

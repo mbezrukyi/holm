@@ -6,7 +6,7 @@ use std::collections::hash_map::Entry;
 use std::hash::BuildHasher as _;
 use std::path::{Component, Path, PathBuf};
 
-use holm_markdown::{Body, Note as Text, Target};
+use holm_markdown::{Body, NoteFile, Target};
 
 use crate::model::{Link, LinkTarget, Note, NoteId};
 use crate::{FolderPath, NotePath, Result, Snapshot};
@@ -146,7 +146,7 @@ pub(crate) fn relink(
     to: &FolderPath,
     moved: Option<FolderMove<'_>>,
 ) -> Option<String> {
-    let mut note = Text::parse(text);
+    let mut note = NoteFile::parse(text);
     let body = note.body();
     let mut edits = Vec::new();
     for link in Body::parse(body).links() {

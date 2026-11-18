@@ -46,7 +46,7 @@ impl Paint {
 
 /// What a key in the window does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Step {
+pub(crate) enum KeyResult {
     /// The window stays open.
     Stay,
     /// The window closes with no change.
@@ -73,36 +73,36 @@ impl ColorWindow {
     ///
     /// Keys 1 to 6 pick a palette color, 7 to 9 a custom color, and 0 removes the color. `+`
     /// opens the hex field. In the field, Enter takes a `rgb` or `rrggbb` value. Esc closes.
-    pub(crate) fn key(&mut self, keystroke: &Keystroke, custom: &[Color]) -> Step {
+    pub(crate) fn key(&mut self, keystroke: &Keystroke, custom: &[Color]) -> KeyResult {
         let key = keystroke.key.as_str();
         if key == "escape" {
-            return Step::Close;
+            return KeyResult::Close;
         }
         if let Some(hex) = &mut self.hex {
             return match key {
                 "enter" => Color::from_hex(&format!("#{hex}"))
-                    .map_or(Step::Stay, |color| Step::Apply(Some(color))),
+                    .map_or(KeyResult::Stay, |color| KeyResult::Apply(Some(color))),
                 "backspace" => {
                     hex.pop();
-                    Step::Stay
+                    KeyResult::Stay
                 }
-                _ if keystroke.key_char.is_some() => Step::Type,
-                _ => Step::Stay,
+                _ if keystroke.key_char.is_some() => KeyResult::Type,
+                _ => KeyResult::Stay,
             };
         }
         if keystroke.key_char.as_deref() == Some("+") || key == "+" {
             self.hex = Some(String::new());
-            return Step::Stay;
+            return KeyResult::Stay;
         }
         let Some(digit) = key.parse::<usize>().ok().filter(|_| key.len() == 1) else {
-            return Step::Stay;
+            return KeyResult::Stay;
         };
         match digit {
-            0 => Step::Apply(None),
-            1..=6 => Step::Apply(Some(self.paint.palette()[digit - 1])),
+            0 => KeyResult::Apply(None),
+            1..=6 => KeyResult::Apply(Some(self.paint.palette()[digit - 1])),
             _ => custom
                 .get(digit - 7)
-                .map_or(Step::Stay, |color| Step::Apply(Some(*color))),
+                .map_or(KeyResult::Stay, |color| KeyResult::Apply(Some(*color))),
         }
     }
 

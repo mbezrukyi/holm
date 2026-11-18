@@ -11,7 +11,7 @@ const MAX_STEPS: usize = 1000;
 
 /// One replaced range. `start` is a byte offset in the text right before this change.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct Change {
+pub(super) struct TextChange {
     pub(super) start: usize,
     pub(super) removed: String,
     pub(super) inserted: String,
@@ -33,8 +33,8 @@ pub(crate) enum Group {
 
 /// One undo step: the changes in the order they were made.
 #[derive(Debug)]
-pub(super) struct Step {
-    pub(super) changes: Vec<Change>,
+pub(super) struct UndoStep {
+    pub(super) changes: Vec<TextChange>,
     pub(super) before: Ends,
     pub(super) after: Ends,
     pub(super) group: Group,
@@ -44,13 +44,13 @@ pub(super) struct Step {
 
 #[derive(Debug, Default)]
 pub(super) struct History {
-    undo: VecDeque<Step>,
-    redo: Vec<Step>,
+    undo: VecDeque<UndoStep>,
+    redo: Vec<UndoStep>,
 }
 
 impl History {
     /// Adds a new step, or joins it to the last one. It clears the redo steps.
-    pub(super) fn record(&mut self, step: Step) {
+    pub(super) fn record(&mut self, step: UndoStep) {
         self.redo.clear();
         if let Some(last) = self.undo.back_mut()
             && last.join(&step)
@@ -63,28 +63,28 @@ impl History {
         }
     }
 
-    pub(super) fn pop_undo(&mut self) -> Option<Step> {
+    pub(super) fn pop_undo(&mut self) -> Option<UndoStep> {
         self.undo.pop_back()
     }
 
-    pub(super) fn push_redo(&mut self, mut step: Step) {
+    pub(super) fn push_redo(&mut self, mut step: UndoStep) {
         step.time = None;
         self.redo.push(step);
     }
 
-    pub(super) fn pop_redo(&mut self) -> Option<Step> {
+    pub(super) fn pop_redo(&mut self) -> Option<UndoStep> {
         self.redo.pop()
     }
 
     /// Puts back a redone step, and keeps the other redo steps.
-    pub(super) fn push_undo(&mut self, step: Step) {
+    pub(super) fn push_undo(&mut self, step: UndoStep) {
         self.undo.push_back(step);
     }
 }
 
-impl Step {
+impl UndoStep {
     /// Adds `next` to this step when both are one run of typing or of removal.
-    fn join(&mut self, next: &Step) -> bool {
+    fn join(&mut self, next: &UndoStep) -> bool {
         let (Some(time), Some(next_time)) = (self.time, next.time) else {
             return false;
         };

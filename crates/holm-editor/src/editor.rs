@@ -13,7 +13,7 @@ use gpui_kit::{
 };
 use holm_markdown::{Color, Target};
 
-use crate::color::{self, ColorWindow, Paint, Step};
+use crate::color::{self, ColorWindow, KeyResult, Paint};
 use crate::element::{EditorElement, Layout, Scroll, Theme};
 use crate::files::{FileKind, LinkedFiles};
 use crate::find::Find;
@@ -627,10 +627,10 @@ impl Editor {
             return true;
         }
         match window.key(keystroke, &self.custom_colors) {
-            Step::Type => return false,
-            Step::Stay => {}
-            Step::Close => self.color = None,
-            Step::Apply(color) => {
+            KeyResult::Type => return false,
+            KeyResult::Stay => {}
+            KeyResult::Close => self.color = None,
+            KeyResult::Apply(color) => {
                 let paint = window.paint;
                 self.color = None;
                 let changed = self.model.toggle_format(paint.format(color));

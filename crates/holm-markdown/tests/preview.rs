@@ -1,9 +1,9 @@
 //! The preview line of a note.
 
-use holm_markdown::Note;
+use holm_markdown::NoteFile;
 
 fn preview(text: &str) -> String {
-    Note::parse(text).preview()
+    NoteFile::parse(text).preview()
 }
 
 #[test]

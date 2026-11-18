@@ -76,7 +76,7 @@ impl TagName {
     }
 
     /// The tags of a parsed note.
-    pub(crate) fn of_note(text: &holm_markdown::Note) -> Vec<Self> {
+    pub(crate) fn of_note(text: &holm_markdown::NoteFile) -> Vec<Self> {
         text.tags().into_iter().map(Self::from_written).collect()
     }
 }

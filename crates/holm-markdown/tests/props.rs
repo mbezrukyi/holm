@@ -1,6 +1,6 @@
 //! Property tests for split, join and the field setters.
 
-use holm_markdown::{Note, normalize_tag};
+use holm_markdown::{NoteFile, normalize_tag};
 use proptest::prelude::*;
 
 /// Lines that look like frontmatter, Markdown and YAML, to reach the edge cases.
@@ -79,7 +79,7 @@ fn frontmatter() -> impl Strategy<Value = (Vec<String>, Vec<String>)> {
 proptest! {
     #[test]
     fn split_then_join_gives_the_same_bytes(text in note_text()) {
-        let note = Note::parse(&text);
+        let note = NoteFile::parse(&text);
         prop_assert_eq!(note.to_string(), text);
         // The readers never panic.
         let _ = (note.id(), note.tags(), note.pinned(), note.preview());
@@ -87,7 +87,7 @@ proptest! {
 
     #[test]
     fn any_string_joins_back(text in any::<String>()) {
-        prop_assert_eq!(Note::parse(&text).to_string(), text);
+        prop_assert_eq!(NoteFile::parse(&text).to_string(), text);
     }
 
     #[test]
@@ -105,7 +105,7 @@ proptest! {
         }
         text = format!("{text}---{le}{body}");
 
-        let mut note = Note::parse(&text);
+        let mut note = NoteFile::parse(&text);
         for op in &ops {
             match op {
                 Op::Id(id) => note.set_id(id.as_deref()),
@@ -115,7 +115,7 @@ proptest! {
         }
         let out = note.to_string();
 
-        let reparsed = Note::parse(&out);
+        let reparsed = NoteFile::parse(&out);
         prop_assert_eq!(reparsed.body(), body.as_str());
         let frontmatter = &out[..out.len() - body.len()];
         let kept: Vec<&str> = frontmatter.split(le).filter(|line| line.contains('Q')).collect();

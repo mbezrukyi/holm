@@ -4,10 +4,10 @@
 //! too. Its text can run over several lines. Quote markers or an indent can stand between
 //! them. The tree skips them, but a node that crosses a line holds them in its range.
 
+mod html_tag;
 mod parse;
 mod restyle;
 mod scan;
-mod tag;
 
 use std::borrow::Cow;
 use std::ops::Range;
@@ -55,7 +55,7 @@ pub enum Kind {
     Image(Box<Destination>),
     /// A line break: a backslash or two spaces at the end of a line.
     HardBreak,
-    /// Raw HTML that is not a Holm style tag, or a tag with no partner.
+    /// Raw HTML that is not a Holm style HTML tag, or one with no partner.
     Html,
 }
 

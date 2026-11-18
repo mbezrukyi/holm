@@ -4,19 +4,19 @@
 use super::Kind;
 use crate::Color;
 
-/// A Holm tag that opens or closes a style.
-pub(super) enum Tag {
+/// An HTML tag that opens or closes a style.
+pub(super) enum HtmlTag {
     Open(&'static str, Kind),
     Close(&'static str),
 }
 
 const NAMES: [&str; 9] = ["u", "span", "mark", "b", "strong", "i", "em", "s", "del"];
 
-/// Reads one raw HTML tag. Other tags, and a `<span>` with no hex color, give `None`.
-pub(super) fn read(source: &str) -> Option<Tag> {
+/// Reads one raw HTML tag. Other HTML tags, and a `<span>` with no hex color, give `None`.
+pub(super) fn read(source: &str) -> Option<HtmlTag> {
     let inner = source.strip_prefix('<')?.strip_suffix('>')?;
     if let Some(name) = inner.strip_prefix('/') {
-        return known(name.trim_end()).map(Tag::Close);
+        return known(name.trim_end()).map(HtmlTag::Close);
     }
     if inner.ends_with('/') {
         return None;
@@ -36,7 +36,7 @@ pub(super) fn read(source: &str) -> Option<Tag> {
         "i" | "em" => Kind::Emphasis,
         _ => Kind::Strikethrough,
     };
-    Some(Tag::Open(name, kind))
+    Some(HtmlTag::Open(name, kind))
 }
 
 fn known(name: &str) -> Option<&'static str> {

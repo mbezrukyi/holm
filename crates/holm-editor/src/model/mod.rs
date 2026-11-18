@@ -24,7 +24,7 @@ pub(crate) use display::{
 };
 pub(crate) use format::Format;
 pub(crate) use history::Group;
-use history::{Change, Ends, History, Step};
+use history::{Ends, History, TextChange, UndoStep};
 pub(crate) use links::LinkForm;
 
 const LF: LineType = LineType::LF;
@@ -229,7 +229,7 @@ impl Model {
             if self.text[start..end] == text {
                 continue;
             }
-            changes.push(Change {
+            changes.push(TextChange {
                 start,
                 removed: self.text[start..end].to_owned(),
                 inserted: text.clone(),
@@ -241,7 +241,7 @@ impl Model {
         }
         self.reparse();
         self.set_ends(ends);
-        self.history.record(Step {
+        self.history.record(UndoStep {
             changes,
             before,
             after: self.ends(),

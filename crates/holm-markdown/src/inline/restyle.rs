@@ -7,7 +7,7 @@ use std::ops::Range;
 
 use super::parse::{Defs, parse};
 use super::{Kind, Leaf, Node};
-use super::{scan, tag};
+use super::{html_tag, scan};
 use crate::{BlockKind, Body, Color};
 
 /// A format key: the inline style it adds or removes, or the color it sets.
@@ -1115,7 +1115,7 @@ impl Writer<'_> {
                     escape_markers(source, &mut self.out);
                 } else if self.policy.escape
                     && piece.class == Class::Html
-                    && tag::read(source).is_some()
+                    && html_tag::read(source).is_some()
                 {
                     // A lone Holm tag could pair with a new one.
                     self.out.push('\\');

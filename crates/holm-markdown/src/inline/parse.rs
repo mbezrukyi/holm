@@ -4,8 +4,8 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
+use super::html_tag::{self, HtmlTag};
 use super::scan::{self, InlineLink};
-use super::tag::{self, Tag};
 use super::{Destination, Kind, Node};
 use crate::body::link;
 
@@ -680,12 +680,12 @@ fn pair_tags(text: &str, nodes: Vec<Node>) -> Vec<Node> {
             out.push(node);
             continue;
         }
-        match tag::read(&text[node.source.clone()]) {
-            Some(Tag::Open(name, kind)) => {
+        match html_tag::read(&text[node.source.clone()]) {
+            Some(HtmlTag::Open(name, kind)) => {
                 open.push((name, out.len(), kind));
                 out.push(node);
             }
-            Some(Tag::Close(name)) => {
+            Some(HtmlTag::Close(name)) => {
                 let Some(k) = open.iter().rposition(|(n, _, _)| *n == name) else {
                     out.push(node);
                     continue;

@@ -3,7 +3,7 @@
 use std::fmt::Write as _;
 use std::fs;
 
-use holm_markdown::Note;
+use holm_markdown::NoteFile;
 
 /// Shows `\r`, so the snapshot shows the line endings.
 fn visible(text: &str) -> String {
@@ -11,7 +11,7 @@ fn visible(text: &str) -> String {
 }
 
 fn report(text: &str) -> String {
-    let note = Note::parse(text);
+    let note = NoteFile::parse(text);
     let frontmatter = &text[..text.len() - note.body().len()];
 
     let mut edited = note.clone();
@@ -41,7 +41,7 @@ fn report(text: &str) -> String {
 fn samples() {
     insta::glob!("samples/*.md", |path| {
         let text = fs::read_to_string(path).unwrap();
-        assert_eq!(Note::parse(&text).to_string(), text);
+        assert_eq!(NoteFile::parse(&text).to_string(), text);
         insta::assert_snapshot!(report(&text));
     });
 }

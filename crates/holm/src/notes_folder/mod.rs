@@ -1208,7 +1208,7 @@ mod tests {
         fs::write(&file, "---\ntags: [a, b]\n---\n# A\n").unwrap();
         change(TagChange::Remove(tag_name("a")), cx);
 
-        let tags = holm_markdown::Note::parse(&fs::read_to_string(&file).unwrap()).tags();
+        let tags = holm_markdown::NoteFile::parse(&fs::read_to_string(&file).unwrap()).tags();
         assert_eq!(tags, ["b"]);
     }
 }
