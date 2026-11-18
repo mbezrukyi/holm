@@ -41,14 +41,6 @@ pub struct FolderPath(Plain);
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Name(Arc<[u8]>);
 
-/// A note or a folder that the core brings up to date with the disk. A folder node holds
-/// everything at its path and below it.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub(crate) enum Node {
-    Note(NotePath),
-    Folder(FolderPath),
-}
-
 impl Name {
     /// The name that a person typed, with no spaces around it.
     ///
@@ -306,26 +298,6 @@ fn split(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
         Some(slash) => (&bytes[..slash], &bytes[slash + 1..]),
         None => (&b""[..], bytes),
     })
-}
-
-impl Node {
-    /// Whether `other` is this node or below it.
-    pub(crate) fn holds(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Folder(folder), Self::Note(note)) => note.is_below(folder),
-            (Self::Folder(_), Self::Folder(folder)) => self.holds_folder(folder),
-            (Self::Note(note), Self::Note(other)) => note == other,
-            (Self::Note(_), Self::Folder(_)) => false,
-        }
-    }
-
-    /// Whether `folder` is this node or below it.
-    pub(crate) fn holds_folder(&self, folder: &FolderPath) -> bool {
-        match self {
-            Self::Folder(node) => node == folder || folder.is_below(node),
-            Self::Note(_) => false,
-        }
-    }
 }
 
 /// Whether `name` can be one part of a plain path. A zero byte would break the order.
@@ -788,18 +760,5 @@ mod tests {
         for raw in ["", "/a", "work/", ".git/x", "work/.a", "a//b", "./a"] {
             assert_eq!(split(raw), None, "{raw}");
         }
-    }
-
-    #[test]
-    fn a_folder_node_holds_itself_and_what_is_below_it() {
-        let work = Node::Folder(folder("work"));
-        assert!(work.holds(&work));
-        assert!(work.holds(&Node::Note(note("work/a.md"))));
-        assert!(work.holds(&Node::Folder(folder("work/x"))));
-        assert!(!work.holds(&Node::Folder(folder("workshop"))));
-        assert!(Node::Folder(FolderPath::root()).holds(&Node::Note(note("a.md"))));
-        let a = Node::Note(note("a.md"));
-        assert!(a.holds(&a));
-        assert!(!a.holds(&Node::Folder(folder("a.md"))));
     }
 }

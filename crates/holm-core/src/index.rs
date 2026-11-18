@@ -20,7 +20,8 @@ use rusqlite::{Connection, OptionalExtension as _, params};
 
 use crate::error::{Error, Result};
 use crate::model::{Change, Link, LinkTarget, Note, NoteId, NoteInfo};
-use crate::paths::{FolderPath, Node, NotePath, NoteReader};
+use crate::nodes::{Node, Nodes};
+use crate::paths::{NotePath, NoteReader};
 use crate::relink::resolve;
 use crate::snapshot::Delta;
 use crate::store::{Stamp, Store, attachment, time};
@@ -107,7 +108,7 @@ impl Index {
         let path = dir.join(FILE);
         let opened = fs::create_dir_all(dir).map_err(Fail::Io).and_then(|()| {
             let mut conn = connect(&path)?;
-            sync(&mut conn, store, &[Node::Folder(FolderPath::root())])?;
+            sync(&mut conn, store, &Nodes::root())?;
             Ok(conn)
         });
         let conn = match opened {
@@ -181,8 +182,7 @@ impl Index {
     }
 
     /// Brings the notes at or below each of `nodes` up to date with the files.
-    /// No node may be inside another.
-    pub(crate) fn refresh(&self, store: &Store, nodes: &[Node]) -> Result<Refresh> {
+    pub(crate) fn refresh(&self, store: &Store, nodes: &Nodes) -> Result<Refresh> {
         self.run(store, |conn| sync(conn, store, nodes))
     }
 
@@ -286,7 +286,7 @@ fn fresh(path: &Path, store: &Store, fail: &Fail) -> Result<Connection, Fail> {
             let mut conn = Connection::open_in_memory()?;
             settings(&conn)?;
             schema(&mut conn)?;
-            sync(&mut conn, store, &[Node::Folder(FolderPath::root())])?;
+            sync(&mut conn, store, &Nodes::root())?;
             Ok(conn)
         }
         conn => conn,
@@ -336,7 +336,7 @@ fn schema(conn: &mut Connection) -> Result<(), Fail> {
 fn rebuild(path: &Path, store: &Store) -> Result<Connection, Fail> {
     remove(path)?;
     let mut conn = connect(path)?;
-    sync(&mut conn, store, &[Node::Folder(FolderPath::root())])?;
+    sync(&mut conn, store, &Nodes::root())?;
     Ok(conn)
 }
 
@@ -357,7 +357,7 @@ fn remove(path: &Path) -> Result<(), Fail> {
 ///
 /// It handles the files the index knows before new ones. So a known file keeps its id
 /// when a new file has the same id.
-fn sync(conn: &mut Connection, store: &Store, nodes: &[Node]) -> Result<Refresh, Fail> {
+fn sync(conn: &mut Connection, store: &Store, nodes: &Nodes) -> Result<Refresh, Fail> {
     let mut files = Vec::new();
     for node in nodes {
         files.extend(store.files(node)?);

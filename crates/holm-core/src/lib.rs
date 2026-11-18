@@ -5,6 +5,7 @@
 mod error;
 mod index;
 pub mod model;
+mod nodes;
 mod paths;
 mod relink;
 mod retag;
@@ -30,7 +31,8 @@ pub use watch::Feed;
 
 use index::Index;
 use model::{Change, ChangeList, DeleteCount, LinkTarget, Note, NoteId, NoteInfo, NoteSet, Order};
-use paths::{Name, Node};
+use nodes::{Node, Nodes};
+use paths::Name;
 use retag::TagEdit;
 use snapshot::Delta;
 use store::Store;
@@ -916,7 +918,7 @@ impl Inner {
     /// Updates the index and the draft at each path after Holm's own change, and returns
     /// whether a note changed. It adds no change to the list, so the write adds its own.
     fn refresh(&self, draft: &mut Draft<'_>, nodes: Vec<Node>) -> Result<bool> {
-        let refresh = self.index.refresh(&self.store, &outer(nodes))?;
+        let refresh = self.index.refresh(&self.store, &Nodes::new(nodes))?;
         Ok(draft.notes(refresh.delta))
     }
 
@@ -924,12 +926,7 @@ impl Inner {
     /// change list.
     fn apply(&self, batch: Batch) -> Result<()> {
         self.write(|draft| {
-            let nodes = outer(
-                batch
-                    .into_iter()
-                    .flat_map(|path| nodes(&self.store, &draft.next, &path))
-                    .collect(),
-            );
+            let nodes = Nodes::outside(&self.store, &draft.next, batch);
             if nodes.is_empty() {
                 return Ok(());
             }
@@ -976,49 +973,6 @@ impl Stream for Changes {
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<ChangeList>> {
         Pin::new(&mut self.receive).poll_next(cx)
     }
-}
-
-/// The nodes that are not inside another of them, each once.
-fn outer(mut nodes: Vec<Node>) -> Vec<Node> {
-    nodes.sort();
-    nodes.dedup();
-    let all = nodes.clone();
-    nodes.retain(|node| !all.iter().any(|other| other != node && other.holds(node)));
-    nodes
-}
-
-/// The nodes for an outside change at the raw path `path`: what is there now, and what was
-/// there in `before`. The empty path is the whole notes folder.
-///
-/// A path that is gone, and that `before` knows as no note, may have been a folder that
-/// `before` does not list, like `attachments/`. So it gives a folder node.
-fn nodes(store: &Store, before: &Snapshot, path: &Path) -> Vec<Node> {
-    if path.as_os_str().is_empty() {
-        return vec![Node::Folder(FolderPath::root())];
-    }
-    let Some((folder, name)) = FolderPath::split_raw(path) else {
-        return Vec::new();
-    };
-    let mut nodes = Vec::new();
-    let now = match store.entry(&folder, &name) {
-        store::Entry::Note(note, _) => Some(Node::Note(note)),
-        store::Entry::Folder(folder) => Some(Node::Folder(folder)),
-        store::Entry::Other | store::Entry::Missing => None,
-    };
-    let note = folder
-        .note_file(&name)
-        .filter(|note| before.note(note).is_some());
-    let child = folder.child(&name);
-    match (&now, note) {
-        (_, Some(note)) => nodes.push(Node::Note(note)),
-        (Some(Node::Note(_)), None) if before.has_folder(&child) => {
-            nodes.push(Node::Folder(child));
-        }
-        (Some(_), None) => {}
-        (None, None) => nodes.push(Node::Folder(child)),
-    }
-    nodes.extend(now);
-    nodes
 }
 
 /// A lock that still works after a panic in another thread. The data it guards stays valid.

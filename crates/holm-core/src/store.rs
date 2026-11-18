@@ -15,7 +15,8 @@ use sha2::{Digest as _, Sha256};
 
 use crate::error::{Error, NameProblem, Result};
 use crate::model::{Note, NoteId, NoteInfo};
-use crate::paths::{FolderPath, Name, Node, NotePath};
+use crate::nodes::Node;
+use crate::paths::{FolderPath, Name, NotePath};
 use crate::relink::{Moved, relink};
 
 pub(crate) mod attachment;
