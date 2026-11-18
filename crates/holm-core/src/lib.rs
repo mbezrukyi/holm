@@ -2,7 +2,9 @@
 //!
 //! It has no UI. The app and the later manager use it through one [`Core`] handle.
 
+mod changes;
 mod diff;
+mod disk;
 mod error;
 mod facts;
 mod index;
@@ -22,27 +24,21 @@ mod watch;
 mod write;
 
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::task::{Context, Poll};
 
-use futures_channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use futures_core::Stream;
-
+pub use changes::Changes;
 pub use error::{Error, NameProblem, Result};
 pub use paths::{FolderPath, NotePath};
 pub use snapshot::Snapshot;
 pub use tag::TagName;
 pub use watch::Feed;
 
+use changes::Listeners;
+use disk::Disk;
 use facts::Facts;
-use index::{Index, Row, Rows};
-use model::{
-    ChangeList, DeleteCount, LinkTarget, Note, NoteId, NoteInfo, Order, SearchResults, Source,
-};
-use nodes::{Node, Nodes};
+use model::{DeleteCount, LinkTarget, Note, NoteId, NoteInfo, Order, SearchResults, Source};
+use nodes::Node;
 use paths::Name;
-use reconcile::Settled;
 use retag::TagEdit;
 use store::Store;
 use watch::{Apply, Batch};
@@ -61,7 +57,7 @@ pub struct Core {
 struct Inner {
     /// Each write and each watch batch holds it to the end, so no reader sees half of one.
     locked: Mutex<Locked>,
-    listeners: Mutex<Vec<UnboundedSender<ChangeList>>>,
+    listeners: Listeners,
     _watcher: Option<watch::Watcher>,
 }
 
@@ -70,13 +66,6 @@ struct Inner {
 struct Locked {
     disk: Disk,
     facts: Facts,
-}
-
-/// The note files and the index rows.
-#[derive(Debug)]
-struct Disk {
-    store: Store,
-    index: Index,
 }
 
 impl Core {
@@ -152,9 +141,7 @@ impl Core {
     /// Each list gives the moves of a write first, then the note changes in path order, then
     /// [`Change::Folders`](model::Change::Folders) and [`Change::Tags`](model::Change::Tags).
     pub fn changes(&self) -> Changes {
-        let (send, receive) = mpsc::unbounded();
-        lock(&self.inner.listeners).push(send);
-        Changes { receive }
+        self.inner.listeners.add()
     }
 
     /// The notes whose title, text or tags hold every word of `text`, in `order`, with the
@@ -516,12 +503,10 @@ impl Core {
     }
 
     fn build(store: Store, index_dir: &Path, watcher: Option<watch::Watcher>) -> Result<Self> {
-        let index = Index::open(index_dir)?;
-        let mut disk = Disk { store, index };
-        let facts = disk.start()?;
+        let (disk, facts) = Disk::open(store, index_dir)?;
         let inner = Inner {
             locked: Mutex::new(Locked { disk, facts }),
-            listeners: Mutex::new(Vec::new()),
+            listeners: Listeners::default(),
             _watcher: watcher,
         };
         Ok(Self {
@@ -535,97 +520,6 @@ impl Core {
         let inner = Arc::downgrade(&self.inner);
         Arc::new(move |batch| inner.upgrade().map(|inner| inner.apply(batch)))
     }
-}
-
-impl Disk {
-    /// Builds the facts from the index rows and the files, and brings the rows up to date.
-    /// When the rows can't be read, it starts from no facts and rebuilds the index.
-    fn start(&mut self) -> Result<Facts> {
-        let (entries, readable) = match self.index.entries() {
-            Ok(entries) => (entries, true),
-            Err(error) => {
-                tracing::warn!(%error, "cannot read the index, so Holm rebuilds it");
-                (Vec::new(), false)
-            }
-        };
-        let mut facts = Facts::new(entries, self.store.folders(&FolderPath::root())?);
-        let settled = scan::files(&self.store, &facts, &Nodes::root())?;
-        if readable {
-            self.write_rows(&settled);
-        } else {
-            self.rebuild_from(&settled);
-        }
-        facts.settle(settled);
-        Ok(facts)
-    }
-
-    /// Writes the rows of `settled` into the index. When SQLite fails, it rebuilds the index,
-    /// so it never fails.
-    fn write_rows(&mut self, settled: &Settled) {
-        let rows = Rows {
-            removed: &settled.removed,
-            moved: settled
-                .moved
-                .iter()
-                .map(|moved| (&moved.from, &moved.info.path))
-                .collect(),
-            put: put_rows(settled),
-        };
-        if let Err(error) = self.index.write(&rows) {
-            tracing::warn!(%error, "the index failed, so Holm rebuilds it");
-            self.rebuild();
-        }
-    }
-
-    /// Runs `op` on the index. When SQLite fails, it rebuilds the index and runs `op` again.
-    fn read_index<T>(&mut self, op: impl Fn(&mut Index) -> Result<T>) -> Result<T> {
-        op(&mut self.index).or_else(|error| {
-            tracing::warn!(%error, "the index failed, so Holm rebuilds it");
-            self.rebuild();
-            op(&mut self.index)
-        })
-    }
-
-    /// Rebuilds the index from every note file, read with no facts. A failure leaves the
-    /// index as it is, with a log line.
-    fn rebuild(&mut self) {
-        match scan::files(&self.store, &Facts::default(), &Nodes::root()) {
-            Ok(settled) => self.rebuild_from(&settled),
-            Err(error) => tracing::warn!(%error, "cannot rebuild the index"),
-        }
-    }
-
-    /// Rebuilds the index with the rows of `settled`, which holds every note file.
-    fn rebuild_from(&mut self, settled: &Settled) {
-        if let Err(error) = self.index.rebuild(&put_rows(settled)) {
-            tracing::warn!(%error, "cannot rebuild the index");
-        }
-    }
-
-    /// The count of a delete of `node` in `snapshot`, and the attachment files it removes.
-    fn removal(&self, snapshot: &Snapshot, node: &Node) -> (DeleteCount, Vec<PathBuf>) {
-        let removal = snapshot.removal(node);
-        let files = self.store.attachments(removal.files);
-        let count = DeleteCount {
-            notes: removal.notes,
-            attachments: files.len(),
-        };
-        (count, files)
-    }
-}
-
-/// The index rows of each put note of `settled`.
-fn put_rows(settled: &Settled) -> Vec<Row<'_>> {
-    settled
-        .put
-        .iter()
-        .map(|put| Row {
-            note: &put.note,
-            links: &put.links,
-            stamp: put.stamp,
-            source: put.source,
-        })
-        .collect()
 }
 
 impl Inner {
@@ -650,7 +544,7 @@ impl Inner {
         self.with(|Locked { disk, facts }| {
             let (result, list) = write::run(disk, facts, source, op);
             if let Some(list) = list {
-                send(&mut lock(&self.listeners), list);
+                self.listeners.send(list);
             }
             result
         })
@@ -660,44 +554,6 @@ impl Inner {
     /// change list.
     fn apply(&self, batch: Batch) -> Result<()> {
         self.run(Source::Outside, |write| write.outside(batch))
-    }
-}
-
-/// A stream of change lists. [`Core::changes`] makes it.
-///
-/// It ends when every [`Core`] handle is gone.
-#[derive(Debug)]
-pub struct Changes {
-    receive: UnboundedReceiver<ChangeList>,
-}
-
-impl Changes {
-    /// The next change list, with no wait.
-    ///
-    /// It returns `None` when no list waits, or when every [`Core`] handle is gone.
-    pub fn try_next(&mut self) -> Option<ChangeList> {
-        self.receive.try_recv().ok()
-    }
-}
-
-impl Stream for Changes {
-    type Item = ChangeList;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<ChangeList>> {
-        Pin::new(&mut self.receive).poll_next(cx)
-    }
-}
-
-/// Sends `list` to each listener, and drops the listeners whose stream is gone. The last
-/// listener gets `list` itself, so a long list is cloned only for the others.
-fn send(listeners: &mut Vec<UnboundedSender<ChangeList>>, list: ChangeList) {
-    listeners.retain(|listener| !listener.is_closed());
-    if let Some((last, others)) = listeners.split_last() {
-        for listener in others {
-            // A stream that ends now is dropped at the next list.
-            let _ = listener.unbounded_send(list.clone());
-        }
-        let _ = last.unbounded_send(list);
     }
 }
 

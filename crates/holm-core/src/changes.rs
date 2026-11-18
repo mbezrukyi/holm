@@ -1,0 +1,65 @@
+//! The streams of change lists that the core sends.
+
+use std::pin::Pin;
+use std::sync::Mutex;
+use std::task::{Context, Poll};
+
+use futures_channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use futures_core::Stream;
+
+use crate::lock;
+use crate::model::ChangeList;
+
+/// The senders of each [`Changes`] stream that is still open.
+#[derive(Debug, Default)]
+pub(crate) struct Listeners {
+    senders: Mutex<Vec<UnboundedSender<ChangeList>>>,
+}
+
+impl Listeners {
+    /// A new stream that gets each list sent from now on.
+    pub(crate) fn add(&self) -> Changes {
+        let (send, receive) = mpsc::unbounded();
+        lock(&self.senders).push(send);
+        Changes { receive }
+    }
+
+    /// Sends `list` to each stream, and drops the streams that are gone. The last stream
+    /// gets `list` itself, so a long list is cloned only for the others.
+    pub(crate) fn send(&self, list: ChangeList) {
+        let mut senders = lock(&self.senders);
+        senders.retain(|sender| !sender.is_closed());
+        if let Some((last, others)) = senders.split_last() {
+            for sender in others {
+                // A stream that ends now is dropped at the next list.
+                let _ = sender.unbounded_send(list.clone());
+            }
+            let _ = last.unbounded_send(list);
+        }
+    }
+}
+
+/// A stream of change lists. [`Core::changes`](crate::Core::changes) makes it.
+///
+/// It ends when every [`Core`](crate::Core) handle is gone.
+#[derive(Debug)]
+pub struct Changes {
+    receive: UnboundedReceiver<ChangeList>,
+}
+
+impl Changes {
+    /// The next change list, with no wait.
+    ///
+    /// It returns `None` when no list waits, or when every [`Core`](crate::Core) handle is gone.
+    pub fn try_next(&mut self) -> Option<ChangeList> {
+        self.receive.try_recv().ok()
+    }
+}
+
+impl Stream for Changes {
+    type Item = ChangeList;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<ChangeList>> {
+        Pin::new(&mut self.receive).poll_next(cx)
+    }
+}

@@ -2,6 +2,7 @@
 //! and records what it touched. So the change list of a write misses nothing.
 
 use crate::diff::Touched;
+use crate::disk::Disk;
 use crate::facts::Facts;
 use crate::model::{Change, ChangeList, Note, NoteId, NoteInfo, NoteSet, Order, Source};
 use crate::nodes::{Node, Nodes};
@@ -11,7 +12,7 @@ use crate::retag::TagEdit;
 use crate::store::{Stamp, Store};
 use crate::tag::TagName;
 use crate::watch::Batch;
-use crate::{Disk, Error, Result, scan};
+use crate::{Error, Result, scan};
 
 /// The next facts while one write runs, and what the write touched.
 pub(crate) struct Write<'a> {
