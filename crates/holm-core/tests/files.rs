@@ -506,7 +506,7 @@ fn delete_note_deletes_only_attachments_that_no_other_note_links() {
     ]);
 
     assert_eq!(
-        folder.core.note_delete_count(&note_path("a.md")).unwrap(),
+        folder.core.note_delete_count(&note_path("a.md")),
         DeleteCount {
             notes: 1,
             attachments: 1
@@ -547,7 +547,7 @@ fn only_the_exact_attachments_folder_is_for_attachments() {
         })
     ));
     assert_eq!(
-        core.note_delete_count(&note_path("a.md")).unwrap(),
+        core.note_delete_count(&note_path("a.md")),
         DeleteCount {
             notes: 1,
             attachments: 1
@@ -587,10 +587,7 @@ fn delete_folder_deletes_its_notes_and_their_attachments() {
     ]);
 
     assert_eq!(
-        folder
-            .core
-            .folder_delete_count(&folder_path("work"))
-            .unwrap(),
+        folder.core.folder_delete_count(&folder_path("work")),
         DeleteCount {
             notes: 2,
             attachments: 1

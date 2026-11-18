@@ -1,10 +1,13 @@
 //! The facts of the notes folder in memory: note infos, folders, tags and links.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::ffi::OsStr;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::model::{Link, LinkTarget, NoteInfo, NoteSet, Order, Tag};
+use crate::nodes::Node;
 use crate::paths::{FolderPath, NotePath};
 
 /// The facts of the notes folder at one moment, from [`Core::snapshot`](crate::Core::snapshot).
@@ -17,6 +20,16 @@ pub struct Snapshot {
     notes: imbl::HashMap<NotePath, Arc<Entry>>,
     ids: imbl::HashMap<String, NotePath>,
     folders: imbl::OrdSet<FolderPath>,
+}
+
+/// What a delete of a node removes, from [`Snapshot::removal`].
+#[derive(Debug)]
+pub(crate) struct Removal {
+    /// How many notes the delete removes.
+    pub(crate) notes: usize,
+    /// The file link targets that the removed notes link and no other note links,
+    /// relative to the notes folder, in byte order. They are outside input.
+    pub(crate) files: Vec<PathBuf>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -142,6 +155,35 @@ impl Snapshot {
             .collect();
         notes.sort_unstable_by(|a, b| newest(a, b));
         notes.into_iter().cloned().collect()
+    }
+
+    /// What a delete of `node` removes: a note, or a folder with all its notes.
+    ///
+    /// The files are the file link targets that the notes in `node` link and no note outside
+    /// `node` links. They may be missing on disk.
+    pub(crate) fn removal(&self, node: &Node) -> Removal {
+        let mut notes = 0;
+        let mut inside = BTreeSet::new();
+        let mut outside = HashSet::new();
+        for entry in self.notes.values() {
+            let held = node.holds_note(&entry.info.path);
+            notes += usize::from(held);
+            let files = entry.links.iter().filter_map(|link| match &link.target {
+                LinkTarget::File(file) => Some(file.as_os_str()),
+                LinkTarget::Note { .. } | LinkTarget::Heading(_) | LinkTarget::Web(_) => None,
+            });
+            if held {
+                inside.extend(files);
+            } else {
+                outside.extend(files);
+            }
+        }
+        let files = inside
+            .into_iter()
+            .filter(|file| !outside.contains(file))
+            .map(|file: &OsStr| PathBuf::from(file))
+            .collect();
+        Removal { notes, files }
     }
 
     /// The note at `path`, or `None` when no note is there.

@@ -376,7 +376,7 @@ impl NotesFolder {
         done: impl FnOnce(holm_core::Result<DeleteCount>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.write(move |core| core.note_delete_count(&path), done, cx);
+        self.write(move |core| Ok(core.note_delete_count(&path)), done, cx);
     }
 
     /// What a delete of the folder at `path` removes, after the writes before it.
@@ -386,7 +386,7 @@ impl NotesFolder {
         done: impl FnOnce(holm_core::Result<DeleteCount>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.write(move |core| core.folder_delete_count(&path), done, cx);
+        self.write(move |core| Ok(core.folder_delete_count(&path)), done, cx);
     }
 
     /// Renames a tag in all notes, and gives the number of changed notes.

@@ -22,10 +22,17 @@ impl Node {
     /// Whether `other` is this node or below it.
     pub(crate) fn holds(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Folder(folder), Self::Note(note)) => note.is_below(folder),
+            (_, Self::Note(note)) => self.holds_note(note),
             (Self::Folder(node), Self::Folder(folder)) => node == folder || folder.is_below(node),
-            (Self::Note(note), Self::Note(other)) => note == other,
             (Self::Note(_), Self::Folder(_)) => false,
+        }
+    }
+
+    /// Whether the note at `path` is this node or below it.
+    pub(crate) fn holds_note(&self, path: &NotePath) -> bool {
+        match self {
+            Self::Note(note) => note == path,
+            Self::Folder(folder) => path.is_below(folder),
         }
     }
 }

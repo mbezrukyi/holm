@@ -406,28 +406,18 @@ impl Core {
     }
 
     /// What [`Core::delete_note`] removes: the note and its attachment files.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Index`] as in [`Core::search`].
-    pub fn note_delete_count(&self, path: &NotePath) -> Result<DeleteCount> {
-        let _writing = lock(&self.inner.writing);
+    pub fn note_delete_count(&self, path: &NotePath) -> DeleteCount {
         self.inner
-            .removal(&Node::Note(path.clone()))
-            .map(|(count, _)| count)
+            .removal(&self.inner.snapshot(), &Node::Note(path.clone()))
+            .0
     }
 
     /// What [`Core::delete_folder`] removes: the notes in the folder and below it,
     /// and their attachment files.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Index`] as in [`Core::search`].
-    pub fn folder_delete_count(&self, folder: &FolderPath) -> Result<DeleteCount> {
-        let _writing = lock(&self.inner.writing);
+    pub fn folder_delete_count(&self, folder: &FolderPath) -> DeleteCount {
         self.inner
-            .removal(&Node::Folder(folder.clone()))
-            .map(|(count, _)| count)
+            .removal(&self.inner.snapshot(), &Node::Folder(folder.clone()))
+            .0
     }
 
     /// Deletes the note forever. Holm has no trash.
@@ -927,16 +917,15 @@ impl Inner {
         first_error.map_or(Ok(changed), Err)
     }
 
-    /// The count of a delete of `node`, and the attachment files it removes. The caller holds
-    /// `writing`.
-    fn removal(&self, node: &Node) -> Result<(DeleteCount, Vec<PathBuf>)> {
-        let removal = self.read_index(|index| index.removal(node))?;
+    /// The count of a delete of `node` in `snapshot`, and the attachment files it removes.
+    fn removal(&self, snapshot: &Snapshot, node: &Node) -> (DeleteCount, Vec<PathBuf>) {
+        let removal = snapshot.removal(node);
         let files = self.store.attachments(removal.files);
         let count = DeleteCount {
             notes: removal.notes,
             attachments: files.len(),
         };
-        Ok((count, files))
+        (count, files)
     }
 
     /// Runs `delete` on `node`, then deletes its attachment files.
@@ -947,7 +936,7 @@ impl Inner {
         node: &Node,
         delete: impl FnOnce(&Store) -> Result<()>,
     ) -> Result<()> {
-        let (_, files) = self.removal(node)?;
+        let (_, files) = self.removal(draft.next.snapshot(), node);
         let deleted = delete(&self.store);
         if deleted.is_ok() {
             for file in files {

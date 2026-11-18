@@ -19,7 +19,6 @@ use rusqlite::{Connection, OptionalExtension as _, params};
 
 use crate::error::{Error, Result};
 use crate::model::{Link, LinkTarget, Note, NoteId, NoteInfo};
-use crate::nodes::Node;
 use crate::paths::{NotePath, NoteReader};
 use crate::reconcile::Settled;
 use crate::relink;
@@ -72,16 +71,6 @@ CREATE INDEX links_target ON links (kind, target);
 const NOTE_INFO: &str = "
 path, id, title, pinned, modified, preview,
     (SELECT group_concat(tag, char(10) ORDER BY pos) FROM tags WHERE note = notes.key)";
-
-/// What [`Index::removal`] found.
-#[derive(Debug)]
-pub(crate) struct Removal {
-    /// How many notes the delete removes.
-    pub(crate) notes: usize,
-    /// The file link targets that the removed notes link and no other note links,
-    /// relative to the notes folder. They are outside input.
-    pub(crate) files: Vec<PathBuf>,
-}
 
 /// The index file and one connection to it.
 #[derive(Debug)]
@@ -167,42 +156,6 @@ impl Index {
             let links = put_rows(&tx, &self.root, settled)?;
             tx.commit()?;
             Ok(links)
-        })
-    }
-
-    /// What a delete of `node` removes: a note, or a folder with all its notes.
-    ///
-    /// The files are the file link targets that the notes in `node` link and no note outside
-    /// `node` links. They may be missing on disk.
-    pub(crate) fn removal(&self, node: &Node) -> Result<Removal> {
-        let path = node_bytes(node);
-        let mut prefix = path.clone();
-        prefix.push(b'/');
-        self.run(|conn| {
-            let notes = conn
-                .prepare_cached(
-                    "SELECT count(*) FROM notes
-                    WHERE path = ?1 OR substr(path, 1, length(?2)) = ?2",
-                )?
-                .query_row(params![path, prefix], |row| row.get::<_, i64>(0))?;
-            let notes = usize::try_from(notes).unwrap_or_default();
-            let mut statement = conn.prepare_cached(
-                "SELECT DISTINCT links.target FROM links JOIN notes ON notes.key = links.note
-                WHERE links.kind = 'file'
-                    AND (notes.path = ?1 OR substr(notes.path, 1, length(?2)) = ?2)
-                    AND NOT EXISTS (
-                        SELECT 1 FROM links AS other JOIN notes AS owner ON owner.key = other.note
-                        WHERE other.kind = 'file' AND other.target = links.target
-                            AND owner.path != ?1 AND substr(owner.path, 1, length(?2)) != ?2)
-                ORDER BY links.target",
-            )?;
-            let rows =
-                statement.query_map(params![path, prefix], |row| row.get::<_, Vec<u8>>(0))?;
-            let mut files = Vec::new();
-            for target in rows {
-                files.push(PathBuf::from(OsString::from_vec(target?)));
-            }
-            Ok(Removal { notes, files })
         })
     }
 
@@ -527,16 +480,6 @@ fn link(row: &rusqlite::Row<'_>) -> rusqlite::Result<Link> {
 
 fn bytes(path: impl AsRef<Path>) -> Value {
     Value::Blob(path.as_ref().as_os_str().as_bytes().to_vec())
-}
-
-fn node_bytes(node: &Node) -> Vec<u8> {
-    match node {
-        Node::Note(path) => path.as_ref(),
-        Node::Folder(folder) => folder.as_ref(),
-    }
-    .as_os_str()
-    .as_bytes()
-    .to_vec()
 }
 
 fn path(bytes: Vec<u8>) -> PathBuf {
