@@ -235,26 +235,6 @@ fn an_old_snapshot_stays_as_it_was() {
 }
 
 #[test]
-fn sorted_puts_known_paths_in_order_and_leaves_out_the_others() {
-    let folder = Folder::new(&[
-        ("b.md", ""),
-        ("A.md", ""),
-        ("work/c.md", "---\npinned: true\n---\n"),
-    ]);
-    let snapshot = folder.core.snapshot();
-    let given = ["b.md", "gone.md", "work/c.md", "A.md"].map(note_path);
-
-    assert_eq!(
-        common::paths(snapshot.sorted(given, Order::Title)),
-        ["work/c.md", "A.md", "b.md"]
-    );
-    assert_eq!(
-        snapshot.sorted(Vec::new(), Order::Title),
-        Vec::<NotePath>::new()
-    );
-}
-
-#[test]
 fn paths_first_matching_keep_and_counts_agree_with_the_note_lists() {
     let mut folder = Folder::new(&[
         ("b.md", "#work\n"),

@@ -102,7 +102,14 @@ fn an_outside_edit_updates_the_index_and_sends_a_change() {
 
     assert_eq!(fed.take(), [Change::Changed(fed.info("a.md"))]);
     assert_eq!(previews(&fed.core), ["New words"]);
-    assert_eq!(fed.core.search("words").unwrap().len(), 1);
+    assert_eq!(
+        fed.core
+            .search("words", Order::Title)
+            .unwrap()
+            .paths()
+            .len(),
+        1
+    );
 }
 
 #[test]
@@ -435,7 +442,7 @@ fn a_renamed_folder_keeps_search_links_and_file_links_of_its_notes() {
         ]
     );
     let snapshot = fed.core.snapshot();
-    let found = |text| fed.core.search(text).unwrap();
+    let found = |text| fed.core.search(text, Order::Title).unwrap().into_parts().1;
     assert_eq!(found("potatoes"), [note_path("job/a.md")]);
     assert_eq!(found("carrots"), [note_path("job/plain.md")]);
     assert_eq!(found("food"), [note_path("job/a.md")]);

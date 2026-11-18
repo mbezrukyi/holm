@@ -88,10 +88,7 @@ fn search(bencher: divan::Bencher<'_, '_>, text: &str) {
     let notes = notes_folder();
     let index = tempfile::tempdir().unwrap();
     let core = open(notes.path(), index.path());
-    bencher.bench_local(|| {
-        let found = core.search(text).unwrap();
-        core.snapshot().sorted(found, Order::LastChange)
-    });
+    bencher.bench_local(|| core.search(text, Order::LastChange).unwrap());
 }
 
 /// An autosave: the note file and its index row. The 2 KB note is one of the folder.

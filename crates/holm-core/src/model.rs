@@ -237,6 +237,37 @@ impl Change {
     }
 }
 
+/// The notes that match a search, from [`Core::search`](crate::Core::search), in the order
+/// of a list, with the snapshot that knows each one.
+#[derive(Clone, Debug, Default)]
+pub struct SearchResults {
+    snapshot: Snapshot,
+    paths: Vec<NotePath>,
+}
+
+impl SearchResults {
+    /// The notes at `paths` that `snapshot` has, in `order`.
+    pub(crate) fn new(snapshot: Snapshot, paths: Vec<NotePath>, order: Order) -> Self {
+        let paths = snapshot.sorted(paths, order);
+        Self { snapshot, paths }
+    }
+
+    /// The snapshot that has a note at each path.
+    pub fn snapshot(&self) -> &Snapshot {
+        &self.snapshot
+    }
+
+    /// The paths of the notes, pinned notes on top.
+    pub fn paths(&self) -> &[NotePath] {
+        &self.paths
+    }
+
+    /// The snapshot and the paths, to keep them apart.
+    pub fn into_parts(self) -> (Snapshot, Vec<NotePath>) {
+        (self.snapshot, self.paths)
+    }
+}
+
 /// The changes that made one revision of the snapshot, from [`Changes`](crate::Changes).
 #[derive(Clone, Debug)]
 pub struct ChangeList {

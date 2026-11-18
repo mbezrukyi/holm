@@ -32,7 +32,10 @@ pub use snapshot::Snapshot;
 pub use watch::Feed;
 
 use index::Index;
-use model::{Change, ChangeList, DeleteCount, LinkTarget, Note, NoteId, NoteInfo, NoteSet, Order};
+use model::{
+    Change, ChangeList, DeleteCount, LinkTarget, Note, NoteId, NoteInfo, NoteSet, Order,
+    SearchResults,
+};
 use nodes::{Node, Nodes};
 use paths::Name;
 use retag::TagEdit;
@@ -144,8 +147,8 @@ impl Core {
         Changes { receive }
     }
 
-    /// The paths of the notes whose title, text or tags hold every word of `text`, in no
-    /// order. [`Snapshot::sorted`] puts them in the order of a list.
+    /// The notes whose title, text or tags hold every word of `text`, in `order`, with the
+    /// snapshot they come from. A write that runs ends first, so the snapshot has each note.
     ///
     /// A word also matches longer words that start with it, so `pla` finds "plans".
     /// Capital letters and accents make no difference. With no words, the list is empty.
@@ -153,8 +156,10 @@ impl Core {
     /// # Errors
     ///
     /// [`Error::Index`] as in [`Core::open`].
-    pub fn search(&self, text: &str) -> Result<Vec<NotePath>> {
-        self.inner.index.search(text)
+    pub fn search(&self, text: &str, order: Order) -> Result<SearchResults> {
+        let _writing = lock(&self.inner.writing);
+        let paths = self.inner.index.search(text)?;
+        Ok(SearchResults::new(self.inner.snapshot(), paths, order))
     }
 
     /// The text of each heading in the note at `path`, in order.

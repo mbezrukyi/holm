@@ -32,7 +32,7 @@ use futures_channel::oneshot;
 use futures_core::Stream;
 use gpui_kit::{App, AppContext as _, Context, EventEmitter, Task, Window};
 use holm_core::model::{
-    Change, ChangeList, DeleteCount, LinkTarget, Note, NoteInfo, NoteSet, Order,
+    Change, ChangeList, DeleteCount, LinkTarget, Note, NoteInfo, NoteSet, Order, SearchResults,
 };
 use holm_core::{Changes, Core, FolderPath, NotePath, Snapshot};
 use holm_editor::PastedFile;
@@ -475,9 +475,14 @@ impl NotesFolder {
         )
     }
 
-    /// The paths of the notes that match `query`, in no order. It does not wait for the line.
-    pub(crate) fn search(&self, query: String, cx: &App) -> Task<holm_core::Result<Vec<NotePath>>> {
-        self.look(move |core| core.search(&query), cx)
+    /// The notes that match `query`, in `order`. It does not wait for the line.
+    pub(crate) fn search(
+        &self,
+        query: String,
+        order: Order,
+        cx: &App,
+    ) -> Task<holm_core::Result<SearchResults>> {
+        self.look(move |core| core.search(&query, order), cx)
     }
 
     /// The headings of the note at `path`. It does not wait for the line.

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use holm_core::model::{NoteInfo, NoteSet, Order};
+use holm_core::model::{NoteInfo, NoteSet, Order, SearchResults};
 use holm_core::{NotePath, Snapshot};
 
 /// The notes of one list, in the order of the list. Each path has a note in the snapshot.
@@ -15,10 +15,13 @@ pub(crate) struct NoteList {
 }
 
 impl NoteList {
-    /// The notes at `paths` that `snapshot` has, in `order`.
-    pub(crate) fn new(snapshot: Snapshot, paths: Vec<NotePath>, order: Order) -> Self {
-        let paths = snapshot.sorted(paths, order).into();
-        Self { snapshot, paths }
+    /// The results of a search, in their order.
+    pub(crate) fn new(results: SearchResults) -> Self {
+        let (snapshot, paths) = results.into_parts();
+        Self {
+            snapshot,
+            paths: paths.into(),
+        }
     }
 
     /// Every note of `snapshot`, in `order`.

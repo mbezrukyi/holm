@@ -108,10 +108,7 @@ fn answers(core: &Core) -> Answers {
         search: WORDS
             .iter()
             .chain(&["berr", "CAFE"])
-            .map(|w| {
-                let found = core.search(w).unwrap();
-                core.snapshot().sorted(found, Order::LastChange)
-            })
+            .map(|w| core.search(w, Order::LastChange).unwrap().into_parts().1)
             .collect(),
         links: paths
             .iter()

@@ -18,8 +18,8 @@ fn paths(notes: Vec<NoteInfo>) -> Vec<String> {
 
 /// The search results in the order of a list.
 fn found(folder: &Folder, text: &str) -> Vec<String> {
-    let found = folder.core.search(text).unwrap();
-    common::paths(folder.core.snapshot().sorted(found, Order::Title))
+    let found = folder.core.search(text, Order::Title).unwrap();
+    common::paths(found.into_parts().1)
 }
 
 fn note(id: &str, extra: &str, body: &str) -> String {
@@ -523,4 +523,24 @@ fn notes_in_attachments_and_odd_names_round_trip() {
         all,
         [note_path("attachments/a b.md"), note_path("ünï cödé.md")]
     );
+}
+
+#[test]
+fn search_gives_pinned_notes_first_with_the_snapshot_of_each_note() {
+    let folder = Folder::new(&[
+        ("b.md", "plan\n"),
+        ("A.md", "plan\n"),
+        ("work/c.md", "---\npinned: true\n---\nplan\n"),
+        ("d.md", "other\n"),
+    ]);
+    let results = folder.core.search("plan", Order::Title).unwrap();
+
+    assert_eq!(
+        common::paths(results.paths().to_vec()),
+        ["work/c.md", "A.md", "b.md"]
+    );
+    for path in results.paths() {
+        assert!(results.snapshot().note(path).is_some());
+    }
+    assert_eq!(found(&folder, " "), Vec::<String>::new());
 }

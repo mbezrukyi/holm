@@ -166,7 +166,11 @@ impl Snapshot {
 
     /// The paths of `paths` that the snapshot has a note at, in `order`. Pinned notes are on
     /// top. The others are left out.
-    pub fn sorted(&self, paths: impl IntoIterator<Item = NotePath>, order: Order) -> Vec<NotePath> {
+    pub(crate) fn sorted(
+        &self,
+        paths: impl IntoIterator<Item = NotePath>,
+        order: Order,
+    ) -> Vec<NotePath> {
         let mut notes: Vec<&NoteInfo> = paths
             .into_iter()
             .filter_map(|path| self.note(&path))

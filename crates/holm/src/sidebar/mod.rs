@@ -265,8 +265,6 @@ impl Sidebar {
     }
 
     /// Searches the notes for the query. A result for an old query is dropped.
-    ///
-    /// The background task also puts the results in order, so the sidebar only shows them.
     fn find(&mut self, cx: &mut Context<Self>) {
         if !self.searching() {
             self.finding = None;
@@ -276,17 +274,12 @@ impl Sidebar {
             return;
         }
         let query = self.query.clone();
-        let search = self.notes_folder.read(cx).search(query.clone(), cx);
-        let snapshot = self.tree.snapshot.clone();
-        let order = self.order;
-        let job = cx.background_spawn(async move {
-            let found = search
-                .await
-                .map(|paths| NoteList::new(snapshot, paths, order));
-            (query, found)
-        });
+        let search = self
+            .notes_folder
+            .read(cx)
+            .search(query.clone(), self.order, cx);
         self.finding = Some(cx.spawn(async move |sidebar, cx| {
-            let (query, found) = job.await;
+            let found = search.await.map(NoteList::new);
             sidebar
                 .update(cx, |sidebar, cx| {
                     if query != sidebar.query {
