@@ -23,7 +23,7 @@ use crate::model::{Change, Link, LinkTarget, Note, NoteId, NoteInfo};
 use crate::paths::{FolderPath, Node, NotePath, NoteReader};
 use crate::relink::resolve;
 use crate::snapshot::Delta;
-use crate::store::{ATTACHMENTS, Stamp, Store, time};
+use crate::store::{Stamp, Store, attachment, time};
 
 mod search;
 
@@ -89,8 +89,8 @@ pub(crate) struct Refresh {
 pub(crate) struct Removal {
     /// How many notes the delete removes.
     pub(crate) notes: usize,
-    /// The file link targets in `attachments/` that no other note links, relative to the
-    /// notes folder. They are outside input.
+    /// The file link targets in the [attachment folder](attachment) that no other note links,
+    /// relative to the notes folder. They are outside input.
     pub(crate) files: Vec<PathBuf>,
 }
 
@@ -188,13 +188,13 @@ impl Index {
 
     /// What a delete of `node` removes: a note, or a folder with all its notes.
     ///
-    /// The files are the ones in `attachments/` that the notes in `node` link
+    /// The files are the ones in the [attachment folder](attachment) that the notes in `node` link
     /// and no note outside `node` links. They may be missing on disk.
     pub(crate) fn removal(&self, store: &Store, node: &Node) -> Result<Removal> {
         let path = node_bytes(node);
         let mut prefix = path.clone();
         prefix.push(b'/');
-        let attachments = format!("{ATTACHMENTS}/").into_bytes();
+        let attached = attachment::prefix();
         self.run(store, |conn| {
             let notes = known_in(conn, node)?.len();
             let mut statement = conn.prepare_cached(
@@ -207,7 +207,7 @@ impl Index {
                             AND owner.path != ?1 AND substr(owner.path, 1, length(?2)) != ?2)
                 ORDER BY links.target",
             )?;
-            let rows = statement.query_map(params![path, prefix, attachments], |row| {
+            let rows = statement.query_map(params![path, prefix, attached], |row| {
                 row.get::<_, Vec<u8>>(0)
             })?;
             let mut files = Vec::new();

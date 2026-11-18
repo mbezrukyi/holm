@@ -18,8 +18,8 @@ use crate::model::{Note, NoteId, NoteInfo};
 use crate::paths::{FolderPath, Name, Node, NotePath};
 use crate::relink::{Moved, relink};
 
-/// The folder for pasted files at the root. A new folder can't take its name.
-pub(crate) const ATTACHMENTS: &str = "attachments";
+pub(crate) mod attachment;
+
 /// Longest file stem in bytes. It leaves room for the hash and the extension of an
 /// attachment under [`MAX_NAME_BYTES`](crate::paths::MAX_NAME_BYTES).
 const MAX_STEM_BYTES: usize = 240;
@@ -152,14 +152,15 @@ impl Store {
         rel.under(&self.root).is_file()
     }
 
-    /// Every subfolder at `folder` or below it, sorted by path. It skips `attachments/` at the
-    /// root.
+    /// Every subfolder at `folder` or below it, sorted by path. It skips the
+    /// [attachment folder](attachment).
     ///
     /// # Errors
     ///
     /// [`Error::Read`] when the notes folder can't be read.
     pub(crate) fn folders(&self, folder: &FolderPath) -> Result<Vec<FolderPath>> {
-        let listed = |rel: &FolderPath| rel.as_ref() != Path::new(ATTACHMENTS);
+        let hidden = attachment::folder();
+        let listed = |rel: &FolderPath| hidden.as_ref() != Some(rel);
         let mut folders = Vec::new();
         let Entry::Folder(start) = self.folder_entry(folder) else {
             return Ok(folders);
@@ -337,22 +338,24 @@ impl Store {
         self.read(rel)
     }
 
-    /// Copies `content` into `attachments/` at the root as `<stem>-<hash>` + `ext`, and returns
+    /// Copies `content` into the [attachment folder](attachment) as `<stem>-<hash>` + `ext`, and returns
     /// its absolute path. The hash is a short hash of the content, so a name never clashes.
     ///
     /// When a file with that name is there, it keeps that file and drops the new copy.
-    /// It makes the `attachments/` folder when it is missing.
+    /// It makes the folder when it is missing.
     pub(crate) fn add_attachment(
         &self,
         stem: &OsStr,
         ext: &str,
         content: impl io::Read,
     ) -> Result<PathBuf> {
-        let attachments = Name::from_disk(OsStr::new(ATTACHMENTS));
-        let dir = self.root.join(ATTACHMENTS);
-        match attachments.map(|name| self.entry(&FolderPath::root(), &name)) {
-            Some(Entry::Folder(_)) => {}
-            Some(Entry::Missing) => {
+        let Some(folder) = attachment::folder() else {
+            return Err(write_error(&self.root, io::ErrorKind::InvalidInput.into()));
+        };
+        let dir = self.root.join(&folder);
+        match self.folder_entry(&folder) {
+            Entry::Folder(_) => {}
+            Entry::Missing => {
                 match fs::create_dir(&dir) {
                     Err(e) if e.kind() != io::ErrorKind::AlreadyExists => {
                         return Err(write_error(&dir, e));
@@ -434,7 +437,7 @@ impl Store {
 
     /// Creates the folder `name` in `parent`, and returns its path.
     ///
-    /// It fails with [`Error::BadName`] when `name` is `attachments` at the root, and with
+    /// It fails with [`Error::BadName`] when `name` is [reserved](attachment::reserves), and with
     /// [`Error::NameTaken`] when something in `parent` has the name.
     pub(crate) fn create_folder(&self, parent: &FolderPath, name: &Name) -> Result<FolderPath> {
         let rel = new_folder(parent, name)?;
@@ -543,7 +546,7 @@ impl Store {
         Ok(())
     }
 
-    /// Whether `rel`, a path relative to the notes folder, is a file in `attachments/` that is
+    /// Whether `rel`, a path relative to the notes folder, is a file in the [attachment folder](attachment) that is
     /// not a note. A symlink counts as a file. No folder on the way may be a symlink.
     pub(crate) fn is_attachment(&self, rel: &Path) -> bool {
         let folder = rel.parent().and_then(FolderPath::new);
@@ -551,15 +554,15 @@ impl Store {
         let (Some(folder), Some(name)) = (folder, name) else {
             return false;
         };
-        folder.as_ref().starts_with(ATTACHMENTS)
+        attachment::holds(&folder)
             && self.entry(&folder, &name) == Entry::Other
             && fs::symlink_metadata(self.root.join(rel)).is_ok_and(|meta| !meta.is_dir())
     }
 
     /// Checks that `rel` is a folder that the user may move or delete:
-    /// a real folder that is not the root and not `attachments/`.
+    /// a real folder that is not the root and not the [attachment folder](attachment).
     fn check_user_folder(&self, rel: &FolderPath) -> Result<()> {
-        if rel.is_root() || rel.as_ref() == Path::new(ATTACHMENTS) {
+        if rel.is_root() || attachment::folder().as_ref() == Some(rel) {
             return Err(bad_path(rel.as_ref()));
         }
         match self.folder_entry(rel) {
@@ -669,10 +672,10 @@ fn note(rel: &NotePath, text: &Text, stamp: Stamp) -> Note {
     }
 }
 
-/// The path of the new folder `name` in `parent`. `attachments` at the root is for attached
-/// files.
+/// The path of the new folder `name` in `parent`, unless the name is
+/// [reserved](attachment::reserves).
 fn new_folder(parent: &FolderPath, name: &Name) -> Result<FolderPath> {
-    if parent.is_root() && name.as_os_str().eq_ignore_ascii_case(ATTACHMENTS) {
+    if attachment::reserves(parent, name) {
         return Err(Error::BadName {
             name: name.as_os_str().to_string_lossy().into_owned(),
             problem: NameProblem::Attachments,

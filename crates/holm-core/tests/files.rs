@@ -523,6 +523,49 @@ fn delete_note_deletes_only_attachments_that_no_other_note_links() {
 }
 
 #[test]
+fn only_the_exact_attachments_folder_is_for_attachments() {
+    let folder = Folder::new(&[
+        (
+            "a.md",
+            &note("A", "![x](Attachments/x.png) ![y](attachments/y.png)\n"),
+        ),
+        ("Attachments/x.png", "png"),
+        ("attachments/y.png", "png"),
+        ("work/b.md", ""),
+    ]);
+    let core = &folder.core;
+
+    assert_eq!(
+        common::paths(core.snapshot().folders()),
+        ["Attachments", "work"]
+    );
+    assert!(matches!(
+        core.rename_folder(&folder_path("work"), "Attachments"),
+        Err(Error::BadName {
+            problem: NameProblem::Attachments,
+            ..
+        })
+    ));
+    assert_eq!(
+        core.note_delete_count(&note_path("a.md")).unwrap(),
+        DeleteCount {
+            notes: 1,
+            attachments: 1
+        }
+    );
+    core.delete_note(&note_path("a.md")).unwrap();
+    assert!(folder.path("Attachments/x.png").exists());
+    assert!(!folder.path("attachments/y.png").exists());
+
+    let moved = core
+        .move_folder(&folder_path("Attachments"), &folder_path("work"))
+        .unwrap();
+    assert_eq!(moved, folder_path("work/Attachments"));
+    core.delete_folder(&moved).unwrap();
+    assert!(!folder.path("work/Attachments").exists());
+}
+
+#[test]
 fn delete_note_of_a_gone_note_is_no_error() {
     let folder = Folder::new(&[]);
 
