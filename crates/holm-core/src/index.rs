@@ -69,11 +69,10 @@ CREATE TABLE links (
 CREATE INDEX links_target ON links (kind, target);
 ";
 
+/// The columns that [`note_info`] reads, from the table `notes`.
 const NOTE_INFO: &str = "
-SELECT path, id, title, pinned, modified, preview,
-    (SELECT group_concat(tag, char(10) ORDER BY pos) FROM tags WHERE note = notes.key),
-    changed, size
-FROM notes";
+path, id, title, pinned, modified, preview,
+    (SELECT group_concat(tag, char(10) ORDER BY pos) FROM tags WHERE note = notes.key)";
 
 /// What a [`Index::refresh`] found.
 #[derive(Debug, Default)]
@@ -112,7 +111,8 @@ impl Index {
         let path = dir.join(FILE);
         let opened = fs::create_dir_all(dir).map_err(Fail::Io).and_then(|()| {
             let mut conn = connect(&path)?;
-            sync(&mut conn, store, &Nodes::root())?;
+            let known = start_stamps(&conn)?;
+            sync(&mut conn, store, &Nodes::root(), &known)?;
             Ok(conn)
         });
         let conn = match opened {
@@ -136,7 +136,9 @@ impl Index {
     pub(crate) fn entries(&self) -> Result<Vec<(NoteInfo, Vec<Link>, Stamp)>> {
         self.run(|conn| {
             let mut reader = NoteReader::default();
-            let mut statement = conn.prepare_cached(&format!("{NOTE_INFO} ORDER BY key"))?;
+            let mut statement = conn.prepare_cached(&format!(
+                "SELECT {NOTE_INFO}, changed, size FROM notes ORDER BY key"
+            ))?;
             let notes = statement
                 .query_map([], |row| Ok((note_info(&mut reader, row)?, stamp(row)?)))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -184,8 +186,14 @@ impl Index {
     }
 
     /// Brings the notes at or below each of `nodes` up to date with the files.
-    pub(crate) fn refresh(&self, nodes: &Nodes) -> Result<Refresh> {
-        self.run(|conn| sync(conn, &self.store, nodes))
+    ///
+    /// `known` holds the stamp of each note there that the facts know.
+    pub(crate) fn refresh(
+        &self,
+        nodes: &Nodes,
+        known: &HashMap<NotePath, Stamp>,
+    ) -> Result<Refresh> {
+        self.run(|conn| sync(conn, &self.store, nodes, known))
     }
 
     /// What a delete of `node` removes: a note, or a folder with all its notes.
@@ -197,7 +205,13 @@ impl Index {
         let mut prefix = path.clone();
         prefix.push(b'/');
         self.run(|conn| {
-            let notes = known_in(conn, node)?.len();
+            let notes = conn
+                .prepare_cached(
+                    "SELECT count(*) FROM notes
+                    WHERE path = ?1 OR substr(path, 1, length(?2)) = ?2",
+                )?
+                .query_row(params![path, prefix], |row| row.get::<_, i64>(0))?;
+            let notes = usize::try_from(notes).unwrap_or_default();
             let mut statement = conn.prepare_cached(
                 "SELECT DISTINCT links.target FROM links JOIN notes ON notes.key = links.note
                 WHERE links.kind = 'file'
@@ -286,7 +300,7 @@ fn fresh(path: &Path, store: &Store, fail: &Fail) -> Result<Connection, Fail> {
             let mut conn = Connection::open_in_memory()?;
             settings(&conn)?;
             schema(&mut conn)?;
-            sync(&mut conn, store, &Nodes::root())?;
+            sync(&mut conn, store, &Nodes::root(), &HashMap::new())?;
             Ok(conn)
         }
         conn => conn,
@@ -336,7 +350,7 @@ fn schema(conn: &mut Connection) -> Result<(), Fail> {
 fn rebuild(path: &Path, store: &Store) -> Result<Connection, Fail> {
     remove(path)?;
     let mut conn = connect(path)?;
-    sync(&mut conn, store, &Nodes::root())?;
+    sync(&mut conn, store, &Nodes::root(), &HashMap::new())?;
     Ok(conn)
 }
 
@@ -355,18 +369,19 @@ fn remove(path: &Path) -> Result<(), Fail> {
 
 /// Brings the notes in `places` up to date with the files. It reads only the files whose stamp changed.
 ///
-/// It handles the files the index knows before new ones. So a known file keeps its id
-/// when a new file has the same id.
-fn sync(conn: &mut Connection, store: &Store, nodes: &Nodes) -> Result<Refresh, Fail> {
+/// `known` holds the stamp of each known note in `nodes`. It handles the known files before
+/// new ones. So a known file keeps its id when a new file has the same id.
+fn sync(
+    conn: &mut Connection,
+    store: &Store,
+    nodes: &Nodes,
+    known: &HashMap<NotePath, Stamp>,
+) -> Result<Refresh, Fail> {
     let mut files = Vec::new();
     for node in nodes {
         files.extend(store.files(node)?);
     }
     let tx = conn.transaction()?;
-    let mut known: HashMap<NotePath, Stamp> = HashMap::new();
-    for node in nodes {
-        known.extend(known_in(&tx, node)?);
-    }
     let on_disk: HashMap<&NotePath, Stamp> =
         files.iter().map(|(rel, stamp)| (rel, *stamp)).collect();
     let left: Vec<(&NotePath, Stamp)> = known
@@ -484,23 +499,16 @@ fn shift(
         return Ok(None);
     };
     let info = conn
-        .prepare_cached(&format!("{NOTE_INFO} WHERE key = ?1"))?
+        .prepare_cached(&format!("SELECT {NOTE_INFO} FROM notes WHERE key = ?1"))?
         .query_row([key], |row| note_info(&mut NoteReader::default(), row))?;
     Ok(Some((info, stored_links(conn, key)?)))
 }
 
-/// The stamps of the known notes at or below `node`.
-fn known_in(conn: &Connection, node: &Node) -> Result<Vec<(NotePath, Stamp)>, Fail> {
-    let path = node_bytes(node);
-    let mut prefix = path.clone();
-    prefix.push(b'/');
-    let all = matches!(node, Node::Folder(folder) if folder.is_root());
-    let mut statement = conn.prepare_cached(
-        "SELECT path, modified, changed, size FROM notes
-        WHERE ?1 OR path = ?2 OR substr(path, 1, length(?3)) = ?3",
-    )?;
+/// The stamp of each note in the index. Only the start reads them, before the facts exist.
+fn start_stamps(conn: &Connection) -> Result<HashMap<NotePath, Stamp>, Fail> {
+    let mut statement = conn.prepare_cached("SELECT path, modified, changed, size FROM notes")?;
     let mut reader = NoteReader::default();
-    let rows = statement.query_map(params![all, path, prefix], |row| {
+    let rows = statement.query_map([], |row| {
         let stamp = Stamp {
             modified: row.get(1)?,
             changed: row.get(2)?,
@@ -817,7 +825,7 @@ fn note_info(reader: &mut NoteReader, row: &rusqlite::Row<'_>) -> rusqlite::Resu
     })
 }
 
-/// The stamp of a row of [`NOTE_INFO`].
+/// The stamp of a row of [`NOTE_INFO`] with `changed` and `size` after it.
 fn stamp(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stamp> {
     Ok(Stamp {
         modified: row.get(4)?,

@@ -1,6 +1,9 @@
 //! The facts of the notes folder in memory: the snapshot, and the stamp of each note file.
 
+use std::collections::HashMap;
+
 use crate::model::{Link, NoteInfo};
+use crate::nodes::{Node, Nodes};
 use crate::paths::{FolderPath, NotePath};
 use crate::snapshot::Snapshot;
 use crate::store::Stamp;
@@ -41,6 +44,26 @@ impl Facts {
         &self.snapshot
     }
 
+    /// The stamps of the notes at or below each of `nodes`.
+    pub(crate) fn stamps_in(&self, nodes: &Nodes) -> HashMap<NotePath, Stamp> {
+        let mut stamps = HashMap::new();
+        for node in nodes {
+            match node {
+                Node::Note(path) => stamps.extend(self.stamps.get_key_value(path).map(copied)),
+                Node::Folder(folder) if folder.is_root() => {
+                    stamps.extend(self.stamps.iter().map(copied));
+                }
+                Node::Folder(folder) => stamps.extend(
+                    self.stamps
+                        .iter()
+                        .filter(|(path, _)| path.is_below(folder))
+                        .map(copied),
+                ),
+            }
+        }
+        stamps
+    }
+
     /// Takes out and puts in the notes of `delta`. It returns whether the snapshot changed.
     /// A new stamp alone changes no fact.
     pub(crate) fn apply(&mut self, delta: Delta) -> bool {
@@ -67,4 +90,8 @@ impl Facts {
         self.snapshot = self.snapshot.next_revision();
         self
     }
+}
+
+fn copied((path, stamp): (&NotePath, &Stamp)) -> (NotePath, Stamp) {
+    (path.clone(), *stamp)
 }

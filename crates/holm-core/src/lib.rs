@@ -913,7 +913,8 @@ impl Inner {
     /// Updates the index and the draft at each path after Holm's own change, and returns
     /// whether a note changed. It adds no change to the list, so the write adds its own.
     fn refresh(&self, draft: &mut Draft<'_>, nodes: Vec<Node>) -> Result<bool> {
-        let refresh = self.index.refresh(&Nodes::new(nodes))?;
+        let nodes = Nodes::new(nodes);
+        let refresh = self.index.refresh(&nodes, &draft.next.stamps_in(&nodes))?;
         Ok(draft.notes(refresh.delta))
     }
 
@@ -925,7 +926,7 @@ impl Inner {
             if nodes.is_empty() {
                 return Ok(());
             }
-            let refresh = self.index.refresh(&nodes)?;
+            let refresh = self.index.refresh(&nodes, &draft.next.stamps_in(&nodes))?;
             draft.notes(refresh.delta);
             let mut folders = false;
             for node in &nodes {
