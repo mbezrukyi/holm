@@ -38,7 +38,7 @@ use facts::{Delta, Facts};
 use index::Index;
 use model::{
     Change, ChangeList, DeleteCount, Link, LinkTarget, Note, NoteId, NoteInfo, NoteSet, Order,
-    SearchResults,
+    SearchResults, Source,
 };
 use nodes::{Node, Nodes};
 use paths::Name;
@@ -818,6 +818,11 @@ impl Inner {
     /// The draft replaces the facts, so they keep each new stamp. When a fact changed, the draft
     /// gets the next revision. The change list carries the snapshot of its revision.
     fn write<T>(&self, op: impl FnOnce(&mut Draft<'_>) -> Result<T>) -> Result<T> {
+        self.run(Source::Holm, op)
+    }
+
+    /// Runs `op` as [`Inner::write`] does, for changes from `source`.
+    fn run<T>(&self, source: Source, op: impl FnOnce(&mut Draft<'_>) -> Result<T>) -> Result<T> {
         let _writing = lock(&self.writing);
         let mut draft = Draft {
             store: &self.store,
@@ -836,6 +841,7 @@ impl Inner {
         }
         if !draft.changes.is_empty() {
             let list = ChangeList {
+                source,
                 snapshot: facts.snapshot().clone(),
                 changes: draft.changes,
             };
@@ -989,7 +995,7 @@ impl Inner {
     /// Checks the disk at each path of `batch`, and updates the index, the snapshot and the
     /// change list.
     fn apply(&self, batch: Batch) -> Result<()> {
-        self.write(|draft| {
+        self.run(Source::Outside, |draft| {
             let nodes = Nodes::outside(&self.store, draft.next.snapshot(), batch);
             if nodes.is_empty() {
                 return Ok(());

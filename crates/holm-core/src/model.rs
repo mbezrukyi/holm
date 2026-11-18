@@ -268,9 +268,20 @@ impl SearchResults {
     }
 }
 
+/// Who made the changes of a [`ChangeList`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Source {
+    /// A write through [`Core`](crate::Core).
+    Holm,
+    /// Another tool, seen by the watch.
+    Outside,
+}
+
 /// The changes that made one revision of the snapshot, from [`Changes`](crate::Changes).
 #[derive(Clone, Debug)]
 pub struct ChangeList {
+    /// Who made the changes.
+    pub source: Source,
     /// The first snapshot that shows the changes.
     pub snapshot: Snapshot,
     /// The changes in order: first the note and folder changes, then [`Change::Folders`] and

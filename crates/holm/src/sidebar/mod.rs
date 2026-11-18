@@ -153,7 +153,7 @@ impl Sidebar {
         cx: &mut Context<Self>,
     ) -> Self {
         let changed = cx.subscribe(&notes_folder, |sidebar, _, event: &FolderEvent, cx| {
-            sidebar.changed(&event.changes, cx);
+            sidebar.changed(event, cx);
         });
         let search = cx.new(|cx| InputState::new(window, cx).placeholder(text::SEARCH));
         let search_changed = cx.subscribe(&search, |sidebar, input, event, cx| {
@@ -196,12 +196,12 @@ impl Sidebar {
 
     /// Takes the end of a write or of outside changes: it follows the moves, and then shows
     /// the snapshot.
-    fn changed(&mut self, changes: &[Change], cx: &mut Context<Self>) {
-        if changes.is_empty() {
+    fn changed(&mut self, event: &FolderEvent, cx: &mut Context<Self>) {
+        if event.is_empty() {
             return;
         }
         let view = self.view.clone();
-        for change in changes {
+        for change in event.changes() {
             self.follow(change, cx);
         }
         self.refresh(cx);

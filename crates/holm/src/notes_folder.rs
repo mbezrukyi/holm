@@ -33,6 +33,7 @@ use futures_core::Stream;
 use gpui_kit::{App, AppContext as _, Context, EventEmitter, Task, Window};
 use holm_core::model::{
     Change, ChangeList, DeleteCount, LinkTarget, Note, NoteInfo, NoteSet, Order, SearchResults,
+    Source,
 };
 use holm_core::{Changes, Core, FolderPath, NotePath, Snapshot};
 use holm_editor::PastedFile;
@@ -44,9 +45,29 @@ use crate::tags::TagChange;
 /// in. Each write sends one, also a failed write.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct FolderEvent {
-    /// The changes of every revision up to [`NotesFolder::snapshot`], for every cause. It is
-    /// empty when the snapshot did not change.
-    pub(crate) changes: Vec<Change>,
+    /// The changes of every revision up to [`NotesFolder::snapshot`], in order, each with
+    /// its source. It is empty when the snapshot did not change.
+    changes: Vec<(Source, Change)>,
+}
+
+impl FolderEvent {
+    /// Every change, in order.
+    pub(crate) fn changes(&self) -> impl Iterator<Item = &Change> {
+        self.changes.iter().map(|(_, change)| change)
+    }
+
+    /// The changes that other tools made, in order.
+    pub(crate) fn outside(&self) -> impl Iterator<Item = &Change> {
+        self.changes
+            .iter()
+            .filter(|(source, _)| *source == Source::Outside)
+            .map(|(_, change)| change)
+    }
+
+    /// Whether the snapshot stayed the same.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.changes.is_empty()
+    }
 }
 
 /// A step that gets the end of a write, on the UI thread.
@@ -639,8 +660,8 @@ impl NotesFolder {
         self.ended = turn.number;
         if ran {
             let lists: Vec<ChangeList> = std::iter::from_fn(|| self.changes.try_next()).collect();
-            let changes = self.keep(lists);
-            cx.emit(FolderEvent { changes });
+            let event = self.keep(lists);
+            cx.emit(event);
             (turn.end)(cx);
         }
         if self.late.is_some_and(|late| late <= self.ended) {
@@ -696,20 +717,20 @@ impl NotesFolder {
             lists.push(list);
         }
         if !lists.is_empty() {
-            let changes = self.keep(lists);
-            cx.emit(FolderEvent { changes });
+            let event = self.keep(lists);
+            cx.emit(event);
         }
         Poll::Pending
     }
 
-    /// Keeps the snapshot of the last list, and gives the changes of all lists.
-    fn keep(&mut self, lists: Vec<ChangeList>) -> Vec<Change> {
+    /// Keeps the snapshot of the last list, and gives the event with the changes of all lists.
+    fn keep(&mut self, lists: Vec<ChangeList>) -> FolderEvent {
         let mut changes = Vec::new();
         for list in lists {
             self.snapshot = list.snapshot;
-            changes.extend(list.changes);
+            changes.extend(list.changes.into_iter().map(|change| (list.source, change)));
         }
-        changes
+        FolderEvent { changes }
     }
 }
 
@@ -820,7 +841,7 @@ mod tests {
             cx.subscribe(&notes_folder, move |_, event: &FolderEvent, _| {
                 steps
                     .borrow_mut()
-                    .push(format!("event {:?}", event.changes));
+                    .push(format!("event {:?}", event.changes().collect::<Vec<_>>()));
             })
             .detach();
         });

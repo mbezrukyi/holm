@@ -198,8 +198,8 @@ impl NotePane {
             cx.new(|cx| Links::new(notes_folder.clone(), editor.clone(), backlinks.clone(), cx));
         let subscriptions = vec![
             cx.subscribe(&notes_folder, |pane, _, event: &FolderEvent, cx| {
-                pane.follow(&event.changes, cx);
-                for change in &event.changes {
+                pane.follow(event, cx);
+                for change in event.outside() {
                     pane.outside_change(change, cx);
                 }
                 pane.put_draft(cx);
@@ -826,12 +826,12 @@ impl NotePane {
     /// Follows a move of the open note, or of a folder that holds it. A move to another
     /// folder can change the file links in the note, so the pane reads it again when it has
     /// no unsaved text.
-    fn follow(&mut self, changes: &[Change], cx: &mut Context<Self>) {
+    fn follow(&mut self, event: &FolderEvent, cx: &mut Context<Self>) {
         let unsaved = self.is_dirty(cx);
         let Some(path) = self.shown.editor_mut() else {
             return;
         };
-        let Some(new) = changes.iter().find_map(|change| change.note_after(path)) else {
+        let Some(new) = event.changes().find_map(|change| change.note_after(path)) else {
             return;
         };
         let other_folder = new.folder() != path.folder();

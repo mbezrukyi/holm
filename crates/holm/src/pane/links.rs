@@ -59,7 +59,7 @@ impl Links {
     ) -> Self {
         let subscriptions = vec![
             cx.subscribe(&notes_folder, |links, _, event: &FolderEvent, cx| {
-                if !event.changes.is_empty() {
+                if !event.is_empty() {
                     links.read(cx);
                 }
             }),
