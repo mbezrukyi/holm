@@ -15,8 +15,8 @@ use gpui_kit::{
     InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseMoveEvent, MouseUpEvent,
     ParentElement, Pixels, Render, Styled, Subscription, Window, div, px,
 };
-use holm_core::model::{Note, NoteSet, Order};
-use holm_core::{FolderPath, NotePath, Snapshot};
+use holm_core::model::Note;
+use holm_core::{FolderPath, NotePath};
 
 use crate::config::{Config, SidebarSettings};
 use crate::dialog::{self, Ask, Confirm, Dialog};
@@ -139,9 +139,7 @@ impl NotesView {
                 }
             }
             PaneEvent::Gone(path) => {
-                let neighbor = self.sidebar.read(cx).neighbor(path);
-                let order = self.config.read(cx).settings().note_order;
-                let next = next_note(self.notes_folder.read(cx).snapshot(), neighbor, order);
+                let next = self.sidebar.read(cx).next_note(path, cx);
                 self.show_next(next, window, cx);
             }
         }
@@ -430,12 +428,10 @@ impl NotesView {
 
     fn delete(&mut self, target: Target, window: &mut Window, cx: &mut Context<Self>) {
         let open = self.pane.read(cx).path().cloned();
-        let open_gone = open.as_ref().is_some_and(|open| match &target {
+        let gone = open.filter(|open| match &target {
             Target::Note(path) => path == open,
             Target::Folder(folder) => open.is_below(folder),
         });
-        let neighbor = open.and_then(|open| self.sidebar.read(cx).neighbor(&open));
-        let order = self.config.read(cx).settings().note_order;
         self.write(
             window,
             cx,
@@ -444,8 +440,8 @@ impl NotesView {
                 Target::Folder(path) => notes_folder.delete_folder(path, done, cx),
             },
             move |this, (), window, cx| {
-                if open_gone {
-                    let next = next_note(this.notes_folder.read(cx).snapshot(), neighbor, order);
+                if let Some(gone) = gone {
+                    let next = this.sidebar.read(cx).next_note(&gone, cx);
                     this.show_next(next, window, cx);
                 }
             },
@@ -691,15 +687,4 @@ impl Render for NotesView {
 )]
 fn whole(width: Pixels) -> u16 {
     f32::from(width).round() as u16
-}
-
-/// The note to open after the open one is gone: `neighbor` when it still exists, else the
-/// first note in `order`. With no notes, it is `None`.
-fn next_note(snapshot: &Snapshot, neighbor: Option<NotePath>, order: Order) -> Option<NotePath> {
-    if let Some(next) = neighbor.filter(|next| snapshot.note(next).is_some()) {
-        return Some(next);
-    }
-    snapshot
-        .first(NoteSet::All, order)
-        .map(|note| note.path.clone())
 }
