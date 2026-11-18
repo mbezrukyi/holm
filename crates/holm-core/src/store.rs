@@ -160,8 +160,7 @@ impl Store {
     ///
     /// [`Error::Read`] when the notes folder can't be read.
     pub(crate) fn folders(&self, folder: &FolderPath) -> Result<Vec<FolderPath>> {
-        let hidden = attachment::folder();
-        let listed = |rel: &FolderPath| hidden.as_ref() != Some(rel);
+        let listed = |rel: &FolderPath| !attachment::is(rel);
         let mut folders = Vec::new();
         let Entry::Folder(start) = self.folder_entry(folder) else {
             return Ok(folders);
@@ -561,7 +560,7 @@ impl Store {
     /// Checks that `rel` is a folder that the user may move or delete:
     /// a real folder that is not the root and not the [attachment folder](attachment).
     fn check_user_folder(&self, rel: &FolderPath) -> Result<()> {
-        if rel.is_root() || attachment::folder().as_ref() == Some(rel) {
+        if rel.is_root() || attachment::is(rel) {
             return Err(bad_path(rel.as_ref()));
         }
         match self.folder_entry(rel) {

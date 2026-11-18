@@ -6,6 +6,7 @@
 
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt as _;
+use std::path::Path;
 
 use crate::paths::{FolderPath, Name};
 
@@ -14,6 +15,11 @@ const ATTACHMENTS: &str = "attachments";
 /// The attachments folder. It is always `Some`.
 pub(crate) fn folder() -> Option<FolderPath> {
     FolderPath::new(ATTACHMENTS)
+}
+
+/// Whether `folder` is the attachments folder itself.
+pub(crate) fn is(folder: &FolderPath) -> bool {
+    folder.as_ref() == Path::new(ATTACHMENTS)
 }
 
 /// Whether a new folder `name` in `parent` takes the name of the attachments folder.
@@ -60,6 +66,10 @@ mod tests {
     #[test]
     fn only_the_exact_folder_holds_attachments() {
         assert_eq!(folder(), Some(folder_path("attachments")));
+        assert!(is(&folder_path("attachments")));
+        assert!(!is(&folder_path("Attachments")));
+        assert!(!is(&folder_path("attachments/2026")));
+        assert!(!is(&FolderPath::root()));
         assert!(holds(&folder_path("attachments")));
         assert!(holds(&folder_path("attachments/2026")));
         assert!(!holds(&folder_path("Attachments")));
