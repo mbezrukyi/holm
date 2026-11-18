@@ -6,24 +6,29 @@ use crate::model::{Link, Note, NoteInfo};
 use crate::nodes::{Node, Nodes};
 use crate::paths::{FolderPath, NotePath};
 use crate::reconcile::Settled;
+use crate::relink::LinkSource;
 use crate::snapshot::Snapshot;
 use crate::store::Stamp;
 
-/// The snapshot and the stamp of each of its notes. Each note of the snapshot has a stamp.
+/// The snapshot, and the stamp and link source of each of its notes. Each note of the snapshot
+/// has both.
 ///
 /// It is cheap to clone.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Facts {
     snapshot: Snapshot,
-    stamps: imbl::HashMap<NotePath, Stamp>,
+    files: imbl::HashMap<NotePath, (Stamp, LinkSource)>,
 }
+
+/// The facts of one note: what the snapshot shows, its links, its stamp and its link source.
+pub(crate) type NoteFacts = (NoteInfo, Vec<Link>, Stamp, LinkSource);
 
 impl Facts {
     /// The facts of `notes` and `folders`, with revision 0.
-    pub(crate) fn new(notes: Vec<(NoteInfo, Vec<Link>, Stamp)>, folders: Vec<FolderPath>) -> Self {
+    pub(crate) fn new(notes: Vec<NoteFacts>, folders: Vec<FolderPath>) -> Self {
         let mut facts = Self {
             snapshot: Snapshot::new(folders),
-            stamps: imbl::HashMap::new(),
+            files: imbl::HashMap::new(),
         };
         facts.apply(Vec::new(), notes);
         facts
@@ -38,12 +43,12 @@ impl Facts {
         let mut stamps = HashMap::new();
         for node in nodes {
             match node {
-                Node::Note(path) => stamps.extend(self.stamps.get_key_value(path).map(copied)),
+                Node::Note(path) => stamps.extend(self.files.get_key_value(path).map(copied)),
                 Node::Folder(folder) if folder.is_root() => {
-                    stamps.extend(self.stamps.iter().map(copied));
+                    stamps.extend(self.files.iter().map(copied));
                 }
                 Node::Folder(folder) => stamps.extend(
-                    self.stamps
+                    self.files
                         .iter()
                         .filter(|(path, _)| path.is_below(folder))
                         .map(copied),
@@ -53,36 +58,40 @@ impl Facts {
         stamps
     }
 
-    /// Puts in what `settled` changes, and returns the notes that were read. `links` holds
-    /// the links of each put note, in order.
-    pub(crate) fn settle(&mut self, settled: Settled, links: Vec<Vec<Link>>) -> Vec<Note> {
+    /// The link source of the note at `path`.
+    pub(crate) fn link_source(&self, path: &NotePath) -> Option<LinkSource> {
+        self.files.get(path).map(|(_, source)| *source)
+    }
+
+    /// Puts in what `settled` changes, and returns the notes that were read.
+    pub(crate) fn settle(&mut self, settled: Settled) -> Vec<Note> {
         let mut removed = settled.removed;
         let mut put = Vec::with_capacity(settled.put.len() + settled.moved.len());
         let mut notes = Vec::with_capacity(settled.put.len());
-        for (read, links) in settled.put.into_iter().zip(links) {
-            put.push((read.note.info.clone(), links, read.stamp));
+        for read in settled.put {
+            put.push((read.note.info.clone(), read.links, read.stamp, read.source));
             notes.push(read.note);
         }
         for moved in settled.moved {
             removed.push(moved.from);
-            put.push((moved.info, moved.links, moved.stamp));
+            put.push((moved.info, moved.links, moved.stamp, moved.source));
         }
         self.apply(removed, put);
         notes
     }
 
     /// Takes out the notes at `removed` first, so a note can move to a path and keep its id.
-    /// Then it puts in `put`, each note with its stamp.
-    fn apply(&mut self, removed: Vec<NotePath>, put: Vec<(NoteInfo, Vec<Link>, Stamp)>) {
+    /// Then it puts in `put`.
+    fn apply(&mut self, removed: Vec<NotePath>, put: Vec<NoteFacts>) {
         for path in &removed {
-            self.stamps.remove(path);
+            self.files.remove(path);
         }
-        for (info, _, stamp) in &put {
-            self.stamps.insert(info.path.clone(), *stamp);
+        for (info, _, stamp, source) in &put {
+            self.files.insert(info.path.clone(), (*stamp, *source));
         }
         self.snapshot.apply(
             removed,
-            put.into_iter().map(|(info, links, _)| (info, links)),
+            put.into_iter().map(|(info, links, _, _)| (info, links)),
         );
     }
 
@@ -98,6 +107,6 @@ impl Facts {
     }
 }
 
-fn copied((path, stamp): (&NotePath, &Stamp)) -> (NotePath, Stamp) {
+fn copied((path, (stamp, _)): (&NotePath, &(Stamp, LinkSource))) -> (NotePath, Stamp) {
     (path.clone(), *stamp)
 }

@@ -17,10 +17,10 @@ use rusqlite::types::{Type, Value};
 use rusqlite::{Connection, OptionalExtension as _, params};
 
 use crate::error::{Error, Result};
+use crate::facts::NoteFacts;
 use crate::model::{Link, LinkTarget, Note, NoteId, NoteInfo};
 use crate::paths::{NotePath, NoteReader};
-use crate::reconcile::Settled;
-use crate::relink;
+use crate::relink::LinkSource;
 use crate::store::{Stamp, time};
 use crate::tag::TagName;
 
@@ -30,7 +30,7 @@ const FILE: &str = "index.sqlite";
 /// Change this number with each change to [`SCHEMA`], to [`search::SCHEMA`], or to what a
 /// column holds.
 /// An index with another number is rebuilt.
-const SHAPE: i32 = 8;
+const SHAPE: i32 = 9;
 
 const SCHEMA: &str = "
 CREATE TABLE notes (
@@ -44,7 +44,7 @@ CREATE TABLE notes (
     modified INTEGER NOT NULL,
     changed INTEGER NOT NULL,
     size INTEGER NOT NULL,
-    source_hash INTEGER NOT NULL,
+    link_source INTEGER NOT NULL,
     links_hash INTEGER NOT NULL
 );
 CREATE INDEX notes_folder ON notes (folder);
@@ -76,15 +76,31 @@ path, id, title, pinned, modified, preview,
 #[derive(Debug)]
 pub(crate) struct Index {
     path: PathBuf,
-    /// The notes folder, for the paths of file links.
-    root: PathBuf,
     conn: Connection,
 }
 
+/// The rows of one note.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Row<'a> {
+    pub(crate) note: &'a Note,
+    pub(crate) links: &'a [Link],
+    pub(crate) stamp: Stamp,
+    pub(crate) source: LinkSource,
+}
+
+/// The rows that one write changes.
+#[derive(Debug)]
+pub(crate) struct Rows<'a> {
+    /// The notes that are gone.
+    pub(crate) removed: &'a [NotePath],
+    /// The notes at a new path with no other change, as old path and new path.
+    pub(crate) moved: Vec<(&'a NotePath, &'a NotePath)>,
+    pub(crate) put: Vec<Row<'a>>,
+}
+
 impl Index {
-    /// Opens the index in `dir`, for the notes folder `root`. When SQLite fails on it, the
-    /// index starts empty.
-    pub(crate) fn open(dir: &Path, root: &Path) -> Result<Self> {
+    /// Opens the index in `dir`. When SQLite fails on it, the index starts empty.
+    pub(crate) fn open(dir: &Path) -> Result<Self> {
         let path = dir.join(FILE);
         let opened = fs::create_dir_all(dir)
             .map_err(Fail::Io)
@@ -93,21 +109,16 @@ impl Index {
             Ok(conn) => conn,
             Err(fail) => {
                 tracing::warn!(error = %fail, path = %path.display(), "the index failed, so it starts empty");
-                fresh(&path, root, &Settled::default()).map_err(|fail| fail.into_error(&path))?
+                fresh(&path, &[]).map_err(|fail| fail.into_error(&path))?
             }
         };
-        Ok(Self {
-            path,
-            root: root.to_owned(),
-            conn,
-        })
+        Ok(Self { path, conn })
     }
 
-    /// Drops every row and writes the rows of `settled`, which holds every note file.
+    /// Drops every row and writes `put`, which holds every note file.
     /// The rows go into a new file, or into memory when the new file fails.
-    pub(crate) fn rebuild(&mut self, settled: &Settled) -> Result<()> {
-        self.conn =
-            fresh(&self.path, &self.root, settled).map_err(|fail| fail.into_error(&self.path))?;
+    pub(crate) fn rebuild(&mut self, put: &[Row<'_>]) -> Result<()> {
+        self.conn = fresh(&self.path, put).map_err(|fail| fail.into_error(&self.path))?;
         Ok(())
     }
 
@@ -116,15 +127,18 @@ impl Index {
         self.run(|conn| Ok(search::find(conn, text)?))
     }
 
-    /// Every note with its links and its stamp, in no order.
-    pub(crate) fn entries(&mut self) -> Result<Vec<(NoteInfo, Vec<Link>, Stamp)>> {
+    /// Every note with its links, its stamp and its link source, in no order.
+    pub(crate) fn entries(&mut self) -> Result<Vec<NoteFacts>> {
         self.run(|conn| {
             let mut reader = NoteReader::default();
             let mut statement = conn.prepare_cached(&format!(
-                "SELECT {NOTE_INFO}, changed, size FROM notes ORDER BY key"
+                "SELECT {NOTE_INFO}, changed, size, link_source FROM notes ORDER BY key"
             ))?;
             let notes = statement
-                .query_map([], |row| Ok((note_info(&mut reader, row)?, stamp(row)?)))?
+                .query_map([], |row| {
+                    let source = LinkSource::from_stored(row.get(9)?);
+                    Ok((note_info(&mut reader, row)?, stamp(row)?, source))
+                })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             let mut statement = conn.prepare_cached(
                 "SELECT kind, target, heading, embedded, notes.path FROM links
@@ -139,24 +153,29 @@ impl Index {
             }
             Ok(notes
                 .into_iter()
-                .map(|(info, stamp)| {
+                .map(|(info, stamp, source)| {
                     let links = links.remove(&info.path).unwrap_or_default();
-                    (info, links, stamp)
+                    (info, links, stamp, source)
                 })
                 .collect())
         })
     }
 
-    /// Writes the rows of `settled` in one transaction, and returns the links of each put note,
-    /// in order. A moved note keeps its row, so its text, tags and links stay.
-    pub(crate) fn write(&mut self, settled: &Settled) -> Result<Vec<Vec<Link>>> {
-        let write = |conn: &mut Connection| {
+    /// Writes `rows` in one transaction. A moved note keeps its row, so its text, tags and
+    /// links stay.
+    pub(crate) fn write(&mut self, rows: &Rows<'_>) -> Result<()> {
+        self.run(|conn| {
             let tx = conn.transaction()?;
-            let links = put_rows(&tx, &self.root, settled)?;
+            for path in rows.removed {
+                delete(&tx, path)?;
+            }
+            for (from, to) in &rows.moved {
+                shift(&tx, from, to)?;
+            }
+            put_rows(&tx, &rows.put)?;
             tx.commit()?;
-            Ok(links)
-        };
-        write(&mut self.conn).map_err(|fail: Fail| fail.into_error(&self.path))
+            Ok(())
+        })
     }
 
     fn run<T>(&mut self, op: impl FnOnce(&mut Connection) -> Result<T, Fail>) -> Result<T> {
@@ -198,11 +217,11 @@ impl std::fmt::Display for Fail {
     }
 }
 
-/// A new index with only the rows of `settled`: a new file, or else one in memory.
-fn fresh(path: &Path, root: &Path, settled: &Settled) -> Result<Connection, Fail> {
+/// A new index with only the rows `put`: a new file, or else one in memory.
+fn fresh(path: &Path, put: &[Row<'_>]) -> Result<Connection, Fail> {
     let file = remove(path).and_then(|()| {
         let mut conn = connect(path)?;
-        fill(&mut conn, root, settled)?;
+        fill(&mut conn, put)?;
         Ok(conn)
     });
     file.or_else(|fail| {
@@ -210,7 +229,7 @@ fn fresh(path: &Path, root: &Path, settled: &Settled) -> Result<Connection, Fail
         let mut conn = Connection::open_in_memory()?;
         settings(&conn)?;
         schema(&mut conn)?;
-        fill(&mut conn, root, settled)?;
+        fill(&mut conn, put)?;
         Ok(conn)
     })
 }
@@ -255,10 +274,10 @@ fn schema(conn: &mut Connection) -> Result<(), Fail> {
     Ok(())
 }
 
-/// Writes the rows of `settled` into the empty index.
-fn fill(conn: &mut Connection, root: &Path, settled: &Settled) -> Result<(), Fail> {
+/// Writes `put` into the empty index.
+fn fill(conn: &mut Connection, put: &[Row<'_>]) -> Result<(), Fail> {
     let tx = conn.transaction()?;
-    put_rows(&tx, root, settled)?;
+    put_rows(&tx, put)?;
     tx.commit()?;
     Ok(())
 }
@@ -276,19 +295,11 @@ fn remove(path: &Path) -> Result<(), Fail> {
     Ok(())
 }
 
-/// Writes the rows of `settled`, and returns the links of each put note, in order.
-fn put_rows(conn: &Connection, root: &Path, settled: &Settled) -> Result<Vec<Vec<Link>>, Fail> {
-    for path in &settled.removed {
-        delete(conn, path)?;
+fn put_rows(conn: &Connection, put: &[Row<'_>]) -> Result<(), Fail> {
+    for row in put {
+        write(conn, row)?;
     }
-    for moved in &settled.moved {
-        shift(conn, &moved.from, &moved.info.path)?;
-    }
-    settled
-        .put
-        .iter()
-        .map(|put| write(conn, root, &put.note, put.stamp, !put.known))
-        .collect()
+    Ok(())
 }
 
 /// Moves the row of the note at `from` to `to`. Its key stays, so its text, tags and links
@@ -299,45 +310,30 @@ fn shift(conn: &Connection, from: &NotePath, to: &NotePath) -> Result<(), Fail> 
     Ok(())
 }
 
-/// Writes the rows of one note and returns its links.
-///
-/// The links come from the body and the folder, their source. When the source stays,
-/// the links come from the stored rows. When the parsed links stay, the stored rows stay.
-fn write(
-    conn: &Connection,
-    root: &Path,
-    note: &Note,
-    stamp: Stamp,
-    new: bool,
-) -> Result<Vec<Link>, Fail> {
+/// Writes the rows of one note. When its links stay, the stored link rows stay.
+fn write(conn: &Connection, row: &Row<'_>) -> Result<(), Fail> {
+    let Row {
+        note,
+        links,
+        stamp,
+        source,
+    } = *row;
     let info = &note.info;
     let folder = info.path.folder();
-    let source_hash = hash((&note.body, AsRef::<Path>::as_ref(&folder)));
-    let old: Option<(i64, i64)> = if new {
-        None
-    } else {
-        conn.prepare_cached("SELECT source_hash, links_hash FROM notes WHERE path = ?1")?
-            .query_row([bytes(&info.path)], |row| Ok((row.get(0)?, row.get(1)?)))
-            .optional()?
-    };
-    let (links, links_hash, stored) = match old {
-        Some((old_source, old_links)) if old_source == source_hash => (None, old_links, true),
-        _ => {
-            let links = relink::links(root, note);
-            let links_hash = hash(&links);
-            let stored = old.is_some_and(|(_, old_links)| old_links == links_hash);
-            (Some(links), links_hash, stored)
-        }
-    };
+    let links_hash = hash(links);
+    let old_links: Option<i64> = conn
+        .prepare_cached("SELECT links_hash FROM notes WHERE path = ?1")?
+        .query_row([bytes(&info.path)], |row| row.get(0))
+        .optional()?;
     let key: i64 = conn
         .prepare_cached(
             "INSERT INTO notes (path, folder, id, title, preview, pinned, modified, changed, size,
-                source_hash, links_hash)
+                link_source, links_hash)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
             ON CONFLICT (path) DO UPDATE SET folder = excluded.folder, id = excluded.id,
                 title = excluded.title, preview = excluded.preview, pinned = excluded.pinned, modified = excluded.modified,
                 changed = excluded.changed, size = excluded.size,
-                source_hash = excluded.source_hash, links_hash = excluded.links_hash
+                link_source = excluded.link_source, links_hash = excluded.links_hash
             RETURNING key",
         )?
         .query_row(
@@ -351,7 +347,7 @@ fn write(
                 stamp.modified,
                 stamp.changed,
                 stamp.size,
-                source_hash,
+                source.stored(),
                 links_hash,
             ],
             |row| row.get(0),
@@ -363,17 +359,11 @@ fn write(
     for (pos, tag) in (0_i64..).zip(&info.tags) {
         add_tag.execute(params![key, pos, tag.as_str()])?;
     }
-    let links = match links {
-        None => stored_links(conn, key)?,
-        Some(links) => {
-            if !stored {
-                write_links(conn, key, &links)?;
-            }
-            links
-        }
-    };
+    if old_links != Some(links_hash) {
+        write_links(conn, key, links)?;
+    }
     search::put(conn, key, &info.title, &note.body, &info.tags)?;
-    Ok(links)
+    Ok(())
 }
 
 /// Replaces the link rows of the note with `key`.
@@ -398,17 +388,6 @@ fn write_links(conn: &Connection, key: i64, links: &[Link]) -> Result<(), Fail> 
         add_link.execute(params![key, pos, kind, target, heading, link.embedded])?;
     }
     Ok(())
-}
-
-/// The links of the note with `key`, from its rows.
-fn stored_links(conn: &Connection, key: i64) -> Result<Vec<Link>, Fail> {
-    let mut statement = conn.prepare_cached(
-        "SELECT kind, target, heading, embedded FROM links WHERE note = ?1 ORDER BY pos",
-    )?;
-    let links = statement
-        .query_map([key], link)?
-        .collect::<rusqlite::Result<_>>()?;
-    Ok(links)
 }
 
 /// A hash of `value`. Two values with the same hash count as the same.

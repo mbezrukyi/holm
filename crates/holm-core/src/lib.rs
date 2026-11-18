@@ -39,9 +39,9 @@ pub use watch::Feed;
 
 use diff::Touched;
 use facts::Facts;
-use index::Index;
+use index::{Index, Row, Rows};
 use model::{
-    Change, ChangeList, DeleteCount, Link, LinkTarget, Note, NoteId, NoteInfo, NoteSet, Order,
+    Change, ChangeList, DeleteCount, LinkTarget, Note, NoteId, NoteInfo, NoteSet, Order,
     SearchResults, Source,
 };
 use nodes::{Node, Nodes};
@@ -683,7 +683,7 @@ impl Core {
     }
 
     fn build(store: Store, index_dir: &Path, watcher: Option<watch::Watcher>) -> Result<Self> {
-        let index = Index::open(index_dir, store.root())?;
+        let index = Index::open(index_dir)?;
         let mut disk = Disk { store, index };
         let facts = disk.start()?;
         let inner = Inner {
@@ -847,9 +847,9 @@ impl Pending<'_> {
     /// Writes the rows of `settled` into the index and puts it in the next facts. It returns the
     /// notes that were read.
     fn take(&mut self, settled: Settled) -> Vec<Note> {
-        let links = self.disk.write_rows(&settled);
+        self.disk.write_rows(&settled);
         self.touched.settled(&settled);
-        self.next.settle(settled, links)
+        self.next.settle(settled)
     }
 }
 
@@ -866,24 +866,31 @@ impl Disk {
         };
         let mut facts = Facts::new(entries, self.store.folders(&FolderPath::root())?);
         let settled = scan::files(&self.store, &facts, &Nodes::root())?;
-        let links = if readable {
-            self.write_rows(&settled)
+        if readable {
+            self.write_rows(&settled);
         } else {
             self.rebuild_from(&settled);
-            self.links(&settled)
-        };
-        facts.settle(settled, links);
+        }
+        facts.settle(settled);
         Ok(facts)
     }
 
-    /// Writes the rows of `settled` into the index, and returns the links of each put note, in
-    /// order. When SQLite fails, it rebuilds the index, so it never fails.
-    fn write_rows(&mut self, settled: &Settled) -> Vec<Vec<Link>> {
-        self.index.write(settled).unwrap_or_else(|error| {
+    /// Writes the rows of `settled` into the index. When SQLite fails, it rebuilds the index,
+    /// so it never fails.
+    fn write_rows(&mut self, settled: &Settled) {
+        let rows = Rows {
+            removed: &settled.removed,
+            moved: settled
+                .moved
+                .iter()
+                .map(|moved| (&moved.from, &moved.info.path))
+                .collect(),
+            put: put_rows(settled),
+        };
+        if let Err(error) = self.index.write(&rows) {
             tracing::warn!(%error, "the index failed, so Holm rebuilds it");
             self.rebuild();
-            self.links(settled)
-        })
+        }
     }
 
     /// Runs `op` on the index. When SQLite fails, it rebuilds the index and runs `op` again.
@@ -906,19 +913,9 @@ impl Disk {
 
     /// Rebuilds the index with the rows of `settled`, which holds every note file.
     fn rebuild_from(&mut self, settled: &Settled) {
-        if let Err(error) = self.index.rebuild(settled) {
+        if let Err(error) = self.index.rebuild(&put_rows(settled)) {
             tracing::warn!(%error, "cannot rebuild the index");
         }
-    }
-
-    /// The links of each put note of `settled`, in order, parsed from its text.
-    fn links(&self, settled: &Settled) -> Vec<Vec<Link>> {
-        let root = self.store.root();
-        settled
-            .put
-            .iter()
-            .map(|put| relink::links(root, &put.note))
-            .collect()
     }
 
     /// The count of a delete of `node` in `snapshot`, and the attachment files it removes.
@@ -931,6 +928,20 @@ impl Disk {
         };
         (count, files)
     }
+}
+
+/// The index rows of each put note of `settled`.
+fn put_rows(settled: &Settled) -> Vec<Row<'_>> {
+    settled
+        .put
+        .iter()
+        .map(|put| Row {
+            note: &put.note,
+            links: &put.links,
+            stamp: put.stamp,
+            source: put.source,
+        })
+        .collect()
 }
 
 impl Inner {

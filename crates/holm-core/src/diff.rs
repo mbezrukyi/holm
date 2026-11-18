@@ -183,6 +183,7 @@ mod tests {
     use std::time::SystemTime;
 
     use super::*;
+    use crate::relink::LinkSource;
     use crate::store::Stamp;
     use crate::tag::TagName;
 
@@ -216,7 +217,7 @@ mod tests {
         Facts::new(
             notes
                 .iter()
-                .map(|note| (note.clone(), Vec::new(), STAMP))
+                .map(|note| (note.clone(), Vec::new(), STAMP, LinkSource::default()))
                 .collect(),
             folders.iter().map(|at| folder(at)).collect(),
         )

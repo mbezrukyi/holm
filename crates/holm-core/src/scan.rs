@@ -1,11 +1,12 @@
-//! Runs the plans of [`reconcile`] on the disk: it lists and reads the note files, and gives
-//! each copied note a new id.
+//! Runs the plans of [`reconcile`] on the disk: it lists and reads the note files, parses
+//! their links, and gives each copied note a new id.
 
 use crate::error::Result;
 use crate::facts::Facts;
 use crate::model::{Note, NoteId};
 use crate::nodes::Nodes;
 use crate::reconcile::{self, Plan, Read, Settled};
+use crate::relink::{self, LinkSource};
 use crate::store::{Stamp, Store};
 
 /// Brings the notes at or below each of `nodes` up to date with the files, from `facts`.
@@ -45,6 +46,8 @@ pub(crate) fn wrote(store: &Store, facts: &Facts, notes: Vec<(Note, Stamp)>) -> 
     settle(store, facts, plan, reads)
 }
 
+/// The read of `note`. Its links come from `facts` when its link source stays, else from
+/// its body.
 fn read(store: &Store, facts: &Facts, note: Note, stamp: Stamp) -> Read {
     let owner_on_disk = note
         .info
@@ -53,9 +56,18 @@ fn read(store: &Store, facts: &Facts, note: Note, stamp: Stamp) -> Read {
         .and_then(|id| facts.snapshot().note_with_id(id.as_str()))
         .filter(|owner| owner.path != note.info.path)
         .is_some_and(|owner| store.exists(&owner.path));
+    let source = LinkSource::of(&note);
+    let path = &note.info.path;
+    let links = if facts.link_source(path) == Some(source) {
+        facts.snapshot().links(path).to_vec()
+    } else {
+        relink::links(store.root(), &note)
+    };
     Read {
         note,
+        links,
         stamp,
+        source,
         owner_on_disk,
     }
 }

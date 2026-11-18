@@ -1,11 +1,37 @@
-//! File link paths: where they point, and how to write them after a note moves.
+//! The links of a note and what they come from, and file link paths: where they point, and
+//! how to write them after a note moves.
 
+use std::hash::BuildHasher as _;
 use std::path::{Component, Path, PathBuf};
 
 use holm_markdown::{Body, Note as Text, Target};
 
 use crate::model::{Link, LinkTarget, Note, NoteId};
 use crate::{FolderPath, NotePath};
+
+/// A hash of what the links of a note come from: its body and its folder. Two notes with the
+/// same hash have the same links.
+///
+/// The hash may change with the `foldhash` version. Then each note gets parsed once more.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct LinkSource(i64);
+
+impl LinkSource {
+    pub(crate) fn of(note: &Note) -> Self {
+        let source = (&note.body, AsRef::<Path>::as_ref(note.info.path.folder()));
+        let hash = foldhash::quality::FixedState::default().hash_one(source);
+        Self(i64::from_ne_bytes(hash.to_ne_bytes()))
+    }
+
+    /// The hash from its stored form, [`LinkSource::stored`].
+    pub(crate) fn from_stored(stored: i64) -> Self {
+        Self(stored)
+    }
+
+    pub(crate) fn stored(self) -> i64 {
+        self.0
+    }
+}
 
 /// The links of the note, with file paths from the notes folder `root`.
 pub(crate) fn links(root: &Path, note: &Note) -> Vec<Link> {

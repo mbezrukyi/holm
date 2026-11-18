@@ -10,6 +10,7 @@ use crate::facts::Facts;
 use crate::model::{Link, LinkTarget, Note, NoteId, NoteInfo};
 use crate::nodes::Nodes;
 use crate::paths::NotePath;
+use crate::relink::LinkSource;
 use crate::snapshot::Snapshot;
 use crate::store::Stamp;
 
@@ -27,7 +28,9 @@ pub(crate) struct Plan {
 #[derive(Debug)]
 pub(crate) struct Read {
     pub(crate) note: Note,
+    pub(crate) links: Vec<Link>,
     pub(crate) stamp: Stamp,
+    pub(crate) source: LinkSource,
     /// Whether a note file is at the path where the facts keep the id of the note, when that
     /// path is another one.
     pub(crate) owner_on_disk: bool,
@@ -51,15 +54,16 @@ pub(crate) struct Moved {
     pub(crate) info: NoteInfo,
     pub(crate) links: Vec<Link>,
     pub(crate) stamp: Stamp,
+    pub(crate) source: LinkSource,
 }
 
 /// A note that was read.
 #[derive(Debug)]
 pub(crate) struct Put {
     pub(crate) note: Note,
+    pub(crate) links: Vec<Link>,
     pub(crate) stamp: Stamp,
-    /// Whether the facts know a note at this path.
-    pub(crate) known: bool,
+    pub(crate) source: LinkSource,
     /// Whether the note is a copy: another note file keeps its id. A copy has no id here, so
     /// the core can give it a new one.
     pub(crate) copy: bool,
@@ -172,6 +176,7 @@ impl Plan {
             }
             settled.moved.push(Moved {
                 links: snapshot.links(&from).to_vec(),
+                source: facts.link_source(&from).unwrap_or_default(),
                 from,
                 info,
                 stamp,
@@ -186,7 +191,9 @@ impl Plan {
             owners.free(&path);
             let Some(Read {
                 mut note,
+                links,
                 stamp,
+                source,
                 owner_on_disk,
             }) = reads.remove(&path)
             else {
@@ -214,8 +221,9 @@ impl Plan {
             }
             settled.put.push(Put {
                 note,
+                links,
                 stamp,
-                known,
+                source,
                 copy,
             });
         }
@@ -304,8 +312,7 @@ mod tests {
         let mut touched = Touched::default();
         touched.settled(&settled);
         let mut after = before.clone();
-        let links = vec![Vec::new(); settled.put.len()];
-        after.settle(settled, links);
+        after.settle(settled);
         let (_, list) = touched.list(Source::Outside, before, after);
         list.map(|list| list.changes).unwrap_or_default()
     }
@@ -339,7 +346,7 @@ mod tests {
         Facts::new(
             notes
                 .iter()
-                .map(|(at, id, stamp)| (info(at, *id), Vec::new(), *stamp))
+                .map(|(at, id, stamp)| (info(at, *id), Vec::new(), *stamp, LinkSource::default()))
                 .collect(),
             Vec::new(),
         )
@@ -351,7 +358,9 @@ mod tests {
                 info: info(at, id),
                 body: String::new(),
             },
+            links: Vec::new(),
             stamp,
+            source: LinkSource::default(),
             owner_on_disk,
         }
     }
@@ -416,7 +425,12 @@ mod tests {
             embedded: true,
         };
         let facts = Facts::new(
-            vec![(info("a.md", Some("A")), vec![link], stamp(5))],
+            vec![(
+                info("a.md", Some("A")),
+                vec![link],
+                stamp(5),
+                LinkSource::default(),
+            )],
             Vec::new(),
         );
         let plan = plan(&facts, &Nodes::root(), vec![(path("work/a.md"), stamp(5))]);
