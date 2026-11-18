@@ -103,7 +103,16 @@ impl Store {
         Ok(path)
     }
 
-    /// Deletes the file at `rel` when [`Store::is_attachment`] allows it.
+    /// The paths in `targets` that are attachments, in their order.
+    /// Each path is relative to the notes folder.
+    pub(crate) fn attachments(&self, targets: impl IntoIterator<Item = PathBuf>) -> Vec<PathBuf> {
+        targets
+            .into_iter()
+            .filter(|target| self.is_attachment(target))
+            .collect()
+    }
+
+    /// Deletes the file at `rel` when it is an attachment.
     pub(crate) fn delete_attachment(&self, rel: &Path) -> Result<()> {
         if self.is_attachment(rel) {
             remove(&self.root.join(rel))?;
@@ -113,7 +122,7 @@ impl Store {
 
     /// Whether `rel`, a path relative to the notes folder, is a file in the attachment folder
     /// that is not a note. A symlink counts as a file. No folder on the way may be a symlink.
-    pub(crate) fn is_attachment(&self, rel: &Path) -> bool {
+    fn is_attachment(&self, rel: &Path) -> bool {
         let Some((folder, name)) = FolderPath::split_raw(rel) else {
             return false;
         };

@@ -856,11 +856,7 @@ impl Inner {
     /// The count of a delete of `node`, and the attachment files it removes.
     fn removal(&self, node: &Node) -> Result<(DeleteCount, Vec<PathBuf>)> {
         let removal = self.index.removal(&self.store, node)?;
-        let files: Vec<PathBuf> = removal
-            .files
-            .into_iter()
-            .filter(|file| self.store.is_attachment(file))
-            .collect();
+        let files = self.store.attachments(removal.files);
         let count = DeleteCount {
             notes: removal.notes,
             attachments: files.len(),
