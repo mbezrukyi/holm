@@ -75,7 +75,7 @@ impl NotesView {
                 notes_folder.clone(),
                 pane.clone(),
                 order,
-                settings.sidebar.view.clone(),
+                &settings.sidebar.view,
                 window,
                 cx,
             )
@@ -656,7 +656,7 @@ impl NotesView {
         let sidebar = SidebarSettings {
             width: whole(self.width),
             hidden: self.hidden,
-            view: self.sidebar.read(cx).view().clone(),
+            view: self.sidebar.read(cx).view(),
         };
         let last_note = self.pane.read(cx).path().cloned();
         self.config.update(cx, |config, cx| {

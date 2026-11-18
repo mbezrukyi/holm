@@ -29,6 +29,7 @@ use gpui_kit::{
 use holm_core::model::{Change, NoteInfo, NoteSet, Order};
 use holm_core::{FolderPath, NotePath, TagName};
 
+use crate::config::SidebarView;
 use crate::error::AppError;
 use crate::icons::Icon;
 use crate::name_field::{Look, NameEvent, NameField, NameWrite};
@@ -37,8 +38,8 @@ use crate::pane::{NotePane, PaneEvent};
 use crate::text;
 
 use list::NoteList;
-pub(crate) use tree::{Item, View};
-use tree::{Row, Tree};
+pub(crate) use tree::Item;
+use tree::{Row, Tree, View};
 
 const TREE_ROW: f32 = 28.;
 const NOTE_ROW: f32 = 52.;
@@ -150,7 +151,7 @@ impl Sidebar {
         notes_folder: Entity<NotesFolder>,
         pane: Entity<NotePane>,
         order: Order,
-        view: View,
+        view: &SidebarView,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -176,7 +177,7 @@ impl Sidebar {
             notes_folder,
             order,
             tree: Tree::default(),
-            view,
+            view: View::from(view),
             open: HashSet::new(),
             rows: Vec::new(),
             entries: Vec::new(),
@@ -196,8 +197,8 @@ impl Sidebar {
         sidebar
     }
 
-    pub(crate) fn view(&self) -> &View {
-        &self.view
+    pub(crate) fn view(&self) -> SidebarView {
+        SidebarView::from(&self.view)
     }
 
     /// Takes the end of a write or of outside changes: it follows the moves, and then shows

@@ -13,9 +13,8 @@ use holm_core::{Core, Feed};
 use tempfile::TempDir;
 
 use super::{HolmWindow, Startup};
-use crate::config::Config;
+use crate::config::{Config, SidebarItem, SidebarView};
 use crate::log::Log;
-use crate::sidebar::{Item, View};
 use crate::{text, theme};
 
 struct Fixture {
@@ -926,7 +925,13 @@ fn the_keyboard_moves_through_tree_list_and_editor(cx: &mut TestAppContext) {
     assert_eq!(focus(cx, handle), "sidebar");
 
     let settings = Config::load(fixture.config()).settings().clone();
-    assert_eq!(settings.sidebar.view, View::List(Item::All));
+    assert_eq!(
+        settings.sidebar.view,
+        SidebarView {
+            list: true,
+            item: SidebarItem::All,
+        }
+    );
     assert_eq!(settings.last_note, holm_core::NotePath::new("Top.md"));
 }
 
@@ -2092,7 +2097,10 @@ fn a_folder_delete_selects_the_parent_folder(cx: &mut TestAppContext) {
     assert_eq!(sidebar(cx, handle), "tree All notes");
     assert_eq!(
         Config::load(fixture.config()).settings().sidebar.view,
-        View::Tree(Item::All)
+        SidebarView {
+            list: false,
+            item: SidebarItem::All,
+        }
     );
 }
 
@@ -2257,7 +2265,13 @@ fn search_lists_the_notes_that_match_and_esc_returns(cx: &mut TestAppContext) {
     settle(cx);
     assert_eq!(notes_list(cx, handle), ["Plan"]);
     let settings = Config::load(fixture.config()).settings().clone();
-    assert_eq!(settings.sidebar.view, View::Tree(Item::All));
+    assert_eq!(
+        settings.sidebar.view,
+        SidebarView {
+            list: false,
+            item: SidebarItem::All,
+        }
+    );
     assert!(!settings.sidebar.hidden);
 
     // The find bar of the editor lets Ctrl+Shift+F through.

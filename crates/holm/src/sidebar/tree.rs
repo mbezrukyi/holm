@@ -7,6 +7,7 @@ use std::collections::HashSet;
 use holm_core::model::{Change, NoteSet, Order, Tag};
 
 use super::list::NoteList;
+use crate::config::{SidebarItem, SidebarView};
 
 /// An item of the folder tree. Each item has a note list.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -76,9 +77,43 @@ pub(crate) enum View {
     List(Item),
 }
 
-impl Default for View {
-    fn default() -> Self {
-        Self::List(Item::All)
+impl From<&SidebarView> for View {
+    fn from(saved: &SidebarView) -> Self {
+        let item = Item::from(&saved.item);
+        if saved.list {
+            Self::List(item)
+        } else {
+            Self::Tree(item)
+        }
+    }
+}
+
+impl From<&View> for SidebarView {
+    fn from(view: &View) -> Self {
+        Self {
+            list: matches!(view, View::List(_)),
+            item: SidebarItem::from(view.item()),
+        }
+    }
+}
+
+impl From<&SidebarItem> for Item {
+    fn from(saved: &SidebarItem) -> Self {
+        match saved {
+            SidebarItem::All => Self::All,
+            SidebarItem::Folder(path) => Self::Folder(path.clone()),
+            SidebarItem::Tag(name) => Self::Tag(name.clone()),
+        }
+    }
+}
+
+impl From<&Item> for SidebarItem {
+    fn from(item: &Item) -> Self {
+        match item {
+            Item::All => Self::All,
+            Item::Folder(path) => Self::Folder(path.clone()),
+            Item::Tag(name) => Self::Tag(name.clone()),
+        }
     }
 }
 

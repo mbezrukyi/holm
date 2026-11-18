@@ -16,7 +16,6 @@ use holm_editor::WritingHelp;
 use holm_markdown::Color;
 use toml_edit::{Array, DocumentMut, Item, Table, Value};
 
-use crate::sidebar::{Item as SidebarItem, View};
 use crate::text;
 
 const VERSION: i64 = 1;
@@ -58,7 +57,7 @@ pub(crate) struct SidebarSettings {
     /// In pixels.
     pub(crate) width: u16,
     pub(crate) hidden: bool,
-    pub(crate) view: View,
+    pub(crate) view: SidebarView,
 }
 
 impl Default for SidebarSettings {
@@ -66,9 +65,29 @@ impl Default for SidebarSettings {
         Self {
             width: 250,
             hidden: false,
-            view: View::default(),
+            view: SidebarView {
+                list: true,
+                item: SidebarItem::All,
+            },
         }
     }
+}
+
+/// The sidebar view as the settings keep it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SidebarView {
+    /// The note list of `item`, or else the folder tree with `item` selected.
+    pub(crate) list: bool,
+    pub(crate) item: SidebarItem,
+}
+
+/// An item of the folder tree, as the settings keep it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum SidebarItem {
+    All,
+    /// A folder that is not the root.
+    Folder(FolderPath),
+    Tag(TagName),
 }
 
 impl Default for Settings {
@@ -300,8 +319,6 @@ fn read_writing_help(table: &dyn toml_edit::TableLike, help: &mut WritingHelp) {
 }
 
 fn read_sidebar(table: &dyn toml_edit::TableLike, sidebar: &mut SidebarSettings) {
-    let mut list = matches!(sidebar.view, View::List(_));
-    let mut item = sidebar.view.item().clone();
     for (key, value) in table.iter() {
         match key {
             "width" => {
@@ -317,27 +334,22 @@ fn read_sidebar(table: &dyn toml_edit::TableLike, sidebar: &mut SidebarSettings)
                 }
             }
             "view" => {
-                if let Some(view) = get(key, value, |value| match value.as_str()? {
+                if let Some(list) = get(key, value, |value| match value.as_str()? {
                     "tree" => Some(false),
                     "list" => Some(true),
                     _ => None,
                 }) {
-                    list = view;
+                    sidebar.view.list = list;
                 }
             }
             "item" => {
                 if let Some(read) = get(key, value, |value| item_from(value.as_str()?)) {
-                    item = read;
+                    sidebar.view.item = read;
                 }
             }
             _ => unknown(&format!("sidebar.{key}")),
         }
     }
-    sidebar.view = if list {
-        View::List(item)
-    } else {
-        View::Tree(item)
-    };
 }
 
 /// `all`, `folder:<path>` or `tag:<name>`.
@@ -441,12 +453,9 @@ fn write(document: &mut DocumentMut, settings: &Settings) {
         let sidebar = &settings.sidebar;
         set(table, "width", Value::from(i64::from(sidebar.width)));
         set(table, "hidden", Value::from(sidebar.hidden));
-        let view = match sidebar.view {
-            View::Tree(_) => "tree",
-            View::List(_) => "list",
-        };
+        let view = if sidebar.view.list { "list" } else { "tree" };
         set(table, "view", Value::from(view));
-        set(table, "item", Value::from(item_text(sidebar.view.item())));
+        set(table, "item", Value::from(item_text(&sidebar.view.item)));
     }
 }
 
@@ -505,7 +514,10 @@ mod tests {
             sidebar: SidebarSettings {
                 width: 310,
                 hidden: true,
-                view: View::Tree(SidebarItem::Tag(tag_name("work/holm"))),
+                view: SidebarView {
+                    list: false,
+                    item: SidebarItem::Tag(tag_name("work/holm")),
+                },
             },
             last_note: NotePath::new("work/Plans.md"),
         };
@@ -555,10 +567,19 @@ mod tests {
             load("version = 1\n[sidebar]\nview = \"list\"\nitem = \"folder:work\"\n");
         assert_eq!(
             config.settings().sidebar.view,
-            View::List(SidebarItem::Folder(folder_path("work")))
+            SidebarView {
+                list: true,
+                item: SidebarItem::Folder(folder_path("work")),
+            }
         );
         let (_dir, config) = load("version = 1\n[sidebar]\nview = \"tree\"\nitem = \"bad\"\n");
-        assert_eq!(config.settings().sidebar.view, View::Tree(SidebarItem::All));
+        assert_eq!(
+            config.settings().sidebar.view,
+            SidebarView {
+                list: false,
+                item: SidebarItem::All,
+            }
+        );
     }
 
     #[test]
