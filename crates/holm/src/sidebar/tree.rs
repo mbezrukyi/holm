@@ -30,7 +30,7 @@ impl Item {
         }
     }
 
-    /// The folder for a new note from this item. Notes of "All notes" and tags go in the root.
+    /// The folder for a new note or folder from this item. "All notes" and tags give the root.
     pub(crate) fn folder(&self) -> FolderPath {
         match self {
             Self::Folder(path) => path.clone(),

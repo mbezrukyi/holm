@@ -509,13 +509,9 @@ impl NotesView {
 
     /// Ctrl+Shift+N: an empty name field for a new folder in the folder of the view.
     fn new_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let parent = match self.sidebar.read(cx).view().item() {
-            Item::Folder(folder) => folder.clone(),
-            Item::All | Item::Tag(_) => FolderPath::root(),
-        };
         self.hidden = false;
         self.sidebar
-            .update(cx, |sidebar, cx| sidebar.new_folder(parent, window, cx));
+            .update(cx, |sidebar, cx| sidebar.new_folder(window, cx));
         cx.notify();
     }
 

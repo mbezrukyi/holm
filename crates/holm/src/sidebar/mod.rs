@@ -527,14 +527,10 @@ impl Sidebar {
         self.open_name_field(Named::Folder(folder), Some(&text), item, write, window, cx);
     }
 
-    /// Starts an empty name field for a new folder in `parent`, as its first child row.
-    /// Nothing is on disk before `Enter`.
-    pub(crate) fn new_folder(
-        &mut self,
-        parent: FolderPath,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    /// Starts an empty name field for a new folder in the folder of the view, as its first
+    /// child row. Nothing is on disk before `Enter`.
+    pub(crate) fn new_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let parent = self.view.item().folder();
         let item = if parent.is_root() {
             Item::All
         } else {
