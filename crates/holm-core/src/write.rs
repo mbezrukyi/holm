@@ -1,11 +1,9 @@
 //! The steps of one write. Each step changes the disk, puts what it finds in the next facts,
 //! and records what it touched. So the change list of a write misses nothing.
 
-use std::path::Path;
-
 use crate::diff::Touched;
 use crate::facts::Facts;
-use crate::model::{Change, ChangeList, Note, NoteInfo, NoteSet, Order, Source};
+use crate::model::{Change, ChangeList, Note, NoteId, NoteInfo, NoteSet, Order, Source};
 use crate::nodes::{Node, Nodes};
 use crate::paths::{FolderPath, Name, NotePath};
 use crate::reconcile::Settled;
@@ -42,11 +40,6 @@ pub(crate) fn run<T>(
 }
 
 impl Write<'_> {
-    /// The notes folder.
-    pub(crate) fn root(&self) -> &Path {
-        self.disk.store.root()
-    }
-
     /// Saves `body` as the body of the note at `path`.
     pub(crate) fn save(&mut self, path: &NotePath, body: &str) -> Result<Note> {
         let (note, stamp) = self.disk.store.save(path, body)?;
@@ -65,8 +58,53 @@ impl Write<'_> {
         self.update(&note, stamp)
     }
 
+    /// The id of the note. A note with no id gets one.
+    pub(crate) fn link_id(&mut self, path: &NotePath) -> Result<NoteId> {
+        let note = self.edit_fields(path, |text| {
+            if text.id().is_none() {
+                text.set_id(Some(NoteId::generate().as_str()));
+            }
+        })?;
+        note.info.id.ok_or_else(|| self.lost(&note.info.path))
+    }
+
+    /// Adds the tag to the note, when it does not have it yet.
+    pub(crate) fn add_tag(&mut self, path: &NotePath, tag: &TagName) -> Result<NoteInfo> {
+        self.edit_fields(path, |text| {
+            let mut tags = TagName::of_note(text);
+            if !tags.contains(tag) {
+                tags.push(tag.clone());
+                text.set_tags(&tags);
+            }
+        })
+        .map(|note| note.info)
+    }
+
+    /// Removes the tag from the note, but not its child tags.
+    pub(crate) fn remove_tag(&mut self, path: &NotePath, tag: &TagName) -> Result<NoteInfo> {
+        self.edit_fields(path, |text| {
+            let mut tags = TagName::of_note(text);
+            let count = tags.len();
+            tags.retain(|other| other != tag);
+            if tags.len() != count {
+                text.set_tags(&tags);
+            }
+        })
+        .map(|note| note.info)
+    }
+
+    /// Pins or unpins the note.
+    pub(crate) fn set_pinned(&mut self, path: &NotePath, pinned: bool) -> Result<NoteInfo> {
+        self.edit_fields(path, |text| {
+            if text.pinned() != pinned {
+                text.set_pinned(pinned);
+            }
+        })
+        .map(|note| note.info)
+    }
+
     /// Changes the frontmatter of the note with `edit`, and keeps its modification time.
-    pub(crate) fn edit_fields(
+    fn edit_fields(
         &mut self,
         path: &NotePath,
         edit: impl FnOnce(&mut holm_markdown::Note),
@@ -97,8 +135,27 @@ impl Write<'_> {
         Ok(new)
     }
 
-    /// Moves the folder into `parent` as `name`, and returns its new path.
+    /// Renames the folder to `name` in its parent, and returns its new path.
+    pub(crate) fn rename_folder(&mut self, folder: &FolderPath, name: &Name) -> Result<FolderPath> {
+        self.move_folder_to(folder, &folder.folder().unwrap_or_default(), name)
+    }
+
+    /// Moves the folder into `parent` with its name, and returns its new path.
     pub(crate) fn move_folder(
+        &mut self,
+        folder: &FolderPath,
+        parent: &FolderPath,
+    ) -> Result<FolderPath> {
+        let Some((_, name)) = folder.split() else {
+            return Err(Error::BadPath {
+                path: folder.as_ref().to_owned(),
+            });
+        };
+        self.move_folder_to(folder, parent, &name)
+    }
+
+    /// Moves the folder into `parent` as `name`, and returns its new path.
+    fn move_folder_to(
         &mut self,
         folder: &FolderPath,
         parent: &FolderPath,
@@ -200,10 +257,18 @@ impl Write<'_> {
     /// Puts a note that Holm just wrote into the index and the next facts, and returns it.
     fn update(&mut self, note: &Note, stamp: Stamp) -> Result<Note> {
         let notes = self.update_all(vec![(note.clone(), stamp)]);
-        notes.into_iter().next().ok_or_else(|| Error::Write {
-            path: self.disk.store.root().join(&note.info.path),
+        notes
+            .into_iter()
+            .next()
+            .ok_or_else(|| self.lost(&note.info.path))
+    }
+
+    /// The error when the note that Holm just wrote at `path` does not read back as written.
+    fn lost(&self, path: &NotePath) -> Error {
+        Error::Write {
+            path: self.disk.store.root().join(path),
             source: std::io::ErrorKind::InvalidData.into(),
-        })
+        }
     }
 
     /// Puts notes that Holm just wrote into the index and the next facts, and returns them.

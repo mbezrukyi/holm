@@ -1,5 +1,7 @@
 //! Tag changes in many notes: a rename or a delete of a tag with its child tags.
 
+use crate::Snapshot;
+use crate::model::NoteSet;
 use crate::tag::TagName;
 
 /// A change of one tag and its child tags in every note that has them.
@@ -17,6 +19,14 @@ impl TagEdit<'_> {
             Self::Rename { from, .. } => from,
             Self::Delete(tag) => tag,
         }
+    }
+
+    /// How many notes in `snapshot` the edit changes.
+    pub(crate) fn count(&self, snapshot: &Snapshot) -> usize {
+        snapshot
+            .matching(NoteSet::WithTag(self.tag()))
+            .filter(|note| self.apply(&note.tags) != note.tags)
+            .count()
     }
 
     /// The tags of a note after the edit. A rename to a tag that the note has merges the two.

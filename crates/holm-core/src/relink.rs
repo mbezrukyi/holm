@@ -1,13 +1,15 @@
 //! The links of a note and what they come from, and file link paths: where they point, and
 //! how to write them after a note moves.
 
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::hash::BuildHasher as _;
 use std::path::{Component, Path, PathBuf};
 
 use holm_markdown::{Body, Note as Text, Target};
 
 use crate::model::{Link, LinkTarget, Note, NoteId};
-use crate::{FolderPath, NotePath};
+use crate::{FolderPath, NotePath, Result, Snapshot};
 
 /// A hash of what the links of a note come from: its body and its folder. Two notes with the
 /// same hash have the same links.
@@ -52,6 +54,51 @@ pub(crate) fn links(root: &Path, note: &Note) -> Vec<Link> {
             embedded: link.embedded,
         })
         .collect()
+}
+
+/// The text of each heading in the note, in order.
+pub(crate) fn headings(note: &Note) -> Vec<String> {
+    Body::parse(&note.body)
+        .headings()
+        .iter()
+        .map(|heading| heading.text.clone())
+        .collect()
+}
+
+/// The note links in the note at `path` that point to a note or heading missing in
+/// `snapshot`, each once. A heading link needs a heading with the same text, also in capital
+/// letters. `read` reads a linked note, once for each note.
+pub(crate) fn broken(
+    snapshot: &Snapshot,
+    path: &NotePath,
+    mut read: impl FnMut(&NotePath) -> Result<Note>,
+) -> Result<Vec<LinkTarget>> {
+    let mut known: HashMap<&NoteId, Option<Vec<String>>> = HashMap::new();
+    let mut broken = Vec::new();
+    for link in snapshot.links(path) {
+        let LinkTarget::Note { id, heading } = &link.target else {
+            continue;
+        };
+        let targets = match known.entry(id) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                let note = snapshot
+                    .note_with_id(id.as_str())
+                    .map(|info| read(&info.path))
+                    .transpose()?;
+                entry.insert(note.as_ref().map(headings))
+            }
+        };
+        let found = match (targets, heading) {
+            (None, _) => false,
+            (Some(_), None) => true,
+            (Some(targets), Some(heading)) => targets.contains(heading),
+        };
+        if !found && !broken.contains(&link.target) {
+            broken.push(link.target.clone());
+        }
+    }
+    Ok(broken)
 }
 
 /// The path of a file that a note in `folder` links as `file`.

@@ -21,9 +21,6 @@ mod tag;
 mod watch;
 mod write;
 
-use std::collections::{HashMap, hash_map};
-use std::ffi::OsStr;
-use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -41,8 +38,7 @@ pub use watch::Feed;
 use facts::Facts;
 use index::{Index, Row, Rows};
 use model::{
-    ChangeList, DeleteCount, LinkTarget, Note, NoteId, NoteInfo, NoteSet, Order, SearchResults,
-    Source,
+    ChangeList, DeleteCount, LinkTarget, Note, NoteId, NoteInfo, Order, SearchResults, Source,
 };
 use nodes::{Node, Nodes};
 use paths::Name;
@@ -51,9 +47,6 @@ use retag::TagEdit;
 use store::Store;
 use watch::{Apply, Batch};
 use write::Write;
-
-/// The stem of a pasted image before its hash.
-const PASTED_IMAGE: &str = "Pasted image";
 
 /// The handle to one notes folder.
 ///
@@ -187,13 +180,7 @@ impl Core {
     ///
     /// As in [`Core::read`].
     pub fn headings(&self, path: &NotePath) -> Result<Vec<String>> {
-        let body = self.read(path)?.body;
-        let parsed = holm_markdown::Body::parse(&body);
-        Ok(parsed
-            .headings()
-            .iter()
-            .map(|heading| heading.text.clone())
-            .collect())
+        self.read(path).map(|note| relink::headings(&note))
     }
 
     /// The note links in the note at `path` that point to a missing note or heading,
@@ -203,35 +190,11 @@ impl Core {
     ///
     /// As in [`Core::read`], when a linked note can't be read.
     pub fn broken_links(&self, path: &NotePath) -> Result<Vec<LinkTarget>> {
-        let snapshot = self.snapshot();
-        let mut known: HashMap<NoteId, Option<Vec<String>>> = HashMap::new();
-        let mut broken = Vec::new();
-        for link in snapshot.links(path) {
-            let LinkTarget::Note { id, heading } = &link.target else {
-                continue;
-            };
-            let headings = match known.entry(id.clone()) {
-                hash_map::Entry::Occupied(entry) => entry.into_mut(),
-                hash_map::Entry::Vacant(entry) => entry.insert(self.all_headings(&snapshot, id)?),
-            };
-            let found = match (headings, heading) {
-                (None, _) => false,
-                (Some(_), None) => true,
-                (Some(headings), Some(heading)) => headings.contains(heading),
-            };
-            if !found && !broken.contains(&link.target) {
-                broken.push(link.target.clone());
-            }
-        }
-        Ok(broken)
-    }
-
-    /// Every heading of the note with `id`, or `None` with no such note.
-    fn all_headings(&self, snapshot: &Snapshot, id: &NoteId) -> Result<Option<Vec<String>>> {
-        match snapshot.note_with_id(id.as_str()) {
-            Some(info) => self.headings(&info.path).map(Some),
-            None => Ok(None),
-        }
+        self.inner.with(|locked| {
+            relink::broken(locked.facts.snapshot(), path, |note| {
+                locked.disk.store.read(note).map(|(note, _)| note)
+            })
+        })
     }
 
     /// The path for a link from the note at `note` to `file`, with no copy. A file inside the
@@ -242,16 +205,8 @@ impl Core {
     ///
     /// [`Error::BadPath`] when `file` is not absolute.
     pub fn file_link(&self, note: &NotePath, file: impl AsRef<Path>) -> Result<PathBuf> {
-        let file = file.as_ref();
-        if !file.is_absolute() {
-            return Err(Error::BadPath {
-                path: file.to_owned(),
-            });
-        }
-        let file = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_owned());
-        Ok(self
-            .inner
-            .with(|locked| relink::link(locked.disk.store.root(), note, &file)))
+        self.inner
+            .with(|locked| locked.disk.store.file_link(note, file.as_ref()))
     }
 
     /// Reads one note.
@@ -377,8 +332,8 @@ impl Core {
     /// - [`Error::Read`] when `folder` is missing or is not a folder.
     /// - [`Error::Write`] when the folder can't be moved. It then stays where it was.
     pub fn rename_folder(&self, folder: &FolderPath, name: &str) -> Result<FolderPath> {
-        let name = Name::typed(name)?;
-        self.move_folder_to(folder, &folder.folder().unwrap_or_default(), &name)
+        self.inner
+            .write(|write| write.rename_folder(folder, &Name::typed(name)?))
     }
 
     /// Moves the folder into `parent` with its name, and returns its new path.
@@ -390,14 +345,7 @@ impl Core {
     /// - [`Error::BadPath`] also when `parent` is `folder` or inside it.
     /// - Else as in [`Core::rename_folder`].
     pub fn move_folder(&self, folder: &FolderPath, parent: &FolderPath) -> Result<FolderPath> {
-        match folder.split() {
-            Some((_, name)) => self.move_folder_to(folder, parent, &name),
-            None => self.inner.write(|_| {
-                Err(Error::BadPath {
-                    path: folder.as_ref().to_owned(),
-                })
-            }),
-        }
+        self.inner.write(|write| write.move_folder(folder, parent))
     }
 
     /// What [`Core::delete_note`] removes: the note and its attachment files.
@@ -458,17 +406,7 @@ impl Core {
     /// - [`Error::Read`] or [`Error::NotUtf8`] when the file can't be read as text.
     /// - [`Error::Write`] when the id can't be written.
     pub fn link_id(&self, path: &NotePath) -> Result<NoteId> {
-        self.inner.write(|write| {
-            let note = write.edit_fields(path, |text| {
-                if text.id().is_none() {
-                    text.set_id(Some(NoteId::generate().as_str()));
-                }
-            })?;
-            note.info.id.ok_or_else(|| Error::Write {
-                path: write.root().join(&note.info.path),
-                source: std::io::ErrorKind::InvalidData.into(),
-            })
-        })
+        self.inner.write(|write| write.link_id(path))
     }
 
     /// Adds the tag to the note and returns it. Its body, other tags and modification time stay.
@@ -480,17 +418,7 @@ impl Core {
     /// - [`Error::Read`] or [`Error::NotUtf8`] when the file can't be read as text.
     /// - [`Error::Write`] when the file can't be written. The old file then stays.
     pub fn add_tag(&self, path: &NotePath, tag: &TagName) -> Result<NoteInfo> {
-        self.inner.write(|write| {
-            write
-                .edit_fields(path, |text| {
-                    let mut tags = TagName::of_note(text);
-                    if !tags.contains(tag) {
-                        tags.push(tag.clone());
-                        text.set_tags(&tags);
-                    }
-                })
-                .map(|note| note.info)
-        })
+        self.inner.write(|write| write.add_tag(path, tag))
     }
 
     /// Removes the tag from the note and returns it. Its child tags, its body, other tags and
@@ -500,18 +428,7 @@ impl Core {
     ///
     /// The errors of [`Core::add_tag`] for the file.
     pub fn remove_tag(&self, path: &NotePath, tag: &TagName) -> Result<NoteInfo> {
-        self.inner.write(|write| {
-            write
-                .edit_fields(path, |text| {
-                    let mut tags = TagName::of_note(text);
-                    let count = tags.len();
-                    tags.retain(|other| other != tag);
-                    if tags.len() != count {
-                        text.set_tags(&tags);
-                    }
-                })
-                .map(|note| note.info)
-        })
+        self.inner.write(|write| write.remove_tag(path, tag))
     }
 
     /// Pins or unpins the note and returns it. Its body and modification time stay.
@@ -520,15 +437,7 @@ impl Core {
     ///
     /// As in [`Core::add_tag`].
     pub fn set_pinned(&self, path: &NotePath, pinned: bool) -> Result<NoteInfo> {
-        self.inner.write(|write| {
-            write
-                .edit_fields(path, |text| {
-                    if text.pinned() != pinned {
-                        text.set_pinned(pinned);
-                    }
-                })
-                .map(|note| note.info)
-        })
+        self.inner.write(|write| write.set_pinned(path, pinned))
     }
 
     /// How many notes [`Core::rename_tag`] changes.
@@ -584,18 +493,8 @@ impl Core {
     /// - [`Error::Read`] when `file` can't be read or is not a file.
     /// - [`Error::Write`] when the copy can't be written.
     pub fn attach_file(&self, note: &NotePath, file: impl AsRef<Path>) -> Result<PathBuf> {
-        let file = file.as_ref();
-        let read_error = |source| Error::Read {
-            path: file.to_owned(),
-            source,
-        };
-        let source = File::open(file).map_err(read_error)?;
-        if !source.metadata().map_err(read_error)?.is_file() {
-            return Err(read_error(std::io::ErrorKind::IsADirectory.into()));
-        }
-        let stem = file.file_stem().unwrap_or_default().to_string_lossy();
-        let ext = file.extension().map(OsStr::to_string_lossy);
-        self.attach(note, &stem, ext.as_deref(), source)
+        self.inner
+            .with(|locked| locked.disk.store.attach_file(note, file.as_ref()))
     }
 
     /// Saves a pasted image into `attachments/`, and returns its path from the folder
@@ -607,38 +506,13 @@ impl Core {
     ///
     /// [`Error::Write`] when the image can't be written.
     pub fn paste_image(&self, note: &NotePath, extension: &str, bytes: &[u8]) -> Result<PathBuf> {
-        self.attach(note, PASTED_IMAGE, Some(extension), bytes)
-    }
-
-    fn attach(
-        &self,
-        note: &NotePath,
-        stem: &str,
-        ext: Option<&str>,
-        content: impl std::io::Read,
-    ) -> Result<PathBuf> {
-        self.inner.with(|locked| {
-            let store = &locked.disk.store;
-            let file = store.add_attachment(stem, ext, content)?;
-            Ok(relink::link(store.root(), note, &file))
-        })
+        self.inner
+            .with(|locked| locked.disk.store.paste_image(note, extension, bytes))
     }
 
     fn tag_edit_count(&self, edit: &TagEdit<'_>) -> usize {
-        self.snapshot()
-            .matching(NoteSet::WithTag(edit.tag()))
-            .filter(|note| edit.apply(&note.tags) != note.tags)
-            .count()
-    }
-
-    fn move_folder_to(
-        &self,
-        folder: &FolderPath,
-        parent: &FolderPath,
-        name: &Name,
-    ) -> Result<FolderPath> {
         self.inner
-            .write(|write| write.move_folder(folder, parent, name))
+            .with(|locked| edit.count(locked.facts.snapshot()))
     }
 
     fn build(store: Store, index_dir: &Path, watcher: Option<watch::Watcher>) -> Result<Self> {

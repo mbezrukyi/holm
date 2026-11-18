@@ -4,18 +4,21 @@
 //! `Attachments/` is a user folder. A new folder name takes the name in any case, like a name
 //! clash.
 
+use std::ffi::OsStr;
 use std::fmt::Write as _;
-use std::fs;
+use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest as _, Sha256};
 
 use super::{Entry, Store, remove, sync_dir, temp_file, write_error};
-use crate::error::Result;
-use crate::paths::{FolderPath, Name};
+use crate::error::{Error, Result};
+use crate::paths::{FolderPath, Name, NotePath};
 
 const ATTACHMENTS: &str = "attachments";
+/// The stem of a pasted image before its hash.
+const PASTED_IMAGE: &str = "Pasted image";
 
 /// Longest file stem in bytes. It leaves room for the hash and the extension of an
 /// attachment under [`MAX_NAME_BYTES`](crate::paths::MAX_NAME_BYTES).
@@ -44,6 +47,44 @@ fn holds(folder: &FolderPath) -> bool {
 }
 
 impl Store {
+    /// Copies the file at `file` into the attachment folder, and returns its path from the
+    /// folder of `note`, for a link.
+    pub(crate) fn attach_file(&self, note: &NotePath, file: &Path) -> Result<PathBuf> {
+        let read_error = |source| Error::Read {
+            path: file.to_owned(),
+            source,
+        };
+        let source = File::open(file).map_err(read_error)?;
+        if !source.metadata().map_err(read_error)?.is_file() {
+            return Err(read_error(io::ErrorKind::IsADirectory.into()));
+        }
+        let stem = file.file_stem().unwrap_or_default().to_string_lossy();
+        let ext = file.extension().map(OsStr::to_string_lossy);
+        self.attach(note, &stem, ext.as_deref(), source)
+    }
+
+    /// Saves a pasted image in the format `extension` into the attachment folder, and returns
+    /// its path from the folder of `note`, for a link.
+    pub(crate) fn paste_image(
+        &self,
+        note: &NotePath,
+        extension: &str,
+        bytes: &[u8],
+    ) -> Result<PathBuf> {
+        self.attach(note, PASTED_IMAGE, Some(extension), bytes)
+    }
+
+    fn attach(
+        &self,
+        note: &NotePath,
+        stem: &str,
+        ext: Option<&str>,
+        content: impl io::Read,
+    ) -> Result<PathBuf> {
+        let file = self.add_attachment(stem, ext, content)?;
+        Ok(crate::relink::link(&self.root, note, &file))
+    }
+
     /// Copies `content` into the attachment folder as `<stem>-<hash>.<ext>`, and returns its
     /// absolute path. The hash is a short hash of the content, so a name never clashes.
     /// With no `ext`, the name has no `.` either.
@@ -53,7 +94,7 @@ impl Store {
     ///
     /// When a file with that name is there, it keeps that file and drops the new copy.
     /// It makes the folder when it is missing.
-    pub(crate) fn add_attachment(
+    fn add_attachment(
         &self,
         stem: &str,
         ext: Option<&str>,

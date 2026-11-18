@@ -78,6 +78,18 @@ impl Store {
         &self.root
     }
 
+    /// The path for a link from the note at `note` to the absolute path `file`, with no copy.
+    /// It follows the symlinks in `file` when it can.
+    pub(crate) fn file_link(&self, note: &NotePath, file: &Path) -> Result<PathBuf> {
+        if !file.is_absolute() {
+            return Err(Error::BadPath {
+                path: file.to_owned(),
+            });
+        }
+        let file = fs::canonicalize(file).unwrap_or_else(|_| file.to_owned());
+        Ok(crate::relink::link(&self.root, note, &file))
+    }
+
     /// Every note file at `node` or below it, with its stamp.
     /// A subfolder or a file that can't be read is left out with a log line.
     ///
