@@ -17,10 +17,14 @@ use crate::paths::{FolderPath, NotePath};
 #[derive(Clone, Debug, Default)]
 pub struct Snapshot {
     revision: u64,
-    notes: imbl::HashMap<NotePath, Arc<Entry>>,
-    ids: imbl::HashMap<String, NotePath>,
+    notes: Map<NotePath, Arc<Entry>>,
+    ids: Map<String, NotePath>,
     folders: imbl::OrdSet<FolderPath>,
 }
+
+/// The paths come from file names on disk, so the hasher has a random seed.
+type Map<K, V> =
+    imbl::GenericHashMap<K, V, foldhash::fast::RandomState, imbl::shared_ptr::DefaultSharedPtr>;
 
 /// What a delete of a node removes, from [`Snapshot::removal`].
 #[derive(Debug)]
@@ -184,6 +188,13 @@ impl Snapshot {
             .map(|file: &OsStr| PathBuf::from(file))
             .collect();
         Removal { notes, files }
+    }
+
+    /// The note at `path` and its links, or `None` when no note is there.
+    pub(crate) fn note_and_links(&self, path: &NotePath) -> Option<(&NoteInfo, &[Link])> {
+        self.notes
+            .get(path)
+            .map(|entry| (&entry.info, entry.links.as_slice()))
     }
 
     /// The note at `path`, or `None` when no note is there.

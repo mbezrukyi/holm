@@ -77,11 +77,11 @@ impl Touched {
         let mut new: Vec<&NoteInfo> = Vec::new();
         let mut notes = Vec::new();
         for path in &self.notes {
-            match (before.note(path), after.note(path)) {
-                (Some(old), None) => gone.push(old),
-                (None, Some(note)) => new.push(note),
-                (Some(old), Some(note)) => {
-                    if old != note || before.links(path) != after.links(path) {
+            match (before.note_and_links(path), after.note_and_links(path)) {
+                (Some((old, _)), None) => gone.push(old),
+                (None, Some((note, _))) => new.push(note),
+                (Some((old, old_links)), Some((note, links))) => {
+                    if old != note || old_links != links {
                         tags = tags || !same_tags(old, note);
                         notes.push(Change::Changed(path.clone()));
                     }
