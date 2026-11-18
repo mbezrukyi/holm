@@ -5,6 +5,7 @@
 mod error;
 mod index;
 pub mod model;
+mod paths;
 mod relink;
 mod retag;
 mod snapshot;
@@ -23,6 +24,7 @@ use futures_channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use futures_core::Stream;
 
 pub use error::{Error, NameProblem, Result};
+pub use paths::{FolderPath, NotePath};
 pub use snapshot::Snapshot;
 pub use store::title_of;
 pub use watch::Feed;
