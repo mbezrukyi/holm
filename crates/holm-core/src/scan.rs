@@ -33,7 +33,7 @@ pub(crate) fn files(store: &Store, facts: &Facts, nodes: &Nodes) -> Result<Settl
             }
         })
         .collect();
-    Ok(settle(store, facts, plan, reads))
+    Ok(decide_with_ids(store, facts, plan, reads))
 }
 
 /// Settles notes that Holm just wrote, with their stamps, against `facts`.
@@ -43,7 +43,7 @@ pub(crate) fn wrote(store: &Store, facts: &Facts, notes: Vec<(Note, Stamp)>) -> 
         .into_iter()
         .map(|(note, stamp)| read(store, facts, note, stamp))
         .collect();
-    settle(store, facts, plan, reads)
+    decide_with_ids(store, facts, plan, reads)
 }
 
 /// The read of `note`. Its links come from `facts` when its link source stays, else from
@@ -74,8 +74,8 @@ fn read(store: &Store, facts: &Facts, note: Note, stamp: Stamp) -> Read {
 
 /// Settles `plan`, then writes a new id into each copy. A copy whose write fails stays
 /// without an id, with a log line.
-fn settle(store: &Store, facts: &Facts, plan: Plan, reads: Vec<Read>) -> Settled {
-    let mut settled = plan.settle(facts, reads);
+fn decide_with_ids(store: &Store, facts: &Facts, plan: Plan, reads: Vec<Read>) -> Settled {
+    let mut settled = plan.decide(facts, reads);
     for put in settled.put.iter_mut().filter(|put| put.copy) {
         let id = NoteId::generate();
         let path = &put.note.info.path;

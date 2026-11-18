@@ -1,7 +1,7 @@
 //! The rules that bring the facts up to date with the note files: moves, gone notes and id
 //! clashes.
 //!
-//! It does no I/O. The core lists and reads the files, and runs what it settles.
+//! It does no I/O. The core lists and reads the files, and runs what it decides.
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
@@ -42,14 +42,14 @@ pub(crate) struct Settled {
     /// The known notes that are gone.
     pub(crate) removed: Vec<NotePath>,
     /// The notes that moved with no change.
-    pub(crate) moved: Vec<Moved>,
+    pub(crate) moved: Vec<MovedNote>,
     /// The notes that were read, known paths first.
     pub(crate) put: Vec<Put>,
 }
 
 /// A note at a new path, with the facts of its old path.
 #[derive(Debug)]
-pub(crate) struct Moved {
+pub(crate) struct MovedNote {
     pub(crate) from: NotePath,
     pub(crate) info: NoteInfo,
     pub(crate) links: Vec<Link>,
@@ -154,7 +154,7 @@ impl Plan {
     ///
     /// Each note keeps its id, unless an earlier note in the order keeps it, or a note file at
     /// another path that the facts know. When that file is gone, its note is gone too.
-    pub(crate) fn settle(self, facts: &Facts, reads: Vec<Read>) -> Settled {
+    pub(crate) fn decide(self, facts: &Facts, reads: Vec<Read>) -> Settled {
         let snapshot = facts.snapshot();
         let mut reads: HashMap<NotePath, Read> = reads
             .into_iter()
@@ -174,7 +174,7 @@ impl Plan {
             if let Some(id) = &info.id {
                 owners.claim(id, &info.path);
             }
-            settled.moved.push(Moved {
+            settled.moved.push(MovedNote {
                 links: snapshot.links(&from).to_vec(),
                 source: facts.link_source(&from).unwrap_or_default(),
                 from,
@@ -231,7 +231,7 @@ impl Plan {
     }
 }
 
-/// The owner of each id while a plan settles: the facts, with the paths that the plan freed
+/// The owner of each id while a plan decides: the facts, with the paths that the plan freed
 /// and the ids it claimed.
 struct Owners<'a> {
     snapshot: &'a Snapshot,
@@ -312,7 +312,7 @@ mod tests {
         let mut touched = Touched::default();
         touched.settled(&settled);
         let mut after = before.clone();
-        after.settle(settled);
+        after.apply(settled);
         let (_, list) = touched.list(Source::Outside, before, after);
         list.map(|list| list.changes).unwrap_or_default()
     }
@@ -392,7 +392,7 @@ mod tests {
         let plan = plan(&facts, &Nodes::root(), vec![(path("work/a.md"), stamp(5))]);
         assert_eq!(plan.reads(), Vec::<NotePath>::new());
 
-        let settled = plan.settle(&facts, Vec::new());
+        let settled = plan.decide(&facts, Vec::new());
         assert_eq!(settled.removed, Vec::<NotePath>::new());
         assert_eq!(settled.moved.len(), 1);
         assert_eq!(settled.moved[0].from, path("a.md"));
@@ -412,7 +412,7 @@ mod tests {
         let plan = plan(&facts, &Nodes::root(), vec![(path("z/a.md"), stamp(5))]);
         assert_eq!(plan.reads(), [path("z/a.md")]);
 
-        let settled = plan.settle(&facts, vec![read("z/a.md", None, stamp(5), false)]);
+        let settled = plan.decide(&facts, vec![read("z/a.md", None, stamp(5), false)]);
         assert!(settled.moved.is_empty());
         assert_eq!(sorted(&settled.removed), ["x/a.md", "y/a.md"]);
         assert_eq!(put_ids(&settled), [("z/a.md".to_owned(), None, false)]);
@@ -436,7 +436,7 @@ mod tests {
         let plan = plan(&facts, &Nodes::root(), vec![(path("work/a.md"), stamp(5))]);
         assert_eq!(plan.reads(), [path("work/a.md")]);
 
-        let settled = plan.settle(&facts, vec![read("work/a.md", Some("A"), stamp(5), false)]);
+        let settled = plan.decide(&facts, vec![read("work/a.md", Some("A"), stamp(5), false)]);
         assert_eq!(settled.removed, [path("a.md")]);
         assert_eq!(
             put_ids(&settled),
@@ -458,7 +458,7 @@ mod tests {
         let plan = plan(&facts, &Nodes::root(), files);
         assert_eq!(plan.reads(), [path("z.md"), path("a.md")]);
 
-        let settled = plan.settle(
+        let settled = plan.decide(
             &facts,
             vec![
                 read("a.md", Some("A"), stamp(7), true),
@@ -481,7 +481,7 @@ mod tests {
         let nodes = Nodes::new([Node::Note(path("new.md"))]);
         let plan = plan(&facts, &nodes, vec![(path("new.md"), stamp(6))]);
 
-        let settled = plan.settle(&facts, vec![read("new.md", Some("A"), stamp(6), false)]);
+        let settled = plan.decide(&facts, vec![read("new.md", Some("A"), stamp(6), false)]);
         assert_eq!(settled.removed, [path("old.md")]);
         assert_eq!(put_ids(&settled), [("new.md".to_owned(), Some("A"), false)]);
         assert_eq!(
@@ -499,7 +499,7 @@ mod tests {
         let plan = plan(&facts, &Nodes::root(), vec![(path("a.md"), stamp(6))]);
         assert_eq!(plan.reads(), [path("a.md")]);
 
-        let settled = plan.settle(&facts, Vec::new());
+        let settled = plan.decide(&facts, Vec::new());
         assert_eq!(settled.removed, [path("a.md")]);
         assert!(settled.put.is_empty());
         assert_eq!(changes(&facts, settled), [Change::Removed(path("a.md"))]);
@@ -510,6 +510,6 @@ mod tests {
         let facts = facts(&[("a.md", Some("A"), stamp(5))]);
         let plan = plan(&facts, &Nodes::root(), vec![(path("a.md"), stamp(5))]);
         assert_eq!(plan.reads(), Vec::<NotePath>::new());
-        assert!(plan.settle(&facts, Vec::new()).put.is_empty());
+        assert!(plan.decide(&facts, Vec::new()).put.is_empty());
     }
 }

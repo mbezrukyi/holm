@@ -129,7 +129,7 @@ impl Feed {
     /// are in the same batch.
     ///
     /// The core checks the disk at each path and below it, updates the index,
-    /// and sends the changes to each [`Changes`](crate::Changes) before this returns.
+    /// and sends the changes to each [`ChangeLists`](crate::ChangeLists) before this returns.
     /// Hidden paths are skipped.
     ///
     /// # Errors

@@ -18,7 +18,7 @@ use crate::tag::{self, TagName};
 #[derive(Clone, Debug, Default)]
 pub struct Snapshot {
     revision: u64,
-    notes: Map<NotePath, Arc<Entry>>,
+    notes: Map<NotePath, Arc<NoteData>>,
     ids: Map<String, NotePath>,
     folders: imbl::OrdSet<FolderPath>,
 }
@@ -38,13 +38,13 @@ pub(crate) struct Removal {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct Entry {
+struct NoteData {
     info: NoteInfo,
     links: Vec<Link>,
 }
 
 impl Snapshot {
-    /// A number that grows with each change of the snapshot.
+    /// A number that grows with each new snapshot.
     ///
     /// Two snapshots with the same revision hold the same facts.
     pub fn revision(&self) -> u64 {
@@ -98,7 +98,7 @@ impl Snapshot {
         }
     }
 
-    /// Every tag as a tree. `work` holds `work/holm`.
+    /// Every tag as nested tags. `work` holds `work/holm`.
     ///
     /// A parent tag shows even when no note has it, only its children.
     pub fn tags(&self) -> Vec<Tag> {
@@ -115,7 +115,7 @@ impl Snapshot {
                 *counts.entry(name).or_default() += 1;
             }
         }
-        tag_tree(&counts)
+        nested_tags(&counts)
     }
 
     /// The count of notes right in each folder, without the notes of its subfolders. A folder
@@ -263,7 +263,7 @@ impl Snapshot {
             self.remove(&path);
         }
         for (info, links) in put {
-            let entry = Entry { info, links };
+            let entry = NoteData { info, links };
             if self
                 .notes
                 .get(&entry.info.path)
@@ -348,9 +348,9 @@ fn by_title(a: &((bool, String), &NoteInfo), b: &((bool, String), &NoteInfo)) ->
     a.0.cmp(&b.0).then_with(|| a.1.path.cmp(&b.1.path))
 }
 
-/// Builds the tag tree from the count of notes of each tag. A parent tag counts the notes of its
+/// Builds the nested tags from the count of notes of each tag. A parent tag counts the notes of its
 /// children.
-fn tag_tree(counts: &BTreeMap<&str, usize>) -> Vec<Tag> {
+fn nested_tags(counts: &BTreeMap<&str, usize>) -> Vec<Tag> {
     let mut children: HashMap<Option<&str>, Vec<&str>> = HashMap::new();
     for name in counts.keys() {
         children.entry(tag::parent(name)).or_default().push(name);

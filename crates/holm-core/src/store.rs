@@ -15,7 +15,7 @@ use crate::error::{Error, NameProblem, Result};
 use crate::model::{Note, NoteId, NoteInfo};
 use crate::nodes::Node;
 use crate::paths::{FolderPath, Name, NotePath};
-use crate::relink::{Moved, relink};
+use crate::relink::{FolderMove, relink};
 use crate::tag::TagName;
 
 pub(crate) mod attachment;
@@ -234,7 +234,7 @@ impl Store {
                     modified,
                 )
                 .map_err(fail)?;
-                // A closed file, so a big job does not run out of file handles.
+                // A closed file, so a big index write does not run out of file handles.
                 Ok(Some(file.into_temp_path()))
             });
             match temp {
@@ -450,7 +450,7 @@ impl Store {
         }
         sync_dir(folder_abs(&path)).map_err(|e| write_error(&path, e))?;
         sync_dir(folder_abs(&source)).map_err(|e| write_error(&source, e))?;
-        self.relink_folder(Moved { from, to: &rel })?;
+        self.relink_folder(FolderMove { from, to: &rel })?;
         Ok(rel)
     }
 
@@ -512,7 +512,7 @@ impl Store {
     }
 
     /// Fixes the relative file links of each note inside a folder that moved.
-    fn relink_folder(&self, moved: Moved<'_>) -> Result<()> {
+    fn relink_folder(&self, moved: FolderMove<'_>) -> Result<()> {
         let paths: Vec<NotePath> = self
             .files(&Node::Folder(moved.to.clone()))?
             .into_iter()

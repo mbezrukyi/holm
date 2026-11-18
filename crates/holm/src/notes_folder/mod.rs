@@ -39,7 +39,7 @@ use gpui_kit::{App, AppContext as _, Context, EventEmitter, Subscription, Task, 
 use holm_core::model::{
     Change, ChangeList, DeleteCount, LinkTarget, Note, NoteSet, Order, SearchResults, Source,
 };
-use holm_core::{Changes, Core, FolderPath, NotePath, Snapshot, TagName};
+use holm_core::{ChangeLists, Core, FolderPath, NotePath, Snapshot, TagName};
 use holm_editor::PastedFile;
 
 use crate::error::AppError;
@@ -163,7 +163,7 @@ pub(crate) struct NotesFolder {
     core: Core,
     root: PathBuf,
     snapshot: Snapshot,
-    changes: Changes,
+    changes: ChangeLists,
     /// How long a call waits for its job.
     budget: Duration,
     line: VecDeque<Entry>,

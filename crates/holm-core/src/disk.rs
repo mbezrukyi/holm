@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use crate::Result;
 use crate::facts::Facts;
-use crate::index::{Index, Row, Rows};
+use crate::index::{Index, NoteRows, Rows};
 use crate::model::DeleteCount;
 use crate::nodes::{Node, Nodes};
 use crate::paths::FolderPath;
@@ -48,7 +48,7 @@ impl Disk {
         } else {
             self.rebuild_from(&settled);
         }
-        facts.settle(settled);
+        facts.apply(settled);
         Ok(facts)
     }
 
@@ -108,11 +108,11 @@ impl Disk {
 }
 
 /// The index rows of each put note of `settled`.
-fn put_rows(settled: &Settled) -> Vec<Row<'_>> {
+fn put_rows(settled: &Settled) -> Vec<NoteRows<'_>> {
     settled
         .put
         .iter()
-        .map(|put| Row {
+        .map(|put| NoteRows {
             note: &put.note,
             links: &put.links,
             stamp: put.stamp,

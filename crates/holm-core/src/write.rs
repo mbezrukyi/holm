@@ -309,6 +309,6 @@ impl Write<'_> {
     fn take(&mut self, settled: Settled) -> Vec<Note> {
         self.disk.write_rows(&settled);
         self.touched.settled(&settled);
-        self.next.settle(settled)
+        self.next.apply(settled)
     }
 }

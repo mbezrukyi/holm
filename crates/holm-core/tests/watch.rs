@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use futures_core::Stream;
 
 use holm_core::model::{Change, ChangeList, LinkTarget, NoteId, NoteInfo, NoteSet, Order, Source};
-use holm_core::{Changes, Core, Error, Feed, FolderPath, NotePath};
+use holm_core::{ChangeLists, Core, Error, Feed, FolderPath, NotePath};
 use tempfile::TempDir;
 
 /// A notes folder with a core that sees changes only through its feed.
@@ -26,7 +26,7 @@ struct Fed {
     _cache: TempDir,
     core: Core,
     feed: Feed,
-    changes: RefCell<Changes>,
+    changes: RefCell<ChangeLists>,
 }
 
 impl Fed {
@@ -390,12 +390,15 @@ fn a_move_rule_follows_paths_below_a_folder_and_child_tags() {
 
     let tag = Change::TagMoved {
         from: tag_name("work"),
-        to: tag_name("home/job"),
+        to: tag_name("life/home"),
     };
-    assert_eq!(tag.tag_after(&tag_name("work")), Some(tag_name("home/job")));
+    assert_eq!(
+        tag.tag_after(&tag_name("work")),
+        Some(tag_name("life/home"))
+    );
     assert_eq!(
         tag.tag_after(&tag_name("work/holm")),
-        Some(tag_name("home/job/holm"))
+        Some(tag_name("life/home/holm"))
     );
     assert_eq!(tag.tag_after(&tag_name("workshop")), None);
     assert_eq!(after(&tag, "work"), None);
@@ -659,7 +662,7 @@ mod real_events {
     /// Long enough for a slow CI machine. A passing test does not wait this long.
     const WAIT: Duration = Duration::from_secs(10);
 
-    fn open(files: &[(&str, &str)]) -> (TempDir, TempDir, Core, Changes) {
+    fn open(files: &[(&str, &str)]) -> (TempDir, TempDir, Core, ChangeLists) {
         let dir = tempfile::tempdir().unwrap();
         for (path, text) in files {
             write(&dir.path().join(path), text);
@@ -671,12 +674,12 @@ mod real_events {
     }
 
     /// Waits up to [`WAIT`] for the next change list, and gives its changes.
-    fn next(changes: &mut Changes) -> Vec<Change> {
+    fn next(changes: &mut ChangeLists) -> Vec<Change> {
         next_list(changes).changes
     }
 
     /// Waits up to [`WAIT`] for the next change list.
-    fn next_list(changes: &mut Changes) -> ChangeList {
+    fn next_list(changes: &mut ChangeLists) -> ChangeList {
         let deadline = Instant::now() + WAIT;
         loop {
             if let Some(list) = changes.try_next() {

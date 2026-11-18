@@ -81,7 +81,7 @@ pub(crate) struct Index {
 
 /// The rows of one note.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Row<'a> {
+pub(crate) struct NoteRows<'a> {
     pub(crate) note: &'a Note,
     pub(crate) links: &'a [Link],
     pub(crate) stamp: Stamp,
@@ -95,7 +95,7 @@ pub(crate) struct Rows<'a> {
     pub(crate) removed: &'a [NotePath],
     /// The notes at a new path with no other change, as old path and new path.
     pub(crate) moved: Vec<(&'a NotePath, &'a NotePath)>,
-    pub(crate) put: Vec<Row<'a>>,
+    pub(crate) put: Vec<NoteRows<'a>>,
 }
 
 impl Index {
@@ -117,7 +117,7 @@ impl Index {
 
     /// Drops every row and writes `put`, which holds every note file.
     /// The rows go into a new file, or into memory when the new file fails.
-    pub(crate) fn rebuild(&mut self, put: &[Row<'_>]) -> Result<()> {
+    pub(crate) fn rebuild(&mut self, put: &[NoteRows<'_>]) -> Result<()> {
         self.conn = fresh(&self.path, put).map_err(|fail| fail.into_error(&self.path))?;
         Ok(())
     }
@@ -218,7 +218,7 @@ impl std::fmt::Display for Fail {
 }
 
 /// A new index with only the rows `put`: a new file, or else one in memory.
-fn fresh(path: &Path, put: &[Row<'_>]) -> Result<Connection, Fail> {
+fn fresh(path: &Path, put: &[NoteRows<'_>]) -> Result<Connection, Fail> {
     let file = remove(path).and_then(|()| {
         let mut conn = connect(path)?;
         fill(&mut conn, put)?;
@@ -275,7 +275,7 @@ fn schema(conn: &mut Connection) -> Result<(), Fail> {
 }
 
 /// Writes `put` into the empty index.
-fn fill(conn: &mut Connection, put: &[Row<'_>]) -> Result<(), Fail> {
+fn fill(conn: &mut Connection, put: &[NoteRows<'_>]) -> Result<(), Fail> {
     let tx = conn.transaction()?;
     put_rows(&tx, put)?;
     tx.commit()?;
@@ -295,7 +295,7 @@ fn remove(path: &Path) -> Result<(), Fail> {
     Ok(())
 }
 
-fn put_rows(conn: &Connection, put: &[Row<'_>]) -> Result<(), Fail> {
+fn put_rows(conn: &Connection, put: &[NoteRows<'_>]) -> Result<(), Fail> {
     for row in put {
         write(conn, row)?;
     }
@@ -311,8 +311,8 @@ fn shift(conn: &Connection, from: &NotePath, to: &NotePath) -> Result<(), Fail> 
 }
 
 /// Writes the rows of one note. When its links stay, the stored link rows stay.
-fn write(conn: &Connection, row: &Row<'_>) -> Result<(), Fail> {
-    let Row {
+fn write(conn: &Connection, row: &NoteRows<'_>) -> Result<(), Fail> {
+    let NoteRows {
         note,
         links,
         stamp,

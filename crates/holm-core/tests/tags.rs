@@ -142,7 +142,7 @@ fn set_pinned_pins_and_unpins_and_keeps_the_time() {
 #[test]
 fn rename_tag_renames_child_tags_and_keeps_times() {
     let folder = Folder::new(&[
-        ("a.md", "---\ntags: [work, home]\n---\n# A\n"),
+        ("a.md", "---\ntags: [work, life]\n---\n# A\n"),
         ("b.md", "---\ntags: [work/holm]\n---\n# B\n"),
         ("c.md", "---\ntags: [workshop]\n---\n# C\n"),
     ]);
@@ -151,26 +151,26 @@ fn rename_tag_renames_child_tags_and_keeps_times() {
     assert_eq!(
         folder
             .core
-            .tag_rename_count(&tag_name("work"), &tag_name("job")),
+            .tag_rename_count(&tag_name("work"), &tag_name("home")),
         2
     );
     assert_eq!(
         folder
             .core
-            .rename_tag(&tag_name("work"), &tag_name("job"))
+            .rename_tag(&tag_name("work"), &tag_name("home"))
             .unwrap(),
         2
     );
 
-    assert_eq!(tags(&folder, "a.md"), ["job", "home"]);
-    assert_eq!(tags(&folder, "b.md"), ["job/holm"]);
+    assert_eq!(tags(&folder, "a.md"), ["home", "life"]);
+    assert_eq!(tags(&folder, "b.md"), ["home/holm"]);
     assert_eq!(tags(&folder, "c.md"), ["workshop"]);
     assert_eq!(
         folder.core.read(&note_path("b.md")).unwrap().info.modified,
         time
     );
     assert_eq!(tagged(&folder, "work"), [] as [String; 0]);
-    assert_eq!(tagged(&folder, "job"), ["a.md", "b.md"]);
+    assert_eq!(tagged(&folder, "home"), ["a.md", "b.md"]);
 }
 
 #[test]
@@ -190,7 +190,7 @@ fn rename_tag_changes_every_note_in_many_folders_and_leaves_no_temp_file() {
     assert_eq!(
         folder
             .core
-            .rename_tag(&tag_name("work"), &tag_name("job"))
+            .rename_tag(&tag_name("work"), &tag_name("home"))
             .unwrap(),
         30
     );
@@ -199,30 +199,30 @@ fn rename_tag_changes_every_note_in_many_folders_and_leaves_no_temp_file() {
         let path = format!("f{}/n{n}.md", n % 3);
         assert_eq!(
             tags(&folder, &path),
-            [tag_name("job"), tag_name(&format!("n{n}"))]
+            [tag_name("home"), tag_name(&format!("n{n}"))]
         );
     }
-    assert_eq!(tagged(&folder, "job").len(), 30);
+    assert_eq!(tagged(&folder, "home").len(), 30);
     assert_eq!(folder.names("f0").len(), 10);
 }
 
 #[test]
 fn rename_tag_to_an_existing_tag_merges_them() {
     let folder = Folder::new(&[
-        ("a.md", "---\ntags: [work, job]\n---\n# A\n"),
-        ("b.md", "---\ntags: [job/holm, work/holm]\n---\n# B\n"),
+        ("a.md", "---\ntags: [work, home]\n---\n# A\n"),
+        ("b.md", "---\ntags: [home/holm, work/holm]\n---\n# B\n"),
     ]);
 
     assert_eq!(
         folder
             .core
-            .rename_tag(&tag_name("work"), &tag_name("job"))
+            .rename_tag(&tag_name("work"), &tag_name("home"))
             .unwrap(),
         2
     );
 
-    assert_eq!(tags(&folder, "a.md"), ["job"]);
-    assert_eq!(tags(&folder, "b.md"), ["job/holm"]);
+    assert_eq!(tags(&folder, "a.md"), ["home"]);
+    assert_eq!(tags(&folder, "b.md"), ["home/holm"]);
 }
 
 #[test]
@@ -288,10 +288,10 @@ fn a_note_that_cant_change_keeps_its_tags_and_the_others_still_change() {
     let locked = folder.path("locked");
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
 
-    let result = folder.core.rename_tag(&tag_name("work"), &tag_name("job"));
+    let result = folder.core.rename_tag(&tag_name("work"), &tag_name("home"));
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
 
     assert!(matches!(result, Err(Error::Write { .. })), "{result:?}");
-    assert_eq!(tags(&folder, "a.md"), ["job"]);
+    assert_eq!(tags(&folder, "a.md"), ["home"]);
     assert_eq!(tags(&folder, "locked/b.md"), ["work"]);
 }

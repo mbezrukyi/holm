@@ -26,7 +26,7 @@ mod write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-pub use changes::Changes;
+pub use changes::ChangeLists;
 pub use error::{Error, NameProblem, Result};
 pub use paths::{FolderPath, NotePath};
 pub use snapshot::Snapshot;
@@ -72,7 +72,7 @@ impl Core {
     /// Opens the notes folder and brings the index in `index_dir` up to date with the files.
     ///
     /// Then it watches the notes folder. Changes from other tools update the index
-    /// and the snapshot, and go to each [`Changes`]. When the watch can't start, the core works without it,
+    /// and the snapshot, and go to each [`ChangeLists`]. When the watch can't start, the core works without it,
     /// with a log line.
     ///
     /// Then it keeps the facts of the notes folder in memory, as a [`Snapshot`].
@@ -140,7 +140,7 @@ impl Core {
     /// from other tools. When a list comes, [`Core::snapshot`] shows its revision or a newer one.
     /// Each list gives the moves of a write first, then the note changes in path order, then
     /// [`Change::Folders`](model::Change::Folders) and [`Change::Tags`](model::Change::Tags).
-    pub fn follow(&self) -> (Snapshot, Changes) {
+    pub fn follow(&self) -> (Snapshot, ChangeLists) {
         self.inner
             .with(|locked| (locked.facts.snapshot().clone(), self.inner.listeners.add()))
     }
@@ -309,7 +309,7 @@ impl Core {
     /// Names work as in [`Core::create_folder`]. A change of only the capital letters works.
     /// Relative file links in its notes change, so they point to the same files.
     /// A note whose links can't change keeps them, with a log line.
-    /// Each note changes in one step, but the whole job does not. After a crash, the folder has
+    /// Each note changes in one step, but the whole rename does not. After a crash, the folder has
     /// moved, but some notes can still have their old links.
     ///
     /// # Errors
@@ -435,13 +435,13 @@ impl Core {
 
     /// Renames the tag `from` to `to` in every note, and returns how many notes changed.
     ///
-    /// Child tags follow: `work` to `job` makes `work/holm` into `job/holm`.
+    /// Child tags follow: `work` to `home` makes `work/holm` into `home/holm`.
     /// When a note already has the new name, the two tags merge.
     /// The notes keep their modification times.
     ///
     /// A note that can't be changed keeps its tags, with a log line. The other notes still change.
-    /// Each note changes in one step, but the whole job does not. After a crash, some notes can
-    /// have the new tag and some the old one. A second rename then finishes the job.
+    /// Each note changes in one step, but the whole rename does not. After a crash, some notes can
+    /// have the new tag and some the old one. A second rename then finishes it.
     ///
     /// # Errors
     ///

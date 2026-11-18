@@ -10,7 +10,7 @@ use futures_core::Stream;
 use crate::lock;
 use crate::model::ChangeList;
 
-/// The senders of each [`Changes`] stream that is still open.
+/// The senders of each [`ChangeLists`] stream that is still open.
 #[derive(Debug, Default)]
 pub(crate) struct Listeners {
     senders: Mutex<Vec<UnboundedSender<ChangeList>>>,
@@ -18,10 +18,10 @@ pub(crate) struct Listeners {
 
 impl Listeners {
     /// A new stream that gets each list sent from now on.
-    pub(crate) fn add(&self) -> Changes {
+    pub(crate) fn add(&self) -> ChangeLists {
         let (send, receive) = mpsc::unbounded();
         lock(&self.senders).push(send);
-        Changes { receive }
+        ChangeLists { receive }
     }
 
     /// Sends `list` to each stream, and drops the streams that are gone. The last stream
@@ -43,11 +43,11 @@ impl Listeners {
 ///
 /// It ends when every [`Core`](crate::Core) handle is gone.
 #[derive(Debug)]
-pub struct Changes {
+pub struct ChangeLists {
     receive: UnboundedReceiver<ChangeList>,
 }
 
-impl Changes {
+impl ChangeLists {
     /// The next change list, with no wait.
     ///
     /// It returns `None` when no list waits, or when every [`Core`](crate::Core) handle is gone.
@@ -56,7 +56,7 @@ impl Changes {
     }
 }
 
-impl Stream for Changes {
+impl Stream for ChangeLists {
     type Item = ChangeList;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<ChangeList>> {

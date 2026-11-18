@@ -59,7 +59,7 @@ impl TagName {
     }
 
     /// The name after the tag `from` became `to`, or `None` when `from` does not hold this
-    /// tag. Child tags follow: `work/holm` becomes `job/holm`.
+    /// tag. Child tags follow: `work/holm` becomes `home/holm`.
     #[must_use]
     pub fn moved(&self, from: &Self, to: &Self) -> Option<Self> {
         let rest = child_part(&self.0, &from.0)?;
@@ -180,11 +180,11 @@ mod tests {
 
     #[test]
     fn moved_takes_the_children_along() {
-        let (from, to) = (tag("work"), tag("home/job"));
-        assert_eq!(tag("work").moved(&from, &to), Some(tag("home/job")));
+        let (from, to) = (tag("work"), tag("life/home"));
+        assert_eq!(tag("work").moved(&from, &to), Some(tag("life/home")));
         assert_eq!(
             tag("work/holm").moved(&from, &to),
-            Some(tag("home/job/holm"))
+            Some(tag("life/home/holm"))
         );
         assert_eq!(tag("workshop").moved(&from, &to), None);
     }

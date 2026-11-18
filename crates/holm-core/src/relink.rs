@@ -128,7 +128,7 @@ pub(crate) fn link(root: &Path, note: &NotePath, file: &Path) -> PathBuf {
 
 /// A folder move: its old path and its new path, relative to the notes folder.
 #[derive(Clone, Copy)]
-pub(crate) struct Moved<'a> {
+pub(crate) struct FolderMove<'a> {
     pub(crate) from: &'a FolderPath,
     pub(crate) to: &'a FolderPath,
 }
@@ -144,7 +144,7 @@ pub(crate) fn relink(
     root: &Path,
     from: &FolderPath,
     to: &FolderPath,
-    moved: Option<Moved<'_>>,
+    moved: Option<FolderMove<'_>>,
 ) -> Option<String> {
     let mut note = Text::parse(text);
     let body = note.body();

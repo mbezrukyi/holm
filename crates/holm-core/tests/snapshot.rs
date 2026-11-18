@@ -104,12 +104,12 @@ fn note_writes_show_in_the_snapshot_after_them() {
     assert_eq!(titles(&snapshot), ["Plans", "Ideas"]);
 
     let (count, snapshot) = one_step(core, |core| {
-        core.rename_tag(&tag_name("work"), &tag_name("job"))
+        core.rename_tag(&tag_name("work"), &tag_name("home"))
     });
     assert_eq!(count, 1);
-    assert_eq!(tag_names(&snapshot), ["job"]);
+    assert_eq!(tag_names(&snapshot), ["home"]);
 
-    let (_, snapshot) = one_step(core, |core| core.delete_tag(&tag_name("job")));
+    let (_, snapshot) = one_step(core, |core| core.delete_tag(&tag_name("home")));
     assert_eq!(tag_names(&snapshot), [] as [TagName; 0]);
 
     let ((), snapshot) = one_step(core, |core| core.delete_note(&note_path("Ideas.md")));

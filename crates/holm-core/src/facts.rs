@@ -30,7 +30,7 @@ impl Facts {
             snapshot: Snapshot::new(folders),
             files: imbl::HashMap::new(),
         };
-        facts.apply(Vec::new(), notes);
+        facts.remove_and_put(Vec::new(), notes);
         facts
     }
 
@@ -64,7 +64,7 @@ impl Facts {
     }
 
     /// Puts in what `settled` changes, and returns the notes that were read.
-    pub(crate) fn settle(&mut self, settled: Settled) -> Vec<Note> {
+    pub(crate) fn apply(&mut self, settled: Settled) -> Vec<Note> {
         let mut removed = settled.removed;
         let mut put = Vec::with_capacity(settled.put.len() + settled.moved.len());
         let mut notes = Vec::with_capacity(settled.put.len());
@@ -76,13 +76,13 @@ impl Facts {
             removed.push(moved.from);
             put.push((moved.info, moved.links, moved.stamp, moved.source));
         }
-        self.apply(removed, put);
+        self.remove_and_put(removed, put);
         notes
     }
 
     /// Takes out the notes at `removed` first, so a note can move to a path and keep its id.
     /// Then it puts in `put`.
-    fn apply(&mut self, removed: Vec<NotePath>, put: Vec<NoteFacts>) {
+    fn remove_and_put(&mut self, removed: Vec<NotePath>, put: Vec<NoteFacts>) {
         for path in &removed {
             self.files.remove(path);
         }

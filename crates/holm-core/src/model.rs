@@ -105,7 +105,7 @@ impl NoteSet<'_> {
     }
 }
 
-/// One tag in the tag tree.
+/// One tag of the nested tags.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tag {
     /// The full name, like `work/holm`.
@@ -194,7 +194,7 @@ pub enum Change {
     },
     /// The list from [`Snapshot::folders`](crate::Snapshot::folders) changed.
     Folders,
-    /// The tag tree from [`Snapshot::tags`](crate::Snapshot::tags) changed.
+    /// The nested tags from [`Snapshot::tags`](crate::Snapshot::tags) changed.
     Tags,
 }
 
@@ -267,7 +267,7 @@ pub enum Source {
     Outside,
 }
 
-/// The changes that made one revision of the snapshot, from [`Changes`](crate::Changes).
+/// The changes that made one revision of the snapshot, from [`ChangeLists`](crate::ChangeLists).
 #[derive(Clone, Debug)]
 pub struct ChangeList {
     /// Who made the changes.
