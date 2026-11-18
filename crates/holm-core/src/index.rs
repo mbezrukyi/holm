@@ -24,7 +24,7 @@ use crate::nodes::{Node, Nodes};
 use crate::paths::{NotePath, NoteReader};
 use crate::relink::resolve;
 use crate::snapshot::Delta;
-use crate::store::{Stamp, Store, attachment, time};
+use crate::store::{Stamp, Store, time};
 
 mod search;
 
@@ -90,7 +90,7 @@ pub(crate) struct Refresh {
 pub(crate) struct Removal {
     /// How many notes the delete removes.
     pub(crate) notes: usize,
-    /// The file link targets in the [attachment folder](attachment) that no other note links,
+    /// The file link targets that the removed notes link and no other note links,
     /// relative to the notes folder. They are outside input.
     pub(crate) files: Vec<PathBuf>,
 }
@@ -188,18 +188,17 @@ impl Index {
 
     /// What a delete of `node` removes: a note, or a folder with all its notes.
     ///
-    /// The files are the ones in the [attachment folder](attachment) that the notes in `node` link
-    /// and no note outside `node` links. They may be missing on disk.
+    /// The files are the file link targets that the notes in `node` link and no note outside
+    /// `node` links. They may be missing on disk.
     pub(crate) fn removal(&self, store: &Store, node: &Node) -> Result<Removal> {
         let path = node_bytes(node);
         let mut prefix = path.clone();
         prefix.push(b'/');
-        let attached = attachment::prefix();
         self.run(store, |conn| {
             let notes = known_in(conn, node)?.len();
             let mut statement = conn.prepare_cached(
                 "SELECT DISTINCT links.target FROM links JOIN notes ON notes.key = links.note
-                WHERE links.kind = 'file' AND substr(links.target, 1, length(?3)) = ?3
+                WHERE links.kind = 'file'
                     AND (notes.path = ?1 OR substr(notes.path, 1, length(?2)) = ?2)
                     AND NOT EXISTS (
                         SELECT 1 FROM links AS other JOIN notes AS owner ON owner.key = other.note
@@ -207,9 +206,8 @@ impl Index {
                             AND owner.path != ?1 AND substr(owner.path, 1, length(?2)) != ?2)
                 ORDER BY links.target",
             )?;
-            let rows = statement.query_map(params![path, prefix, attached], |row| {
-                row.get::<_, Vec<u8>>(0)
-            })?;
+            let rows =
+                statement.query_map(params![path, prefix], |row| row.get::<_, Vec<u8>>(0))?;
             let mut files = Vec::new();
             for target in rows {
                 files.push(PathBuf::from(OsString::from_vec(target?)));

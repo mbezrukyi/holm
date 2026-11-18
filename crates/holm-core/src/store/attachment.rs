@@ -7,7 +7,6 @@
 use std::ffi::OsStr;
 use std::fs;
 use std::io;
-use std::os::unix::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest as _, Sha256};
@@ -42,13 +41,6 @@ pub(crate) fn reserves(parent: &FolderPath, name: &Name) -> bool {
 /// Whether `folder` is the attachments folder or a folder inside it.
 fn holds(folder: &FolderPath) -> bool {
     folder.as_ref().starts_with(ATTACHMENTS)
-}
-
-/// The bytes that each path inside the attachments folder starts with: `attachments/`.
-pub(crate) fn prefix() -> Vec<u8> {
-    let mut prefix = OsStr::new(ATTACHMENTS).as_bytes().to_vec();
-    prefix.push(b'/');
-    prefix
 }
 
 impl Store {
@@ -210,6 +202,5 @@ mod tests {
         assert!(!holds(&folder_path("attachments2")));
         assert!(!holds(&folder_path("work/attachments")));
         assert!(!holds(&FolderPath::root()));
-        assert_eq!(prefix(), b"attachments/");
     }
 }
