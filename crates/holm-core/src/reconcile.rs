@@ -6,8 +6,8 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 
-use crate::facts::{Delta, Facts};
-use crate::model::{Change, Link, LinkTarget, Note, NoteId, NoteInfo};
+use crate::facts::Facts;
+use crate::model::{Link, LinkTarget, Note, NoteId, NoteInfo};
 use crate::nodes::Nodes;
 use crate::paths::NotePath;
 use crate::snapshot::Snapshot;
@@ -63,15 +63,6 @@ pub(crate) struct Put {
     /// Whether the note is a copy: another note file keeps its id. A copy has no id here, so
     /// the core can give it a new one.
     pub(crate) copy: bool,
-}
-
-/// The changes that a [`Settled`] makes, for a change list.
-#[derive(Debug, Default)]
-pub(crate) struct Refresh {
-    /// The note changes, sorted by path. It holds no [`Change::Folders`] or [`Change::Tags`].
-    pub(crate) notes: Vec<Change>,
-    /// Whether the tag tree changed.
-    pub(crate) tags: bool,
 }
 
 /// The plan for the notes at or below each of `nodes`, where `files` are the note files now.
@@ -232,89 +223,6 @@ impl Plan {
     }
 }
 
-impl Settled {
-    /// The delta for the facts, and the notes that were read. `links` holds the links of each
-    /// put note, in order.
-    pub(crate) fn into_delta(self, links: Vec<Vec<Link>>) -> (Delta, Vec<Note>) {
-        let mut delta = Delta {
-            removed: self.removed,
-            put: Vec::with_capacity(self.put.len() + self.moved.len()),
-        };
-        let mut notes = Vec::with_capacity(self.put.len());
-        for (put, links) in self.put.into_iter().zip(links) {
-            delta.put.push((put.note.info.clone(), links, put.stamp));
-            notes.push(put.note);
-        }
-        for moved in self.moved {
-            delta.removed.push(moved.from);
-            delta.put.push((moved.info, moved.links, moved.stamp));
-        }
-        (delta, notes)
-    }
-}
-
-/// The changes that `settled` makes in `before`.
-///
-/// A gone note and a new note with the same id are one move. A moved note without an id is a
-/// removed note and a new one, as a read would find it.
-pub(crate) fn changes(before: &Facts, settled: &Settled) -> Refresh {
-    let snapshot = before.snapshot();
-    let mut out = Refresh::default();
-    for moved in &settled.moved {
-        if moved.info.id.is_some() {
-            out.notes.push(Change::Moved {
-                from: moved.from.clone(),
-                note: moved.info.clone(),
-            });
-        } else {
-            out.tags |= !moved.info.tags.is_empty();
-            out.notes.push(Change::Removed(moved.from.clone()));
-            out.notes.push(Change::Added(moved.info.clone()));
-        }
-    }
-    let mut gone: Vec<&NoteInfo> = settled
-        .removed
-        .iter()
-        .filter_map(|path| snapshot.note(path))
-        .collect();
-    for put in &settled.put {
-        let note = &put.note.info;
-        let old = snapshot.note(&note.path);
-        let from = match (old, &note.id) {
-            (None, Some(id)) => gone
-                .iter()
-                .position(|gone| gone.id.as_ref() == Some(id))
-                .map(|i| gone.swap_remove(i)),
-            _ => None,
-        };
-        let change = match (from, old) {
-            (Some(from), _) => {
-                out.tags |= !same_tags(&from.tags, &note.tags);
-                Change::Moved {
-                    from: from.path.clone(),
-                    note: note.clone(),
-                }
-            }
-            (None, None) => {
-                out.tags |= !note.tags.is_empty();
-                Change::Added(note.clone())
-            }
-            (None, Some(old)) => {
-                out.tags |= !same_tags(&old.tags, &note.tags);
-                Change::Changed(note.clone())
-            }
-        };
-        out.notes.push(change);
-    }
-    for gone in gone {
-        out.tags |= !gone.tags.is_empty();
-        out.notes.push(Change::Removed(gone.path.clone()));
-    }
-    out.notes
-        .sort_by(|a, b| change_path(a).cmp(&change_path(b)));
-    out
-}
-
 /// The owner of each id while a plan settles: the facts, with the paths that the plan freed
 /// and the ids it claimed.
 struct Owners<'a> {
@@ -379,20 +287,6 @@ fn pairs<'a>(
         .collect()
 }
 
-fn same_tags(a: &[String], b: &[String]) -> bool {
-    a.iter().collect::<HashSet<_>>() == b.iter().collect::<HashSet<_>>()
-}
-
-fn change_path(change: &Change) -> Option<&NotePath> {
-    match change {
-        Change::Added(note) | Change::Changed(note) | Change::Moved { note, .. } => {
-            Some(&note.path)
-        }
-        Change::Removed(path) => Some(path),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, reason = "tests")]
@@ -401,7 +295,20 @@ mod tests {
     use std::time::SystemTime;
 
     use super::*;
+    use crate::diff::Touched;
+    use crate::model::{Change, Source};
     use crate::nodes::Node;
+
+    /// The change list that `settled` makes in `before`, as a batch from outside.
+    fn changes(before: &Facts, settled: Settled) -> Vec<Change> {
+        let mut touched = Touched::default();
+        touched.settled(&settled);
+        let mut after = before.clone();
+        let links = vec![Vec::new(); settled.put.len()];
+        after.settle(settled, links);
+        let (_, list) = touched.list(Source::Outside, before, after);
+        list.map(|list| list.changes).unwrap_or_default()
+    }
 
     fn path(path: &str) -> NotePath {
         NotePath::new(path).unwrap()
@@ -482,7 +389,7 @@ mod tests {
         assert_eq!(settled.moved[0].from, path("a.md"));
         assert_eq!(settled.moved[0].info, info("work/a.md", Some("A")));
         assert_eq!(
-            changes(&facts, &settled).notes,
+            changes(&facts, settled),
             [Change::Moved {
                 from: path("a.md"),
                 note: info("work/a.md", Some("A")),
@@ -522,7 +429,7 @@ mod tests {
             [("work/a.md".to_owned(), Some("A"), false)]
         );
         assert_eq!(
-            changes(&facts, &settled).notes,
+            changes(&facts, settled),
             [Change::Moved {
                 from: path("a.md"),
                 note: info("work/a.md", Some("A")),
@@ -564,7 +471,7 @@ mod tests {
         assert_eq!(settled.removed, [path("old.md")]);
         assert_eq!(put_ids(&settled), [("new.md".to_owned(), Some("A"), false)]);
         assert_eq!(
-            changes(&facts, &settled).notes,
+            changes(&facts, settled),
             [Change::Moved {
                 from: path("old.md"),
                 note: info("new.md", Some("A")),
@@ -581,10 +488,7 @@ mod tests {
         let settled = plan.settle(&facts, Vec::new());
         assert_eq!(settled.removed, [path("a.md")]);
         assert!(settled.put.is_empty());
-        assert_eq!(
-            changes(&facts, &settled).notes,
-            [Change::Removed(path("a.md"))]
-        );
+        assert_eq!(changes(&facts, settled), [Change::Removed(path("a.md"))]);
     }
 
     #[test]

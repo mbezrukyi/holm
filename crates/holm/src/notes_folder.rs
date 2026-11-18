@@ -864,7 +864,7 @@ mod tests {
             [
                 "event [Folders]",
                 "create ok",
-                r#"event [FolderMoved { from: "work", to: "job" }]"#,
+                r#"event [FolderMoved { from: "work", to: "job" }, Folders]"#,
                 "rename ok",
                 "event []",
                 "fail failed",

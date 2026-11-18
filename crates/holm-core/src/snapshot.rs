@@ -242,15 +242,14 @@ impl Snapshot {
     }
 
     /// Takes out the notes at `removed`, then puts in `put`. So a note can move to a path and
-    /// keep its id. It returns whether a fact changed.
+    /// keep its id.
     pub(crate) fn apply(
         &mut self,
         removed: Vec<NotePath>,
         put: impl IntoIterator<Item = (NoteInfo, Vec<Link>)>,
-    ) -> bool {
-        let mut changed = false;
+    ) {
         for path in removed {
-            changed |= self.remove(&path);
+            self.remove(&path);
         }
         for (info, links) in put {
             let entry = Entry { info, links };
@@ -267,14 +266,11 @@ impl Snapshot {
                     .insert(id.as_str().to_owned(), entry.info.path.clone());
             }
             self.notes.insert(entry.info.path.clone(), Arc::new(entry));
-            changed = true;
         }
-        changed
     }
 
-    /// Puts `found` in place of the folders at `folder` or below it. It returns whether they
-    /// changed. `found` must be sorted.
-    pub(crate) fn set_folders(&mut self, folder: &FolderPath, found: Vec<FolderPath>) -> bool {
+    /// Puts `found` in place of the folders at `folder` or below it. `found` must be sorted.
+    pub(crate) fn set_folders(&mut self, folder: &FolderPath, found: Vec<FolderPath>) {
         let old: Vec<FolderPath> = self
             .folders
             .iter()
@@ -282,13 +278,12 @@ impl Snapshot {
             .cloned()
             .collect();
         if old == found {
-            return false;
+            return;
         }
         for folder in &old {
             self.folders.remove(folder);
         }
         self.folders.extend(found);
-        true
     }
 
     /// The snapshot after this one, with the next revision.
@@ -297,16 +292,15 @@ impl Snapshot {
         self
     }
 
-    fn remove(&mut self, path: &NotePath) -> bool {
+    fn remove(&mut self, path: &NotePath) {
         let Some(old) = self.notes.remove(path) else {
-            return false;
+            return;
         };
         if let Some(id) = &old.info.id
             && self.ids.get(id.as_str()).is_some_and(|owner| owner == path)
         {
             self.ids.remove(id.as_str());
         }
-        true
     }
 }
 

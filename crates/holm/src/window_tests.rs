@@ -309,6 +309,26 @@ fn typing_saves_the_note_with_its_line_breaks(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn a_late_pin_of_the_open_note_asks_nothing_about_the_disk(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let note = fixture.notes().join("Note.md");
+    fs::write(&note, "one\n").unwrap();
+    let startup = Startup {
+        write_budget: Duration::ZERO,
+        ..fixture.startup(None)
+    };
+    let handle = open(cx, startup);
+
+    press(cx, handle, "ctrl-shift-p");
+    press(cx, handle, "x");
+    cx.run_until_parked();
+
+    assert!(read(&note).contains("pinned: true"));
+    assert_eq!(editor_text(cx, handle), "xone\n");
+    assert_eq!(state(cx, handle), None);
+}
+
+#[gpui_kit::test]
 fn an_outside_change_reloads_quietly_with_no_unsaved_text(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     fs::write(fixture.notes().join("Note.md"), "old\n").unwrap();

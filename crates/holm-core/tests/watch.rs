@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use futures_core::Stream;
 
-use holm_core::model::{Change, ChangeList, LinkTarget, NoteId, NoteInfo, NoteSet, Order};
+use holm_core::model::{Change, ChangeList, LinkTarget, NoteId, NoteInfo, NoteSet, Order, Source};
 use holm_core::{Changes, Core, Error, Feed, NotePath};
 use tempfile::TempDir;
 
@@ -194,24 +194,39 @@ fn a_move_with_the_new_path_first_is_one_change() {
 }
 
 #[test]
-fn holm_s_own_saves_and_new_notes_come_only_as_notes() {
+fn holm_s_own_saves_and_new_notes_come_from_holm() {
     let fed = Fed::new(&[("a.md", "# A\n")]);
 
-    fed.core.save(&note_path("a.md"), "# A\n\nMore.\n").unwrap();
-    fed.core.add_tag(&note_path("a.md"), "work").unwrap();
+    let saved = fed.core.save(&note_path("a.md"), "# A\n\nMore.\n").unwrap();
+    let tagged = fed.core.add_tag(&note_path("a.md"), "work").unwrap();
     let new = fed.core.create(&folder_path(""), "New").unwrap();
     fed.feed
-        .changed([PathBuf::from("a.md"), common::path_buf(new.info.path)])
+        .changed([
+            PathBuf::from("a.md"),
+            common::path_buf(new.info.path.clone()),
+        ])
         .unwrap();
 
-    assert_eq!(fed.take(), [Change::Notes, Change::Notes, Change::Notes]);
+    let lists: Vec<(Source, Vec<Change>)> = fed
+        .lists()
+        .into_iter()
+        .map(|list| (list.source, list.changes))
+        .collect();
+    assert_eq!(
+        lists,
+        [
+            (Source::Holm, vec![Change::Changed(saved.info)]),
+            (Source::Holm, vec![Change::Changed(tagged), Change::Tags]),
+            (Source::Holm, vec![Change::Added(new.info)]),
+        ]
+    );
 }
 
 #[test]
-fn a_pin_comes_only_as_notes_and_an_attachment_not_at_all() {
+fn a_pin_comes_as_a_change_and_an_attachment_not_at_all() {
     let fed = Fed::new(&[("a.md", "# A\n")]);
 
-    fed.core.set_pinned(&note_path("a.md"), true).unwrap();
+    let pinned = fed.core.set_pinned(&note_path("a.md"), true).unwrap();
     let image = fed
         .core
         .paste_image(&note_path("a.md"), "png", b"png")
@@ -220,7 +235,7 @@ fn a_pin_comes_only_as_notes_and_an_attachment_not_at_all() {
         .changed([PathBuf::from("a.md"), PathBuf::from("attachments"), image])
         .unwrap();
 
-    assert_eq!(fed.take(), [Change::Notes]);
+    assert_eq!(fed.take(), [Change::Changed(pinned)]);
 }
 
 #[test]
@@ -259,19 +274,23 @@ fn each_own_move_comes_as_one_list_with_its_revision() {
             ),
             (
                 folder_revision,
-                vec![Change::FolderMoved {
-                    from: folder_path("area"),
-                    to: folder_path("zone"),
-                }],
+                vec![
+                    Change::FolderMoved {
+                        from: folder_path("area"),
+                        to: folder_path("zone"),
+                    },
+                    Change::Folders,
+                ],
             ),
             (
                 fed.core.snapshot().revision(),
                 vec![
-                    Change::Notes,
                     Change::TagMoved {
                         from: "work".into(),
                         to: "Job".into(),
                     },
+                    Change::Changed(fed.info("C.md")),
+                    Change::Tags,
                 ],
             ),
         ]
@@ -601,10 +620,15 @@ mod real_events {
 
     /// Waits up to [`WAIT`] for the next change list, and gives its changes.
     fn next(changes: &mut Changes) -> Vec<Change> {
+        next_list(changes).changes
+    }
+
+    /// Waits up to [`WAIT`] for the next change list.
+    fn next_list(changes: &mut Changes) -> ChangeList {
         let deadline = Instant::now() + WAIT;
         loop {
             if let Some(list) = changes.try_next() {
-                return list.changes;
+                return list;
             }
             assert!(Instant::now() < deadline, "no change list came");
             std::thread::sleep(Duration::from_millis(10));
@@ -624,15 +648,19 @@ mod real_events {
     }
 
     #[test]
-    fn a_save_comes_only_as_notes_but_the_next_outside_change_comes() {
+    fn a_save_comes_from_holm_and_the_next_outside_change_from_outside() {
         let (dir, _cache, core, mut changes) = open(&[("a.md", "# A\n")]);
 
-        core.save(&note_path("a.md"), "# A\n\nMore.\n").unwrap();
+        let saved = core.save(&note_path("a.md"), "# A\n\nMore.\n").unwrap();
         fs::write(dir.path().join("b.md"), "# B\n").unwrap();
 
-        assert_eq!(next(&mut changes), [Change::Notes]);
+        let list = next_list(&mut changes);
+        assert_eq!(list.source, Source::Holm);
+        assert_eq!(list.changes, [Change::Changed(saved.info)]);
+        let list = next_list(&mut changes);
+        assert_eq!(list.source, Source::Outside);
         assert_eq!(
-            next(&mut changes),
+            list.changes,
             [Change::Added(core.read(&note_path("b.md")).unwrap().info)]
         );
     }

@@ -2,6 +2,7 @@
 //!
 //! It has no UI. The app and the later manager use it through one [`Core`] handle.
 
+mod diff;
 mod error;
 mod facts;
 mod index;
@@ -34,7 +35,8 @@ pub use paths::{FolderPath, NotePath};
 pub use snapshot::Snapshot;
 pub use watch::Feed;
 
-use facts::{Delta, Facts};
+use diff::Touched;
+use facts::Facts;
 use index::Index;
 use model::{
     Change, ChangeList, DeleteCount, Link, LinkTarget, Note, NoteId, NoteInfo, NoteSet, Order,
@@ -142,9 +144,8 @@ impl Core {
     /// Each stream gets every list from the time it was made. A list comes for each new
     /// revision, with the snapshot of that revision. It can come before [`Core::snapshot`]
     /// shows that revision.
-    /// A batch of outside changes gives the note changes in path order, then
-    /// [`Change::Folders`] and [`Change::Tags`]. A write gives the moves it made, and
-    /// [`Change::Notes`] and [`Change::Folders`] for the other facts it changed.
+    /// Each list gives the moves of a write first, then the note changes in path order, then
+    /// [`Change::Folders`] and [`Change::Tags`].
     pub fn changes(&self) -> Changes {
         let (send, receive) = mpsc::unbounded();
         lock(&self.inner.listeners).push(send);
@@ -361,7 +362,7 @@ impl Core {
                 .inner
                 .store
                 .create_folder(parent, &Name::typed(name)?)?;
-            draft.wrote_folders(&new)?;
+            draft.folders(&new)?;
             Ok(new)
         })
     }
@@ -660,7 +661,7 @@ impl Core {
         self.inner.write(|draft| {
             let new = self.inner.store.move_folder(folder, parent, name)?;
             if new != *folder {
-                draft.changes.push(Change::FolderMoved {
+                draft.touched.moved(Change::FolderMoved {
                     from: folder.clone(),
                     to: new.clone(),
                 });
@@ -697,46 +698,20 @@ impl Core {
     }
 }
 
-/// The next snapshot, while one write runs.
+/// The next facts, while one write runs, and what the write touched.
 struct Draft<'a> {
     store: &'a Store,
     next: Facts,
-    changed: bool,
-    /// The change list of the next revision.
-    changes: Vec<Change>,
+    touched: Touched,
 }
 
 impl Draft<'_> {
-    /// Applies `delta`, and returns whether a note changed.
-    fn notes(&mut self, delta: Delta) -> bool {
-        let changed = self.next.apply(delta);
-        self.changed |= changed;
-        changed
-    }
-
-    /// Adds [`Change::Notes`] once, after a write of Holm changed notes with no move.
-    fn wrote_notes(&mut self) {
-        if !self.changes.contains(&Change::Notes) {
-            self.changes.push(Change::Notes);
-        }
-    }
-
-    /// Reads the folders at `folder` or below it again after a write of Holm, and adds
-    /// [`Change::Folders`] once when they changed.
-    fn wrote_folders(&mut self, folder: &FolderPath) -> Result<()> {
-        if self.folders(folder)? && !self.changes.contains(&Change::Folders) {
-            self.changes.push(Change::Folders);
-        }
-        Ok(())
-    }
-
-    /// Reads the folders at `folder` or below it from the disk again. It returns whether they
-    /// changed.
-    fn folders(&mut self, folder: &FolderPath) -> Result<bool> {
+    /// Reads the folders at `folder` or below it from the disk again.
+    fn folders(&mut self, folder: &FolderPath) -> Result<()> {
         let found = self.store.folders(folder)?;
-        let changed = self.next.set_folders(folder, found);
-        self.changed |= changed;
-        Ok(changed)
+        self.next.set_folders(folder, found);
+        self.touched.folder(folder.clone());
+        Ok(())
     }
 }
 
@@ -759,7 +734,7 @@ impl Inner {
             self.rebuild_from(&settled);
             self.links(&settled)
         };
-        facts.apply(settled.into_delta(links).0);
+        facts.settle(settled, links);
         *lock(&self.facts) = facts;
         Ok(())
     }
@@ -824,28 +799,16 @@ impl Inner {
     /// Runs `op` as [`Inner::write`] does, for changes from `source`.
     fn run<T>(&self, source: Source, op: impl FnOnce(&mut Draft<'_>) -> Result<T>) -> Result<T> {
         let _writing = lock(&self.writing);
+        let before = lock(&self.facts).clone();
         let mut draft = Draft {
             store: &self.store,
-            next: lock(&self.facts).clone(),
-            changed: false,
-            changes: Vec::new(),
+            next: before.clone(),
+            touched: Touched::default(),
         };
         let result = op(&mut draft);
-        debug_assert!(
-            !draft.changed || !draft.changes.is_empty(),
-            "a new revision with no change"
-        );
-        let mut facts = draft.next;
-        if draft.changed {
-            facts = facts.next_revision();
-        }
-        if !draft.changes.is_empty() {
-            let list = ChangeList {
-                source,
-                snapshot: facts.snapshot().clone(),
-                changes: draft.changes,
-            };
-            lock(&self.listeners).retain(|listener| listener.unbounded_send(list.clone()).is_ok());
+        let (facts, list) = draft.touched.list(source, &before, draft.next);
+        if let Some(list) = list {
+            send(&mut lock(&self.listeners), list);
         }
         *lock(&self.facts) = facts;
         result
@@ -863,11 +826,7 @@ impl Inner {
     /// Puts notes that Holm just wrote into the index and the draft, and returns them.
     fn update_all(&self, draft: &mut Draft<'_>, notes: Vec<(Note, store::Stamp)>) -> Vec<Note> {
         let settled = scan::wrote(&self.store, &draft.next, notes);
-        let (notes, changed) = self.take(draft, settled);
-        if changed {
-            draft.wrote_notes();
-        }
-        notes
+        self.take(draft, settled)
     }
 
     /// Changes the frontmatter of the note with `edit`, keeps its modification time,
@@ -915,7 +874,7 @@ impl Inner {
             && let TagEdit::Rename { from, to } = edit
             && from != to
         {
-            draft.changes.push(Change::TagMoved {
+            draft.touched.moved(Change::TagMoved {
                 from: (*from).to_owned(),
                 to: to.clone(),
             });
@@ -951,11 +910,9 @@ impl Inner {
                 }
             }
         }
-        if self.refresh(draft, vec![node.clone()])? {
-            draft.wrote_notes();
-        }
+        self.refresh(draft, vec![node.clone()])?;
         if let Node::Folder(folder) = node {
-            draft.wrote_folders(folder)?;
+            draft.folders(folder)?;
         }
         deleted
     }
@@ -970,26 +927,26 @@ impl Inner {
             vec![Node::Note(from.clone()), Node::Note(to.clone())],
         )?;
         let info = self.store.read(to)?.0.info;
-        draft.changes.push(Change::Moved {
+        draft.touched.moved(Change::Moved {
             from: from.clone(),
             note: info.clone(),
         });
         Ok(info)
     }
 
-    /// Updates the index and the draft at each path after Holm's own change, and returns
-    /// whether a note changed. It adds no change to the list, so the write adds its own.
-    fn refresh(&self, draft: &mut Draft<'_>, nodes: Vec<Node>) -> Result<bool> {
+    /// Updates the index and the draft at each path after Holm's own change.
+    fn refresh(&self, draft: &mut Draft<'_>, nodes: Vec<Node>) -> Result<()> {
         let settled = scan::files(&self.store, &draft.next, &Nodes::new(nodes))?;
-        Ok(self.take(draft, settled).1)
+        self.take(draft, settled);
+        Ok(())
     }
 
     /// Writes the rows of `settled` into the index and puts it in the draft. It returns the
-    /// notes that were read, and whether a note changed.
-    fn take(&self, draft: &mut Draft<'_>, settled: Settled) -> (Vec<Note>, bool) {
+    /// notes that were read.
+    fn take(&self, draft: &mut Draft<'_>, settled: Settled) -> Vec<Note> {
         let links = self.write_rows(&settled);
-        let (delta, notes) = settled.into_delta(links);
-        (notes, draft.notes(delta))
+        draft.touched.settled(&settled);
+        draft.next.settle(settled, links)
     }
 
     /// Checks the disk at each path of `batch`, and updates the index, the snapshot and the
@@ -1001,20 +958,11 @@ impl Inner {
                 return Ok(());
             }
             let settled = scan::files(&self.store, &draft.next, &nodes)?;
-            let refresh = reconcile::changes(&draft.next, &settled);
             self.take(draft, settled);
-            let mut folders = false;
             for node in &nodes {
                 if let Node::Folder(folder) = node {
-                    folders |= draft.folders(folder)?;
+                    draft.folders(folder)?;
                 }
-            }
-            draft.changes.extend(refresh.notes);
-            if folders {
-                draft.changes.push(Change::Folders);
-            }
-            if refresh.tags {
-                draft.changes.push(Change::Tags);
             }
             Ok(())
         })
@@ -1043,6 +991,19 @@ impl Stream for Changes {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<ChangeList>> {
         Pin::new(&mut self.receive).poll_next(cx)
+    }
+}
+
+/// Sends `list` to each listener, and drops the listeners whose stream is gone. The last
+/// listener gets `list` itself, so a long list is cloned only for the others.
+fn send(listeners: &mut Vec<UnboundedSender<ChangeList>>, list: ChangeList) {
+    listeners.retain(|listener| !listener.is_closed());
+    if let Some((last, others)) = listeners.split_last() {
+        for listener in others {
+            // A stream that ends now is dropped at the next list.
+            let _ = listener.unbounded_send(list.clone());
+        }
+        let _ = last.unbounded_send(list);
     }
 }
 

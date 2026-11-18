@@ -2,9 +2,10 @@
 
 use std::collections::HashMap;
 
-use crate::model::{Link, NoteInfo};
+use crate::model::{Link, Note, NoteInfo};
 use crate::nodes::{Node, Nodes};
 use crate::paths::{FolderPath, NotePath};
+use crate::reconcile::Settled;
 use crate::snapshot::Snapshot;
 use crate::store::Stamp;
 
@@ -17,15 +18,6 @@ pub(crate) struct Facts {
     stamps: imbl::HashMap<NotePath, Stamp>,
 }
 
-/// The notes that a change of the index took out and put in, each put note with its stamp.
-///
-/// [`Facts::apply`] takes them out first, so a note can move to a path and keep its id.
-#[derive(Debug, Default)]
-pub(crate) struct Delta {
-    pub(crate) removed: Vec<NotePath>,
-    pub(crate) put: Vec<(NoteInfo, Vec<Link>, Stamp)>,
-}
-
 impl Facts {
     /// The facts of `notes` and `folders`, with revision 0.
     pub(crate) fn new(notes: Vec<(NoteInfo, Vec<Link>, Stamp)>, folders: Vec<FolderPath>) -> Self {
@@ -33,10 +25,7 @@ impl Facts {
             snapshot: Snapshot::new(folders),
             stamps: imbl::HashMap::new(),
         };
-        facts.apply(Delta {
-            removed: Vec::new(),
-            put: notes,
-        });
+        facts.apply(Vec::new(), notes);
         facts
     }
 
@@ -64,25 +53,42 @@ impl Facts {
         stamps
     }
 
-    /// Takes out and puts in the notes of `delta`. It returns whether the snapshot changed.
-    /// A new stamp alone changes no fact.
-    pub(crate) fn apply(&mut self, delta: Delta) -> bool {
-        for path in &delta.removed {
+    /// Puts in what `settled` changes, and returns the notes that were read. `links` holds
+    /// the links of each put note, in order.
+    pub(crate) fn settle(&mut self, settled: Settled, links: Vec<Vec<Link>>) -> Vec<Note> {
+        let mut removed = settled.removed;
+        let mut put = Vec::with_capacity(settled.put.len() + settled.moved.len());
+        let mut notes = Vec::with_capacity(settled.put.len());
+        for (read, links) in settled.put.into_iter().zip(links) {
+            put.push((read.note.info.clone(), links, read.stamp));
+            notes.push(read.note);
+        }
+        for moved in settled.moved {
+            removed.push(moved.from);
+            put.push((moved.info, moved.links, moved.stamp));
+        }
+        self.apply(removed, put);
+        notes
+    }
+
+    /// Takes out the notes at `removed` first, so a note can move to a path and keep its id.
+    /// Then it puts in `put`, each note with its stamp.
+    fn apply(&mut self, removed: Vec<NotePath>, put: Vec<(NoteInfo, Vec<Link>, Stamp)>) {
+        for path in &removed {
             self.stamps.remove(path);
         }
-        for (info, _, stamp) in &delta.put {
+        for (info, _, stamp) in &put {
             self.stamps.insert(info.path.clone(), *stamp);
         }
         self.snapshot.apply(
-            delta.removed,
-            delta.put.into_iter().map(|(info, links, _)| (info, links)),
-        )
+            removed,
+            put.into_iter().map(|(info, links, _)| (info, links)),
+        );
     }
 
-    /// Puts `found` in place of the folders at `folder` or below it. It returns whether they
-    /// changed. `found` must be sorted.
-    pub(crate) fn set_folders(&mut self, folder: &FolderPath, found: Vec<FolderPath>) -> bool {
-        self.snapshot.set_folders(folder, found)
+    /// Puts `found` in place of the folders at `folder` or below it. `found` must be sorted.
+    pub(crate) fn set_folders(&mut self, folder: &FolderPath, found: Vec<FolderPath>) {
+        self.snapshot.set_folders(folder, found);
     }
 
     /// The facts after these ones, with the next revision.

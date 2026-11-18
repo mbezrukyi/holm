@@ -160,17 +160,17 @@ pub struct DeleteCount {
 /// One change to the notes folder, in a [`ChangeList`].
 ///
 /// A write through [`Core`](crate::Core) gives the moves it makes: [`Change::Moved`],
-/// [`Change::FolderMoved`] and [`Change::TagMoved`]. Its other changes come only as
-/// [`Change::Notes`] and [`Change::Folders`], and show in the snapshot.
+/// [`Change::FolderMoved`] and [`Change::TagMoved`]. A note that such a move explains gives
+/// no other change.
 ///
 /// The core finds no folder moves from other tools. Each note of a moved folder comes as
 /// [`Change::Moved`] or as [`Change::Removed`] and [`Change::Added`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Change {
-    /// A new note file from another tool.
+    /// A new note file.
     Added(NoteInfo),
-    /// A note file whose text or info another tool changed.
+    /// A note file whose text, info or links changed.
     Changed(NoteInfo),
     /// A note file that is gone. The path is where it was.
     Removed(NotePath),
@@ -195,9 +195,6 @@ pub enum Change {
         /// The new name.
         to: String,
     },
-    /// Holm made, saved or deleted notes, or changed their tags or pin. The snapshot holds
-    /// the new facts.
-    Notes,
     /// The list from [`Snapshot::folders`](crate::Snapshot::folders) changed.
     Folders,
     /// The tag tree from [`Snapshot::tags`](crate::Snapshot::tags) changed.
@@ -284,7 +281,8 @@ pub struct ChangeList {
     pub source: Source,
     /// The first snapshot that shows the changes.
     pub snapshot: Snapshot,
-    /// The changes in order: first the note and folder changes, then [`Change::Folders`] and
-    /// [`Change::Tags`]. It is never empty, and each new revision has one.
+    /// The changes in order: first the moves of a write, then the note changes in path order,
+    /// then [`Change::Folders`] and [`Change::Tags`]. It is never empty, and each new revision
+    /// has one.
     pub changes: Vec<Change>,
 }
