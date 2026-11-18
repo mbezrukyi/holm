@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use holm_core::TagName;
+use holm_core::{FolderPath, TagName};
 
 use crate::path_text::PathText;
 
@@ -104,7 +104,16 @@ pub(crate) const TAGS: &str = "TAGS";
 pub(crate) const NEW_FOLDER: &str = "New folder";
 /// The accessible name of a name field in the tree.
 pub(crate) const NAME_FIELD: &str = "Name";
-pub(crate) const ROOT_FOLDER: &str = "Notes folder";
+const ROOT_FOLDER: &str = "Notes folder";
+
+/// A folder as the screen shows it: its path, or a name for the root folder.
+pub(crate) fn folder_label(folder: &FolderPath) -> String {
+    if folder.is_root() {
+        ROOT_FOLDER.to_owned()
+    } else {
+        folder.to_string()
+    }
+}
 pub(crate) const MOVE_TO: &str = "Move to";
 pub(crate) const NO_FOLDER: &str = "No folder has this name";
 
@@ -196,5 +205,12 @@ mod tests {
             "~/.config/holm/config.toml"
         );
         assert_eq!(home_path(Path::new("/etc/holm.toml")), "/etc/holm.toml");
+    }
+
+    #[test]
+    fn the_root_folder_has_a_name() {
+        assert_eq!(folder_label(&FolderPath::root()), "Notes folder");
+        let folder = FolderPath::new("work/holm").expect("a plain path");
+        assert_eq!(folder_label(&folder), "work/holm");
     }
 }

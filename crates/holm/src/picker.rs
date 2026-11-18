@@ -94,24 +94,15 @@ impl FolderPicker {
             .folders
             .iter()
             .enumerate()
-            .filter(|(_, folder)| Lowercase::new(&name(folder)).holds(&query))
+            .filter(|(_, folder)| Lowercase::new(&text::folder_label(folder)).holds(&query))
             .map(|(at, _)| at)
             .collect();
         let shown = self
             .rows
             .iter()
-            .map(|at| PickRow::new(name(&self.folders[*at])).icon(Icon::Folder))
+            .map(|at| PickRow::new(text::folder_label(&self.folders[*at])).icon(Icon::Folder))
             .collect();
         self.list.update(cx, |list, cx| list.set_rows(shown, cx));
-    }
-}
-
-/// The name that a row shows for `folder`: its path, or a name for the root folder.
-fn name(folder: &FolderPath) -> String {
-    if folder.is_root() {
-        text::ROOT_FOLDER.to_owned()
-    } else {
-        folder.to_string()
     }
 }
 

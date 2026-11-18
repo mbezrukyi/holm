@@ -1048,7 +1048,7 @@ fn when(time: SystemTime) -> String {
 fn item_label(item: &Item) -> String {
     match item {
         Item::All => text::ALL_NOTES.to_owned(),
-        Item::Folder(path) => path.to_string(),
+        Item::Folder(path) => text::folder_label(path),
         Item::Tag(name) => text::tag_label(name),
     }
 }

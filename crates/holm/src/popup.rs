@@ -20,6 +20,7 @@ use holm_core::NotePath;
 use holm_core::model::NoteInfo;
 
 use crate::icons::Icon;
+use crate::text;
 
 /// A layer over the whole window that centers its child. The parts under it get no mouse
 /// input.
@@ -125,7 +126,7 @@ impl PickRow {
 
 fn folder(note: &NotePath) -> Option<SharedString> {
     let folder = note.folder();
-    (!folder.is_root()).then(|| folder.to_string().into())
+    (!folder.is_root()).then(|| text::folder_label(folder).into())
 }
 
 /// What a [`PickList`] tells its owner.
