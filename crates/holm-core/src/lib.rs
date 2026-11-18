@@ -474,7 +474,7 @@ impl Core {
                 }
             })?;
             note.info.id.ok_or_else(|| Error::Write {
-                path: note.info.path.under(self.inner.store.root()),
+                path: self.inner.store.root().join(&note.info.path),
                 source: std::io::ErrorKind::InvalidData.into(),
             })
         })
@@ -787,7 +787,7 @@ impl Inner {
     fn update(&self, draft: &mut Draft<'_>, note: &Note, stamp: store::Stamp) -> Result<Note> {
         let notes = self.update_all(draft, &[(note.clone(), stamp)])?;
         notes.into_iter().next().ok_or_else(|| Error::Write {
-            path: note.info.path.under(self.store.root()),
+            path: self.store.root().join(&note.info.path),
             source: std::io::ErrorKind::InvalidData.into(),
         })
     }

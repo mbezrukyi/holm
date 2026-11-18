@@ -11,7 +11,7 @@ use std::ffi::OsStr;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::os::unix::ffi::OsStrExt as _;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use crate::error::{Error, NameProblem, Result};
@@ -155,33 +155,9 @@ impl NotePath {
         std::iter::once(self.folder.clone()).chain(self.folder.parents())
     }
 
-    /// The path of the note below the folder `root`.
-    pub fn under(&self, root: &Path) -> PathBuf {
-        root.join(self.as_path())
-    }
-
-    /// Whether `path` is the path of this note, relative to the notes folder.
-    pub fn is_at(&self, path: &Path) -> bool {
-        path.as_os_str().as_bytes() == &*self.path
-    }
-
-    /// The path relative to the notes folder.
-    pub fn to_path(&self) -> PathBuf {
-        self.as_path().to_owned()
-    }
-
-    /// The bytes of the path relative to the notes folder.
-    pub(crate) fn bytes(&self) -> &[u8] {
-        &self.path
-    }
-
     /// The file name, with `.md`.
     pub(crate) fn file(&self) -> Name {
         Name(self.name_bytes().into())
-    }
-
-    fn as_path(&self) -> &Path {
-        Path::new(OsStr::from_bytes(&self.path))
     }
 
     fn name_bytes(&self) -> &[u8] {
@@ -532,6 +508,12 @@ impl fmt::Debug for Name {
     }
 }
 
+impl AsRef<Path> for NotePath {
+    fn as_ref(&self) -> &Path {
+        Path::new(OsStr::from_bytes(&self.path))
+    }
+}
+
 impl AsRef<Path> for FolderPath {
     fn as_ref(&self) -> &Path {
         Path::new(OsStr::from_bytes(self.0.bytes()))
@@ -540,7 +522,7 @@ impl AsRef<Path> for FolderPath {
 
 impl fmt::Display for NotePath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.as_path().display().fmt(f)
+        AsRef::<Path>::as_ref(self).display().fmt(f)
     }
 }
 
@@ -552,7 +534,7 @@ impl fmt::Display for FolderPath {
 
 impl fmt::Debug for NotePath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(&self.to_path(), f)
+        fmt::Debug::fmt(AsRef::<Path>::as_ref(self), f)
     }
 }
 
@@ -622,14 +604,9 @@ mod tests {
     }
 
     #[test]
-    fn is_at_compares_the_whole_path() {
-        let plans = note("work/Plans.md");
-        assert!(plans.is_at(Path::new("work/Plans.md")));
-        assert!(!plans.is_at(Path::new("workPlans.md")));
-        assert!(!plans.is_at(Path::new("work/x/Plans.md")));
-        assert!(!plans.is_at(Path::new("/work/Plans.md")));
-        assert!(note("A.md").is_at(Path::new("A.md")));
-        assert!(!note("A.md").is_at(Path::new("x/A.md")));
+    fn a_note_reads_as_its_whole_path() {
+        assert_eq!(note("work/Plans.md").as_ref(), Path::new("work/Plans.md"));
+        assert_eq!(note("A.md").as_ref(), Path::new("A.md"));
     }
 
     #[test]

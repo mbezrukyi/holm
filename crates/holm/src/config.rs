@@ -401,7 +401,7 @@ fn write(document: &mut DocumentMut, settings: &Settings) {
     match settings
         .last_note
         .as_ref()
-        .map(|path| path.to_path().into_os_string().into_string().ok())
+        .map(|path| path.as_ref().to_str().map(str::to_owned))
     {
         Some(Some(path)) => set(document, "last_note", Value::from(path)),
         Some(None) | None => {

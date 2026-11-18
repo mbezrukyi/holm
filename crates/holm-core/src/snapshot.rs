@@ -143,7 +143,7 @@ impl Snapshot {
                 entry.info.path != *path
                     && entry.links.iter().any(|link| match &link.target {
                         LinkTarget::Note { id: to, .. } => Some(to) == id,
-                        LinkTarget::File(file) => path.is_at(file),
+                        LinkTarget::File(file) => path.as_ref().as_os_str() == file.as_os_str(),
                         LinkTarget::Heading(_) | LinkTarget::Web(_) => false,
                     })
             })
