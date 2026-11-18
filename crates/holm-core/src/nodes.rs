@@ -63,10 +63,6 @@ impl Nodes {
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
-
-    pub(crate) fn iter(&self) -> std::slice::Iter<'_, Node> {
-        self.0.iter()
-    }
 }
 
 impl<'a> IntoIterator for &'a Nodes {
@@ -74,7 +70,7 @@ impl<'a> IntoIterator for &'a Nodes {
     type IntoIter = std::slice::Iter<'a, Node>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.iter()
+        self.0.iter()
     }
 }
 
@@ -149,10 +145,7 @@ mod tests {
             note("b.md"),
             folder("workshop"),
         ]);
-        assert_eq!(
-            nodes.iter().cloned().collect::<Vec<_>>(),
-            [note("b.md"), folder("work"), folder("workshop")]
-        );
+        assert_eq!(nodes.0, [note("b.md"), folder("work"), folder("workshop")]);
         assert_eq!(Nodes::new([note("a.md"), folder("")]).0, [folder("")]);
     }
 }
