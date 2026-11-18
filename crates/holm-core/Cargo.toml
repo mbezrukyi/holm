@@ -21,8 +21,13 @@ thiserror.workspace = true
 tracing.workspace = true
 ulid.workspace = true
 
+[features]
+# Publishes a big sample notes folder for speed tests in other crates.
+test-support = []
+
 [dev-dependencies]
 divan.workspace = true
+holm-core = { path = ".", features = ["test-support"] }
 proptest.workspace = true
 
 [[bench]]

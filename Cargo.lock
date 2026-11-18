@@ -3432,6 +3432,7 @@ dependencies = [
  "foldhash",
  "futures-channel",
  "futures-core",
+ "holm-core",
  "holm-markdown",
  "imbl",
  "notify",

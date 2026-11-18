@@ -9,42 +9,18 @@ use std::path::Path;
 use std::process::Command;
 
 use holm_core::model::{NoteSet, Order};
+use holm_core::sample::{self, NOTES};
 use holm_core::{Core, NotePath};
 use tempfile::TempDir;
-
-const NOTES: usize = 5_000;
-const FOLDERS: usize = 50;
-const TAGS: usize = 100;
 
 fn main() {
     divan::main();
 }
 
-/// A notes folder with [`NOTES`] notes in [`FOLDERS`] folders. Each note has an id, two tags,
-/// two note links, a file link and about 2 KB of text.
+/// The sample notes folder of [`sample::notes_folder`].
 fn notes_folder() -> TempDir {
     let dir = tempfile::tempdir().unwrap();
-    for folder in 0..FOLDERS {
-        fs::create_dir(dir.path().join(format!("folder {folder}"))).unwrap();
-    }
-    let words = "a line of plain words that a person may write in a note about work and home. ";
-    for note in 0..NOTES {
-        let text = format!(
-            "---\nid: N{note:05}\ntags: [tag{}, area/tag{}]\n---\n# Note {note}\n\n{}\n\n\
-            See [this](holm:N{:05}) and [that](holm:N{:05}), and [a file](attachments/f{note}.pdf).\n\n{}\n",
-            note % TAGS,
-            (note / 7) % TAGS,
-            words.repeat(12),
-            (note + 1) % NOTES,
-            (note + 2) % NOTES,
-            words.repeat(12),
-        );
-        let path = dir
-            .path()
-            .join(format!("folder {}", note % FOLDERS))
-            .join(format!("Note {note}.md"));
-        fs::write(path, text).unwrap();
-    }
+    sample::notes_folder(dir.path()).unwrap();
     dir
 }
 
@@ -104,9 +80,9 @@ fn sidebar_tags(bencher: divan::Bencher<'_, '_>) {
     bencher.bench_local(|| core.snapshot().tags());
 }
 
-/// A search key, with the results in the order of the list. `"work ho"` matches every note,
-/// and `"note 50"` 11 notes. `"tag"` matches every note through its tags, and `"tag work"`
-/// through a tag and the text.
+/// A search key, with the results in the order of the list. `"work ho"` matches about 2,100
+/// notes, and `"note 50"` 11 notes. `"tag"` matches every note through its tags, and
+/// `"tag work"` through a tag and the text.
 #[divan::bench(sample_count = 50, args = ["work ho", "note 50", "tag work", "tag"])]
 fn search(bencher: divan::Bencher<'_, '_>, text: &str) {
     let notes = notes_folder();

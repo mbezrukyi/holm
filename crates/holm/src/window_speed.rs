@@ -6,44 +6,16 @@
 //! cargo test --release -p holm window_speed -- --ignored --nocapture
 //! ```
 
-use std::fs;
-use std::path::Path;
 use std::time::{Duration, Instant};
 
 use gpui_kit::{AnyWindowHandle, AppContext as _, Entity, Keystroke, TestAppContext};
+use holm_core::sample::{self, FOLDERS};
 
 use super::Startup;
 use crate::pane::NotePane;
 use crate::window::{HolmWindow, Stage};
 
 use super::{Fixture, autosave, keys, open, press, screen, settle, sidebar, type_new_name};
-
-const NOTES: usize = 5_000;
-const FOLDERS: usize = 50;
-const TAGS: usize = 100;
-
-/// [`NOTES`] notes in [`FOLDERS`] folders, each with two tags, two note links and about 2 KB of text.
-fn many_notes(dir: &Path) {
-    for folder in 0..FOLDERS {
-        fs::create_dir(dir.join(format!("folder {folder}"))).unwrap();
-    }
-    let words = "a line of plain words that a person may write in a note about work and home. ";
-    for note in 0..NOTES {
-        let text = format!(
-            "---\nid: N{note:05}\ntags: [tag{}, area/tag{}]\n---\n# Note {note}\n\n{}\n\n\
-            See [this](holm:N{:05}) and [that](holm:N{:05}).\n",
-            note % TAGS,
-            (note / 7) % TAGS,
-            words.repeat(24),
-            (note + 1) % NOTES,
-            (note + 2) % NOTES,
-        );
-        let path = dir
-            .join(format!("folder {}", note % FOLDERS))
-            .join(format!("Note {note}.md"));
-        fs::write(path, text).unwrap();
-    }
-}
 
 fn time(what: &str, run: impl FnOnce()) {
     let start = Instant::now();
@@ -91,7 +63,7 @@ fn search_key(cx: &mut TestAppContext, handle: AnyWindowHandle, key: &'static st
 #[ignore = "prints times for a person to read"]
 fn window_speed(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
-    many_notes(&fixture.notes());
+    sample::notes_folder(&fixture.notes()).unwrap();
 
     let mut handle = None;
     time("start with a new index", || {
@@ -217,7 +189,7 @@ fn quick_open(what: &str, cx: &mut TestAppContext, handle: AnyWindowHandle, numb
 #[ignore = "prints times for a person to read"]
 fn window_speed_during_a_tag_rename(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
-    many_notes(&fixture.notes());
+    sample::notes_folder(&fixture.notes()).unwrap();
     let startup = Startup {
         write_budget: Duration::ZERO,
         ..fixture.startup(None)

@@ -9,6 +9,8 @@ mod nodes;
 mod paths;
 mod relink;
 mod retag;
+#[cfg(feature = "test-support")]
+pub mod sample;
 mod snapshot;
 mod store;
 mod watch;
