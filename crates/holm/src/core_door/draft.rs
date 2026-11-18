@@ -47,7 +47,7 @@ impl NoteText {
 }
 
 /// One write of the draft. Its version tells the draft which text it wrote.
-pub(super) struct Write {
+pub(super) struct DraftSave {
     pub(super) version: u64,
     pub(super) text: NoteText,
 }
@@ -110,13 +110,13 @@ impl Draft {
 
     /// The write to put in the line before a job. It is `None` with no text, or when the line
     /// already holds a write of this text.
-    pub(super) fn write(&mut self) -> Option<Write> {
+    pub(super) fn write(&mut self) -> Option<DraftSave> {
         let text = self.text.clone()?;
         if self.writing == Some(self.version) {
             return None;
         }
         self.writing = Some(self.version);
-        Some(Write {
+        Some(DraftSave {
             version: self.version,
             text,
         })

@@ -47,7 +47,7 @@ use holm_editor::{Changed, Editor, UpFromStart};
 use holm_markdown::Target;
 
 use crate::backlinks::{Backlinks, OpenBacklink};
-use crate::core_door::{CoreDoor, Done, FolderEvent, NotSaved, SaveEvent, Step, window_step};
+use crate::core_door::{CoreDoor, Done, FolderEvent, NotSaved, SaveEvent, Then, window_step};
 use crate::error::AppError;
 use crate::link_picker::{LinkChoice, LinkStart};
 use crate::message_line::{MessageLine, OpenState};
@@ -55,7 +55,7 @@ use crate::name_field::{NameEvent, NameWrite};
 use crate::tags::{TagChange, TagRow};
 use crate::title::TitleField;
 use crate::{text, theme};
-use disk_menu::{Answer, Choice, Disk, DiskMenu};
+use disk_menu::{Choice, Chosen, DiskMenu, DiskQuestion};
 pub(crate) use links::Pick;
 use links::{Links, LinksEvent};
 use new_note::{NewNote, NewNoteEvent};
@@ -88,7 +88,7 @@ pub(crate) enum Leave {
 }
 
 /// What the pane shows.
-enum Shown {
+enum Content {
     Empty,
     /// The note at this path, in the editor.
     Note(NotePath),
@@ -101,7 +101,7 @@ enum Shown {
     },
 }
 
-impl Shown {
+impl Content {
     /// The note that the user sees and works on.
     fn note(&self) -> Option<&NotePath> {
         match self {
@@ -130,14 +130,14 @@ impl Shown {
 
 pub(crate) struct NotePane {
     core_door: Entity<CoreDoor>,
-    line: Entity<MessageLine>,
+    message_line: Entity<MessageLine>,
     disk_menu: Entity<DiskMenu>,
     editor: Entity<Editor>,
     tag_row: Entity<TagRow>,
     title: Entity<TitleField<NotePath>>,
     backlinks: Entity<Backlinks>,
     links: Entity<Links>,
-    shown: Shown,
+    content: Content,
     /// The note that an open reads, until it shows. Moves follow it too.
     next: Option<NotePath>,
     /// The facts of the open note in the last snapshot that had it.
@@ -145,7 +145,7 @@ pub(crate) struct NotePane {
     ending: LineEnding,
     autosave: Option<Task<()>>,
     /// Another tool changed or deleted the note while the editor had unsaved changes.
-    disk: Option<Disk>,
+    disk: Option<DiskQuestion>,
     /// The reason of the last failed save, until a save works.
     not_saved: Option<&'static str>,
     /// The number of the last open or drop of a note. A read for an older one is dropped.
@@ -217,8 +217,8 @@ impl NotePane {
                     title.update(cx, TitleField::close);
                 }
             }),
-            cx.subscribe(&disk_menu, |pane, _, answer: &Answer, cx| {
-                pane.answer_disk(*answer, cx);
+            cx.subscribe(&disk_menu, |pane, _, chosen: &Chosen, cx| {
+                pane.choose(*chosen, cx);
             }),
             cx.subscribe_in(&line, window, |pane, _, _: &OpenState, window, cx| {
                 pane.open_state(window, cx);
@@ -241,14 +241,14 @@ impl NotePane {
         editor.update(cx, |editor, cx| editor.set_appearance(appearance, cx));
         let mut pane = Self {
             core_door,
-            line,
+            message_line: line,
             disk_menu,
             editor,
             tag_row,
             title,
             backlinks,
             links,
-            shown: Shown::Empty,
+            content: Content::Empty,
             next: None,
             last_info: None,
             ending: LineEnding::Lf,
@@ -281,13 +281,13 @@ impl NotePane {
         });
         let path = note.info.path.clone();
         if !reload {
-            self.shown = Shown::Note(path.clone());
-        } else if let Some(open) = self.shown.editor_mut() {
+            self.content = Content::Note(path.clone());
+        } else if let Some(open) = self.content.editor_mut() {
             open.clone_from(&path);
         }
         self.last_info = Some(note.info);
         self.show_fields(cx);
-        self.settle(cx);
+        self.mark_synced(cx);
         if !reload && let Some(heading) = self.open_heading.take() {
             self.editor
                 .update(cx, |editor, cx| editor.show_heading(&heading, cx));
@@ -306,12 +306,12 @@ impl NotePane {
     /// Drops the open note and its text, with no save.
     fn drop_note(&mut self, cx: &mut Context<Self>) {
         self.title.update(cx, TitleField::close);
-        self.shown = Shown::Empty;
+        self.content = Content::Empty;
         self.next = None;
         self.last_info = None;
         self.autosave = None;
         self.opening += 1;
-        self.settle(cx);
+        self.mark_synced(cx);
         self.editor.update(cx, |editor, cx| editor.set_text("", cx));
         self.core_door
             .update(cx, |core_door, _| core_door.drop_text());
@@ -332,11 +332,12 @@ impl NotePane {
 
     /// Shows a one-time error in the message line.
     fn answer(&self, message: &'static str, cx: &mut Context<Self>) {
-        self.line.update(cx, |line, cx| line.show(message, cx));
+        self.message_line
+            .update(cx, |line, cx| line.show(message, cx));
     }
 
     /// Sets the disk question. A new question closes the menu of the old one.
-    fn set_disk(&mut self, disk: Option<Disk>, cx: &mut Context<Self>) {
+    fn set_disk(&mut self, disk: Option<DiskQuestion>, cx: &mut Context<Self>) {
         if self.disk != disk {
             self.disk = disk;
             self.disk_menu.update(cx, DiskMenu::close);
@@ -345,7 +346,7 @@ impl NotePane {
     }
 
     /// The editor text matches the file: no disk question, and no "Not saved".
-    fn settle(&mut self, cx: &mut Context<Self>) {
+    fn mark_synced(&mut self, cx: &mut Context<Self>) {
         self.not_saved = None;
         self.set_disk(None, cx);
     }
@@ -353,12 +354,12 @@ impl NotePane {
     /// Shows the state in the message line. A disk question wins over "Not saved".
     fn show_state(&self, cx: &mut Context<Self>) {
         let state = match (self.disk, self.not_saved) {
-            (Some(Disk::Changed), _) => Some(text::CHANGED_ON_DISK),
-            (Some(Disk::Deleted), _) => Some(text::DELETED_ON_DISK),
+            (Some(DiskQuestion::Changed), _) => Some(text::CHANGED_ON_DISK),
+            (Some(DiskQuestion::Deleted), _) => Some(text::DELETED_ON_DISK),
             (None, Some(_)) => Some(text::NOT_SAVED),
             (None, None) => None,
         };
-        self.line
+        self.message_line
             .update(cx, |line, cx| line.set_state(state.map(Into::into), cx));
     }
 
@@ -373,10 +374,10 @@ impl NotePane {
         }
     }
 
-    fn answer_disk(&mut self, Answer { disk, choice }: Answer, cx: &mut Context<Self>) {
-        match (disk, choice) {
-            (Disk::Changed, Choice::KeepMine) => self.keep_mine(cx),
-            (Disk::Deleted, Choice::KeepMine) => self.keep_deleted(cx),
+    fn choose(&mut self, Chosen { question, choice }: Chosen, cx: &mut Context<Self>) {
+        match (question, choice) {
+            (DiskQuestion::Changed, Choice::KeepMine) => self.keep_mine(cx),
+            (DiskQuestion::Deleted, Choice::KeepMine) => self.keep_deleted(cx),
             (_, Choice::Reload) => self.reload(true, cx),
             (_, Choice::Close) => self.close_deleted(cx),
         }
@@ -384,7 +385,7 @@ impl NotePane {
 
     /// Opens the system picker for `pick`, and embeds each picked path at the cursor.
     pub(crate) fn link_paths(&mut self, pick: Pick, cx: &mut Context<Self>) {
-        if self.shown.note().is_none() {
+        if self.content.note().is_none() {
             return;
         }
         self.links.update(cx, |links, cx| links.pick(pick, cx));
@@ -398,7 +399,7 @@ impl NotePane {
         done: impl FnOnce(LinkStart, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
-        let Some(open_note) = self.shown.note().cloned() else {
+        let Some(open_note) = self.content.note().cloned() else {
             return;
         };
         let link = self.editor.read(cx).link_at_cursor();
@@ -426,8 +427,8 @@ impl NotePane {
     /// Makes the link that the user picked in the link picker, and puts it at the cursor.
     /// A new note goes in the folder of the open note. With no open note, it does nothing.
     /// `done` runs when the link is in place.
-    pub(crate) fn link(&mut self, choice: LinkChoice, done: Step<()>, cx: &mut Context<Self>) {
-        let Some(path) = self.shown.note().cloned() else {
+    pub(crate) fn link(&mut self, choice: LinkChoice, done: Then<()>, cx: &mut Context<Self>) {
+        let Some(path) = self.content.note().cloned() else {
             cx.defer(move |cx| done((), cx));
             return;
         };
@@ -472,7 +473,7 @@ impl NotePane {
     }
 
     fn put_link(&mut self, target: &Target, text: &str, cx: &mut Context<Self>) {
-        if self.shown.note().is_none() {
+        if self.content.note().is_none() {
             return;
         }
         let replace = self.replace_link;
@@ -485,7 +486,7 @@ impl NotePane {
 
     /// Shows the tags and the pin of the open note from the snapshot.
     fn show_fields(&mut self, cx: &mut Context<Self>) {
-        let path = self.shown.editor().cloned();
+        let path = self.content.editor().cloned();
         self.title
             .update(cx, |title, cx| title.show(path.clone(), cx));
         let Some(path) = path else {
@@ -501,7 +502,7 @@ impl NotePane {
     }
 
     fn change_tag(&mut self, change: TagChange, cx: &mut Context<Self>) {
-        let Some(path) = self.shown.note().cloned() else {
+        let Some(path) = self.content.note().cloned() else {
             return;
         };
         // The event of the write shows the fields.
@@ -512,7 +513,7 @@ impl NotePane {
 
     /// Opens the tag popup. The editor scrolls to it.
     pub(crate) fn focus_tags(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.shown.note().is_none() {
+        if self.content.note().is_none() {
             return;
         }
         self.tag_row.update(cx, |row, cx| row.enter(window, cx));
@@ -520,7 +521,7 @@ impl NotePane {
 
     /// Ctrl+Shift+B: opens the backlinks list. The editor scrolls to it.
     pub(crate) fn show_backlinks(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.shown.note().is_none() {
+        if self.content.note().is_none() {
             return;
         }
         self.backlinks
@@ -529,7 +530,7 @@ impl NotePane {
 
     /// Pins or unpins the open note.
     pub(crate) fn toggle_pin(&mut self, cx: &mut Context<Self>) {
-        let Some(path) = self.shown.note().cloned() else {
+        let Some(path) = self.content.note().cloned() else {
             return;
         };
         let pinned = !self.last_info.as_ref().is_some_and(|info| info.pinned);
@@ -544,7 +545,7 @@ impl NotePane {
 
     /// Gives the editor text to the draft of the notes folder, and saves it soon.
     fn edited(&mut self, cx: &mut Context<Self>) {
-        if let Some(path) = self.shown.editor().cloned() {
+        if let Some(path) = self.content.editor().cloned() {
             let body = self
                 .ending
                 .to_disk(self.editor.read(cx).text())
@@ -583,7 +584,7 @@ impl NotePane {
         if self.closing {
             return false;
         }
-        if !self.unsaved(cx) || self.line.read(cx).message() == Some(text::CLOSE_AGAIN) {
+        if !self.unsaved(cx) || self.message_line.read(cx).message() == Some(text::CLOSE_AGAIN) {
             return true;
         }
         self.closing = true;
@@ -612,7 +613,7 @@ impl NotePane {
     fn save_end(&mut self, event: &SaveEvent, cx: &mut Context<Self>) {
         match event {
             SaveEvent::Saved => {
-                self.settle(cx);
+                self.mark_synced(cx);
                 if self.unsaved(cx) {
                     self.schedule_save(cx);
                 }
@@ -632,14 +633,14 @@ impl NotePane {
 
     /// Takes a change of the open note by another tool. [`Self::follow`] takes the moves.
     fn outside_change(&mut self, change: &Change, cx: &mut Context<Self>) {
-        let Some(path) = self.shown.editor() else {
+        let Some(path) = self.content.editor() else {
             return;
         };
         let unsaved = self.unsaved(cx);
         match change {
             Change::Changed(changed) if changed == path => {
                 if unsaved {
-                    self.set_disk(Some(Disk::Changed), cx);
+                    self.set_disk(Some(DiskQuestion::Changed), cx);
                 } else {
                     self.set_disk(None, cx);
                     self.reload(false, cx);
@@ -648,7 +649,7 @@ impl NotePane {
             Change::Removed(gone) if gone == path => {
                 if unsaved {
                     self.autosave = None;
-                    self.set_disk(Some(Disk::Deleted), cx);
+                    self.set_disk(Some(DiskQuestion::Deleted), cx);
                 } else {
                     cx.emit(PaneEvent::Gone(gone.clone()));
                 }
@@ -660,7 +661,7 @@ impl NotePane {
     /// Reads the note again. With `discard`, it drops the unsaved text first, and gives it
     /// back when the read fails.
     fn reload(&mut self, discard: bool, cx: &mut Context<Self>) {
-        let Some(path) = self.shown.editor().cloned() else {
+        let Some(path) = self.content.editor().cloned() else {
             return;
         };
         let opening = self.opening;
@@ -697,7 +698,7 @@ impl NotePane {
     /// "Close" after an outside delete: drops the note and its text, and the app opens another
     /// note.
     fn close_deleted(&mut self, cx: &mut Context<Self>) {
-        let Some(path) = self.shown.editor().cloned() else {
+        let Some(path) = self.content.editor().cloned() else {
             return;
         };
         self.drop_note(cx);
@@ -707,30 +708,30 @@ impl NotePane {
     /// The open note: the note that an open reads, or else the note in the editor, also
     /// under a new note.
     pub(crate) fn path(&self) -> Option<&NotePath> {
-        self.next.as_ref().or_else(|| self.shown.editor())
+        self.next.as_ref().or_else(|| self.content.editor())
     }
 
     /// Whether the pane shows a new note with no file yet. Speed tests read it with no frame.
     #[cfg(test)]
     pub(crate) fn shows_new_note(&self) -> bool {
-        matches!(self.shown, Shown::New { .. })
+        matches!(self.content, Content::New { .. })
     }
 
     /// The note that the user sees. Speed tests read it with no frame.
     #[cfg(test)]
     pub(crate) fn shown_note(&self) -> Option<&NotePath> {
-        self.shown.note()
+        self.content.note()
     }
 
     /// Opens the note at `path`, and drops a new note. With [`Leave::Keep`], the line first
     /// writes the unsaved text. When that save fails, the pane stays on the note.
     pub(crate) fn open(&mut self, path: NotePath, leave: Leave, cx: &mut Context<Self>) {
-        if leave == Leave::Keep && self.shown.note() == Some(&path) {
+        if leave == Leave::Keep && self.content.note() == Some(&path) {
             self.stop_opening(cx);
             return;
         }
-        if let Shown::New { kept, .. } = &mut self.shown {
-            self.shown = kept.take().map_or(Shown::Empty, Shown::Note);
+        if let Content::New { kept, .. } = &mut self.content {
+            self.content = kept.take().map_or(Content::Empty, Content::Note);
             cx.notify();
         }
         self.opening += 1;
@@ -790,7 +791,7 @@ impl NotePane {
             return;
         }
         self.opening += 1;
-        if let Some(path) = self.shown.editor() {
+        if let Some(path) = self.content.editor() {
             cx.emit(PaneEvent::Opened(path.clone()));
         }
     }
@@ -806,7 +807,7 @@ impl NotePane {
             cx.emit(PaneEvent::Opening(new));
         }
         let unsaved = self.unsaved(cx);
-        let Some(path) = self.shown.editor_mut() else {
+        let Some(path) = self.content.editor_mut() else {
             return;
         };
         let Some(new) = event.changes().find_map(|change| change.note_after(path)) else {
@@ -829,7 +830,7 @@ impl NotePane {
 
     /// F2: opens the title field of the open note.
     pub(crate) fn edit_title(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.shown.note().is_some() {
+        if self.content.note().is_some() {
             self.title.update(cx, |title, cx| title.open(window, cx));
         }
     }
@@ -838,11 +839,11 @@ impl NotePane {
     fn rename(
         &mut self,
         title: String,
-        done: Step<Result<NotePath, AppError>>,
+        done: Then<Result<NotePath, AppError>>,
         cx: &mut Context<Self>,
     ) {
         // With no note, the title field is gone too.
-        let Some(path) = self.shown.note().cloned() else {
+        let Some(path) = self.content.note().cloned() else {
             return;
         };
         self.core_door.update(cx, |core_door, cx| {
@@ -860,7 +861,7 @@ impl NotePane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Shown::New { note, .. } = &self.shown {
+        if let Content::New { note, .. } = &self.content {
             note.update(cx, |note, cx| note.focus(window, cx));
             return;
         }
@@ -878,9 +879,9 @@ impl NotePane {
                 let core_door = pane.core_door.clone();
                 let note = cx.new(|cx| NewNote::new(core_door, folder, tag, window, cx));
                 let subscription = cx.subscribe_in(&note, window, Self::new_note_event);
-                pane.shown = Shown::New {
+                pane.content = Content::New {
                     note,
-                    kept: pane.shown.editor().cloned(),
+                    kept: pane.content.editor().cloned(),
                     _subscription: subscription,
                 };
                 cx.notify();
@@ -897,7 +898,7 @@ impl NotePane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Shown::New { kept, .. } = std::mem::replace(&mut self.shown, Shown::Empty) else {
+        let Content::New { kept, .. } = std::mem::replace(&mut self.content, Content::Empty) else {
             return;
         };
         window.focus(&self.editor.focus_handle(cx), cx);
@@ -907,7 +908,7 @@ impl NotePane {
                 self.opening += 1;
                 self.opened(note.clone(), cx);
             }
-            (NewNoteEvent::Cancelled, Some(kept)) => self.shown = Shown::Note(kept),
+            (NewNoteEvent::Cancelled, Some(kept)) => self.content = Content::Note(kept),
             (NewNoteEvent::Cancelled, None) => cx.emit(PaneEvent::Closed),
         }
     }
@@ -918,7 +919,7 @@ impl NotePane {
 fn step<R: 'static>(
     cx: &Context<NotePane>,
     step: impl FnOnce(&mut NotePane, R, &mut Context<NotePane>) + 'static,
-) -> Step<R> {
+) -> Then<R> {
     let pane = cx.weak_entity();
     Box::new(move |result, cx| {
         pane.update(cx, |pane, cx| step(pane, result, cx)).ok();
@@ -935,9 +936,9 @@ impl Focusable for NotePane {
 
 impl Render for NotePane {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let body = match &self.shown {
-            Shown::New { note, .. } => note.clone().into_any_element(),
-            Shown::Note(_) => div()
+        let body = match &self.content {
+            Content::New { note, .. } => note.clone().into_any_element(),
+            Content::Note(_) => div()
                 .flex_1()
                 .min_h_0()
                 .font_family(theme::NOTE_FONT)
@@ -945,7 +946,7 @@ impl Render for NotePane {
                 .line_height(theme::NOTE_LINE)
                 .child(self.editor.clone())
                 .into_any_element(),
-            Shown::Empty => empty_pane(&self.editor.focus_handle(cx), cx).into_any_element(),
+            Content::Empty => empty_pane(&self.editor.focus_handle(cx), cx).into_any_element(),
         };
         v_flex()
             .size_full()

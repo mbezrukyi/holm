@@ -13,7 +13,7 @@ use holm_core::{Core, Feed};
 use tempfile::TempDir;
 
 use super::{HolmWindow, Startup};
-use crate::config::{Config, SidebarItem, SidebarView};
+use crate::config::{Config, SavedSidebarView, SidebarItem};
 use crate::log::Log;
 use crate::{text, theme};
 
@@ -927,7 +927,7 @@ fn the_keyboard_moves_through_tree_list_and_editor(cx: &mut TestAppContext) {
     let settings = Config::load(fixture.config()).settings().clone();
     assert_eq!(
         settings.sidebar.view,
-        SidebarView {
+        SavedSidebarView {
             list: true,
             item: SidebarItem::All,
         }
@@ -2097,7 +2097,7 @@ fn a_folder_delete_selects_the_parent_folder(cx: &mut TestAppContext) {
     assert_eq!(sidebar(cx, handle), "tree All notes");
     assert_eq!(
         Config::load(fixture.config()).settings().sidebar.view,
-        SidebarView {
+        SavedSidebarView {
             list: false,
             item: SidebarItem::All,
         }
@@ -2267,7 +2267,7 @@ fn search_lists_the_notes_that_match_and_esc_returns(cx: &mut TestAppContext) {
     let settings = Config::load(fixture.config()).settings().clone();
     assert_eq!(
         settings.sidebar.view,
-        SidebarView {
+        SavedSidebarView {
             list: false,
             item: SidebarItem::All,
         }

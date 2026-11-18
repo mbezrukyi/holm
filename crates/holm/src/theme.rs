@@ -6,7 +6,7 @@ use gpui_kit::component::{Theme as Ui, ThemeMode, ThemeRegistry};
 use gpui_kit::{App, Pixels, Window, WindowAppearance, px};
 use holm_editor::Appearance;
 
-use crate::config::Theme;
+use crate::config::AppearanceSetting;
 
 const THEMES: &str = include_str!("theme.json");
 const LIGHT: &str = "Holm Light";
@@ -52,12 +52,12 @@ pub(crate) fn init(cx: &mut App) {
     });
 }
 
-/// Sets light or dark mode. [`Theme::System`] takes the mode of `window`.
-pub(crate) fn apply(theme: Theme, window: &mut Window, cx: &mut App) {
+/// Sets light or dark mode. [`AppearanceSetting::System`] takes the mode of `window`.
+pub(crate) fn apply(theme: AppearanceSetting, window: &mut Window, cx: &mut App) {
     let mode = match theme {
-        Theme::Light => ThemeMode::Light,
-        Theme::Dark => ThemeMode::Dark,
-        Theme::System => match window.appearance() {
+        AppearanceSetting::Light => ThemeMode::Light,
+        AppearanceSetting::Dark => ThemeMode::Dark,
+        AppearanceSetting::System => match window.appearance() {
             WindowAppearance::Dark | WindowAppearance::VibrantDark => ThemeMode::Dark,
             WindowAppearance::Light | WindowAppearance::VibrantLight => ThemeMode::Light,
         },

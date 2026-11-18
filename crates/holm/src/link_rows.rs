@@ -41,7 +41,7 @@ impl<'a> Query<'a> {
 const MAX_NOTES: usize = 50;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Row {
+pub(crate) enum LinkRow {
     /// The note at this place in the picker notes.
     Note(usize),
     Heading(String),
@@ -54,18 +54,18 @@ pub(crate) enum Row {
 /// Titles keep the order of `notes` with an empty query. Else the best match comes first.
 /// Only the first [`MAX_NOTES`] titles show. When no title is the query itself, the last row
 /// creates a note.
-pub(crate) fn rows(query: Query<'_>, notes: &PickNotes, headings: &[String]) -> Vec<Row> {
+pub(crate) fn rows(query: Query<'_>, notes: &PickNotes, headings: &[String]) -> Vec<LinkRow> {
     match query {
         Query::Titles(text) => {
             let text = text.trim();
             let pattern = Lowercase::new(text);
-            let mut rows: Vec<Row> = ranked(&pattern, notes.titles())
+            let mut rows: Vec<LinkRow> = ranked(&pattern, notes.titles())
                 .into_iter()
                 .take(MAX_NOTES)
-                .map(Row::Note)
+                .map(LinkRow::Note)
                 .collect();
             if !text.is_empty() && notes.position(&pattern).is_none() {
-                rows.push(Row::Create(text.to_owned()));
+                rows.push(LinkRow::Create(text.to_owned()));
             }
             rows
         }
@@ -73,7 +73,7 @@ pub(crate) fn rows(query: Query<'_>, notes: &PickNotes, headings: &[String]) -> 
             let lowered = headings.iter().map(|text| Lowercase::new(text));
             ranked(&Lowercase::new(filter.trim()), lowered)
                 .into_iter()
-                .map(|at| Row::Heading(headings[at].clone()))
+                .map(|at| LinkRow::Heading(headings[at].clone()))
                 .collect()
         }
     }
@@ -160,9 +160,9 @@ mod tests {
         rows(Query::Titles(text), &PickNotes::new(notes.to_vec()), &[])
             .into_iter()
             .map(|row| match row {
-                Row::Note(at) => notes[at].title.clone(),
-                Row::Create(title) => format!("+{title}"),
-                Row::Heading(text) => format!("#{text}"),
+                LinkRow::Note(at) => notes[at].title.clone(),
+                LinkRow::Create(title) => format!("+{title}"),
+                LinkRow::Heading(text) => format!("#{text}"),
             })
             .collect()
     }
@@ -231,14 +231,15 @@ mod tests {
             "Big bets".to_owned(),
         ];
         let query = |filter| Query::Headings { note: None, filter };
-        let shown =
-            |filter| -> Vec<Row> { rows(query(filter), &PickNotes::new(Vec::new()), &headings) };
+        let shown = |filter| -> Vec<LinkRow> {
+            rows(query(filter), &PickNotes::new(Vec::new()), &headings)
+        };
         assert_eq!(shown("").len(), 3);
         assert_eq!(
             shown("bi"),
             [
-                Row::Heading("Big bets".to_owned()),
-                Row::Heading("Bug list".to_owned())
+                LinkRow::Heading("Big bets".to_owned()),
+                LinkRow::Heading("Bug list".to_owned())
             ]
         );
         assert_eq!(shown("xyz"), []);

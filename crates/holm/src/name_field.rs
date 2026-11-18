@@ -22,12 +22,12 @@ use gpui_kit::{
     Render, SharedString, Subscription, Window,
 };
 
-use crate::core_door::{Step, window_step};
+use crate::core_door::{Then, window_step};
 use crate::error::AppError;
 use crate::text_field::{FieldEvent, TextField};
 
 /// Writes a typed name, and ends with the result of the write. It shows the answer of a fail.
-pub(crate) type NameWrite<T> = Rc<dyn Fn(String, Step<Result<T, AppError>>, &mut Window, &mut App)>;
+pub(crate) type NameWrite<T> = Rc<dyn Fn(String, Then<Result<T, AppError>>, &mut Window, &mut App)>;
 
 /// What the field tells its owner. After [`NameEvent::Written`] and [`NameEvent::Closed`], the
 /// owner drops the field.
@@ -51,7 +51,7 @@ pub(crate) struct NameField<T> {
 }
 
 /// What the field shows in its place.
-pub(crate) struct Look {
+pub(crate) struct Wording {
     pub(crate) id: &'static str,
     pub(crate) label: SharedString,
     /// The muted text of an empty field.
@@ -61,29 +61,29 @@ pub(crate) struct Look {
 impl<T: Clone + 'static> NameField<T> {
     /// Opens an empty field, and gives it the focus.
     pub(crate) fn new_name(
-        look: Look,
+        wording: Wording,
         write: NameWrite<T>,
         home: FocusHandle,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        Self::open(look, None, write, home, window, cx)
+        Self::open(wording, None, write, home, window, cx)
     }
 
     /// Opens the field with the name `start`, selected, and gives it the focus.
     pub(crate) fn rename(
-        look: Look,
+        wording: Wording,
         start: &str,
         write: NameWrite<T>,
         home: FocusHandle,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        Self::open(look, Some(start.to_owned()), write, home, window, cx)
+        Self::open(wording, Some(start.to_owned()), write, home, window, cx)
     }
 
     fn open(
-        look: Look,
+        wording: Wording,
         start: Option<String>,
         write: NameWrite<T>,
         home: FocusHandle,
@@ -92,7 +92,8 @@ impl<T: Clone + 'static> NameField<T> {
     ) -> Self {
         let text = start.as_deref().unwrap_or_default();
         let field = cx.new(|cx| {
-            TextField::new(look.id, look.label, text, window, cx).placeholder(look.placeholder)
+            TextField::new(wording.id, wording.label, text, window, cx)
+                .placeholder(wording.placeholder)
         });
         let subscription = cx.subscribe_in(&field, window, |this, _, event, window, cx| {
             this.field_event(*event, window, cx);
@@ -144,7 +145,7 @@ impl<T: Clone + 'static> NameField<T> {
         self.set_writing(true, cx);
         let ended = window_step(window, cx, Self::ended);
         // A write may end at once, and the field can't take its end in its own update.
-        let done: Step<Result<T, AppError>> =
+        let done: Then<Result<T, AppError>> =
             Box::new(move |result, cx| cx.defer(move |cx| ended(result, cx)));
         let write = self.write.clone();
         window.defer(cx, move |window, cx| write(name, done, window, cx));
@@ -222,14 +223,14 @@ mod tests {
         cx: &mut TestAppContext,
     ) -> (Entity<NameField<String>>, Events, &mut VisualTestContext) {
         cx.update(gpui_kit::init);
-        let look = Look {
+        let wording = Wording {
             id: "name",
             label: "Name".into(),
             placeholder: SharedString::default(),
         };
         let (field, cx) = cx.add_window_view(|window, cx| {
             let home = cx.focus_handle();
-            NameField::rename(look, "Old", refuse_once(), home, window, cx)
+            NameField::rename(wording, "Old", refuse_once(), home, window, cx)
         });
         let events: Events = Rc::default();
         let seen = Rc::clone(&events);

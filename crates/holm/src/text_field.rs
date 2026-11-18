@@ -48,7 +48,7 @@ pub(crate) struct TextField {
     head: usize,
     focus: FocusHandle,
     /// The text as the last frame drew it, for clicks and the input method.
-    shown: Option<Shown>,
+    shaped: Option<Shaped>,
     /// How far the text scrolls to the left, when the field is narrower than its text.
     scroll: Pixels,
     selecting: bool,
@@ -57,13 +57,13 @@ pub(crate) struct TextField {
 }
 
 #[derive(Clone)]
-struct Shown {
+struct Shaped {
     line: ShapedLine,
     origin: Point<Pixels>,
     line_height: Pixels,
 }
 
-impl Shown {
+impl Shaped {
     /// The box of the glyphs from `start` to `end` on the line. The line paints its glyphs in
     /// the middle of the line height, so the box fits the text in any line height.
     fn span(&self, start: Pixels, end: Pixels) -> Bounds<Pixels> {
@@ -92,7 +92,7 @@ impl TextField {
             anchor: 0,
             head: text.len(),
             focus,
-            shown: None,
+            shaped: None,
             scroll: px(0.),
             selecting: false,
             locked: false,
@@ -203,11 +203,13 @@ impl TextField {
 
     /// The byte offset nearest to `position` in the window.
     fn offset_at(&self, position: Point<Pixels>) -> usize {
-        self.shown.as_ref().map_or(0, |shown| {
+        self.shaped.as_ref().map_or(0, |shaped| {
             if self.text.is_empty() {
                 0
             } else {
-                shown.line.closest_index_for_x(position.x - shown.origin.x)
+                shaped
+                    .line
+                    .closest_index_for_x(position.x - shaped.origin.x)
             }
         })
     }
@@ -346,11 +348,11 @@ impl EntityInputHandler for TextField {
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
-        let shown = self.shown.as_ref()?;
+        let shaped = self.shaped.as_ref()?;
         let range = self.range_from_utf16(&range);
-        Some(shown.span(
-            shown.line.x_for_index(range.start),
-            shown.line.x_for_index(range.end),
+        Some(shaped.span(
+            shaped.line.x_for_index(range.start),
+            shaped.line.x_for_index(range.end),
         ))
     }
 
@@ -387,7 +389,7 @@ impl IntoElement for Line {
 }
 
 impl Element for Line {
-    type RequestLayoutState = Shown;
+    type RequestLayoutState = Shaped;
     type PrepaintState = ();
 
     fn id(&self) -> Option<ElementId> {
@@ -432,12 +434,12 @@ impl Element for Line {
         layout.min_size.width = px(0.).into();
         layout.flex_shrink = 1.;
         let id = window.request_layout(layout, [], cx);
-        let shown = Shown {
+        let shaped = Shaped {
             line,
             origin: Point::default(),
             line_height,
         };
-        (id, shown)
+        (id, shaped)
     }
 
     fn prepaint(
@@ -456,7 +458,7 @@ impl Element for Line {
         _: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
-        shown: &mut Self::RequestLayoutState,
+        shaped: &mut Self::RequestLayoutState,
         (): &mut (),
         window: &mut Window,
         cx: &mut App,
@@ -464,11 +466,11 @@ impl Element for Line {
         let entity = match &self.0 {
             Source::Field(entity) => entity.clone(),
             Source::Text(_) => {
-                shown
+                shaped
                     .line
                     .paint(
                         bounds.origin,
-                        shown.line_height,
+                        shaped.line_height,
                         TextAlign::Left,
                         None,
                         window,
@@ -488,9 +490,9 @@ impl Element for Line {
         let caret = if empty {
             px(0.)
         } else {
-            shown.line.x_for_index(field.head)
+            shaped.line.x_for_index(field.head)
         };
-        let width = if empty { px(0.) } else { shown.line.width() };
+        let width = if empty { px(0.) } else { shaped.line.width() };
         let view = bounds.size.width - CARET_WIDTH;
         // The caret stays in view, and the text never scrolls past its end.
         let mut scroll = field.scroll;
@@ -498,25 +500,25 @@ impl Element for Line {
             scroll = caret - view;
         }
         scroll = scroll.min(caret).min(width - view).max(px(0.));
-        shown.origin = bounds.origin - point(scroll, px(0.));
-        let x = |at: usize| shown.line.x_for_index(at);
+        shaped.origin = bounds.origin - point(scroll, px(0.));
+        let x = |at: usize| shaped.line.x_for_index(at);
         let selected = (!empty && !selection.is_empty())
-            .then(|| shown.span(x(selection.start), x(selection.end)));
-        let shown = shown.clone();
+            .then(|| shaped.span(x(selection.start), x(selection.end)));
+        let shaped = shaped.clone();
         entity.update(cx, |field, _| {
             field.scroll = scroll;
-            field.shown = Some(shown.clone());
+            field.shaped = Some(shaped.clone());
         });
         window.handle_input(&focus, ElementInputHandler::new(bounds, entity), cx);
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             if let Some(selected) = selected.filter(|_| focused) {
                 window.paint_quad(fill(selected, selection_color));
             }
-            shown
+            shaped
                 .line
                 .paint(
-                    shown.origin,
-                    shown.line_height,
+                    shaped.origin,
+                    shaped.line_height,
                     TextAlign::Left,
                     None,
                     window,
@@ -524,7 +526,7 @@ impl Element for Line {
                 )
                 .ok();
             if focused && selected.is_none() {
-                window.paint_quad(fill(shown.span(caret, caret + CARET_WIDTH), caret_color));
+                window.paint_quad(fill(shaped.span(caret, caret + CARET_WIDTH), caret_color));
             }
         });
     }

@@ -77,10 +77,10 @@ impl FolderEvent {
 }
 
 /// A step that gets the end of a write, on the UI thread.
-pub(crate) type Step<R> = Box<dyn FnOnce(R, &mut App)>;
+pub(crate) type Then<R> = Box<dyn FnOnce(R, &mut App)>;
 
 /// What the caller of a job gets at its end. A failure shows as an answer in both cases.
-pub(crate) struct Done<T>(Step<Result<T, AppError>>);
+pub(crate) struct Done<T>(Then<Result<T, AppError>>);
 
 impl<T: 'static> Done<T> {
     /// `step` gets the value. After a failure, it does not run.
@@ -107,7 +107,7 @@ pub(crate) fn window_step<V: 'static, R: 'static>(
     window: &Window,
     cx: &Context<V>,
     step: impl FnOnce(&mut V, R, &mut Window, &mut Context<V>) + 'static,
-) -> Step<R> {
+) -> Then<R> {
     let entity = cx.weak_entity();
     let window = window.window_handle();
     Box::new(move |result, cx| {
@@ -600,17 +600,17 @@ impl CoreDoor {
     }
 
     fn push_draft(&mut self) {
-        let Some(write) = self.draft.write() else {
+        let Some(save) = self.draft.write() else {
             return;
         };
         let (send, mut receive) = oneshot::channel();
         let work: Work = Box::new(move |core: &Core| {
-            let failure = write.text.write(core).err().map(AppError::from);
+            let failure = save.text.write(core).err().map(AppError::from);
             let chain = failure.as_ref().map(|error| crate::chain(error));
             send.send(failure).ok();
             chain
         });
-        let version = write.version;
+        let version = save.version;
         let end: End = Box::new(move |door, cx| {
             let Ok(Some(failure)) = receive.try_recv() else {
                 return;

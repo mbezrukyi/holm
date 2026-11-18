@@ -28,7 +28,7 @@ const CUSTOM_COLORS: usize = 3;
 
 /// Light or dark mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum Theme {
+pub(crate) enum AppearanceSetting {
     /// The mode of the system.
     #[default]
     System,
@@ -40,7 +40,7 @@ pub(crate) enum Theme {
 pub(crate) struct Settings {
     /// `None` until the user picks a folder.
     pub(crate) notes_folder: Option<PathBuf>,
-    pub(crate) theme: Theme,
+    pub(crate) theme: AppearanceSetting,
     pub(crate) note_order: Order,
     pub(crate) writing_help: WritingHelp,
     /// The last custom colors, the newest first.
@@ -57,7 +57,7 @@ pub(crate) struct SidebarSettings {
     /// In pixels.
     pub(crate) width: u16,
     pub(crate) hidden: bool,
-    pub(crate) view: SidebarView,
+    pub(crate) view: SavedSidebarView,
 }
 
 impl Default for SidebarSettings {
@@ -65,7 +65,7 @@ impl Default for SidebarSettings {
         Self {
             width: 250,
             hidden: false,
-            view: SidebarView {
+            view: SavedSidebarView {
                 list: true,
                 item: SidebarItem::All,
             },
@@ -75,7 +75,7 @@ impl Default for SidebarSettings {
 
 /// The sidebar view as the settings keep it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct SidebarView {
+pub(crate) struct SavedSidebarView {
     /// The note list of `item`, or else the folder tree with `item` selected.
     pub(crate) list: bool,
     pub(crate) item: SidebarItem,
@@ -94,7 +94,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             notes_folder: None,
-            theme: Theme::default(),
+            theme: AppearanceSetting::default(),
             note_order: Order::default(),
             writing_help: WritingHelp::default(),
             custom_colors: Vec::new(),
@@ -111,13 +111,13 @@ pub(crate) struct Config {
     path: PathBuf,
     document: DocumentMut,
     settings: Settings,
-    state: State,
+    health: Health,
     /// Whether the last write of the file failed.
     save_failed: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum State {
+enum Health {
     Writable,
     Broken,
     Newer,
@@ -126,17 +126,17 @@ enum State {
 impl Config {
     /// Reads the file at `path`. A missing file gives the defaults.
     pub(crate) fn load(path: PathBuf) -> Self {
-        let (document, state) = match fs::read_to_string(&path) {
+        let (document, health) = match fs::read_to_string(&path) {
             Ok(text) => parse(&path, &text),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                (DocumentMut::new(), State::Writable)
+                (DocumentMut::new(), Health::Writable)
             }
             Err(error) => {
                 tracing::warn!(path = %path.display(), %error, "cannot read the config file");
-                (DocumentMut::new(), State::Broken)
+                (DocumentMut::new(), Health::Broken)
             }
         };
-        let settings = if state == State::Broken {
+        let settings = if health == Health::Broken {
             Settings::default()
         } else {
             read(&document)
@@ -145,7 +145,7 @@ impl Config {
             path,
             document,
             settings,
-            state,
+            health,
             save_failed: false,
         }
     }
@@ -157,7 +157,7 @@ impl Config {
     /// The problem of the settings: Holm can't read the file, or the last save failed.
     /// A good save ends it.
     pub(crate) fn problem(&self) -> Option<&'static str> {
-        (self.state == State::Broken || self.save_failed).then_some(text::CONFIG_WRITE)
+        (self.health == Health::Broken || self.save_failed).then_some(text::CONFIG_WRITE)
     }
 
     /// Applies `change` to the settings, writes them as [`Config::save`] does, and notifies the
@@ -175,7 +175,7 @@ impl Config {
     /// with a newer version. A folder path that is not UTF-8 stays out of the file.
     fn save(&mut self, settings: Settings) {
         self.settings = settings;
-        if self.state != State::Writable {
+        if self.health != Health::Writable {
             tracing::info!(path = %self.path.display(), "the config file stays as it is");
             return;
         }
@@ -197,12 +197,12 @@ impl Config {
     }
 }
 
-fn parse(path: &Path, text: &str) -> (DocumentMut, State) {
+fn parse(path: &Path, text: &str) -> (DocumentMut, Health) {
     let mut document = match text.parse::<DocumentMut>() {
         Ok(document) => document,
         Err(error) => {
             tracing::warn!(path = %path.display(), %error, "the config file is not TOML");
-            return (DocumentMut::new(), State::Broken);
+            return (DocumentMut::new(), Health::Broken);
         }
     };
     let version = match document.get("version") {
@@ -211,7 +211,7 @@ fn parse(path: &Path, text: &str) -> (DocumentMut, State) {
             Some(version) if version >= 0 => version,
             _ => {
                 tracing::warn!(path = %path.display(), "the config version is not a number");
-                return (DocumentMut::new(), State::Broken);
+                return (DocumentMut::new(), Health::Broken);
             }
         },
     };
@@ -220,7 +220,7 @@ fn parse(path: &Path, text: &str) -> (DocumentMut, State) {
             path = %path.display(), version,
             "the config file is from a newer Holm, so Holm does not change it"
         );
-        return (document, State::Newer);
+        return (document, Health::Newer);
     }
     for step in MIGRATIONS
         .iter()
@@ -230,7 +230,7 @@ fn parse(path: &Path, text: &str) -> (DocumentMut, State) {
     }
     set(&mut document, "version", Value::from(VERSION));
     document.sort_values_by(|a, _, b, _| (a.get() != "version").cmp(&(b.get() != "version")));
-    (document, State::Writable)
+    (document, Health::Writable)
 }
 
 /// A file from before `version` existed. Its keys are the same as in version 1.
@@ -248,9 +248,9 @@ fn read(document: &DocumentMut) -> Settings {
             }
             "theme" => {
                 if let Some(theme) = get(key, item, |item| match item.as_str()? {
-                    "system" => Some(Theme::System),
-                    "light" => Some(Theme::Light),
-                    "dark" => Some(Theme::Dark),
+                    "system" => Some(AppearanceSetting::System),
+                    "light" => Some(AppearanceSetting::Light),
+                    "dark" => Some(AppearanceSetting::Dark),
                     _ => None,
                 }) {
                     settings.theme = theme;
@@ -401,9 +401,9 @@ fn write(document: &mut DocumentMut, settings: &Settings) {
         None => {}
     }
     let theme = match settings.theme {
-        Theme::System => "system",
-        Theme::Light => "light",
-        Theme::Dark => "dark",
+        AppearanceSetting::System => "system",
+        AppearanceSetting::Light => "light",
+        AppearanceSetting::Dark => "dark",
     };
     set(document, "theme", Value::from(theme));
     let order = match settings.note_order {
@@ -499,7 +499,7 @@ mod tests {
 
         let settings = Settings {
             notes_folder: Some(PathBuf::from("/home/me/Notes")),
-            theme: Theme::Dark,
+            theme: AppearanceSetting::Dark,
             note_order: Order::Title,
             writing_help: WritingHelp {
                 indent_lists: false,
@@ -514,7 +514,7 @@ mod tests {
             sidebar: SidebarSettings {
                 width: 310,
                 hidden: true,
-                view: SidebarView {
+                view: SavedSidebarView {
                     list: false,
                     item: SidebarItem::Tag(tag_name("work/holm")),
                 },
@@ -530,7 +530,7 @@ mod tests {
     #[test]
     fn a_file_with_no_version_is_migrated_to_version_1() {
         let (_dir, mut config) = load("# My settings\ntheme = \"dark\"\n");
-        assert_eq!(config.settings().theme, Theme::Dark);
+        assert_eq!(config.settings().theme, AppearanceSetting::Dark);
 
         config.save(config.settings().clone());
 
@@ -546,7 +546,7 @@ mod tests {
         );
 
         let mut settings = config.settings().clone();
-        settings.theme = Theme::Light;
+        settings.theme = AppearanceSetting::Light;
         config.save(settings);
 
         let text = file(&config);
@@ -567,7 +567,7 @@ mod tests {
             load("version = 1\n[sidebar]\nview = \"list\"\nitem = \"folder:work\"\n");
         assert_eq!(
             config.settings().sidebar.view,
-            SidebarView {
+            SavedSidebarView {
                 list: true,
                 item: SidebarItem::Folder(folder_path("work")),
             }
@@ -575,7 +575,7 @@ mod tests {
         let (_dir, config) = load("version = 1\n[sidebar]\nview = \"tree\"\nitem = \"bad\"\n");
         assert_eq!(
             config.settings().sidebar.view,
-            SidebarView {
+            SavedSidebarView {
                 list: false,
                 item: SidebarItem::All,
             }
@@ -585,7 +585,7 @@ mod tests {
     #[test]
     fn a_bad_value_gives_the_default_for_that_key() {
         let (_dir, config) = load("version = 1\ntheme = \"blue\"\nnote_order = \"title\"\n");
-        assert_eq!(config.settings().theme, Theme::System);
+        assert_eq!(config.settings().theme, AppearanceSetting::System);
         assert_eq!(config.settings().note_order, Order::Title);
         assert_eq!(config.problem(), None);
     }
@@ -598,7 +598,7 @@ mod tests {
         assert_eq!(config.settings(), &Settings::default());
 
         let settings = Settings {
-            theme: Theme::Light,
+            theme: AppearanceSetting::Light,
             ..Settings::default()
         };
         config.save(settings.clone());
@@ -612,7 +612,7 @@ mod tests {
         let text = "version = 2\ntheme = \"dark\"\n";
         let (_dir, mut config) = load(text);
         assert_eq!(config.problem(), None);
-        assert_eq!(config.settings().theme, Theme::Dark);
+        assert_eq!(config.settings().theme, AppearanceSetting::Dark);
 
         config.save(Settings::default());
         assert_eq!(file(&config), text);

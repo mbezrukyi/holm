@@ -1,8 +1,8 @@
-//! The disk menu: the answers to a disk question, right above the state in the message line
+//! The disk menu: the choices for a disk question, right above the state in the message line
 //! and as wide as it.
 //!
 //! - It opens with the cursor on "Keep mine".
-//! - `↑` and `↓` move the cursor. `Enter` or a click picks the answer under it.
+//! - `↑` and `↓` move the cursor. `Enter` or a click picks the choice under it.
 //! - `Esc`, or a click outside the menu and the state, closes it. See [`Dropdown`] for the
 //!   focus.
 
@@ -22,7 +22,7 @@ use crate::text;
 /// A question about the open note after another tool changed its file, while the editor had
 /// unsaved changes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Disk {
+pub(crate) enum DiskQuestion {
     Changed,
     Deleted,
 }
@@ -35,15 +35,15 @@ pub(crate) enum Choice {
     Close,
 }
 
-/// The user picked `choice` for the question `disk`.
+/// The user picked `choice` for `question`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Answer {
-    pub(crate) disk: Disk,
+pub(crate) struct Chosen {
+    pub(crate) question: DiskQuestion,
     pub(crate) choice: Choice,
 }
 
-impl Disk {
-    /// The answers in the menu. The first one starts under the cursor.
+impl DiskQuestion {
+    /// The choices in the menu. The first one starts under the cursor.
     fn choices(self) -> [Choice; 2] {
         match self {
             Self::Changed => [Choice::KeepMine, Choice::Reload],
@@ -54,7 +54,7 @@ impl Disk {
 
 pub(crate) struct DiskMenu {
     /// The question of the open menu. `None` while the menu is closed.
-    open: Option<Disk>,
+    open: Option<DiskQuestion>,
     cursor: usize,
     dropdown: Dropdown<Self>,
 }
@@ -77,7 +77,12 @@ impl DiskMenu {
     }
 
     /// Opens the menu for `disk`, or closes it when it is open.
-    pub(crate) fn toggle(&mut self, disk: Disk, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn toggle(
+        &mut self,
+        disk: DiskQuestion,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.open.is_some() {
             self.close(cx);
         } else {
@@ -95,12 +100,12 @@ impl DiskMenu {
     }
 
     fn pick(&mut self, at: usize, cx: &mut Context<Self>) {
-        let Some(disk) = self.open else {
+        let Some(question) = self.open else {
             return;
         };
-        if let Some(choice) = disk.choices().get(at).copied() {
+        if let Some(choice) = question.choices().get(at).copied() {
             self.close(cx);
-            cx.emit(Answer { disk, choice });
+            cx.emit(Chosen { question, choice });
         }
     }
 
@@ -120,7 +125,7 @@ impl DiskMenu {
     }
 }
 
-impl EventEmitter<Answer> for DiskMenu {}
+impl EventEmitter<Chosen> for DiskMenu {}
 
 impl Render for DiskMenu {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

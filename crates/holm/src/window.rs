@@ -18,7 +18,7 @@ use gpui_kit::{
 };
 use holm_core::Core;
 
-use crate::config::{Config, Theme};
+use crate::config::{AppearanceSetting, Config};
 use crate::core_door::CoreDoor;
 use crate::error::AppError;
 use crate::log::Log;
@@ -78,7 +78,7 @@ pub(crate) struct HolmWindow {
     default_folder: PathBuf,
     write_budget: Duration,
     stage: Stage,
-    line: Entity<MessageLine>,
+    message_line: Entity<MessageLine>,
     _subscriptions: [Subscription; 2],
 }
 
@@ -104,14 +104,14 @@ impl HolmWindow {
         } = startup;
         theme::apply(config.settings().theme, window, cx);
         let appearance = cx.observe_window_appearance(window, |this, window, cx| {
-            if this.config.read(cx).settings().theme == Theme::System {
-                theme::apply(Theme::System, window, cx);
+            if this.config.read(cx).settings().theme == AppearanceSetting::System {
+                theme::apply(AppearanceSetting::System, window, cx);
             }
         });
-        let line = cx.new(MessageLine::new);
+        let message_line = cx.new(MessageLine::new);
         // Without a log file, the crash notice has no log to point to.
         if let Some(file) = log.file().filter(|_| crashed) {
-            line.update(cx, |line, cx| line.show(text::crashed(file), cx));
+            message_line.update(cx, |line, cx| line.show(text::crashed(file), cx));
         }
         let folder = config.settings().notes_folder.clone();
         let config = cx.new(|_| config);
@@ -129,7 +129,7 @@ impl HolmWindow {
             default_folder,
             write_budget,
             stage: Stage::Ask,
-            line,
+            message_line,
             _subscriptions: [appearance, config_changed],
         };
         this.show_problems(cx);
@@ -146,7 +146,7 @@ impl HolmWindow {
             .flatten()
             .map(SharedString::from)
             .collect();
-        self.line
+        self.message_line
             .update(cx, |line, cx| line.set_problems(problems, cx));
     }
 
@@ -173,7 +173,7 @@ impl HolmWindow {
         let open = self.open_core.clone();
         let settings = self.config.read(cx).settings();
         let (last, order) = (settings.last_note.clone(), settings.note_order);
-        let line = self.line.clone();
+        let message_line = self.message_line.clone();
         let budget = self.write_budget;
         let job =
             cx.background_spawn({
@@ -192,7 +192,7 @@ impl HolmWindow {
                         let core_door =
                             cx.new(|cx| CoreDoor::new(core, folder, budget, window, cx));
                         Stage::Open(cx.new(|cx| {
-                            NotesView::new(core_door, note, order, config, line, window, cx)
+                            NotesView::new(core_door, note, order, config, message_line, window, cx)
                         }))
                     }
                     Err(error) => {
@@ -343,15 +343,15 @@ impl Render for HolmWindow {
             .child(self.folder_screen(cx))
             .map(|root| {
                 if matches!(self.stage, Stage::Open(_)) {
-                    root.child(self.line.clone())
+                    root.child(self.message_line.clone())
                 } else {
-                    // The question stays in the middle of the window, under the line.
+                    // The question stays in the middle of the window, under the message line.
                     root.child(
                         div()
                             .absolute()
                             .bottom_0()
                             .w_full()
-                            .child(self.line.clone()),
+                            .child(self.message_line.clone()),
                     )
                 }
             })

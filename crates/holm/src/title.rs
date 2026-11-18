@@ -21,7 +21,7 @@ use gpui_kit::{
 
 use holm_core::NotePath;
 
-use crate::name_field::{Look, NameEvent, NameField, NameWrite};
+use crate::name_field::{NameEvent, NameField, NameWrite, Wording};
 use crate::text;
 use crate::text_field;
 
@@ -74,7 +74,7 @@ impl<T: Clone + 'static> TitleField<T> {
             field.update(cx, |field, cx| field.focus(window, cx));
             return;
         }
-        let look = Look {
+        let wording = Wording {
             id: "title-input",
             label: text::NOTE_TITLE.into(),
             placeholder: text::NOTE_TITLE.into(),
@@ -82,9 +82,9 @@ impl<T: Clone + 'static> TitleField<T> {
         let (write, home) = (self.write.clone(), self.home.clone());
         let field = if self.path.is_some() {
             let title = self.title();
-            cx.new(|cx| NameField::rename(look, &title, write, home, window, cx))
+            cx.new(|cx| NameField::rename(wording, &title, write, home, window, cx))
         } else {
-            cx.new(|cx| NameField::new_name(look, write, home, window, cx))
+            cx.new(|cx| NameField::new_name(wording, write, home, window, cx))
         };
         let subscription = cx.subscribe(&field, |this, _, event: &NameEvent<T>, cx| {
             if !matches!(event, NameEvent::Blur) {

@@ -22,7 +22,7 @@ use holm_core::model::{Note, Order};
 use holm_core::{FolderPath, NotePath, TagName};
 
 use crate::config::{Config, SidebarSettings};
-use crate::core_door::{CoreDoor, Done, JobFailed, Step, window_step};
+use crate::core_door::{CoreDoor, Done, JobFailed, Then, window_step};
 use crate::dialog::{self, Ask, Dialog};
 use crate::error::AppError;
 use crate::link_picker::{LinkPicker, LinkPickerEvent, LinkStart};
@@ -53,7 +53,7 @@ pub(crate) struct NotesView {
     /// The part that had the focus before quick open or the link picker. It gets the focus
     /// back on `Esc`.
     before_popup: Option<FocusHandle>,
-    line: Entity<MessageLine>,
+    message_line: Entity<MessageLine>,
     subscriptions: Vec<Subscription>,
 }
 
@@ -64,12 +64,13 @@ impl NotesView {
         note: Option<Note>,
         order: Order,
         config: Entity<Config>,
-        line: Entity<MessageLine>,
+        message_line: Entity<MessageLine>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let settings = config.read(cx).settings().clone();
-        let pane = cx.new(|cx| NotePane::new(core_door.clone(), line.clone(), note, window, cx));
+        let pane =
+            cx.new(|cx| NotePane::new(core_door.clone(), message_line.clone(), note, window, cx));
         let sidebar = cx.new(|cx| {
             Sidebar::new(
                 core_door.clone(),
@@ -83,11 +84,12 @@ impl NotesView {
         let subscriptions = vec![
             cx.observe(&core_door, |this, core_door, cx| {
                 let writing = core_door.read(cx).writing();
-                this.line
+                this.message_line
                     .update(cx, |line, cx| line.set_writing(writing, cx));
             }),
             cx.subscribe(&core_door, |this, _, JobFailed(answer), cx| {
-                this.line.update(cx, |line, cx| line.show(*answer, cx));
+                this.message_line
+                    .update(cx, |line, cx| line.show(*answer, cx));
             }),
             cx.subscribe_in(&sidebar, window, Self::sidebar_event),
             cx.subscribe_in(&pane, window, Self::pane_event),
@@ -105,10 +107,10 @@ impl NotesView {
             quick_open: None,
             link_picker: None,
             before_popup: None,
-            line,
+            message_line,
             subscriptions,
         };
-        this.keep_state(cx);
+        this.save_place(cx);
         this.focus_home(window, cx);
         this
     }
@@ -122,9 +124,9 @@ impl NotesView {
     ) {
         match event {
             PaneEvent::Opening(_) => {}
-            PaneEvent::Opened(_) => self.keep_state(cx),
+            PaneEvent::Opened(_) => self.save_place(cx),
             PaneEvent::Closed => {
-                self.keep_state(cx);
+                self.save_place(cx);
                 // A popup that closes later must not give the focus back to the editor.
                 self.before_popup = None;
                 let in_pane = self.pane.focus_handle(cx).contains_focused(window, cx);
@@ -148,7 +150,7 @@ impl NotesView {
     ) {
         let tag = tag.clone();
         self.hidden = false;
-        self.keep_state(cx);
+        self.save_place(cx);
         self.focus_sidebar(window, cx);
         cx.notify();
         // A new tag may still wait in the write line.
@@ -177,7 +179,7 @@ impl NotesView {
         &mut self,
         from: TagName,
         to: String,
-        done: Step<Result<(), AppError>>,
+        done: Then<Result<(), AppError>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -279,7 +281,7 @@ impl NotesView {
                     },
                 );
             }
-            SidebarEvent::ViewChanged => self.keep_state(cx),
+            SidebarEvent::ViewChanged => self.save_place(cx),
         }
     }
 
@@ -296,22 +298,22 @@ impl NotesView {
             then(self, true, window, cx);
             return;
         }
-        let answered = window_step(
+        let decided = window_step(
             window,
             cx,
-            move |this: &mut Self, answer: dialog::Answer, window, cx| {
+            move |this: &mut Self, decision: dialog::Decision, window, cx| {
                 this.dialog = None;
                 this.focus_sidebar(window, cx);
                 cx.notify();
-                if answer.confirm && answer.do_not_ask {
+                if decision.confirm && decision.do_not_ask {
                     this.config.update(cx, |config, cx| {
                         config.change(|settings| settings.ask_before_delete = false, cx);
                     });
                 }
-                then(this, answer.confirm, window, cx);
+                then(this, decision.confirm, window, cx);
             },
         );
-        self.dialog = Some(cx.new(|cx| Dialog::new(ask, answered, window, cx)));
+        self.dialog = Some(cx.new(|cx| Dialog::new(ask, decided, window, cx)));
         cx.notify();
     }
 
@@ -333,7 +335,7 @@ impl NotesView {
                 window,
                 cx,
                 |core_door, done, cx| core_door.move_note(path, folder, done, cx),
-                |this, _, _, cx| this.keep_state(cx),
+                |this, _, _, cx| this.save_place(cx),
             ),
             Target::Folder(path) => self.write(
                 window,
@@ -341,7 +343,7 @@ impl NotesView {
                 |core_door, done, cx| core_door.move_folder(path, folder, done, cx),
                 |this, to, window, cx| {
                     this.show_folder(to, window, cx);
-                    this.keep_state(cx);
+                    this.save_place(cx);
                 },
             ),
         }
@@ -574,7 +576,7 @@ impl NotesView {
         } else {
             self.focus_sidebar(window, cx);
         }
-        self.keep_state(cx);
+        self.save_place(cx);
         cx.notify();
     }
 
@@ -583,7 +585,7 @@ impl NotesView {
         self.hidden = false;
         self.sidebar
             .update(cx, |sidebar, cx| sidebar.focus_search(window, cx));
-        self.keep_state(cx);
+        self.save_place(cx);
         cx.notify();
     }
 
@@ -644,12 +646,12 @@ impl NotesView {
     fn mouse_up(&mut self, _: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
         if self.resizing {
             self.resizing = false;
-            self.keep_state(cx);
+            self.save_place(cx);
         }
     }
 
-    /// Keeps the sidebar state and the open note in the config.
-    fn keep_state(&mut self, cx: &mut Context<Self>) {
+    /// Keeps the sidebar view and the open note in the config.
+    fn save_place(&mut self, cx: &mut Context<Self>) {
         let sidebar = SidebarSettings {
             width: whole(self.width),
             hidden: self.hidden,

@@ -29,17 +29,17 @@ use gpui_kit::{
 use holm_core::model::{Change, NoteInfo, NoteSet, Order};
 use holm_core::{FolderPath, NotePath, TagName};
 
-use crate::config::SidebarView;
-use crate::core_door::{CoreDoor, Done, FolderEvent, Step};
+use crate::config::SavedSidebarView;
+use crate::core_door::{CoreDoor, Done, FolderEvent, Then};
 use crate::error::AppError;
 use crate::icons::Icon;
-use crate::name_field::{Look, NameEvent, NameField, NameWrite};
+use crate::name_field::{NameEvent, NameField, NameWrite, Wording};
 use crate::pane::{NotePane, PaneEvent};
 use crate::text;
 
 use list::NoteList;
 pub(crate) use tree::Item;
-use tree::{Row, Tree, View};
+use tree::{Lists, SidebarView, TreeRow};
 
 const TREE_ROW: f32 = 28.;
 const NOTE_ROW: f32 = 52.;
@@ -83,7 +83,7 @@ pub(crate) enum SidebarEvent {
 /// Renames the tag `from` to a typed name, and ends with the result. It shows the answer of
 /// a fail.
 pub(crate) type TagRename =
-    Rc<dyn Fn(TagName, String, Step<Result<(), AppError>>, &mut Window, &mut App)>;
+    Rc<dyn Fn(TagName, String, Then<Result<(), AppError>>, &mut Window, &mut App)>;
 
 /// A name field in the tree: for a folder or a tag after `F2`, or for a new folder.
 struct Naming {
@@ -123,10 +123,10 @@ impl Named {
 pub(crate) struct Sidebar {
     core_door: Entity<CoreDoor>,
     order: Order,
-    tree: Tree,
-    view: View,
+    lists: Lists,
+    view: SidebarView,
     open: HashSet<Item>,
-    rows: Vec<Row>,
+    rows: Vec<TreeRow>,
     /// The rows of the tree with the group labels between them.
     entries: Vec<Entry>,
     list: NoteList,
@@ -151,7 +151,7 @@ impl Sidebar {
         core_door: Entity<CoreDoor>,
         pane: Entity<NotePane>,
         order: Order,
-        view: &SidebarView,
+        view: &SavedSidebarView,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -176,8 +176,8 @@ impl Sidebar {
         let mut sidebar = Self {
             core_door,
             order,
-            tree: Tree::default(),
-            view: View::from(view),
+            lists: Lists::default(),
+            view: SidebarView::from(view),
             open: HashSet::new(),
             rows: Vec::new(),
             entries: Vec::new(),
@@ -197,8 +197,8 @@ impl Sidebar {
         sidebar
     }
 
-    pub(crate) fn view(&self) -> SidebarView {
-        SidebarView::from(&self.view)
+    pub(crate) fn view(&self) -> SavedSidebarView {
+        SavedSidebarView::from(&self.view)
     }
 
     /// Takes the end of a write or of outside changes: it follows the moves, and then shows
@@ -220,8 +220,8 @@ impl Sidebar {
     /// Moves the view, the open items and the name field with `change`, when it is a move.
     fn follow(&mut self, change: &Change, cx: &mut Context<Self>) {
         let view = match &self.view {
-            View::Tree(item) => item.moved(change).map(View::Tree),
-            View::List(item) => item.moved(change).map(View::List),
+            SidebarView::Tree(item) => item.moved(change).map(SidebarView::Tree),
+            SidebarView::List(item) => item.moved(change).map(SidebarView::List),
         };
         if let Some(view) = view {
             self.view = view;
@@ -243,12 +243,12 @@ impl Sidebar {
     /// view and the open items.
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let snapshot = self.core_door.read(cx).snapshot();
-        self.tree = Tree::new(snapshot, self.order);
-        let item = self.tree.nearest(self.view.item());
+        self.lists = Lists::new(snapshot, self.order);
+        let item = self.lists.nearest(self.view.item());
         if &item != self.view.item() {
             self.show_in_tree(item, cx);
         }
-        self.open.retain(|item| self.tree.has(item));
+        self.open.retain(|item| self.lists.has(item));
         self.rebuild(cx);
         cx.notify();
         if self.searching() {
@@ -262,7 +262,7 @@ impl Sidebar {
 
     /// Whether the sidebar shows a note list: the list of a tree item, or the search results.
     fn shows_list(&self) -> bool {
-        self.searching() || matches!(self.view, View::List(_))
+        self.searching() || matches!(self.view, SidebarView::List(_))
     }
 
     /// Searches the notes for the query. A result for an old query is dropped.
@@ -334,7 +334,7 @@ impl Sidebar {
             Some(Named::NewFolder(parent)) => Some(parent),
             _ => None,
         };
-        self.rows = self.tree.rows(&self.open, new_folder);
+        self.rows = self.lists.rows(&self.open, new_folder);
         self.entries.clear();
         for (at, row) in self.rows.iter().enumerate() {
             let first = |kind: fn(&Item) -> bool| {
@@ -357,10 +357,10 @@ impl Sidebar {
         let list = if self.searching() {
             self.found.clone()
         } else {
-            self.tree.list(self.view.item())
+            self.lists.list(self.view.item())
         };
         if let Some(open) = self.open_note(cx)
-            && self.tree.snapshot.note(open).is_none()
+            && self.lists.snapshot.note(open).is_none()
             && let Some(next) = self.neighbor(open)
         {
             self.left = Some((open.clone(), next));
@@ -452,12 +452,12 @@ impl Sidebar {
 
     /// Every note, in the order of the lists.
     pub(crate) fn notes(&self) -> impl Iterator<Item = &NoteInfo> {
-        self.tree.notes.notes()
+        self.lists.notes.notes()
     }
 
     /// Every folder, sorted by path, for the folder picker.
     pub(crate) fn folders(&self) -> &[FolderPath] {
-        &self.tree.folders
+        &self.lists.folders
     }
 
     /// Shows the tree with `item` selected, and opens its parents.
@@ -467,10 +467,10 @@ impl Sidebar {
             parent = item.parent();
             self.open.insert(item);
         }
-        self.set_view(View::Tree(item), cx);
+        self.set_view(SidebarView::Tree(item), cx);
     }
 
-    fn set_view(&mut self, view: View, cx: &mut Context<Self>) {
+    fn set_view(&mut self, view: SidebarView, cx: &mut Context<Self>) {
         if self.view != view {
             self.view = view;
             cx.emit(SidebarEvent::ViewChanged);
@@ -483,11 +483,11 @@ impl Sidebar {
     fn scroll_to_selection(&self, cx: &App) {
         let at = match &self.view {
             _ if self.shows_list() => self.selected_note(cx),
-            View::Tree(item) => self
+            SidebarView::Tree(item) => self
                 .entries
                 .iter()
                 .position(|entry| matches!(entry, Entry::Row(at) if &self.rows[*at].item == item)),
-            View::List(_) => self.selected_note(cx),
+            SidebarView::List(_) => self.selected_note(cx),
         };
         if let Some(at) = at {
             self.scroll.scroll_to_item(at, ScrollStrategy::Nearest);
@@ -565,15 +565,15 @@ impl Sidebar {
         if self.searching() {
             self.clear_search(window, cx);
         }
-        let look = Look {
+        let wording = Wording {
             id: "name-input",
             label: text::NAME_FIELD.into(),
             placeholder: SharedString::default(),
         };
         let home = self.focus.clone();
         let field = match text {
-            Some(text) => cx.new(|cx| NameField::rename(look, text, write, home, window, cx)),
-            None => cx.new(|cx| NameField::new_name(look, write, home, window, cx)),
+            Some(text) => cx.new(|cx| NameField::rename(wording, text, write, home, window, cx)),
+            None => cx.new(|cx| NameField::new_name(wording, write, home, window, cx)),
         };
         let subscription = cx.subscribe(&field, |sidebar, _, _: &NameEvent<()>, cx| {
             sidebar.field = None;
@@ -609,7 +609,7 @@ impl Sidebar {
         &mut self,
         folder: FolderPath,
         name: String,
-        done: Step<Result<(), AppError>>,
+        done: Then<Result<(), AppError>>,
         cx: &mut Context<Self>,
     ) {
         let sidebar = cx.weak_entity();
@@ -630,7 +630,7 @@ impl Sidebar {
         &mut self,
         parent: FolderPath,
         name: String,
-        done: Step<Result<(), AppError>>,
+        done: Then<Result<(), AppError>>,
         cx: &mut Context<Self>,
     ) {
         let sidebar = cx.weak_entity();
@@ -689,13 +689,13 @@ impl Sidebar {
                 .selected_note(cx)
                 .and_then(|at| self.list.path(at))
                 .map(|path| Target::Note(path.to_owned())),
-            View::Tree(Item::Folder(folder)) => Some(Target::Folder(folder.clone())),
-            View::Tree(_) | View::List(_) => None,
+            SidebarView::Tree(Item::Folder(folder)) => Some(Target::Folder(folder.clone())),
+            SidebarView::Tree(_) | SidebarView::List(_) => None,
         }
     }
 
     fn tree_key(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let View::Tree(item) = &self.view else {
+        let SidebarView::Tree(item) = &self.view else {
             return false;
         };
         let item = item.clone();
@@ -709,7 +709,7 @@ impl Sidebar {
                 };
                 if let Some(row) = self.rows.get(next) {
                     let item = row.item.clone();
-                    self.set_view(View::Tree(item), cx);
+                    self.set_view(SidebarView::Tree(item), cx);
                 }
             }
             "right" => {
@@ -725,10 +725,10 @@ impl Sidebar {
                     self.rebuild(cx);
                     cx.notify();
                 } else if let Some(parent) = item.parent() {
-                    self.set_view(View::Tree(parent), cx);
+                    self.set_view(SidebarView::Tree(parent), cx);
                 }
             }
-            "enter" => self.set_view(View::List(item), cx),
+            "enter" => self.set_view(SidebarView::List(item), cx),
             "escape" => cx.emit(SidebarEvent::FocusEditor),
             "f2" => match item {
                 Item::Tag(tag) => cx.emit(SidebarEvent::RenameTag(tag)),
@@ -846,7 +846,7 @@ impl Sidebar {
     fn tree_row(&mut self, at: usize, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let row = &self.rows[at];
-        let selected = matches!(&self.view, View::Tree(item) if item == &row.item);
+        let selected = matches!(&self.view, SidebarView::Tree(item) if item == &row.item);
         let icon = match &row.item {
             Item::All => Icon::All,
             Item::Folder(_) if row.open => Icon::FolderOpen,
@@ -912,7 +912,7 @@ impl Sidebar {
             )
             .on_click(cx.listener(move |sidebar, _: &ClickEvent, window, cx| {
                 window.focus(&sidebar.focus, cx);
-                sidebar.set_view(View::List(item.clone()), cx);
+                sidebar.set_view(SidebarView::List(item.clone()), cx);
             }))
             .into_any_element()
     }
@@ -1107,8 +1107,8 @@ impl Render for Sidebar {
                 }),
                 cx,
             )),
-            View::Tree(_) => None,
-            View::List(item) => {
+            SidebarView::Tree(_) => None,
+            SidebarView::List(item) => {
                 let name = match item {
                     Item::All => text::ALL_NOTES.to_owned(),
                     Item::Folder(_) => item.name(),

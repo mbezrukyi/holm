@@ -78,7 +78,7 @@ impl MessageLine {
         self.problems.update(cx, |list, cx| list.toggle(window, cx));
     }
 
-    /// Shows `text` on the left until the next key.
+    /// Shows `text`, an answer or a start message, on the left until the next key.
     pub(crate) fn show(&mut self, text: impl Into<PathText>, cx: &mut Context<Self>) {
         self.message = Some(text.into());
         cx.notify();

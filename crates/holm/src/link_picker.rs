@@ -16,7 +16,7 @@ use holm_core::model::{NoteInfo, NoteSet};
 use holm_core::{NotePath, Snapshot};
 
 use crate::core_door::CoreDoor;
-use crate::link_rows::{self, Query, Row};
+use crate::link_rows::{self, LinkRow, Query};
 use crate::pick_notes::PickNotes;
 use crate::popup::{self, PickEvent, PickList, PickRow};
 use crate::text;
@@ -69,7 +69,7 @@ pub(crate) struct LinkPicker {
     notes: PickNotes,
     open_note: NotePath,
     list: Entity<PickList>,
-    rows: Vec<Row>,
+    rows: Vec<LinkRow>,
     /// The note of the heading rows, or `None` for the open note.
     heading_note: Option<usize>,
     /// The headings of each note that the field named.
@@ -120,7 +120,7 @@ impl LinkPicker {
     fn choice(&self, row: usize) -> Option<LinkChoice> {
         let note = |at: usize| self.notes.get(at);
         Some(match self.rows.get(row)? {
-            Row::Note(at) => {
+            LinkRow::Note(at) => {
                 let note = note(*at)?;
                 LinkChoice::Note {
                     path: note.path.clone(),
@@ -128,7 +128,7 @@ impl LinkPicker {
                     heading: None,
                 }
             }
-            Row::Heading(heading) => match self.heading_note {
+            LinkRow::Heading(heading) => match self.heading_note {
                 Some(at) => {
                     let note = note(at)?;
                     LinkChoice::Note {
@@ -139,7 +139,7 @@ impl LinkPicker {
                 }
                 None => LinkChoice::SameNote(heading.clone()),
             },
-            Row::Create(title) => LinkChoice::Create(title.clone()),
+            LinkRow::Create(title) => LinkChoice::Create(title.clone()),
         })
     }
 
@@ -181,7 +181,7 @@ impl LinkPicker {
     fn fill_title(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         cx.stop_propagation();
         let selected = self.list.read(cx).selected();
-        let Some(Row::Note(at)) = selected.and_then(|at| self.rows.get(at)) else {
+        let Some(LinkRow::Note(at)) = selected.and_then(|at| self.rows.get(at)) else {
             return;
         };
         let query = format!("{}#", self.notes[*at].title);
@@ -195,9 +195,9 @@ impl LinkPicker {
             .iter()
             .filter_map(|row| {
                 Some(match row {
-                    Row::Note(at) => PickRow::note(self.notes.get(*at)?),
-                    Row::Heading(heading) => PickRow::new(heading.clone()),
-                    Row::Create(title) => PickRow::new(text::create_note(title)),
+                    LinkRow::Note(at) => PickRow::note(self.notes.get(*at)?),
+                    LinkRow::Heading(heading) => PickRow::new(heading.clone()),
+                    LinkRow::Create(title) => PickRow::new(text::create_note(title)),
                 })
             })
             .collect()

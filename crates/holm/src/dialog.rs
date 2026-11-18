@@ -1,6 +1,6 @@
 //! The dialog before a change that has no undo. It says how many notes the change touches.
-//! It gives its answer to the step of its owner, once. A dialog that closes with no answer
-//! gives "cancel".
+//! It gives its decision to the step of its owner, once. A dialog that closes with no
+//! decision gives "cancel".
 //!
 //! `Enter` confirms and `Esc` cancels. Before a delete of notes, `Space` turns the
 //! "Do not show again" switch on and off. The tag dialogs always show, because their count of
@@ -18,7 +18,7 @@ use gpui_kit::{
 use holm_core::TagName;
 use holm_core::model::DeleteCount;
 
-use crate::core_door::Step;
+use crate::core_door::Then;
 use crate::{popup, text};
 
 /// The change that the dialog asks about.
@@ -36,9 +36,9 @@ pub(crate) enum Ask {
     DeleteTag { tag: TagName, notes: usize },
 }
 
-/// The answer of the dialog.
+/// The decision of the dialog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Answer {
+pub(crate) struct Decision {
     pub(crate) confirm: bool,
     pub(crate) do_not_ask: bool,
 }
@@ -47,26 +47,26 @@ pub(crate) struct Dialog {
     ask: Ask,
     do_not_ask: bool,
     focus: FocusHandle,
-    /// It gets the answer. It is gone after the answer.
-    answer: Option<Step<Answer>>,
+    /// It gets the decision. It is gone after the decision.
+    then: Option<Then<Decision>>,
 }
 
 impl Dialog {
     pub(crate) fn new(
         ask: Ask,
-        answer: Step<Answer>,
+        then: Then<Decision>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
-        cx.on_release(|dialog: &mut Self, cx| dialog.answer(false, cx))
+        cx.on_release(|dialog: &mut Self, cx| dialog.decide(false, cx))
             .detach();
         Self {
             ask,
             do_not_ask: false,
             focus,
-            answer: Some(answer),
+            then: Some(then),
         }
     }
 
@@ -81,16 +81,16 @@ impl Dialog {
         }
     }
 
-    fn answer(&mut self, confirm: bool, cx: &mut App) {
-        let Some(step) = self.answer.take() else {
+    fn decide(&mut self, confirm: bool, cx: &mut App) {
+        let Some(step) = self.then.take() else {
             return;
         };
-        let answer = Answer {
+        let decision = Decision {
             confirm,
             do_not_ask: self.do_not_ask,
         };
         // The step updates the owner, which may hold this dialog in its own update.
-        cx.defer(move |cx| step(answer, cx));
+        cx.defer(move |cx| step(decision, cx));
     }
 
     fn toggle(&mut self, cx: &mut Context<Self>) {
@@ -106,8 +106,8 @@ impl Dialog {
             return;
         }
         match event.keystroke.key.as_str() {
-            "enter" => self.answer(true, cx),
-            "escape" => self.answer(false, cx),
+            "enter" => self.decide(true, cx),
+            "escape" => self.decide(false, cx),
             "space" => self.toggle(cx),
             _ => return,
         }
@@ -163,13 +163,13 @@ impl Render for Dialog {
                         Button::new("cancel")
                             .label(text::CANCEL)
                             .ghost()
-                            .on_click(cx.listener(|dialog, _, _, cx| dialog.answer(false, cx))),
+                            .on_click(cx.listener(|dialog, _, _, cx| dialog.decide(false, cx))),
                     )
                     .child(
                         Button::new("confirm")
                             .label(confirm)
                             .danger()
-                            .on_click(cx.listener(|dialog, _, _, cx| dialog.answer(true, cx))),
+                            .on_click(cx.listener(|dialog, _, _, cx| dialog.decide(true, cx))),
                     ),
             );
         popup::layer(cx)

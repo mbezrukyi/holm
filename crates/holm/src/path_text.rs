@@ -113,7 +113,7 @@ struct Piece {
 }
 
 #[derive(Debug, Default, PartialEq)]
-struct Row {
+struct WrapRow {
     pieces: Vec<Piece>,
     width: Pixels,
 }
@@ -131,7 +131,12 @@ fn piece_width(text: &str, chip: bool, measure: Measure<'_>) -> Pixels {
 }
 
 /// Lays out `parts` in rows. With no `width`, the text stays in one row.
-fn lay_out(parts: &[Part], mode: Mode, width: Option<Pixels>, measure: Measure<'_>) -> Vec<Row> {
+fn lay_out(
+    parts: &[Part],
+    mode: Mode,
+    width: Option<Pixels>,
+    measure: Measure<'_>,
+) -> Vec<WrapRow> {
     let segs: Vec<Piece> = parts
         .iter()
         .map(|part| match part {
@@ -152,7 +157,7 @@ fn lay_out(parts: &[Part], mode: Mode, width: Option<Pixels>, measure: Measure<'
 }
 
 /// Puts `piece` at the end of `row`. A plain piece joins a plain piece before it.
-fn push(row: &mut Row, piece: Piece, measure: Measure<'_>) {
+fn push(row: &mut WrapRow, piece: Piece, measure: Measure<'_>) {
     let piece = match row.pieces.pop() {
         Some(mut last) if !last.chip && !piece.chip => {
             last.text.push_str(&piece.text);
@@ -201,9 +206,9 @@ fn atoms(segs: Vec<Piece>, width: Pixels, measure: Measure<'_>) -> Vec<Vec<Piece
     atoms
 }
 
-fn wrap(segs: Vec<Piece>, width: Pixels, measure: Measure<'_>) -> Vec<Row> {
+fn wrap(segs: Vec<Piece>, width: Pixels, measure: Measure<'_>) -> Vec<WrapRow> {
     let mut rows = Vec::new();
-    let mut row = Row::default();
+    let mut row = WrapRow::default();
     for atom in atoms(segs, width, measure) {
         // The space at the end may hang past the edge.
         let shown: Pixels = atom
@@ -229,8 +234,8 @@ fn wrap(segs: Vec<Piece>, width: Pixels, measure: Measure<'_>) -> Vec<Row> {
     rows
 }
 
-fn one_line(segs: Vec<Piece>, width: Pixels, measure: Measure<'_>) -> Row {
-    let mut row = Row::default();
+fn one_line(segs: Vec<Piece>, width: Pixels, measure: Measure<'_>) -> WrapRow {
+    let mut row = WrapRow::default();
     let total = segs
         .iter()
         .map(|seg| piece_width(&seg.text, seg.chip, measure))
@@ -276,7 +281,7 @@ fn cut(text: &str, fits: impl Fn(&str) -> bool) -> String {
 
 /// The fonts and sizes of a text with path chips.
 #[derive(Clone)]
-pub(crate) struct Look {
+pub(crate) struct PathTextStyle {
     font: Font,
     font_size: Pixels,
     color: Hsla,
@@ -284,7 +289,7 @@ pub(crate) struct Look {
     chip_font: Font,
 }
 
-impl Look {
+impl PathTextStyle {
     fn new(window: &Window, cx: &App) -> Self {
         let style = window.text_style();
         let font = style.font();
@@ -326,7 +331,7 @@ impl Look {
         mode: Mode,
         width: Option<Pixels>,
         window: &Window,
-    ) -> Vec<Row> {
+    ) -> Vec<WrapRow> {
         let measure = |text: &str, chip: bool| self.shape(text, chip, window).width();
         lay_out(&text.parts, mode, width, &measure)
     }
@@ -351,7 +356,7 @@ pub(crate) struct ShapedRow(Vec<(Pixels, ShapedLine, bool)>);
 
 impl Element for PathTextElement {
     type RequestLayoutState = ();
-    type PrepaintState = (Look, Vec<ShapedRow>);
+    type PrepaintState = (PathTextStyle, Vec<ShapedRow>);
 
     fn id(&self) -> Option<ElementId> {
         None
@@ -372,7 +377,7 @@ impl Element for PathTextElement {
         if self.mode == Mode::OneLine {
             style.size.width = relative(1.).into();
         }
-        let look = Look::new(window, cx);
+        let path_style = PathTextStyle::new(window, cx);
         let text = self.text.clone();
         let mode = self.mode;
         let id = window.request_measured_layout(style, move |known, available, window, _| {
@@ -381,10 +386,10 @@ impl Element for PathTextElement {
                 AvailableSpace::MinContent => Some(px(0.)),
                 AvailableSpace::MaxContent => None,
             });
-            let rows = look.lay_out(&text, mode, width, window);
+            let rows = path_style.lay_out(&text, mode, width, window);
             let widest = rows.iter().map(|row| row.width).fold(px(0.), Pixels::max);
             #[allow(clippy::cast_precision_loss, reason = "a few rows")]
-            let height = look.line_height * rows.len() as f32;
+            let height = path_style.line_height * rows.len() as f32;
             Size {
                 width: known.width.unwrap_or(widest),
                 height,
@@ -402,8 +407,8 @@ impl Element for PathTextElement {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        let look = Look::new(window, cx);
-        let rows = look
+        let path_style = PathTextStyle::new(window, cx);
+        let rows = path_style
             .lay_out(&self.text, self.mode, Some(bounds.size.width), window)
             .into_iter()
             .map(|row| {
@@ -413,7 +418,7 @@ impl Element for PathTextElement {
                         .map(|piece| {
                             (
                                 piece.x,
-                                look.shape(&piece.text, piece.chip, window),
+                                path_style.shape(&piece.text, piece.chip, window),
                                 piece.chip,
                             )
                         })
@@ -421,7 +426,7 @@ impl Element for PathTextElement {
                 )
             })
             .collect();
-        (look, rows)
+        (path_style, rows)
     }
 
     fn paint(
@@ -430,15 +435,15 @@ impl Element for PathTextElement {
         _inspector_id: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
         _request_layout: &mut Self::RequestLayoutState,
-        (look, rows): &mut Self::PrepaintState,
+        (path_style, rows): &mut Self::PrepaintState,
         window: &mut Window,
         cx: &mut App,
     ) {
         // Plain text paints with the metrics of its shaped line, so the chip uses them too.
-        let plain = look.shape(" ", false, window);
+        let plain = path_style.shape(" ", false, window);
         let (ascent, descent) = (plain.ascent, plain.descent);
         let background = cx.theme().accent;
-        let line_height = look.line_height;
+        let line_height = path_style.line_height;
         for (ix, ShapedRow(pieces)) in rows.iter().enumerate() {
             #[allow(clippy::cast_precision_loss, reason = "a few rows")]
             let top = bounds.origin.y + line_height * ix as f32;
