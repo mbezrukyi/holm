@@ -112,7 +112,9 @@ impl Links {
             };
             let names = files.iter().map(|file| file_name(file)).collect();
             let Ok(paths) = links.update(cx, |links, cx| {
-                links.notes_folder.read(cx).file_links(note, files, cx)
+                links.notes_folder.update(cx, |notes_folder, cx| {
+                    notes_folder.file_links(note, files, cx)
+                })
             }) else {
                 return;
             };
@@ -219,27 +221,21 @@ impl Links {
     }
 
     /// Embeds a link to each file at the cursor, as `![name](..)`. It shows an image or a file
-    /// chip. An error shows in the message line.
+    /// chip. A file with no link gets none.
     fn insert_file_links(
         &mut self,
         names: Vec<String>,
-        files: Vec<holm_core::Result<PathBuf>>,
+        files: Vec<Option<PathBuf>>,
         cx: &mut Context<Self>,
     ) {
-        for (name, file) in names.into_iter().zip(files) {
-            match file {
-                Ok(path) => {
-                    let target = Target::File(path.to_string_lossy().into_owned());
-                    self.editor.update(cx, |editor, cx| {
-                        editor.insert_link(&name, &target, true, cx);
-                    });
-                }
-                Err(error) => {
-                    let error = AppError::from(error);
-                    tracing::warn!(error = %crate::chain(&error), "cannot link a file");
-                    cx.emit(LinksEvent::Error(error.message()));
-                }
-            }
+        for (name, path) in names.into_iter().zip(files) {
+            let Some(path) = path else {
+                continue;
+            };
+            let target = Target::File(path.to_string_lossy().into_owned());
+            self.editor.update(cx, |editor, cx| {
+                editor.insert_link(&name, &target, true, cx);
+            });
         }
     }
 }

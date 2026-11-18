@@ -6,9 +6,10 @@
 //!
 //! - The write works: the focus goes to the home of the owner, and the field sends
 //!   [`NameEvent::Written`] with the value of the write.
-//! - Holm refuses the name: the field opens again with its text, and an answer names the
-//!   reason.
-//! - Another fail: an answer names it, and the field sends [`NameEvent::Closed`].
+//! - Holm refuses the name: the field opens again with its text.
+//! - Another fail: the field sends [`NameEvent::Closed`].
+//!
+//! The write shows the answer of a fail.
 //!
 //! `Enter` with the unchanged name of a rename writes nothing, and sends [`NameEvent::Closed`].
 //! So does `Esc`, and the focus goes home. When the field loses the focus, it sends
@@ -22,13 +23,11 @@ use gpui_kit::{
 };
 
 use crate::error::AppError;
-use crate::message_line::Answer;
 use crate::notes_folder::{Step, window_step};
 use crate::text_field::{FieldEvent, TextField};
 
-/// Writes a typed name, and ends with the value of the write.
-pub(crate) type NameWrite<T> =
-    Rc<dyn Fn(String, Step<holm_core::Result<T>>, &mut Window, &mut App)>;
+/// Writes a typed name, and ends with the result of the write. It shows the answer of a fail.
+pub(crate) type NameWrite<T> = Rc<dyn Fn(String, Step<Result<T, AppError>>, &mut Window, &mut App)>;
 
 /// What the field tells its owner. After [`NameEvent::Written`] and [`NameEvent::Closed`], the
 /// owner drops the field.
@@ -145,7 +144,7 @@ impl<T: Clone + 'static> NameField<T> {
         self.set_writing(true, cx);
         let ended = window_step(window, cx, Self::ended);
         // A write may end at once, and the field can't take its end in its own update.
-        let done: Step<holm_core::Result<T>> =
+        let done: Step<Result<T, AppError>> =
             Box::new(move |result, cx| cx.defer(move |cx| ended(result, cx)));
         let write = self.write.clone();
         window.defer(cx, move |window, cx| write(name, done, window, cx));
@@ -163,7 +162,7 @@ impl<T: Clone + 'static> NameField<T> {
         }
     }
 
-    fn ended(&mut self, result: holm_core::Result<T>, window: &mut Window, cx: &mut Context<Self>) {
+    fn ended(&mut self, result: Result<T, AppError>, window: &mut Window, cx: &mut Context<Self>) {
         self.set_writing(false, cx);
         let error = match result {
             Ok(value) => {
@@ -175,11 +174,8 @@ impl<T: Clone + 'static> NameField<T> {
         };
         let refused = matches!(
             error,
-            holm_core::Error::NameTaken { .. } | holm_core::Error::BadName { .. }
+            AppError::Core(holm_core::Error::NameTaken { .. } | holm_core::Error::BadName { .. })
         );
-        let error = AppError::from(error);
-        tracing::warn!(error = %crate::chain(&error), "cannot write the name");
-        window.dispatch_action(Box::new(Answer(error.message())), cx);
         if !refused {
             self.go_home(window, cx);
             cx.emit(NameEvent::Closed);
@@ -212,9 +208,9 @@ mod tests {
         Rc::new(move |name, done, _, cx| {
             calls.set(calls.get() + 1);
             let result = if calls.get() == 1 {
-                Err(holm_core::Error::NameTaken {
+                Err(AppError::Core(holm_core::Error::NameTaken {
                     path: PathBuf::from(&name),
-                })
+                }))
             } else {
                 Ok(name)
             };

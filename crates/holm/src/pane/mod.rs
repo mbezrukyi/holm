@@ -52,7 +52,7 @@ use crate::error::AppError;
 use crate::link_picker::{LinkChoice, LinkStart};
 use crate::message_line::{MessageLine, OpenState};
 use crate::name_field::{NameEvent, NameWrite};
-use crate::notes_folder::{FolderEvent, NotSaved, NotesFolder, SaveEvent, Step, window_step};
+use crate::notes_folder::{Done, FolderEvent, NotSaved, NotesFolder, SaveEvent, Step, window_step};
 use crate::tags::{TagChange, TagRow};
 use crate::title::TitleField;
 use crate::{text, theme};
@@ -403,7 +403,7 @@ impl NotePane {
         let link = self.editor.read(cx).link_at_cursor();
         self.replace_link = link.as_ref().is_some_and(|link| !link.embedded);
         let target = link.map(|link| link.target);
-        let done = step(cx, move |pane, _: holm_core::Result<()>, cx| {
+        let done = Done::value(step(cx, move |pane: &mut Self, (), cx| {
             let snapshot = pane.notes_folder.read(cx).snapshot();
             let query = match target {
                 Some(Target::Note { id, heading }) => match snapshot.note_with_id(&id) {
@@ -417,21 +417,17 @@ impl NotePane {
                 _ => String::new(),
             };
             done(LinkStart::new(snapshot, open_note, query), cx);
-        });
+        }));
         self.notes_folder
             .update(cx, |notes_folder, cx| notes_folder.wait(done, cx));
     }
 
     /// Makes the link that the user picked in the link picker, and puts it at the cursor.
     /// A new note goes in the folder of the open note. With no open note, it does nothing.
-    pub(crate) fn link(
-        &mut self,
-        choice: LinkChoice,
-        done: impl FnOnce(holm_core::Result<()>, &mut App) + 'static,
-        cx: &mut Context<Self>,
-    ) {
+    /// `done` runs when the link is in place.
+    pub(crate) fn link(&mut self, choice: LinkChoice, done: Step<()>, cx: &mut Context<Self>) {
         let Some(path) = self.shown.note().cloned() else {
-            cx.defer(move |cx| done(Ok(()), cx));
+            cx.defer(move |cx| done((), cx));
             return;
         };
         let folder = path.folder().clone();
@@ -448,28 +444,26 @@ impl NotePane {
             } => self.notes_folder.update(cx, |notes_folder, cx| {
                 notes_folder.link_id(
                     path,
-                    move |id, cx| {
-                        let made = id.map(|id| {
-                            let text = heading.clone().unwrap_or(title);
-                            put(Target::Note { id, heading }, text, cx);
-                        });
-                        done(made, cx);
-                    },
+                    Done::value(move |id, cx| {
+                        let text = heading.clone().unwrap_or(title);
+                        put(Target::Note { id, heading }, text, cx);
+                        done((), cx);
+                    }),
                     cx,
                 );
             }),
             LinkChoice::SameNote(heading) => {
                 self.put_link(&Target::Heading(heading.clone()), &heading, cx);
-                cx.defer(move |cx| done(Ok(()), cx));
+                cx.defer(move |cx| done((), cx));
             }
             LinkChoice::Create(title) => self.notes_folder.update(cx, |notes_folder, cx| {
                 notes_folder.create_linked_note(
                     folder,
                     title.clone(),
-                    move |id, cx| {
-                        let made = id.map(|id| put(Target::Note { id, heading: None }, title, cx));
-                        done(made, cx);
-                    },
+                    Done::value(move |id, cx| {
+                        put(Target::Note { id, heading: None }, title, cx);
+                        done((), cx);
+                    }),
                     cx,
                 );
             }),
@@ -509,9 +503,9 @@ impl NotePane {
         let Some(path) = self.shown.note().cloned() else {
             return;
         };
-        let done = Self::field_step(cx);
+        // The event of the write shows the fields.
         self.notes_folder.update(cx, |notes_folder, cx| {
-            notes_folder.change_tag(path, change, done, cx);
+            notes_folder.change_tag(path, change, Done::value(|(), _| {}), cx);
         });
     }
 
@@ -538,22 +532,9 @@ impl NotePane {
             return;
         };
         let pinned = !self.last_info.as_ref().is_some_and(|info| info.pinned);
-        let done = Self::field_step(cx);
         self.notes_folder.update(cx, |notes_folder, cx| {
-            notes_folder.set_pinned(path, pinned, done, cx);
+            notes_folder.set_pinned(path, pinned, Done::value(|(), _| {}), cx);
         });
-    }
-
-    /// The end of a write of the tags or the pin. An error shows in the message line.
-    fn field_step(cx: &Context<Self>) -> Step<holm_core::Result<()>> {
-        step(cx, |pane, result, cx| {
-            if let Err(error) = result {
-                let error = AppError::from(error);
-                tracing::warn!(error = %crate::chain(&error), "cannot change the tags or the pin");
-                pane.answer(error.message(), cx);
-            }
-            pane.show_fields(cx);
-        })
     }
 
     fn unsaved(&self, cx: &App) -> bool {
@@ -682,22 +663,17 @@ impl NotePane {
             return;
         };
         let opening = self.opening;
-        let done = step(cx, move |pane: &mut Self, result, cx| {
+        // The pane owns the error: a failed read gives the dropped text back.
+        let done = Done::result(step(cx, move |pane: &mut Self, result, cx| {
             if pane.opening != opening {
                 return;
             }
             match result {
                 Ok(note) => pane.show(note, true, cx),
-                Err(error) => {
-                    let error = AppError::from(error);
-                    tracing::warn!(error = %crate::chain(&error), "cannot reload the note");
-                    pane.answer(error.message(), cx);
-                    if discard {
-                        pane.edited(cx);
-                    }
-                }
+                Err(_) if discard => pane.edited(cx),
+                Err(_) => {}
             }
-        });
+        }));
         // The line must not write the text that the reload drops.
         self.notes_folder.update(cx, |notes_folder, cx| {
             if discard {
@@ -779,28 +755,19 @@ impl NotePane {
 
     /// Reads the note at `path` and shows it, when no newer open came after `opening`.
     fn read_note(&mut self, path: NotePath, opening: u64, cx: &mut Context<Self>) {
-        let done = step(cx, move |pane: &mut Self, read, cx| {
+        let done = Done::value(step(cx, move |pane: &mut Self, note, cx| {
             if pane.opening == opening {
-                pane.opened(read, cx);
+                pane.opened(note, cx);
             }
-        });
+        }));
         self.notes_folder
             .update(cx, |notes_folder, cx| notes_folder.read(path, done, cx));
     }
 
-    fn opened(&mut self, read: holm_core::Result<Note>, cx: &mut Context<Self>) {
-        match read {
-            Ok(note) => {
-                let path = note.info.path.clone();
-                self.show(note, false, cx);
-                cx.emit(PaneEvent::Opened(path));
-            }
-            Err(error) => {
-                let error = AppError::from(error);
-                tracing::warn!(error = %crate::chain(&error), "cannot open the note");
-                self.answer(error.message(), cx);
-            }
-        }
+    fn opened(&mut self, note: Note, cx: &mut Context<Self>) {
+        let path = note.info.path.clone();
+        self.show(note, false, cx);
+        cx.emit(PaneEvent::Opened(path));
     }
 
     /// Follows a move of the open note, or of a folder that holds it. A move to another
@@ -839,7 +806,7 @@ impl NotePane {
     fn rename(
         &mut self,
         title: String,
-        done: Step<holm_core::Result<NotePath>>,
+        done: Step<Result<NotePath, AppError>>,
         cx: &mut Context<Self>,
     ) {
         // With no note, the title field is gone too.
@@ -847,7 +814,7 @@ impl NotePane {
             return;
         };
         self.notes_folder.update(cx, |notes_folder, cx| {
-            notes_folder.rename_note(path, title, done, cx);
+            notes_folder.rename_note(path, title, Done::result(done), cx);
         });
     }
 
@@ -905,7 +872,7 @@ impl NotePane {
         match (event, kept) {
             (NewNoteEvent::Created(note), _) => {
                 self.opening += 1;
-                self.opened(Ok(note.clone()), cx);
+                self.opened(note.clone(), cx);
             }
             (NewNoteEvent::Cancelled, Some(kept)) => self.shown = Shown::Note(kept),
             (NewNoteEvent::Cancelled, None) => cx.emit(PaneEvent::Closed),

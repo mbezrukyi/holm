@@ -33,7 +33,7 @@ use crate::dialog::{Ask, Confirm};
 use crate::error::AppError;
 use crate::icons::Icon;
 use crate::name_field::{Look, NameEvent, NameField, NameWrite};
-use crate::notes_folder::{FolderEvent, NotesFolder, Step};
+use crate::notes_folder::{Done, FolderEvent, NotesFolder, Step};
 use crate::text;
 
 use list::NoteList;
@@ -76,8 +76,6 @@ pub(crate) enum SidebarEvent {
     /// The view changed, or a folder rename moved the open note. The app keeps both in the
     /// config.
     ViewChanged,
-    /// Show this answer in the message line.
-    Answer(&'static str),
 }
 
 /// A name field in the tree: for a folder or a tag after `F2`, or for a new folder.
@@ -273,11 +271,10 @@ impl Sidebar {
             cx.notify();
             return;
         }
-        let query = self.query.clone();
-        let search = self
-            .notes_folder
-            .read(cx)
-            .search(query.clone(), self.order, cx);
+        let (query, order) = (self.query.clone(), self.order);
+        let search = self.notes_folder.update(cx, |notes_folder, cx| {
+            notes_folder.search(query.clone(), order, cx)
+        });
         self.finding = Some(cx.spawn(async move |sidebar, cx| {
             let found = search.await.map(NoteList::new);
             sidebar
@@ -286,13 +283,8 @@ impl Sidebar {
                         return;
                     }
                     sidebar.finding = None;
-                    match found {
-                        Ok(found) => sidebar.found = found,
-                        Err(error) => {
-                            let error = AppError::from(error);
-                            tracing::warn!(error = %crate::chain(&error), "cannot search the notes");
-                            cx.emit(SidebarEvent::Answer(error.message()));
-                        }
+                    if let Some(found) = found {
+                        sidebar.found = found;
                     }
                     sidebar.rebuild_list();
                     sidebar.scroll_to_selection();
@@ -574,81 +566,79 @@ impl Sidebar {
         &mut self,
         named: Named,
         name: String,
-        done: Step<holm_core::Result<()>>,
+        done: Step<Result<(), AppError>>,
         window: &Window,
         cx: &mut Context<Self>,
     ) {
         let sidebar = cx.weak_entity();
         match named {
             Named::Folder(folder) => {
-                let renamed = move |renamed: holm_core::Result<FolderPath>, cx: &mut App| {
-                    if renamed.is_ok() {
-                        sidebar
-                            .update(cx, |_, cx| cx.emit(SidebarEvent::ViewChanged))
-                            .ok();
-                    }
-                    done(renamed.map(drop), cx);
-                };
+                let renamed =
+                    Done::result(move |renamed: Result<FolderPath, AppError>, cx: &mut App| {
+                        if renamed.is_ok() {
+                            sidebar
+                                .update(cx, |_, cx| cx.emit(SidebarEvent::ViewChanged))
+                                .ok();
+                        }
+                        done(renamed.map(drop), cx);
+                    });
                 self.notes_folder.update(cx, |notes_folder, cx| {
                     notes_folder.rename_folder(folder, name, renamed, cx);
                 });
             }
             Named::NewFolder(parent) => {
-                let created = move |created: holm_core::Result<FolderPath>, cx: &mut App| {
-                    let shown = created.map(|folder| {
-                        sidebar
-                            .update(cx, |sidebar, cx| {
-                                sidebar.show_in_tree(Item::Folder(folder), cx);
-                            })
-                            .ok();
+                let created =
+                    Done::result(move |created: Result<FolderPath, AppError>, cx: &mut App| {
+                        let shown = created.map(|folder| {
+                            sidebar
+                                .update(cx, |sidebar, cx| {
+                                    sidebar.show_in_tree(Item::Folder(folder), cx);
+                                })
+                                .ok();
+                        });
+                        done(shown, cx);
                     });
-                    done(shown, cx);
-                };
                 self.notes_folder.update(cx, |notes_folder, cx| {
                     notes_folder.create_folder(parent, name, created, cx);
                 });
             }
             Named::Tag(from) if !name.trim().is_empty() => {
-                let name = match TagName::typed(&name) {
-                    Ok(name) => name,
-                    Err(error) => {
-                        done(Err(error), cx);
-                        return;
-                    }
-                };
                 let confirm = self.confirm.clone();
                 let window = window.window_handle();
                 let notes_folder = self.notes_folder.clone();
-                let (counted_from, counted_to) = (from.clone(), name.clone());
-                let asked = move |count: holm_core::Result<usize>, cx: &mut App| match count {
-                    Ok(notes) => {
-                        let ask = Ask::RenameTag {
-                            from: from.clone(),
-                            to: name.clone(),
-                            notes,
-                        };
-                        let answered: Step<bool> = Box::new(move |confirmed, cx| {
-                            if !confirmed {
-                                done(Ok(()), cx);
-                                return;
-                            }
-                            notes_folder.update(cx, |notes_folder, cx| {
-                                notes_folder.rename_tag(
-                                    from,
-                                    name,
-                                    move |renamed, cx| done(renamed.map(drop), cx),
-                                    cx,
-                                );
+                let counted_from = from.clone();
+                let asked =
+                    move |count: Result<(TagName, usize), AppError>, cx: &mut App| match count {
+                        Ok((name, notes)) => {
+                            let ask = Ask::RenameTag {
+                                from: from.clone(),
+                                to: name.clone(),
+                                notes,
+                            };
+                            let answered: Step<bool> = Box::new(move |confirmed, cx| {
+                                if !confirmed {
+                                    done(Ok(()), cx);
+                                    return;
+                                }
+                                notes_folder.update(cx, |notes_folder, cx| {
+                                    notes_folder.rename_tag(
+                                        from,
+                                        name,
+                                        Done::result(move |renamed, cx| {
+                                            done(renamed.map(drop), cx);
+                                        }),
+                                        cx,
+                                    );
+                                });
                             });
-                        });
-                        window
-                            .update(cx, |_, window, cx| confirm(ask, answered, window, cx))
-                            .ok();
-                    }
-                    Err(error) => done(Err(error), cx),
-                };
+                            window
+                                .update(cx, |_, window, cx| confirm(ask, answered, window, cx))
+                                .ok();
+                        }
+                        Err(error) => done(Err(error), cx),
+                    };
                 self.notes_folder.update(cx, |notes_folder, cx| {
-                    notes_folder.tag_rename_count(counted_from, counted_to, asked, cx);
+                    notes_folder.tag_rename_count(counted_from, name, Done::result(asked), cx);
                 });
             }
             Named::Tag(_) => done(Ok(()), cx),

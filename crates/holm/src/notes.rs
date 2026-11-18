@@ -20,10 +20,9 @@ use holm_core::{FolderPath, NotePath, Snapshot};
 
 use crate::config::{Config, SidebarSettings};
 use crate::dialog::{self, Ask, Confirm, Dialog};
-use crate::error::AppError;
 use crate::link_picker::{LinkPicker, LinkPickerEvent, LinkStart};
 use crate::message_line::MessageLine;
-use crate::notes_folder::{NotesFolder, Step, window_step};
+use crate::notes_folder::{Done, JobFailed, NotesFolder, window_step};
 use crate::pane::{Leave, NotePane, PaneEvent, Pick};
 use crate::picker::{FolderPicker, PickerEvent};
 use crate::quick_open::{QuickOpen, QuickOpenEvent};
@@ -93,6 +92,9 @@ impl NotesView {
                 let writing = notes_folder.read(cx).writing();
                 this.line
                     .update(cx, |line, cx| line.set_writing(writing, cx));
+            }),
+            cx.subscribe(&notes_folder, |this, _, JobFailed(answer), cx| {
+                this.line.update(cx, |line, cx| line.show(*answer, cx));
             }),
             cx.subscribe_in(&sidebar, window, Self::sidebar_event),
             cx.subscribe_in(&pane, window, Self::pane_event),
@@ -168,7 +170,7 @@ impl NotesView {
         self.write(
             window,
             cx,
-            |notes_folder, done, cx| notes_folder.wait(done, cx),
+            NotesFolder::wait,
             move |this, (), window, cx| {
                 this.sidebar
                     .update(cx, |sidebar, cx| sidebar.rename(item, window, cx));
@@ -198,9 +200,6 @@ impl NotesView {
                     .update(cx, |pane, cx| pane.open(path, Leave::Keep, cx));
             }
             SidebarEvent::FocusEditor => self.focus_home(window, cx),
-            SidebarEvent::Answer(message) => {
-                self.line.update(cx, |line, cx| line.show(*message, cx));
-            }
             SidebarEvent::RenameNote => {
                 self.pane.update(cx, |pane, cx| pane.edit_title(window, cx));
             }
@@ -348,7 +347,7 @@ impl NotesView {
             LinkPickerEvent::Pick(choice) => {
                 self.focus_editor(window, cx);
                 let choice = choice.clone();
-                let done = Self::then(window, cx, |this, (), window, cx| {
+                let done = window_step(window, cx, |this: &mut Self, (), window, cx| {
                     this.focus_editor(window, cx);
                 });
                 self.pane.update(cx, |pane, cx| pane.link(choice, done, cx));
@@ -491,40 +490,20 @@ impl NotesView {
     }
 
     /// Puts the write of `start` in the line. `done` gets its value in the update where the
-    /// write ends. An error shows in the message line.
+    /// write ends.
     fn write<T: 'static>(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-        start: impl FnOnce(&mut NotesFolder, Step<holm_core::Result<T>>, &mut Context<NotesFolder>),
+        start: impl FnOnce(&mut NotesFolder, Done<T>, &mut Context<NotesFolder>),
         done: impl FnOnce(&mut Self, T, &mut Window, &mut Context<Self>) + 'static,
     ) {
-        let done = Self::then(window, cx, done);
+        let done = Done::value(window_step(window, cx, move |this, value, window, cx| {
+            done(this, value, window, cx);
+            cx.notify();
+        }));
         self.notes_folder
             .update(cx, |notes_folder, cx| start(notes_folder, done, cx));
-    }
-
-    /// A step for the result of a file action. An error shows in the message line.
-    fn then<T: 'static>(
-        window: &Window,
-        cx: &Context<Self>,
-        done: impl FnOnce(&mut Self, T, &mut Window, &mut Context<Self>) + 'static,
-    ) -> Step<holm_core::Result<T>> {
-        window_step(window, cx, move |this, result, window, cx| {
-            match result {
-                Ok(value) => done(this, value, window, cx),
-                Err(error) => this.fail(error, cx),
-            }
-            cx.notify();
-        })
-    }
-
-    /// Shows the error of a file action as an answer.
-    fn fail(&mut self, error: holm_core::Error, cx: &mut Context<Self>) {
-        let error = AppError::from(error);
-        tracing::warn!(error = %crate::chain(&error), "a file action failed");
-        self.line
-            .update(cx, |line, cx| line.show(error.message(), cx));
     }
 
     fn focus_editor(&self, window: &mut Window, cx: &mut Context<Self>) {

@@ -20,7 +20,7 @@ use holm_core::model::Note;
 use holm_core::{FolderPath, TagName};
 
 use crate::name_field::{NameEvent, NameWrite};
-use crate::notes_folder::NotesFolder;
+use crate::notes_folder::{Done, NotesFolder};
 use crate::tags;
 use crate::text;
 use crate::title::TitleField;
@@ -53,7 +53,7 @@ impl NewNote {
         let write: NameWrite<Note> = Rc::new(move |title, done, _, cx| {
             let (folder, tag) = (folder.clone(), create_tag.clone());
             notes_folder.update(cx, |notes_folder, cx| {
-                notes_folder.create_note(folder, title, tag, done, cx);
+                notes_folder.create_note(folder, title, tag, Done::result(done), cx);
             });
         });
         let focus = cx.focus_handle();
