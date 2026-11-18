@@ -4,7 +4,29 @@ use std::path::{Component, Path, PathBuf};
 
 use holm_markdown::{Body, Note as Text, Target};
 
+use crate::model::{Link, LinkTarget, Note, NoteId};
 use crate::{FolderPath, NotePath};
+
+/// The links of the note, with file paths from the notes folder `root`.
+pub(crate) fn links(root: &Path, note: &Note) -> Vec<Link> {
+    let folder = note.info.path.folder();
+    Body::parse(&note.body)
+        .links()
+        .iter()
+        .map(|link| Link {
+            target: match &link.target {
+                Target::Note { id, heading } => LinkTarget::Note {
+                    id: NoteId::from_field(id.clone()),
+                    heading: heading.clone(),
+                },
+                Target::Heading(heading) => LinkTarget::Heading(heading.clone()),
+                Target::File(file) => LinkTarget::File(resolve(root, folder, file)),
+                Target::Web(address) => LinkTarget::Web(address.clone()),
+            },
+            embedded: link.embedded,
+        })
+        .collect()
+}
 
 /// The path of a file that a note in `folder` links as `file`.
 ///

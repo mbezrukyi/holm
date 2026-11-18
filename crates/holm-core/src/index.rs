@@ -1,8 +1,8 @@
 //! The SQLite index of notes, tags and links, with full-text search.
 //!
-//! The index is a copy of the files. Holm deletes it and rebuilds it when its shape
-//! is old or when SQLite fails on it. When the file can't be rebuilt, the index lives
-//! in memory until Holm ends.
+//! The index is a copy of the files, for a fast start and for search. It never reads or
+//! writes a note file. When SQLite fails on it or its shape is old, it starts again empty.
+//! When a new file fails too, the index lives in memory until Holm ends.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -13,20 +13,17 @@ use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
-use holm_markdown::{Body, Target};
 use rusqlite::config::DbConfig;
 use rusqlite::types::{Type, Value};
 use rusqlite::{Connection, OptionalExtension as _, params};
 
 use crate::error::{Error, Result};
-use crate::facts::Facts;
 use crate::model::{Link, LinkTarget, Note, NoteId, NoteInfo};
-use crate::nodes::{Node, Nodes};
+use crate::nodes::Node;
 use crate::paths::{NotePath, NoteReader};
 use crate::reconcile::Settled;
-use crate::relink::resolve;
-use crate::scan;
-use crate::store::{Stamp, Store, time};
+use crate::relink;
+use crate::store::{Stamp, time};
 
 mod search;
 
@@ -90,29 +87,40 @@ pub(crate) struct Removal {
 #[derive(Debug)]
 pub(crate) struct Index {
     path: PathBuf,
+    /// The notes folder, for the paths of file links.
+    root: PathBuf,
     conn: Mutex<Connection>,
-    store: Store,
 }
 
 impl Index {
-    /// Opens the index in `dir`. It rebuilds the index from the files when SQLite fails on it.
-    ///
-    /// A rebuild reads the note files through `store`.
-    pub(crate) fn open(dir: &Path, store: &Store) -> Result<Self> {
+    /// Opens the index in `dir`, for the notes folder `root`. When SQLite fails on it, the
+    /// index starts empty.
+    pub(crate) fn open(dir: &Path, root: &Path) -> Result<Self> {
         let path = dir.join(FILE);
         let opened = fs::create_dir_all(dir)
             .map_err(Fail::Io)
             .and_then(|()| connect(&path));
         let conn = match opened {
             Ok(conn) => conn,
-            Err(Fail::Core(error)) => return Err(error),
-            Err(fail) => fresh(&path, store, &fail).map_err(|fail| fail.into_error(&path))?,
+            Err(fail) => {
+                tracing::warn!(error = %fail, path = %path.display(), "the index failed, so it starts empty");
+                fresh(&path, root, &Settled::default()).map_err(|fail| fail.into_error(&path))?
+            }
         };
         Ok(Self {
             path,
+            root: root.to_owned(),
             conn: Mutex::new(conn),
-            store: store.clone(),
         })
+    }
+
+    /// Drops every row and writes the rows of `settled`, which holds every note file.
+    /// The rows go into a new file, or into memory when the new file fails.
+    pub(crate) fn rebuild(&self, settled: &Settled) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap_or_else(PoisonError::into_inner);
+        *conn =
+            fresh(&self.path, &self.root, settled).map_err(|fail| fail.into_error(&self.path))?;
+        Ok(())
     }
 
     /// The paths of the notes whose title, text or tags hold every word of `text`, in no order.
@@ -156,7 +164,7 @@ impl Index {
     pub(crate) fn write(&self, settled: &Settled) -> Result<Vec<Vec<Link>>> {
         self.run(|conn| {
             let tx = conn.transaction()?;
-            let links = put_rows(&tx, self.store.root(), settled)?;
+            let links = put_rows(&tx, &self.root, settled)?;
             tx.commit()?;
             Ok(links)
         })
@@ -198,18 +206,9 @@ impl Index {
         })
     }
 
-    /// Runs `op`. When SQLite fails, it rebuilds the index and runs `op` again.
-    fn run<T>(&self, op: impl Fn(&mut Connection) -> Result<T, Fail>) -> Result<T> {
+    fn run<T>(&self, op: impl FnOnce(&mut Connection) -> Result<T, Fail>) -> Result<T> {
         let mut conn = self.conn.lock().unwrap_or_else(PoisonError::into_inner);
-        match op(&mut conn) {
-            Err(Fail::Core(error)) => Err(Fail::Core(error)),
-            Err(fail) => fresh(&self.path, &self.store, &fail).and_then(|fresh| {
-                *conn = fresh;
-                op(&mut conn)
-            }),
-            result => result,
-        }
-        .map_err(|fail| fail.into_error(&self.path))
+        op(&mut conn).map_err(|fail| fail.into_error(&self.path))
     }
 }
 
@@ -217,7 +216,6 @@ impl Index {
 enum Fail {
     Sql(rusqlite::Error),
     Io(io::Error),
-    Core(Error),
 }
 
 impl Fail {
@@ -225,7 +223,6 @@ impl Fail {
         let source: Box<dyn std::error::Error + Send + Sync> = match self {
             Self::Sql(error) => Box::new(error),
             Self::Io(error) => Box::new(error),
-            Self::Core(error) => return error,
         };
         Error::Index {
             path: path.to_owned(),
@@ -240,37 +237,30 @@ impl From<rusqlite::Error> for Fail {
     }
 }
 
-impl From<Error> for Fail {
-    fn from(error: Error) -> Self {
-        Self::Core(error)
-    }
-}
-
 impl std::fmt::Display for Fail {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Sql(error) => error.fmt(f),
             Self::Io(error) => error.fmt(f),
-            Self::Core(error) => error.fmt(f),
         }
     }
 }
 
-/// A new index after `fail`: the file rebuilt from the files, or else one in memory.
-fn fresh(path: &Path, store: &Store, fail: &Fail) -> Result<Connection, Fail> {
-    tracing::warn!(error = %fail, path = %path.display(), "the index failed, so Holm rebuilds it");
-    match rebuild(path, store) {
-        Err(Fail::Core(error)) => Err(Fail::Core(error)),
-        Err(error) => {
-            tracing::warn!(%error, path = %path.display(), "Holm keeps the index in memory");
-            let mut conn = Connection::open_in_memory()?;
-            settings(&conn)?;
-            schema(&mut conn)?;
-            fill(&mut conn, store)?;
-            Ok(conn)
-        }
-        conn => conn,
-    }
+/// A new index with only the rows of `settled`: a new file, or else one in memory.
+fn fresh(path: &Path, root: &Path, settled: &Settled) -> Result<Connection, Fail> {
+    let file = remove(path).and_then(|()| {
+        let mut conn = connect(path)?;
+        fill(&mut conn, root, settled)?;
+        Ok(conn)
+    });
+    file.or_else(|fail| {
+        tracing::warn!(error = %fail, path = %path.display(), "Holm keeps the index in memory");
+        let mut conn = Connection::open_in_memory()?;
+        settings(&conn)?;
+        schema(&mut conn)?;
+        fill(&mut conn, root, settled)?;
+        Ok(conn)
+    })
 }
 
 /// Opens the index file. A new file gets the schema. A file with another shape is deleted first.
@@ -313,18 +303,10 @@ fn schema(conn: &mut Connection) -> Result<(), Fail> {
     Ok(())
 }
 
-fn rebuild(path: &Path, store: &Store) -> Result<Connection, Fail> {
-    remove(path)?;
-    let mut conn = connect(path)?;
-    fill(&mut conn, store)?;
-    Ok(conn)
-}
-
-/// Writes the rows of every note file into the empty index.
-fn fill(conn: &mut Connection, store: &Store) -> Result<(), Fail> {
-    let settled = scan::files(store, &Facts::default(), &Nodes::root())?;
+/// Writes the rows of `settled` into the empty index.
+fn fill(conn: &mut Connection, root: &Path, settled: &Settled) -> Result<(), Fail> {
     let tx = conn.transaction()?;
-    put_rows(&tx, store.root(), &settled)?;
+    put_rows(&tx, root, settled)?;
     tx.commit()?;
     Ok(())
 }
@@ -365,27 +347,6 @@ fn shift(conn: &Connection, from: &NotePath, to: &NotePath) -> Result<(), Fail> 
     Ok(())
 }
 
-/// The links of the note, with file paths from the notes folder.
-fn links_of(root: &Path, note: &Note) -> Vec<Link> {
-    let folder = note.info.path.folder();
-    Body::parse(&note.body)
-        .links()
-        .iter()
-        .map(|link| Link {
-            target: match &link.target {
-                Target::Note { id, heading } => LinkTarget::Note {
-                    id: NoteId::from_field(id.clone()),
-                    heading: heading.clone(),
-                },
-                Target::Heading(heading) => LinkTarget::Heading(heading.clone()),
-                Target::File(file) => LinkTarget::File(resolve(root, folder, file)),
-                Target::Web(address) => LinkTarget::Web(address.clone()),
-            },
-            embedded: link.embedded,
-        })
-        .collect()
-}
-
 /// Writes the rows of one note and returns its links.
 ///
 /// The links come from the body and the folder, their source. When the source stays,
@@ -410,7 +371,7 @@ fn write(
     let (links, links_hash, stored) = match old {
         Some((old_source, old_links)) if old_source == source_hash => (None, old_links, true),
         _ => {
-            let links = links_of(root, note);
+            let links = relink::links(root, note);
             let links_hash = hash(&links);
             let stored = old.is_some_and(|(_, old_links)| old_links == links_hash);
             (Some(links), links_hash, stored)

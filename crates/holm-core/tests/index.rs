@@ -507,6 +507,40 @@ fn the_index_lives_in_memory_when_its_folder_cannot_be_written() {
 }
 
 #[test]
+fn a_save_stays_when_the_index_fails_and_the_next_start_reads_the_file_again() {
+    let folder = Folder::new(&[("a.md", "old\n")]);
+    let cache = tempfile::tempdir().unwrap();
+    let core = Core::open(folder.dir.path(), cache.path()).unwrap();
+    rusqlite::Connection::open(cache.path().join("index.sqlite"))
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER no_update BEFORE UPDATE ON notes BEGIN SELECT RAISE(ABORT, 'no'); END;",
+        )
+        .unwrap();
+    fs::set_permissions(cache.path(), fs::Permissions::from_mode(0o555)).unwrap();
+
+    let saved = core.save(&note_path("a.md"), "new\n");
+    let preview = |core: &Core| {
+        core.snapshot()
+            .note(&note_path("a.md"))
+            .unwrap()
+            .preview
+            .clone()
+    };
+    let found =
+        |core: &Core| common::paths(core.search("new", Order::Title).unwrap().paths().to_vec());
+    let during = (preview(&core), found(&core));
+    drop(core);
+    fs::set_permissions(cache.path(), fs::Permissions::from_mode(0o755)).unwrap();
+
+    saved.unwrap();
+    assert_eq!(during, ("new".to_owned(), vec!["a.md".to_owned()]));
+    let core = Core::open(folder.dir.path(), cache.path()).unwrap();
+    assert_eq!(preview(&core), "new");
+    assert_eq!(found(&core), ["a.md"]);
+}
+
+#[test]
 fn notes_in_attachments_and_odd_names_round_trip() {
     let folder = Folder::new(&[("attachments/a b.md", ""), ("ünï cödé.md", "")]);
 

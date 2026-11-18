@@ -37,7 +37,7 @@ pub use watch::Feed;
 use facts::{Delta, Facts};
 use index::Index;
 use model::{
-    Change, ChangeList, DeleteCount, LinkTarget, Note, NoteId, NoteInfo, NoteSet, Order,
+    Change, ChangeList, DeleteCount, Link, LinkTarget, Note, NoteId, NoteInfo, NoteSet, Order,
     SearchResults,
 };
 use nodes::{Node, Nodes};
@@ -162,7 +162,7 @@ impl Core {
     /// [`Error::Index`] as in [`Core::open`].
     pub fn search(&self, text: &str, order: Order) -> Result<SearchResults> {
         let _writing = lock(&self.inner.writing);
-        let paths = self.inner.index.search(text)?;
+        let paths = self.inner.read_index(|index| index.search(text))?;
         Ok(SearchResults::new(self.inner.snapshot(), paths, order))
     }
 
@@ -411,6 +411,7 @@ impl Core {
     ///
     /// [`Error::Index`] as in [`Core::search`].
     pub fn note_delete_count(&self, path: &NotePath) -> Result<DeleteCount> {
+        let _writing = lock(&self.inner.writing);
         self.inner
             .removal(&Node::Note(path.clone()))
             .map(|(count, _)| count)
@@ -423,6 +424,7 @@ impl Core {
     ///
     /// [`Error::Index`] as in [`Core::search`].
     pub fn folder_delete_count(&self, folder: &FolderPath) -> Result<DeleteCount> {
+        let _writing = lock(&self.inner.writing);
         self.inner
             .removal(&Node::Folder(folder.clone()))
             .map(|(count, _)| count)
@@ -682,20 +684,16 @@ impl Core {
     }
 
     fn build(store: Store, index_dir: &Path, watcher: Option<watch::Watcher>) -> Result<Self> {
-        let index = Index::open(index_dir, &store)?;
-        let mut facts = Facts::new(index.entries()?, store.folders(&FolderPath::root())?);
-        let settled = scan::files(&store, &facts, &Nodes::root())?;
-        let links = index.write(&settled)?;
-        let (delta, _) = settled.into_delta(links);
-        facts.apply(delta);
+        let index = Index::open(index_dir, store.root())?;
         let inner = Inner {
             store,
             index,
             writing: Mutex::new(()),
-            facts: Mutex::new(facts),
+            facts: Mutex::new(Facts::default()),
             listeners: Mutex::new(Vec::new()),
             _watcher: watcher,
         };
+        inner.start()?;
         Ok(Self {
             inner: Arc::new(inner),
         })
@@ -753,6 +751,75 @@ impl Draft<'_> {
 }
 
 impl Inner {
+    /// Builds the facts from the index rows and the files, and brings the rows up to date.
+    /// When the rows can't be read, it starts from no facts and rebuilds the index.
+    fn start(&self) -> Result<()> {
+        let (entries, readable) = match self.index.entries() {
+            Ok(entries) => (entries, true),
+            Err(error) => {
+                tracing::warn!(%error, "cannot read the index, so Holm rebuilds it");
+                (Vec::new(), false)
+            }
+        };
+        let mut facts = Facts::new(entries, self.store.folders(&FolderPath::root())?);
+        let settled = scan::files(&self.store, &facts, &Nodes::root())?;
+        let links = if readable {
+            self.write_rows(&settled)
+        } else {
+            self.rebuild_from(&settled);
+            self.links(&settled)
+        };
+        facts.apply(settled.into_delta(links).0);
+        *lock(&self.facts) = facts;
+        Ok(())
+    }
+
+    /// Writes the rows of `settled` into the index, and returns the links of each put note, in
+    /// order. When SQLite fails, it rebuilds the index, so it never fails.
+    fn write_rows(&self, settled: &Settled) -> Vec<Vec<Link>> {
+        self.index.write(settled).unwrap_or_else(|error| {
+            tracing::warn!(%error, "the index failed, so Holm rebuilds it");
+            self.rebuild();
+            self.links(settled)
+        })
+    }
+
+    /// Runs `op` on the index. When SQLite fails, it rebuilds the index and runs `op` again.
+    /// The caller holds `writing`.
+    fn read_index<T>(&self, op: impl Fn(&Index) -> Result<T>) -> Result<T> {
+        op(&self.index).or_else(|error| {
+            tracing::warn!(%error, "the index failed, so Holm rebuilds it");
+            self.rebuild();
+            op(&self.index)
+        })
+    }
+
+    /// Rebuilds the index from every note file, read with no facts. The caller holds
+    /// `writing`. A failure leaves the index as it is, with a log line.
+    fn rebuild(&self) {
+        match scan::files(&self.store, &Facts::default(), &Nodes::root()) {
+            Ok(settled) => self.rebuild_from(&settled),
+            Err(error) => tracing::warn!(%error, "cannot rebuild the index"),
+        }
+    }
+
+    /// Rebuilds the index with the rows of `settled`, which holds every note file.
+    fn rebuild_from(&self, settled: &Settled) {
+        if let Err(error) = self.index.rebuild(settled) {
+            tracing::warn!(%error, "cannot rebuild the index");
+        }
+    }
+
+    /// The links of each put note of `settled`, in order, parsed from its text.
+    fn links(&self, settled: &Settled) -> Vec<Vec<Link>> {
+        let root = self.store.root();
+        settled
+            .put
+            .iter()
+            .map(|put| relink::links(root, &put.note))
+            .collect()
+    }
+
     fn snapshot(&self) -> Snapshot {
         lock(&self.facts).snapshot().clone()
     }
@@ -790,7 +857,7 @@ impl Inner {
 
     /// Puts a note that Holm just wrote into the index and the draft, and returns it.
     fn update(&self, draft: &mut Draft<'_>, note: &Note, stamp: store::Stamp) -> Result<Note> {
-        let notes = self.update_all(draft, vec![(note.clone(), stamp)])?;
+        let notes = self.update_all(draft, vec![(note.clone(), stamp)]);
         notes.into_iter().next().ok_or_else(|| Error::Write {
             path: self.store.root().join(&note.info.path),
             source: std::io::ErrorKind::InvalidData.into(),
@@ -798,17 +865,13 @@ impl Inner {
     }
 
     /// Puts notes that Holm just wrote into the index and the draft, and returns them.
-    fn update_all(
-        &self,
-        draft: &mut Draft<'_>,
-        notes: Vec<(Note, store::Stamp)>,
-    ) -> Result<Vec<Note>> {
+    fn update_all(&self, draft: &mut Draft<'_>, notes: Vec<(Note, store::Stamp)>) -> Vec<Note> {
         let settled = scan::wrote(&self.store, &draft.next, notes);
-        let (notes, changed) = self.take(draft, settled)?;
+        let (notes, changed) = self.take(draft, settled);
         if changed {
             draft.wrote_notes();
         }
-        Ok(notes)
+        notes
     }
 
     /// Changes the frontmatter of the note with `edit`, keeps its modification time,
@@ -850,7 +913,7 @@ impl Inner {
         }
         let changed = written.len();
         if changed > 0 {
-            self.update_all(draft, written)?;
+            self.update_all(draft, written);
         }
         if changed > 0
             && let TagEdit::Rename { from, to } = edit
@@ -864,9 +927,10 @@ impl Inner {
         first_error.map_or(Ok(changed), Err)
     }
 
-    /// The count of a delete of `node`, and the attachment files it removes.
+    /// The count of a delete of `node`, and the attachment files it removes. The caller holds
+    /// `writing`.
     fn removal(&self, node: &Node) -> Result<(DeleteCount, Vec<PathBuf>)> {
-        let removal = self.index.removal(node)?;
+        let removal = self.read_index(|index| index.removal(node))?;
         let files = self.store.attachments(removal.files);
         let count = DeleteCount {
             notes: removal.notes,
@@ -922,15 +986,15 @@ impl Inner {
     /// whether a note changed. It adds no change to the list, so the write adds its own.
     fn refresh(&self, draft: &mut Draft<'_>, nodes: Vec<Node>) -> Result<bool> {
         let settled = scan::files(&self.store, &draft.next, &Nodes::new(nodes))?;
-        Ok(self.take(draft, settled)?.1)
+        Ok(self.take(draft, settled).1)
     }
 
     /// Writes the rows of `settled` into the index and puts it in the draft. It returns the
     /// notes that were read, and whether a note changed.
-    fn take(&self, draft: &mut Draft<'_>, settled: Settled) -> Result<(Vec<Note>, bool)> {
-        let links = self.index.write(&settled)?;
+    fn take(&self, draft: &mut Draft<'_>, settled: Settled) -> (Vec<Note>, bool) {
+        let links = self.write_rows(&settled);
         let (delta, notes) = settled.into_delta(links);
-        Ok((notes, draft.notes(delta)))
+        (notes, draft.notes(delta))
     }
 
     /// Checks the disk at each path of `batch`, and updates the index, the snapshot and the
@@ -943,7 +1007,7 @@ impl Inner {
             }
             let settled = scan::files(&self.store, &draft.next, &nodes)?;
             let refresh = reconcile::changes(&draft.next, &settled);
-            self.take(draft, settled)?;
+            self.take(draft, settled);
             let mut folders = false;
             for node in &nodes {
                 if let Node::Folder(folder) = node {
