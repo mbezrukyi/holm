@@ -392,7 +392,7 @@ mod tests {
             changes(&facts, settled),
             [Change::Moved {
                 from: path("a.md"),
-                note: info("work/a.md", Some("A")),
+                to: path("work/a.md"),
             }]
         );
     }
@@ -432,7 +432,7 @@ mod tests {
             changes(&facts, settled),
             [Change::Moved {
                 from: path("a.md"),
-                note: info("work/a.md", Some("A")),
+                to: path("work/a.md"),
             }]
         );
     }
@@ -474,7 +474,7 @@ mod tests {
             changes(&facts, settled),
             [Change::Moved {
                 from: path("old.md"),
-                note: info("new.md", Some("A")),
+                to: path("new.md"),
             }]
         );
     }

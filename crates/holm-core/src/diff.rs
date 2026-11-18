@@ -83,7 +83,7 @@ impl Touched {
                 (Some(old), Some(note)) => {
                     if old != note || before.links(path) != after.links(path) {
                         tags = tags || !same_tags(old, note);
-                        notes.push(Change::Changed(note.clone()));
+                        notes.push(Change::Changed(path.clone()));
                     }
                 }
                 (None, None) => {}
@@ -122,11 +122,11 @@ impl Touched {
                 tags = tags || !same_tags(old, note);
                 notes.push(Change::Moved {
                     from: old.path.clone(),
-                    note: note.clone(),
+                    to: note.path.clone(),
                 });
             } else {
                 tags = tags || !note.tags.is_empty();
-                notes.push(Change::Added(note.clone()));
+                notes.push(Change::Added(note.path.clone()));
             }
         }
         for old in gone.into_iter().flatten() {
@@ -168,10 +168,10 @@ fn same_folders(before: &Snapshot, after: &Snapshot, folder: &FolderPath) -> boo
 
 fn note_path(change: &Change) -> Option<&NotePath> {
     match change {
-        Change::Added(note) | Change::Changed(note) | Change::Moved { note, .. } => {
-            Some(&note.path)
-        }
-        Change::Removed(path) => Some(path),
+        Change::Added(path)
+        | Change::Changed(path)
+        | Change::Moved { to: path, .. }
+        | Change::Removed(path) => Some(path),
         _ => None,
     }
 }
@@ -268,7 +268,7 @@ mod tests {
         assert_eq!(list.source, Source::Outside);
         assert_eq!(list.snapshot.revision(), before.snapshot().revision() + 1);
         assert_eq!(after.snapshot().revision(), list.snapshot.revision());
-        assert_eq!(list.changes, [Change::Added(info("a.md", None, &[]))]);
+        assert_eq!(list.changes, [Change::Added(path("a.md"))]);
     }
 
     #[test]
@@ -282,9 +282,9 @@ mod tests {
         assert_eq!(
             changes(&before, after, &["a.md", "b.md", "c.md"], &[], Vec::new()),
             [
-                Change::Added(info("a.md", None, &["y"])),
+                Change::Added(path("a.md")),
                 Change::Removed(path("b.md")),
-                Change::Changed(info("c.md", None, &["x"])),
+                Change::Changed(path("c.md")),
                 Change::Tags,
             ]
         );
@@ -308,9 +308,9 @@ mod tests {
                 Change::Removed(path("b.md")),
                 Change::Moved {
                     from: path("a.md"),
-                    note: info("x/a.md", Some("A"), &[]),
+                    to: path("x/a.md"),
                 },
-                Change::Added(info("x/b.md", None, &[])),
+                Change::Added(path("x/b.md")),
             ]
         );
     }
@@ -328,7 +328,7 @@ mod tests {
         let moves = vec![
             Change::Moved {
                 from: path("a.md"),
-                note: info("c.md", None, &[]),
+                to: path("c.md"),
             },
             Change::FolderMoved {
                 from: folder("work"),

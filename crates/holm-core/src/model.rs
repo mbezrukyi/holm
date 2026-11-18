@@ -157,7 +157,8 @@ pub struct DeleteCount {
     pub attachments: usize,
 }
 
-/// One change to the notes folder, in a [`ChangeList`].
+/// One change to the notes folder, in a [`ChangeList`]. A note change names only paths. The
+/// snapshot of the list has the facts of each note.
 ///
 /// A write through [`Core`](crate::Core) gives the moves it makes: [`Change::Moved`],
 /// [`Change::FolderMoved`] and [`Change::TagMoved`]. A note that such a move explains gives
@@ -169,17 +170,17 @@ pub struct DeleteCount {
 #[non_exhaustive]
 pub enum Change {
     /// A new note file.
-    Added(NoteInfo),
+    Added(NotePath),
     /// A note file whose text, info or links changed.
-    Changed(NoteInfo),
+    Changed(NotePath),
     /// A note file that is gone. The path is where it was.
     Removed(NotePath),
     /// A note that is now at another path. From another tool, only a note with an id moves.
     Moved {
         /// The old path.
         from: NotePath,
-        /// The note at its new path.
-        note: NoteInfo,
+        /// The new path.
+        to: NotePath,
     },
     /// A folder that Holm moved, with everything below it.
     FolderMoved {
@@ -206,7 +207,7 @@ impl Change {
     /// it.
     pub fn note_after(&self, path: &NotePath) -> Option<NotePath> {
         match self {
-            Self::Moved { from, note } if from == path => Some(note.path.clone()),
+            Self::Moved { from, to } if from == path => Some(to.clone()),
             Self::FolderMoved { from, to } => path.moved(from, to),
             _ => None,
         }

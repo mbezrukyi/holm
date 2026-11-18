@@ -827,7 +827,7 @@ impl Draft<'_> {
         let info = self.disk.store.read(to)?.0.info;
         self.touched.moved(Change::Moved {
             from: from.clone(),
-            note: info.clone(),
+            to: to.clone(),
         });
         Ok(info)
     }

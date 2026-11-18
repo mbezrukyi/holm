@@ -691,7 +691,7 @@ impl NotePane {
         };
         let unsaved = self.is_dirty(cx);
         match change {
-            Change::Changed(info) if info.path == *path => {
+            Change::Changed(changed) if changed == path => {
                 if unsaved {
                     self.set_disk(Some(Disk::Changed), cx);
                 } else {

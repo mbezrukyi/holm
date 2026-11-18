@@ -100,7 +100,7 @@ fn an_outside_edit_updates_the_index_and_sends_a_change() {
     fed.write("a.md", &note("A", "", "# New words\n"));
     fed.feed.changed(["a.md"]).unwrap();
 
-    assert_eq!(fed.take(), [Change::Changed(fed.info("a.md"))]);
+    assert_eq!(fed.take(), [Change::Changed(note_path("a.md"))]);
     assert_eq!(previews(&fed.core), ["New words"]);
     assert_eq!(
         fed.core
@@ -119,7 +119,7 @@ fn a_new_file_is_added() {
     fed.write("b.md", "# B\n");
     fed.feed.changed(["b.md"]).unwrap();
 
-    assert_eq!(fed.take(), [Change::Added(fed.info("b.md"))]);
+    assert_eq!(fed.take(), [Change::Added(note_path("b.md"))]);
     assert_eq!(previews(&fed.core), ["B"]);
 }
 
@@ -135,7 +135,7 @@ fn a_move_in_two_batches_with_the_old_path_first_is_a_remove_and_an_add() {
         fed.take(),
         [
             Change::Removed(note_path("a.md")),
-            Change::Added(fed.info("z.md"))
+            Change::Added(note_path("z.md"))
         ]
     );
 }
@@ -167,7 +167,7 @@ fn a_moved_note_keeps_its_id_and_its_backlinks() {
         changes[0],
         Change::Moved {
             from: note_path("a.md"),
-            note: fed.info("work/a.md"),
+            to: note_path("work/a.md"),
         }
     );
     assert_eq!(changes[1..], [Change::Folders]);
@@ -188,7 +188,7 @@ fn a_move_with_the_new_path_first_is_one_change() {
         fed.take(),
         [Change::Moved {
             from: note_path("a.md"),
-            note: fed.info("z.md"),
+            to: note_path("z.md"),
         }]
     );
 }
@@ -215,9 +215,12 @@ fn holm_s_own_saves_and_new_notes_come_from_holm() {
     assert_eq!(
         lists,
         [
-            (Source::Holm, vec![Change::Changed(saved.info)]),
-            (Source::Holm, vec![Change::Changed(tagged), Change::Tags]),
-            (Source::Holm, vec![Change::Added(new.info)]),
+            (Source::Holm, vec![Change::Changed(saved.info.path)]),
+            (
+                Source::Holm,
+                vec![Change::Changed(tagged.path), Change::Tags]
+            ),
+            (Source::Holm, vec![Change::Added(new.info.path)]),
         ]
     );
 }
@@ -235,7 +238,7 @@ fn a_pin_comes_as_a_change_and_an_attachment_not_at_all() {
         .changed([PathBuf::from("a.md"), PathBuf::from("attachments"), image])
         .unwrap();
 
-    assert_eq!(fed.take(), [Change::Changed(pinned)]);
+    assert_eq!(fed.take(), [Change::Changed(pinned.path)]);
 }
 
 #[test]
@@ -269,7 +272,7 @@ fn each_own_move_comes_as_one_list_with_its_revision() {
                 note_revision,
                 vec![Change::Moved {
                     from: note_path("a.md"),
-                    note,
+                    to: note.path,
                 }],
             ),
             (
@@ -289,7 +292,7 @@ fn each_own_move_comes_as_one_list_with_its_revision() {
                         from: "work".into(),
                         to: "Job".into(),
                     },
-                    Change::Changed(fed.info("C.md")),
+                    Change::Changed(note_path("C.md")),
                     Change::Tags,
                 ],
             ),
@@ -369,15 +372,7 @@ fn a_move_rule_follows_paths_below_a_folder_and_child_tags() {
 
     let moved = Change::Moved {
         from: note_path("a.md"),
-        note: NoteInfo {
-            path: note_path("b.md"),
-            id: None,
-            title: "b".into(),
-            preview: String::new(),
-            tags: Vec::new(),
-            pinned: false,
-            modified: std::time::SystemTime::UNIX_EPOCH,
-        },
+        to: note_path("b.md"),
     };
     assert_eq!(
         moved.note_after(&note_path("a.md")),
@@ -407,8 +402,8 @@ fn a_new_folder_adds_its_notes_and_changes_the_folder_list() {
     assert_eq!(
         fed.take(),
         [
-            Change::Added(fed.info("work/a.md")),
-            Change::Added(fed.info("work/deep/b.md")),
+            Change::Added(note_path("work/a.md")),
+            Change::Added(note_path("work/deep/b.md")),
             Change::Folders,
         ]
     );
@@ -471,13 +466,13 @@ fn a_renamed_folder_keeps_search_links_and_file_links_of_its_notes() {
         [
             Change::Moved {
                 from: note_path("work/a.md"),
-                note: fed.info("job/a.md"),
+                to: note_path("job/a.md"),
             },
             Change::Moved {
                 from: note_path("work/pic.md"),
-                note: fed.info("job/pic.md"),
+                to: note_path("job/pic.md"),
             },
-            Change::Added(fed.info("job/plain.md")),
+            Change::Added(note_path("job/plain.md")),
             Change::Removed(note_path("work/plain.md")),
             Change::Folders,
         ]
@@ -512,12 +507,12 @@ fn a_tag_change_sends_a_tags_change() {
     fed.feed.changed(["a.md"]).unwrap();
     assert_eq!(
         fed.take(),
-        [Change::Changed(fed.info("a.md")), Change::Tags]
+        [Change::Changed(note_path("a.md")), Change::Tags]
     );
 
     fed.write("a.md", &note("A", "tags: [work]\n", "# A\n\nText.\n"));
     fed.feed.changed(["a.md"]).unwrap();
-    assert_eq!(fed.take(), [Change::Changed(fed.info("a.md"))]);
+    assert_eq!(fed.take(), [Change::Changed(note_path("a.md"))]);
 
     fs::remove_file(fed.path("a.md")).unwrap();
     fed.feed.changed(["a.md"]).unwrap();
@@ -555,9 +550,9 @@ fn the_empty_path_checks_the_whole_notes_folder() {
     assert_eq!(
         fed.take(),
         [
-            Change::Changed(fed.info("a.md")),
+            Change::Changed(note_path("a.md")),
             Change::Removed(note_path("b.md")),
-            Change::Added(fed.info("work/c.md")),
+            Change::Added(note_path("work/c.md")),
             Change::Folders,
         ]
     );
@@ -572,7 +567,7 @@ fn a_copied_note_gets_a_new_id() {
 
     let copy = fed.info("copy.md");
     assert_ne!(copy.id.as_ref().map(NoteId::as_str), Some("A"));
-    assert_eq!(fed.take(), [Change::Added(copy)]);
+    assert_eq!(fed.take(), [Change::Added(copy.path)]);
     // The new id went into the file. Its event finds nothing new.
     fed.feed.changed(["copy.md"]).unwrap();
     assert_eq!(fed.take(), []);
@@ -587,7 +582,7 @@ fn every_stream_gets_each_change() {
     fed.write("a.md", "# A\n");
     fed.feed.changed(["a.md"]).unwrap();
 
-    let added = Change::Added(fed.info("a.md"));
+    let added = Change::Added(note_path("a.md"));
     assert_eq!(fed.take(), std::slice::from_ref(&added));
     let list = second.try_next().unwrap();
     assert_eq!(list.changes, [added]);
@@ -659,14 +654,11 @@ mod real_events {
 
     #[test]
     fn an_outside_edit_comes_as_a_change() {
-        let (dir, _cache, core, mut changes) = open(&[("a.md", "# Old\n")]);
+        let (dir, _cache, _core, mut changes) = open(&[("a.md", "# Old\n")]);
 
         fs::write(dir.path().join("a.md"), "# New\n").unwrap();
 
-        assert_eq!(
-            next(&mut changes),
-            [Change::Changed(core.read(&note_path("a.md")).unwrap().info)]
-        );
+        assert_eq!(next(&mut changes), [Change::Changed(note_path("a.md"))]);
     }
 
     #[test]
@@ -678,18 +670,15 @@ mod real_events {
 
         let list = next_list(&mut changes);
         assert_eq!(list.source, Source::Holm);
-        assert_eq!(list.changes, [Change::Changed(saved.info)]);
+        assert_eq!(list.changes, [Change::Changed(saved.info.path)]);
         let list = next_list(&mut changes);
         assert_eq!(list.source, Source::Outside);
-        assert_eq!(
-            list.changes,
-            [Change::Added(core.read(&note_path("b.md")).unwrap().info)]
-        );
+        assert_eq!(list.changes, [Change::Added(note_path("b.md"))]);
     }
 
     #[test]
     fn a_rename_comes_as_a_move() {
-        let (dir, _cache, core, mut changes) = open(&[("a.md", &note("A", "", "# A\n"))]);
+        let (dir, _cache, _core, mut changes) = open(&[("a.md", &note("A", "", "# A\n"))]);
 
         fs::rename(dir.path().join("a.md"), dir.path().join("b.md")).unwrap();
 
@@ -697,7 +686,7 @@ mod real_events {
             next(&mut changes),
             [Change::Moved {
                 from: note_path("a.md"),
-                note: core.read(&note_path("b.md")).unwrap().info,
+                to: note_path("b.md"),
             }]
         );
     }
