@@ -3,6 +3,7 @@
 //! It has no UI. The app and the later manager use it through one [`Core`] handle.
 
 mod error;
+mod facts;
 mod index;
 pub mod model;
 mod nodes;
@@ -31,6 +32,7 @@ pub use paths::{FolderPath, NotePath};
 pub use snapshot::Snapshot;
 pub use watch::Feed;
 
+use facts::{Delta, Facts};
 use index::Index;
 use model::{
     Change, ChangeList, DeleteCount, LinkTarget, Note, NoteId, NoteInfo, NoteSet, Order,
@@ -39,7 +41,6 @@ use model::{
 use nodes::{Node, Nodes};
 use paths::Name;
 use retag::TagEdit;
-use snapshot::Delta;
 use store::Store;
 use watch::{Apply, Batch};
 
@@ -63,7 +64,7 @@ struct Inner {
     /// so a watch batch never sees half of it.
     writing: Mutex<()>,
     /// Changes only under `writing`.
-    snapshot: Mutex<Snapshot>,
+    facts: Mutex<Facts>,
     listeners: Mutex<Vec<UnboundedSender<ChangeList>>>,
     _watcher: Option<watch::Watcher>,
 }
@@ -679,12 +680,12 @@ impl Core {
 
     fn build(store: Store, index_dir: &Path, watcher: Option<watch::Watcher>) -> Result<Self> {
         let index = Index::open(index_dir, &store)?;
-        let snapshot = Snapshot::new(index.entries()?, store.folders(&FolderPath::root())?);
+        let facts = Facts::new(index.entries()?, store.folders(&FolderPath::root())?);
         let inner = Inner {
             store,
             index,
             writing: Mutex::new(()),
-            snapshot: Mutex::new(snapshot),
+            facts: Mutex::new(facts),
             listeners: Mutex::new(Vec::new()),
             _watcher: watcher,
         };
@@ -704,7 +705,7 @@ impl Core {
 /// The next snapshot, while one write runs.
 struct Draft<'a> {
     store: &'a Store,
-    next: Snapshot,
+    next: Facts,
     changed: bool,
     /// The change list of the next revision.
     changes: Vec<Change>,
@@ -746,17 +747,17 @@ impl Draft<'_> {
 
 impl Inner {
     fn snapshot(&self) -> Snapshot {
-        lock(&self.snapshot).clone()
+        lock(&self.facts).snapshot().clone()
     }
 
-    /// Runs `op` under the write lock, with a draft of the next snapshot.
-    /// When a fact changed, the draft gets the next revision and replaces the snapshot.
-    /// The change list carries the snapshot of its revision.
+    /// Runs `op` under the write lock, with a draft of the next facts.
+    /// The draft replaces the facts, so they keep each new stamp. When a fact changed, the draft
+    /// gets the next revision. The change list carries the snapshot of its revision.
     fn write<T>(&self, op: impl FnOnce(&mut Draft<'_>) -> Result<T>) -> Result<T> {
         let _writing = lock(&self.writing);
         let mut draft = Draft {
             store: &self.store,
-            next: self.snapshot(),
+            next: lock(&self.facts).clone(),
             changed: false,
             changes: Vec::new(),
         };
@@ -765,20 +766,18 @@ impl Inner {
             !draft.changed || !draft.changes.is_empty(),
             "a new revision with no change"
         );
-        let mut snapshot = draft.next;
+        let mut facts = draft.next;
         if draft.changed {
-            snapshot = snapshot.next_revision();
+            facts = facts.next_revision();
         }
         if !draft.changes.is_empty() {
             let list = ChangeList {
-                snapshot: snapshot.clone(),
+                snapshot: facts.snapshot().clone(),
                 changes: draft.changes,
             };
             lock(&self.listeners).retain(|listener| listener.unbounded_send(list.clone()).is_ok());
         }
-        if draft.changed {
-            *lock(&self.snapshot) = snapshot;
-        }
+        *lock(&self.facts) = facts;
         result
     }
 
@@ -817,7 +816,10 @@ impl Inner {
     }
 
     fn edit_tag(&self, draft: &mut Draft<'_>, edit: &TagEdit<'_>) -> Result<usize> {
-        let paths = draft.next.paths(NoteSet::WithTag(edit.tag()), Order::Title);
+        let paths = draft
+            .next
+            .snapshot()
+            .paths(NoteSet::WithTag(edit.tag()), Order::Title);
         let rewritten = self.store.rewrite(&paths, |_, old| {
             let mut text = holm_markdown::Note::parse(old);
             let tags = text.tags();
@@ -919,7 +921,7 @@ impl Inner {
     /// change list.
     fn apply(&self, batch: Batch) -> Result<()> {
         self.write(|draft| {
-            let nodes = Nodes::outside(&self.store, &draft.next, batch);
+            let nodes = Nodes::outside(&self.store, draft.next.snapshot(), batch);
             if nodes.is_empty() {
                 return Ok(());
             }

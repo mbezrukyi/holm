@@ -19,11 +19,11 @@ use rusqlite::types::{Type, Value};
 use rusqlite::{Connection, OptionalExtension as _, params};
 
 use crate::error::{Error, Result};
+use crate::facts::Delta;
 use crate::model::{Change, Link, LinkTarget, Note, NoteId, NoteInfo};
 use crate::nodes::{Node, Nodes};
 use crate::paths::{NotePath, NoteReader};
 use crate::relink::resolve;
-use crate::snapshot::Delta;
 use crate::store::{Stamp, Store, time};
 
 mod search;
@@ -71,7 +71,8 @@ CREATE INDEX links_target ON links (kind, target);
 
 const NOTE_INFO: &str = "
 SELECT path, id, title, pinned, modified, preview,
-    (SELECT group_concat(tag, char(10) ORDER BY pos) FROM tags WHERE note = notes.key)
+    (SELECT group_concat(tag, char(10) ORDER BY pos) FROM tags WHERE note = notes.key),
+    changed, size
 FROM notes";
 
 /// What a [`Index::refresh`] found.
@@ -131,13 +132,13 @@ impl Index {
         self.run(|conn| Ok(search::find(conn, text)?))
     }
 
-    /// Every note with its links, in no order.
-    pub(crate) fn entries(&self) -> Result<Vec<(NoteInfo, Vec<Link>)>> {
+    /// Every note with its links and its stamp, in no order.
+    pub(crate) fn entries(&self) -> Result<Vec<(NoteInfo, Vec<Link>, Stamp)>> {
         self.run(|conn| {
             let mut reader = NoteReader::default();
             let mut statement = conn.prepare_cached(&format!("{NOTE_INFO} ORDER BY key"))?;
             let notes = statement
-                .query_map([], |row| note_info(&mut reader, row))?
+                .query_map([], |row| Ok((note_info(&mut reader, row)?, stamp(row)?)))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             let mut statement = conn.prepare_cached(
                 "SELECT kind, target, heading, embedded, notes.path FROM links
@@ -152,9 +153,9 @@ impl Index {
             }
             Ok(notes
                 .into_iter()
-                .map(|info| {
+                .map(|(info, stamp)| {
                     let links = links.remove(&info.path).unwrap_or_default();
-                    (info, links)
+                    (info, links, stamp)
                 })
                 .collect())
         })
@@ -171,8 +172,9 @@ impl Index {
             let mut put_notes = Vec::with_capacity(notes.len());
             let mut delta = Delta::default();
             for (note, stamp) in notes {
-                let (note, links) = put(&tx, &self.store, note.clone(), *stamp, false, &mut gone)?;
-                delta.put.push((note.info.clone(), links));
+                let (note, links, stamp) =
+                    put(&tx, &self.store, note.clone(), *stamp, false, &mut gone)?;
+                delta.put.push((note.info.clone(), links, stamp));
                 put_notes.push(note);
             }
             tx.commit()?;
@@ -365,10 +367,11 @@ fn sync(conn: &mut Connection, store: &Store, nodes: &Nodes) -> Result<Refresh, 
     for node in nodes {
         known.extend(known_in(&tx, node)?);
     }
-    let on_disk: HashSet<&NotePath> = files.iter().map(|(rel, _)| rel).collect();
+    let on_disk: HashMap<&NotePath, Stamp> =
+        files.iter().map(|(rel, stamp)| (rel, *stamp)).collect();
     let left: Vec<(&NotePath, Stamp)> = known
         .iter()
-        .filter(|(rel, _)| !on_disk.contains(rel))
+        .filter(|(rel, _)| !on_disk.contains_key(rel))
         .map(|(rel, stamp)| (rel, *stamp))
         .collect();
     let joined: Vec<(&NotePath, Stamp)> = files
@@ -382,7 +385,7 @@ fn sync(conn: &mut Connection, store: &Store, nodes: &Nodes) -> Result<Refresh, 
         if let Some(note) = shift(&tx, from, to)? {
             done.insert(from);
             done.insert(to);
-            moves.push((from.clone(), note));
+            moves.push((from.clone(), note, on_disk[to]));
         }
     }
     let mut gone = Vec::new();
@@ -401,8 +404,8 @@ fn sync(conn: &mut Connection, store: &Store, nodes: &Nodes) -> Result<Refresh, 
         let old_tags = if new { None } else { Some(tags_of(&tx, rel)?) };
         match store.read(rel) {
             Ok((note, stamp)) => {
-                let (note, links) = put(&tx, store, note, stamp, new, &mut gone)?;
-                put_in.push((note.info.clone(), links));
+                let (note, links, stamp) = put(&tx, store, note, stamp, new, &mut gone)?;
+                put_in.push((note.info.clone(), links, stamp));
                 written.push((note.info, old_tags));
             }
             Err(error) => {
@@ -413,15 +416,15 @@ fn sync(conn: &mut Connection, store: &Store, nodes: &Nodes) -> Result<Refresh, 
     }
     tx.commit()?;
     let mut removed: Vec<NotePath> = gone.iter().map(|gone| gone.path.clone()).collect();
-    for (from, (info, links)) in &moves {
+    for (from, (info, links), stamp) in &moves {
         removed.push(from.clone());
-        put_in.push((info.clone(), links.clone()));
+        put_in.push((info.clone(), links.clone(), *stamp));
     }
     let delta = Delta {
         removed,
         put: put_in,
     };
-    let moves = moves.into_iter().map(|(from, (info, _))| (from, info));
+    let moves = moves.into_iter().map(|(from, (info, _), _)| (from, info));
     Ok(Refresh {
         delta,
         ..refresh(written, moves, gone)
@@ -585,7 +588,7 @@ fn change_path(change: &Change) -> Option<&NotePath> {
 }
 
 /// Writes one note into the index, after a check that no other file has its id.
-/// It returns the note and its links.
+/// It returns the note, its links and its stamp. A new id changes the note and its stamp.
 ///
 /// When the other file is gone, its note leaves the index and goes into `gone`.
 /// When `new` is true, the caller knows that the index has no note at this path.
@@ -596,7 +599,7 @@ fn put(
     mut stamp: Stamp,
     new: bool,
     gone: &mut Vec<Gone>,
-) -> Result<(Note, Vec<Link>), Fail> {
+) -> Result<(Note, Vec<Link>, Stamp), Fail> {
     if let Some(id) = &note.info.id
         && let Some(owner) = owner(conn, id)?
         && owner != note.info.path
@@ -616,7 +619,7 @@ fn put(
         }
     }
     let links = write(conn, store.root(), &note, stamp, new)?;
-    Ok((note, links))
+    Ok((note, links, stamp))
 }
 
 /// The links of the note, with file paths from the notes folder.
@@ -811,6 +814,15 @@ fn note_info(reader: &mut NoteReader, row: &rusqlite::Row<'_>) -> rusqlite::Resu
             .unwrap_or_default(),
         pinned: row.get(3)?,
         modified: time(row.get(4)?),
+    })
+}
+
+/// The stamp of a row of [`NOTE_INFO`].
+fn stamp(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stamp> {
+    Ok(Stamp {
+        modified: row.get(4)?,
+        changed: row.get(7)?,
+        size: row.get(8)?,
     })
 }
 

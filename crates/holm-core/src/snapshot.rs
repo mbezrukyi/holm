@@ -25,15 +25,6 @@ struct Entry {
     links: Vec<Link>,
 }
 
-/// The notes that a change of the index took out and put in.
-///
-/// [`Snapshot::apply`] takes them out first, so a note can move to a path and keep its id.
-#[derive(Debug, Default)]
-pub(crate) struct Delta {
-    pub(crate) removed: Vec<NotePath>,
-    pub(crate) put: Vec<(NoteInfo, Vec<Link>)>,
-}
-
 impl Snapshot {
     /// A number that grows with each change of the snapshot.
     ///
@@ -200,26 +191,26 @@ impl Snapshot {
         self.folders.contains(folder)
     }
 
-    /// A snapshot that holds `notes` and `folders`, with revision 0.
-    pub(crate) fn new(notes: Vec<(NoteInfo, Vec<Link>)>, folders: Vec<FolderPath>) -> Self {
-        let mut snapshot = Self {
+    /// A snapshot that holds `folders` and no notes, with revision 0.
+    pub(crate) fn new(folders: Vec<FolderPath>) -> Self {
+        Self {
             folders: folders.into_iter().collect(),
             ..Self::default()
-        };
-        snapshot.apply(Delta {
-            removed: Vec::new(),
-            put: notes,
-        });
-        snapshot
+        }
     }
 
-    /// Takes out and puts in the notes of `delta`. It returns whether a fact changed.
-    pub(crate) fn apply(&mut self, delta: Delta) -> bool {
+    /// Takes out the notes at `removed`, then puts in `put`. So a note can move to a path and
+    /// keep its id. It returns whether a fact changed.
+    pub(crate) fn apply(
+        &mut self,
+        removed: Vec<NotePath>,
+        put: impl IntoIterator<Item = (NoteInfo, Vec<Link>)>,
+    ) -> bool {
         let mut changed = false;
-        for path in delta.removed {
+        for path in removed {
             changed |= self.remove(&path);
         }
-        for (info, links) in delta.put {
+        for (info, links) in put {
             let entry = Entry { info, links };
             if self
                 .notes
