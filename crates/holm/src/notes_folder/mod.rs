@@ -208,9 +208,10 @@ impl NotesFolder {
                 std::future::ready(())
             }),
         ];
+        let (snapshot, changes) = core.follow();
         Self {
-            changes: core.changes(),
-            snapshot: core.snapshot(),
+            changes,
+            snapshot,
             core,
             root,
             budget,

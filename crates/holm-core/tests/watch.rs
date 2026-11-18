@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use futures_core::Stream;
 
 use holm_core::model::{Change, ChangeList, LinkTarget, NoteId, NoteInfo, NoteSet, Order, Source};
-use holm_core::{Changes, Core, Error, Feed, NotePath};
+use holm_core::{Changes, Core, Error, Feed, FolderPath, NotePath};
 use tempfile::TempDir;
 
 /// A notes folder with a core that sees changes only through its feed.
@@ -37,7 +37,7 @@ impl Fed {
         }
         let cache = tempfile::tempdir().unwrap();
         let (core, feed) = Core::open_with_feed(dir.path(), cache.path()).unwrap();
-        let changes = core.changes();
+        let (_, changes) = core.follow();
         Self {
             dir,
             _cache: cache,
@@ -586,8 +586,8 @@ fn a_copied_note_gets_a_new_id() {
 #[test]
 fn every_stream_gets_each_change() {
     let fed = Fed::new(&[]);
-    let mut second = fed.core.changes();
-    drop(fed.core.changes());
+    let (_, mut second) = fed.core.follow();
+    drop(fed.core.follow());
 
     fed.write("a.md", "# A\n");
     fed.feed.changed(["a.md"]).unwrap();
@@ -596,6 +596,31 @@ fn every_stream_gets_each_change() {
     assert_eq!(fed.take(), std::slice::from_ref(&added));
     let list = second.try_next().unwrap();
     assert_eq!(list.changes, [added]);
+}
+
+#[test]
+fn a_stream_starts_at_the_revision_after_its_snapshot() {
+    let fed = Fed::new(&[]);
+    let core = fed.core.clone();
+    let writer = std::thread::spawn(move || {
+        for n in 0..200 {
+            core.create(&FolderPath::root(), &format!("n{n}")).unwrap();
+        }
+    });
+
+    let mut seen = 0;
+    while !writer.is_finished() {
+        let (snapshot, mut changes) = fed.core.follow();
+        while !writer.is_finished() {
+            if let Some(list) = changes.try_next() {
+                assert_eq!(list.snapshot.revision(), snapshot.revision() + 1);
+                seen += 1;
+                break;
+            }
+        }
+    }
+    writer.join().unwrap();
+    assert!(seen > 0, "no write ended after a call");
 }
 
 #[test]
@@ -613,7 +638,7 @@ fn the_feed_refuses_paths_outside_the_notes_folder() {
 #[test]
 fn a_stream_ends_when_the_core_is_gone() {
     let fed = Fed::new(&[]);
-    let mut changes = fed.core.changes();
+    let (_, mut changes) = fed.core.follow();
 
     drop(fed);
 
@@ -641,7 +666,7 @@ mod real_events {
         }
         let cache = tempfile::tempdir().unwrap();
         let core = Core::open(dir.path(), cache.path()).unwrap();
-        let changes = core.changes();
+        let (_, changes) = core.follow();
         (dir, cache, core, changes)
     }
 

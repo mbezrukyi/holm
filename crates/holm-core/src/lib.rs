@@ -133,15 +133,16 @@ impl Core {
         self.inner.snapshot()
     }
 
-    /// A new stream of the change lists, for writes of Holm and for changes from other tools.
+    /// The facts of the notes folder now, and a new stream of the change lists after them.
     ///
-    /// Each stream gets every list from the time it was made. A list comes for each new
-    /// revision, with the snapshot of that revision. When a list comes, [`Core::snapshot`]
-    /// shows its revision or a newer one.
+    /// The stream gets a list for each revision after the snapshot, and no older list. A list
+    /// carries the snapshot of its revision. Lists come for writes of Holm and for changes
+    /// from other tools. When a list comes, [`Core::snapshot`] shows its revision or a newer one.
     /// Each list gives the moves of a write first, then the note changes in path order, then
     /// [`Change::Folders`](model::Change::Folders) and [`Change::Tags`](model::Change::Tags).
-    pub fn changes(&self) -> Changes {
-        self.inner.listeners.add()
+    pub fn follow(&self) -> (Snapshot, Changes) {
+        self.inner
+            .with(|locked| (locked.facts.snapshot().clone(), self.inner.listeners.add()))
     }
 
     /// The notes whose title, text or tags hold every word of `text`, in `order`, with the

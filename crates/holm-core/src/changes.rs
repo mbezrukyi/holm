@@ -39,7 +39,7 @@ impl Listeners {
     }
 }
 
-/// A stream of change lists. [`Core::changes`](crate::Core::changes) makes it.
+/// A stream of change lists. [`Core::follow`](crate::Core::follow) makes it.
 ///
 /// It ends when every [`Core`](crate::Core) handle is gone.
 #[derive(Debug)]

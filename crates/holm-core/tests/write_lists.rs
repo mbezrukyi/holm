@@ -71,7 +71,7 @@ fn check(name: &str, write: impl FnOnce(&Core)) {
 fn check_after(name: &str, prepare: impl FnOnce(&Folder), write: impl FnOnce(&Core)) {
     let folder = Folder::with_feed(FILES);
     prepare(&folder);
-    let mut lists = folder.core.changes();
+    let (_, mut lists) = folder.core.follow();
     let before = disk(&folder);
 
     write(&folder.core);
