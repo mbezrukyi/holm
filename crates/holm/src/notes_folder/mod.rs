@@ -18,8 +18,8 @@
 //! text until a write of it succeeds, and each write of it ends in one [`SaveEvent`].
 //!
 //! A change list from outside Holm wakes it when no job runs, and it sends one event. During a
-//! job, the lists wait for the event of the job. At quit, it runs every write that waits in the
-//! line, and then writes the draft.
+//! job, the lists wait for the event of the job. When its window closes or the app quits, it runs
+//! every write that waits in the line, and then writes the draft.
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 
 use futures_channel::oneshot;
 use futures_core::Stream;
-use gpui_kit::{App, AppContext as _, Context, EventEmitter, Task, Window};
+use gpui_kit::{App, AppContext as _, Context, EventEmitter, Subscription, Task, Window};
 use holm_core::model::{
     Change, ChangeList, DeleteCount, LinkTarget, Note, NoteSet, Order, SearchResults, Source,
 };
@@ -151,12 +151,33 @@ pub(crate) struct NotesFolder {
     /// After the quit drain, no job runs.
     closed: bool,
     watch: Task<()>,
+    _ends: [Subscription; 2],
 }
 
 impl NotesFolder {
-    /// A call waits up to `budget` for its job.
-    pub(crate) fn new(core: Core, budget: Duration, cx: &mut Context<Self>) -> Self {
+    /// A call waits up to `budget` for its job. The line drains when `window` closes, when the
+    /// app quits, or when the entity goes.
+    pub(crate) fn new(
+        core: Core,
+        budget: Duration,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         cx.on_release(|folder, _| folder.drain()).detach();
+        // The platform window can keep views alive after a close, and with them this entity.
+        let window = window.window_handle().window_id();
+        let folder = cx.weak_entity();
+        let ends = [
+            cx.on_window_closed(move |cx, closed| {
+                if closed == window {
+                    folder.update(cx, |folder, _| folder.drain()).ok();
+                }
+            }),
+            cx.on_app_quit(|folder, _| {
+                folder.drain();
+                std::future::ready(())
+            }),
+        ];
         Self {
             changes: core.changes(),
             snapshot: core.snapshot(),
@@ -171,6 +192,7 @@ impl NotesFolder {
             draft: Draft::default(),
             closed: false,
             watch: Self::watch(cx),
+            _ends: ends,
         }
     }
 
@@ -197,12 +219,6 @@ impl NotesFolder {
     /// Whether the draft has text that is not on disk.
     pub(crate) fn unsaved(&self) -> bool {
         self.draft.unsaved()
-    }
-
-    /// At quit: runs every write in the line, then writes the draft. Later writes do not run.
-    /// It works on the UI thread, because no task runs after the window is gone.
-    pub(crate) fn quit(&mut self) {
-        self.drain();
     }
 
     /// Puts the draft in the line now. It does not wait for the job.
@@ -725,7 +741,8 @@ impl NotesFolder {
         self.watch = Self::watch(cx);
     }
 
-    /// Runs every job that waits, and then writes the draft, on this thread.
+    /// Runs every job that waits, and then writes the draft. Later jobs do not run. It works on
+    /// the UI thread, because no task runs after the window is gone.
     fn drain(&mut self) {
         self.closed = true;
         let draft: Option<Job> = self.draft.take().map(|text| {
@@ -845,7 +862,12 @@ mod tests {
         fs::create_dir(&notes).unwrap();
         fs::write(notes.join("A.md"), "# A\n").unwrap();
         let (core, _) = Core::open_with_feed(&notes, dir.path().join("index")).unwrap();
-        let notes_folder = cx.new(|cx| NotesFolder::new(core, Duration::ZERO, cx));
+        let window = cx.add_window(|_, _| gpui_kit::Empty);
+        let notes_folder = window
+            .update(cx, |_, window, cx| {
+                cx.new(|cx| NotesFolder::new(core, Duration::ZERO, window, cx))
+            })
+            .unwrap();
         (dir, notes_folder)
     }
 
@@ -933,8 +955,8 @@ mod tests {
             );
             notes_folder.create_folder(FolderPath::root(), "B".into(), |_, _| {}, cx);
             notes_folder.set_text(note_path("A.md"), "# A\n\nlast\n".into());
-            notes_folder.quit();
         });
+        cx.quit();
 
         let file = fs::read_to_string(dir.path().join("notes/A.md")).unwrap();
         assert!(file.contains("  - work\n"), "{file}");

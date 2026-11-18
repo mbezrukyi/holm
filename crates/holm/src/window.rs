@@ -185,7 +185,7 @@ impl HolmWindow {
                     Ok((core, note)) => {
                         let folder = folder.clone();
                         let config = this.config.clone();
-                        let notes_folder = cx.new(|cx| NotesFolder::new(core, budget, cx));
+                        let notes_folder = cx.new(|cx| NotesFolder::new(core, budget, window, cx));
                         Stage::Open(cx.new(|cx| {
                             NotesView::new(notes_folder, folder, note, config, line, window, cx)
                         }))

@@ -236,7 +236,6 @@ impl NotePane {
                 pane.editor
                     .update(cx, |editor, cx| editor.set_appearance(appearance, cx));
             }),
-            cx.on_release(Self::released),
         ];
         let appearance = theme::appearance(cx);
         editor.update(cx, |editor, cx| editor.set_appearance(appearance, cx));
@@ -726,13 +725,6 @@ impl NotePane {
         };
         self.drop_note(cx);
         cx.emit(PaneEvent::Gone(path));
-    }
-
-    /// When the window closes or the app quits: the notes folder runs the writes in its line,
-    /// and then writes the draft. Unsaved text wins over an outside change.
-    fn released(&mut self, cx: &mut App) {
-        self.notes_folder
-            .update(cx, |notes_folder, _| notes_folder.quit());
     }
 
     /// The path of the note in the editor, also under a new note.
