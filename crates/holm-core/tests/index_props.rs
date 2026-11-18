@@ -1,4 +1,5 @@
-//! Random edits, then a full rebuild of the index must give the same answers.
+//! Random edits, then a fresh reconcile from empty facts must give the same answers. A new
+//! index folder makes the start reconcile every file from empty facts.
 
 #![allow(clippy::unwrap_used, reason = "tests")]
 
@@ -223,7 +224,7 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
 
     #[test]
-    fn a_full_rebuild_equals_the_index_after_edits(edits in prop::collection::vec(edit(), 1..16)) {
+    fn a_fresh_reconcile_equals_the_facts_after_edits(edits in prop::collection::vec(edit(), 1..16)) {
         let mut folder = Folder::with_feed(&[("work/start.md", "# Start\napple\n")]);
         let mut copies = 0;
         for edit in &edits {
@@ -231,8 +232,8 @@ proptest! {
         }
 
         let cache = tempfile::tempdir().unwrap();
-        let rebuilt = Core::open(folder.dir.path(), cache.path()).unwrap();
+        let fresh = Core::open(folder.dir.path(), cache.path()).unwrap();
 
-        prop_assert_eq!(answers(&folder.core), answers(&rebuilt));
+        prop_assert_eq!(answers(&folder.core), answers(&fresh));
     }
 }
