@@ -290,6 +290,13 @@ impl FolderPath {
     pub(crate) fn split(&self) -> Option<(Self, Name)> {
         (!self.is_root()).then(|| (Self(self.0.parent()), Name(self.0.name().into())))
     }
+
+    /// The folder and the last part of the raw relative path `path`, or `None` when `path` is
+    /// empty or not plain.
+    pub(crate) fn split_raw(path: &Path) -> Option<(Self, Name)> {
+        let (folder, name) = split(path.as_os_str().as_bytes())?;
+        Some((Self(Plain::from(folder)), Name(name.into())))
+    }
 }
 
 /// Reads many note paths, like the rows of a query. The notes of one folder share it.
@@ -791,6 +798,19 @@ mod tests {
         assert_eq!(parent, folder("work"));
         assert_eq!(parent.child(&name), folder("work/2026"));
         assert!(FolderPath::root().split().is_none());
+    }
+
+    #[test]
+    fn a_raw_path_splits_only_when_it_is_plain() {
+        let split = |path: &str| {
+            FolderPath::split_raw(Path::new(path))
+                .map(|(folder, name)| (folder, name.as_os_str().to_owned()))
+        };
+        assert_eq!(split("work/a.png"), Some((folder("work"), "a.png".into())));
+        assert_eq!(split("a.md"), Some((FolderPath::root(), "a.md".into())));
+        for raw in ["", "/a", "work/", ".git/x", "work/.a", "a//b", "./a"] {
+            assert_eq!(split(raw), None, "{raw}");
+        }
     }
 
     #[test]

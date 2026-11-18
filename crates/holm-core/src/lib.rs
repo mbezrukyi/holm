@@ -996,9 +996,7 @@ fn nodes(store: &Store, before: &Snapshot, path: &Path) -> Vec<Node> {
     if path.as_os_str().is_empty() {
         return vec![Node::Folder(FolderPath::root())];
     }
-    let folder = path.parent().and_then(FolderPath::new);
-    let name = path.file_name().and_then(Name::from_disk);
-    let (Some(folder), Some(name)) = (folder, name) else {
+    let Some((folder, name)) = FolderPath::split_raw(path) else {
         return Vec::new();
     };
     let mut nodes = Vec::new();

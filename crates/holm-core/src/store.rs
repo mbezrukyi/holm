@@ -549,9 +549,7 @@ impl Store {
     /// Whether `rel`, a path relative to the notes folder, is a file in the [attachment folder](attachment) that is
     /// not a note. A symlink counts as a file. No folder on the way may be a symlink.
     pub(crate) fn is_attachment(&self, rel: &Path) -> bool {
-        let folder = rel.parent().and_then(FolderPath::new);
-        let name = rel.file_name().and_then(Name::from_disk);
-        let (Some(folder), Some(name)) = (folder, name) else {
+        let Some((folder, name)) = FolderPath::split_raw(rel) else {
             return false;
         };
         attachment::holds(&folder)
