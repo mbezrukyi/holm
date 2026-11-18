@@ -29,8 +29,10 @@ pub(crate) struct LinkStart {
 }
 
 impl LinkStart {
-    /// The picker lists the notes of `snapshot` as [`Snapshot::newest`] gives them.
-    /// The link goes into `open_note`. The field starts with `query`.
+    /// The picker lists the notes of `snapshot` with the newest change first, as
+    /// [`Snapshot::newest`] gives them. It does not take the note order of the sidebar: a link
+    /// most often goes to a note of late. The link goes into `open_note`. The field starts with
+    /// `query`.
     pub(crate) fn new(snapshot: &Snapshot, open_note: NotePath, query: String) -> Self {
         Self {
             notes: snapshot.newest(NoteSet::All),

@@ -159,7 +159,7 @@ impl HolmWindow {
         }
     }
 
-    /// Opens the notes folder and its last changed note. `create` makes the folder first.
+    /// Opens the notes folder and its first note. `create` makes the folder first.
     fn open_folder(
         &mut self,
         folder: PathBuf,
@@ -171,13 +171,17 @@ impl HolmWindow {
         cx.notify();
         let index_dir = self.index_dir.clone();
         let open = self.open_core.clone();
-        let last = self.config.read(cx).settings().last_note.clone();
+        let settings = self.config.read(cx).settings();
+        let (last, order) = (settings.last_note.clone(), settings.note_order);
         let line = self.line.clone();
         let budget = self.write_budget;
-        let job = cx.background_spawn({
-            let folder = folder.clone();
-            async move { notes_folder::open(&*open, &folder, &index_dir, create, last.as_ref()) }
-        });
+        let job =
+            cx.background_spawn({
+                let folder = folder.clone();
+                async move {
+                    notes_folder::open(&*open, &folder, &index_dir, create, last.as_ref(), order)
+                }
+            });
         cx.spawn_in(window, async move |this, cx| {
             let result = job.await;
             this.update_in(cx, |this, window, cx| {
@@ -185,9 +189,10 @@ impl HolmWindow {
                     Ok((core, note)) => {
                         let folder = folder.clone();
                         let config = this.config.clone();
-                        let notes_folder = cx.new(|cx| NotesFolder::new(core, budget, window, cx));
+                        let notes_folder =
+                            cx.new(|cx| NotesFolder::new(core, folder, budget, window, cx));
                         Stage::Open(cx.new(|cx| {
-                            NotesView::new(notes_folder, folder, note, config, line, window, cx)
+                            NotesView::new(notes_folder, note, order, config, line, window, cx)
                         }))
                     }
                     Err(error) => {

@@ -2863,6 +2863,16 @@ fn the_link_keys_do_nothing_on_the_empty_pane_with_no_sidebar(cx: &mut TestAppCo
 }
 
 #[gpui_kit::test]
+fn the_start_with_no_last_note_opens_the_first_note_of_the_note_order(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let config = fs::read_to_string(fixture.config()).unwrap();
+    fixture.write_config(&format!("{config}note_order = \"title\"\n"));
+    three_notes(&fixture.notes());
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(editor_text(cx, handle), "# Goals\nread more\n");
+}
+
+#[gpui_kit::test]
 fn an_outside_delete_after_a_view_change_opens_the_first_note(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     three_notes(&fixture.notes());

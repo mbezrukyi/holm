@@ -30,7 +30,6 @@ mod links;
 mod new_note;
 
 use std::borrow::Cow;
-use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -133,8 +132,6 @@ pub(crate) struct NotePane {
     notes_folder: Entity<NotesFolder>,
     line: Entity<MessageLine>,
     disk_menu: Entity<DiskMenu>,
-    /// The notes folder on disk, for the file links of the editor.
-    root: PathBuf,
     editor: Entity<Editor>,
     tag_row: Entity<TagRow>,
     title: Entity<TitleField<NotePath>>,
@@ -166,7 +163,6 @@ impl NotePane {
     pub(crate) fn new(
         notes_folder: Entity<NotesFolder>,
         line: Entity<MessageLine>,
-        root: PathBuf,
         note: Option<Note>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -247,7 +243,6 @@ impl NotePane {
             notes_folder,
             line,
             disk_menu,
-            root,
             editor,
             tag_row,
             title,
@@ -275,7 +270,12 @@ impl NotePane {
     /// Puts `note` from the disk into the editor. A reload keeps the view and is one undo step.
     fn show(&mut self, note: Note, reload: bool, cx: &mut Context<Self>) {
         self.ending = LineEnding::of(&note.body);
-        let folder = Some(self.root.join(note.info.path.folder()));
+        let folder = Some(
+            self.notes_folder
+                .read(cx)
+                .root()
+                .join(note.info.path.folder()),
+        );
         self.editor.update(cx, |editor, cx| {
             if reload {
                 editor.reload_text(&note.body, cx);
@@ -821,7 +821,7 @@ impl NotePane {
         path.clone_from(&new);
         cx.emit(PaneEvent::Opened(new.clone()));
         if other_folder {
-            let folder = Some(self.root.join(new.folder()));
+            let folder = Some(self.notes_folder.read(cx).root().join(new.folder()));
             self.editor
                 .update(cx, |editor, cx| editor.set_folder(folder, cx));
         }

@@ -10,7 +10,6 @@
 //! Holm makes no note by itself. When the open note is gone, the pane opens its neighbor in
 //! the sidebar list. With no note left, it shows the empty pane.
 
-use std::path::PathBuf;
 use std::rc::Rc;
 
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
@@ -19,7 +18,7 @@ use gpui_kit::{
     InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseMoveEvent, MouseUpEvent,
     ParentElement, Pixels, Render, Styled, Subscription, Window, div, px,
 };
-use holm_core::model::Note;
+use holm_core::model::{Note, Order};
 use holm_core::{FolderPath, NotePath, TagName};
 
 use crate::config::{Config, SidebarSettings};
@@ -59,23 +58,23 @@ pub(crate) struct NotesView {
 }
 
 impl NotesView {
+    /// The view of `notes_folder` with `note` open. Its note lists keep `order`.
     pub(crate) fn new(
         notes_folder: Entity<NotesFolder>,
-        root: PathBuf,
         note: Option<Note>,
+        order: Order,
         config: Entity<Config>,
         line: Entity<MessageLine>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let settings = config.read(cx).settings().clone();
-        let pane =
-            cx.new(|cx| NotePane::new(notes_folder.clone(), line.clone(), root, note, window, cx));
+        let pane = cx.new(|cx| NotePane::new(notes_folder.clone(), line.clone(), note, window, cx));
         let sidebar = cx.new(|cx| {
             Sidebar::new(
                 notes_folder.clone(),
                 pane.clone(),
-                settings.note_order,
+                order,
                 settings.sidebar.view.clone(),
                 window,
                 cx,

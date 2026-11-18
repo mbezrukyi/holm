@@ -161,6 +161,7 @@ struct Turn {
 
 pub(crate) struct NotesFolder {
     core: Core,
+    root: PathBuf,
     snapshot: Snapshot,
     changes: Changes,
     /// How long a call waits for its job.
@@ -183,10 +184,11 @@ pub(crate) struct NotesFolder {
 }
 
 impl NotesFolder {
-    /// A call waits up to `budget` for its job. The line drains when `window` closes, when the
-    /// app quits, or when the entity goes.
+    /// The notes folder at `root`, which `core` opened. A call waits up to `budget` for its job.
+    /// The line drains when `window` closes, when the app quits, or when the entity goes.
     pub(crate) fn new(
         core: Core,
+        root: PathBuf,
         budget: Duration,
         window: &Window,
         cx: &mut Context<Self>,
@@ -210,6 +212,7 @@ impl NotesFolder {
             changes: core.changes(),
             snapshot: core.snapshot(),
             core,
+            root,
             budget,
             line: VecDeque::new(),
             next_number: 1,
@@ -222,6 +225,11 @@ impl NotesFolder {
             watch: Self::watch(cx),
             _ends: ends,
         }
+    }
+
+    /// The path of the notes folder, as the user chose it.
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
     }
 
     /// The facts of the notes folder. It is never older than a write that ended.
@@ -888,22 +896,27 @@ pub(crate) fn open(
     index_dir: &Path,
     create: bool,
     last: Option<&NotePath>,
+    order: Order,
 ) -> Result<(Core, Option<Note>), AppError> {
     if create && let Err(error) = std::fs::create_dir_all(folder) {
         tracing::warn!(path = %folder.display(), %error, "cannot make the notes folder");
     }
     let core = open(folder, index_dir)?;
-    let note = first_note(&core, last)?;
+    let note = first_note(&core, last, order)?;
     Ok((core, note))
 }
 
-/// The note to open first: the last open note when it still exists, else the last changed
-/// note. With no notes, it is `None`.
-fn first_note(core: &Core, last: Option<&NotePath>) -> holm_core::Result<Option<Note>> {
+/// The note to open first: the last open note when it still exists, else the first note in
+/// `order`. With no notes, it is `None`.
+fn first_note(
+    core: &Core,
+    last: Option<&NotePath>,
+    order: Order,
+) -> holm_core::Result<Option<Note>> {
     if let Some(note) = last.and_then(|last| core.read(last).ok()) {
         return Ok(Some(note));
     }
-    match core.snapshot().first(NoteSet::All, Order::LastChange) {
+    match core.snapshot().first(NoteSet::All, order) {
         Some(info) => core.read(&info.path).map(Some),
         None => Ok(None),
     }
@@ -937,7 +950,7 @@ mod tests {
         let window = cx.add_window(|_, _| gpui_kit::Empty);
         let notes_folder = window
             .update(cx, |_, window, cx| {
-                cx.new(|cx| NotesFolder::new(core, Duration::ZERO, window, cx))
+                cx.new(|cx| NotesFolder::new(core, notes, Duration::ZERO, window, cx))
             })
             .unwrap();
         (dir, notes_folder)
