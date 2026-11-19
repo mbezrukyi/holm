@@ -338,13 +338,24 @@ impl NotePane {
             .update(cx, |line, cx| line.show(message, cx));
     }
 
-    /// Sets the disk question. A new question closes the menu of the old one.
+    /// Sets the disk question. A new question closes the menu of the old one. A question holds
+    /// the text of the note in the draft.
     fn set_disk(&mut self, disk: Option<DiskQuestion>, cx: &mut Context<Self>) {
+        if disk.is_some() {
+            self.hold_text(cx);
+        }
         if self.disk != disk {
             self.disk = disk;
             self.disk_menu.update(cx, DiskMenu::close);
         }
         self.show_state(cx);
+    }
+
+    fn hold_text(&self, cx: &mut Context<Self>) {
+        if let Some(path) = self.content.editor() {
+            self.core_door
+                .update(cx, |core_door, _| core_door.hold_text(path));
+        }
     }
 
     /// The editor text matches the file: no disk question, and no "Not saved".
@@ -379,7 +390,7 @@ impl NotePane {
     fn choose(&mut self, Chosen { question, choice }: Chosen, cx: &mut Context<Self>) {
         match (question, choice) {
             (DiskQuestion::Changed, Choice::KeepMine) => self.keep_mine(cx),
-            (DiskQuestion::Deleted, Choice::KeepMine) => self.keep_deleted(cx),
+            (DiskQuestion::Deleted, Choice::KeepMine) => self.keep_text(cx),
             (_, Choice::Reload) => self.reload(true, cx),
             (_, Choice::Close) => self.close_deleted(cx),
         }
@@ -562,19 +573,11 @@ impl NotePane {
     fn schedule_save(&mut self, cx: &mut Context<Self>) {
         self.autosave = Some(cx.spawn(async move |pane, cx| {
             cx.background_executor().timer(AUTOSAVE).await;
-            pane.update(cx, Self::autosave).ok();
+            pane.update(cx, Self::save).ok();
         }));
     }
 
-    /// Saves unsaved changes with no conflict.
-    fn autosave(&mut self, cx: &mut Context<Self>) {
-        if self.disk.is_none() {
-            self.save(cx);
-        }
-    }
-
-    /// Puts the unsaved text in the write line now. It wins over an outside change, and
-    /// writes the note again after an outside delete.
+    /// Puts the unsaved text in the write line now. A text that a disk question holds stays.
     fn save(&mut self, cx: &mut Context<Self>) {
         self.autosave = None;
         self.core_door.update(cx, CoreDoor::save_text);
@@ -651,7 +654,6 @@ impl NotePane {
             }
             Change::Removed(gone) if gone == path => {
                 if unsaved {
-                    self.autosave = None;
                     self.set_disk(Some(DiskQuestion::Deleted), cx);
                 } else {
                     cx.emit(PaneEvent::Gone(gone.clone()));
@@ -675,7 +677,10 @@ impl NotePane {
             }
             match result {
                 Ok(note) => pane.show(note, true, cx),
-                Err(_) if discard => pane.edited(cx),
+                Err(_) if discard => {
+                    pane.edited(cx);
+                    pane.hold_text(cx);
+                }
                 Err(_) => {}
             }
         }));
@@ -690,12 +695,17 @@ impl NotePane {
 
     fn keep_mine(&mut self, cx: &mut Context<Self>) {
         self.set_disk(None, cx);
-        self.save(cx);
+        self.keep_text(cx);
     }
 
-    /// "Keep mine" after an outside delete: writes the note again at its path.
-    fn keep_deleted(&mut self, cx: &mut Context<Self>) {
-        self.save(cx);
+    /// Ends the hold of the disk question, and writes the text over the file. After an outside
+    /// delete, it writes the note again at its path.
+    fn keep_text(&mut self, cx: &mut Context<Self>) {
+        self.autosave = None;
+        if let Some(path) = self.content.editor().cloned() {
+            self.core_door
+                .update(cx, |core_door, cx| core_door.keep_text(&path, cx));
+        }
     }
 
     /// "Close" after an outside delete: drops the note and its text, and the app opens another

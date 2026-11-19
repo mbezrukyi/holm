@@ -16,7 +16,7 @@
 //! left. Before each job, the write line writes the draft. So no job sees a note file older than
 //! the editor text. When the editor takes text of another note, the old text goes in the line at
 //! once. The draft keeps each text until a write of it succeeds, and each write of it ends in at
-//! most one [`SaveEvent`].
+//! most one [`SaveEvent`]. While a disk question of a note is open, no job writes its text.
 //!
 //! A change list from outside Holm wakes it when no job runs, and it sends one event. During a
 //! job, the lists wait for the event of the job. When its window closes or the app quits, it runs
@@ -130,8 +130,8 @@ pub(crate) enum SaveEvent {
     Failed(AppError),
 }
 
-/// The editor text is not on disk, because the last write of the draft failed. The
-/// [`SaveEvent`] of that write has the error.
+/// The editor text is not on disk after the writes: the last write of the draft failed, or a
+/// disk question holds the text. The [`SaveEvent`] of a failed write has the error.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct NotSaved;
 
@@ -217,6 +217,19 @@ impl CoreDoor {
         self.draft.drop_text(path);
     }
 
+    /// A disk question of the note at `path` opened. No job writes its editor text until
+    /// [`Self::keep_text`] or [`Self::drop_text`].
+    pub(crate) fn hold_text(&mut self, path: &NotePath) {
+        self.draft.hold(path);
+    }
+
+    /// The user keeps the editor text of the note at `path` over the file. The hold ends, and
+    /// the draft goes in the write line now.
+    pub(crate) fn keep_text(&mut self, path: &NotePath, cx: &mut Context<Self>) {
+        self.draft.release(path);
+        self.save_text(cx);
+    }
+
     /// Whether the draft has text that is not on disk.
     pub(crate) fn unsaved(&self) -> bool {
         self.draft.unsaved()
@@ -242,7 +255,7 @@ impl CoreDoor {
     ) {
         self.push_draft();
         let end: End = Box::new(move |door, cx| {
-            let saved = if door.draft.failed() {
+            let saved = if door.draft.kept_back() {
                 Err(NotSaved)
             } else {
                 Ok(())

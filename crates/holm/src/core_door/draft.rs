@@ -4,6 +4,9 @@
 //! the next job writes it again. When the draft takes text of another note, it gives the write
 //! of the old text first. Only [`Draft::drop_text`] drops a text with no write. Each text
 //! follows the moves of its note, and an outside delete makes it a restore of the note.
+//!
+//! A disk question holds the text of its note: the draft gives no write of it until
+//! [`Draft::release`] or [`Draft::drop_text`].
 
 use holm_core::model::{Change, Note, NoteInfo, Source};
 use holm_core::{Core, NotePath, Snapshot};
@@ -77,13 +80,15 @@ struct Text {
     writing: Option<u64>,
     /// The last write of the text failed.
     failed: bool,
+    /// A disk question holds the text, so it gives no write.
+    held: bool,
 }
 
 impl Text {
     /// The save to put in the write line. It is `None` when the line already holds a save
     /// of this body.
     fn save(&mut self) -> Option<DraftSave> {
-        if self.writing == Some(self.version) {
+        if self.held || self.writing == Some(self.version) {
             return None;
         }
         self.writing = Some(self.version);
@@ -150,6 +155,7 @@ impl Draft {
                 version,
                 writing: None,
                 failed: false,
+                held: false,
             },
         };
         *new.note.body_mut() = body;
@@ -172,6 +178,20 @@ impl Draft {
         self.left.retain(|text| text.note.path() != path);
     }
 
+    /// Holds the text of the note at `path` while its disk question is open.
+    pub(super) fn hold(&mut self, path: &NotePath) {
+        if let Some(text) = self.text_mut(path) {
+            text.held = true;
+        }
+    }
+
+    /// Ends the hold of the text of the note at `path`, so the next writes give it.
+    pub(super) fn release(&mut self, path: &NotePath) {
+        if let Some(text) = self.text_mut(path) {
+            text.held = false;
+        }
+    }
+
     /// Whether the draft has text that is not on disk.
     pub(super) fn unsaved(&self) -> bool {
         self.open.is_some() || !self.left.is_empty()
@@ -185,6 +205,12 @@ impl Draft {
     /// Whether a text is not on disk, because its last write failed.
     pub(super) fn failed(&self) -> bool {
         self.texts().any(|text| text.failed)
+    }
+
+    /// Whether a text stays off the disk after the writes in the line: its last write failed,
+    /// or a disk question holds it.
+    pub(super) fn kept_back(&self) -> bool {
+        self.texts().any(|text| text.failed || text.held)
     }
 
     /// The saves to put in the write line before a job, the left texts first. A text whose save
@@ -249,6 +275,13 @@ impl Draft {
 
     fn texts(&self) -> impl Iterator<Item = &Text> {
         self.left.iter().chain(&self.open)
+    }
+
+    fn text_mut(&mut self, path: &NotePath) -> Option<&mut Text> {
+        self.left
+            .iter_mut()
+            .chain(&mut self.open)
+            .find(|text| text.note.path() == path)
     }
 }
 
@@ -401,5 +434,72 @@ mod tests {
             draft.take(),
             [save("work/A.md", "one"), save("work/B.md", "two")]
         );
+    }
+
+    #[test]
+    fn a_held_text_gives_no_write_until_its_release() {
+        let mut draft = Draft::default();
+        set(&mut draft, "A.md", "one");
+        draft.hold(&note_path("A.md"));
+        set(&mut draft, "A.md", "two");
+        assert!(draft.writes().is_empty());
+        assert!(draft.unsaved());
+        assert!(draft.kept_back());
+        assert!(!draft.failed());
+
+        draft.release(&note_path("A.md"));
+        assert!(!draft.kept_back());
+        let write = one_write(&mut draft);
+        assert_eq!(write.text, save("A.md", "two"));
+        assert_eq!(draft.written(write.id, write.version, true), Written::Saved);
+        assert!(!draft.unsaved());
+    }
+
+    #[test]
+    fn a_held_text_gives_no_write_when_the_editor_takes_another_note() {
+        let mut draft = Draft::default();
+        set(&mut draft, "A.md", "one");
+        draft.hold(&note_path("A.md"));
+        assert!(draft.set(note_path("B.md"), "two".into()).is_none());
+        assert_eq!(one_write(&mut draft).text, save("B.md", "two"));
+        assert!(draft.kept_back());
+    }
+
+    #[test]
+    fn a_drop_ends_the_hold_with_the_text() {
+        let mut draft = Draft::default();
+        set(&mut draft, "A.md", "one");
+        draft.hold(&note_path("A.md"));
+        draft.drop_text(&note_path("A.md"));
+        assert!(!draft.kept_back());
+
+        set(&mut draft, "A.md", "two");
+        assert_eq!(one_write(&mut draft).text, save("A.md", "two"));
+    }
+
+    #[test]
+    fn the_hold_follows_a_move_of_its_note() {
+        let mut draft = Draft::default();
+        set(&mut draft, "A.md", "one");
+        draft.hold(&note_path("A.md"));
+        draft.follow(
+            Source::Outside,
+            &Change::Moved {
+                from: note_path("A.md"),
+                to: note_path("work/A.md"),
+            },
+            &Snapshot::default(),
+        );
+        assert!(draft.writes().is_empty());
+        draft.release(&note_path("work/A.md"));
+        assert_eq!(one_write(&mut draft).text, save("work/A.md", "one"));
+    }
+
+    #[test]
+    fn the_last_writes_at_quit_take_a_held_text() {
+        let mut draft = Draft::default();
+        set(&mut draft, "A.md", "one");
+        draft.hold(&note_path("A.md"));
+        assert_eq!(draft.take(), [save("A.md", "one")]);
     }
 }

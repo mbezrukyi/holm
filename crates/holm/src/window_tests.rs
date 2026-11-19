@@ -399,6 +399,63 @@ fn an_outside_change_with_unsaved_text_asks_to_reload_or_keep_mine(cx: &mut Test
 }
 
 #[gpui_kit::test]
+fn a_pin_or_a_tag_change_during_a_disk_question_keeps_the_outside_text(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let note = fixture.notes().join("Note.md");
+    fs::write(&note, "old\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+    cx.simulate_input(handle, "mine ");
+    fixture.write_outside(cx, "Note.md", "theirs\n");
+
+    keys(cx, handle, "ctrl-shift-p");
+    assert!(read(&note).contains("pinned: true"));
+    assert!(read(&note).ends_with("\n---\ntheirs\n"));
+    assert_eq!(state(cx, handle).as_deref(), Some(text::CHANGED_ON_DISK));
+
+    keys(cx, handle, "ctrl-shift-t");
+    cx.simulate_input(handle, "x");
+    keys(cx, handle, "enter escape");
+    assert_eq!(fields(&note).0, ["x"]);
+    assert!(read(&note).ends_with("\n---\ntheirs\n"));
+    assert_eq!(state(cx, handle).as_deref(), Some(text::CHANGED_ON_DISK));
+    assert_eq!(editor_text(cx, handle), "mine old\n");
+
+    keys(cx, handle, "ctrl-shift-d enter");
+    assert_eq!(state(cx, handle), None);
+    assert!(read(&note).ends_with("\n---\nmine old\n"));
+    assert!(read(&note).contains("pinned: true"));
+    assert_eq!(fields(&note).0, ["x"]);
+}
+
+/// The text that a disk question holds is not saved, so the pane stays on its note.
+#[gpui_kit::test]
+fn a_disk_question_keeps_the_pane_on_its_note(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    three_notes(&notes_dir);
+    let plan = notes_dir.join("Plan.md");
+    let handle = open(cx, fixture.startup(None));
+    cx.simulate_input(handle, "mine ");
+    fixture.write_outside(cx, "Plan.md", "theirs\n");
+
+    keys(cx, handle, "ctrl-shift-l down down");
+    assert_eq!(editor_text(cx, handle), "mine # Plan\nbuy milk\n");
+    assert_eq!(state(cx, handle).as_deref(), Some(text::CHANGED_ON_DISK));
+    assert_eq!(read(&plan), "theirs\n");
+
+    keys(cx, handle, "escape");
+    assert!(close(cx, handle), "the first close keeps the window");
+    assert_eq!(message(cx, handle).as_deref(), Some(text::CLOSE_AGAIN));
+    assert_eq!(read(&plan), "theirs\n");
+
+    assert!(!close(cx, handle));
+    assert!(
+        read(&plan).ends_with("\n---\nmine # Plan\nbuy milk\n"),
+        "no text is lost"
+    );
+}
+
+#[gpui_kit::test]
 fn a_broken_config_is_a_problem_in_the_message_line(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     fixture.write_config("version = [broken\n");
