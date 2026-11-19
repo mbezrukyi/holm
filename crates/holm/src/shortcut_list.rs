@@ -28,6 +28,9 @@ const LIST_HEIGHT: Pixels = px(560.);
 /// How far `Up` and `Down` scroll: about three rows.
 const SCROLL_STEP: Pixels = px(66.);
 
+/// The text size of a key chip: a little bigger than the `Kbd` default.
+const KEY_SIZE: Pixels = px(11.);
+
 /// The list asks its owner to close it.
 pub(crate) struct Close;
 
@@ -101,7 +104,13 @@ impl ShortcutList {
                     .gap_3()
                     .py(px(2.))
                     .child(div().min_w_0().truncate().child(shortcut.label))
-                    .child(Kbd::new(keystroke).outline())
+                    .child(
+                        Kbd::new(keystroke)
+                            .outline()
+                            .text_size(KEY_SIZE)
+                            .px(px(5.))
+                            .py(px(2.)),
+                    )
             });
         v_flex()
             .child(
