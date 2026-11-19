@@ -56,11 +56,7 @@ impl FolderPicker {
             .collect();
         let name = match &target {
             Target::Note(path) => path.title().into_owned(),
-            Target::Folder(path) => path
-                .name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned(),
+            Target::Folder(path) => path.last_part().into_owned(),
         };
         let list = cx.new(|cx| PickList::new(text::move_to(&name), text::NO_FOLDER, window, cx));
         let subscription = cx.subscribe(&list, |this, _, event: &PickEvent, cx| match event {

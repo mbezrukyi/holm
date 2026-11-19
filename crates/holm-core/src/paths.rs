@@ -206,6 +206,11 @@ impl FolderPath {
         (!self.is_root()).then(|| OsStr::from_bytes(self.0.name()))
     }
 
+    /// The last part of the path as text: `2026` for `work/2026`. The root gives an empty text.
+    pub fn last_part(&self) -> Cow<'_, str> {
+        String::from_utf8_lossy(if self.is_root() { b"" } else { self.0.name() })
+    }
+
     /// How many folders down from the root this folder is. The root is 0.
     pub fn depth(&self) -> usize {
         if self.is_root() {
@@ -658,6 +663,8 @@ mod tests {
         assert_eq!(FolderPath::root().folder(), None);
         assert_eq!(year.name(), Some(OsStr::new("2026")));
         assert_eq!(FolderPath::root().name(), None);
+        assert_eq!(year.last_part(), "2026");
+        assert_eq!(FolderPath::root().last_part(), "");
         assert_eq!(year.depth(), 2);
         assert_eq!(FolderPath::root().depth(), 0);
         let parents: Vec<_> = year.parents().collect();

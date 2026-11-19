@@ -51,10 +51,7 @@ impl Item {
     pub(crate) fn name(&self) -> String {
         match self {
             Self::All => String::new(),
-            Self::Folder(path) => path
-                .name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_default(),
+            Self::Folder(path) => path.last_part().into_owned(),
             Self::Tag(name) => name.last_part().to_owned(),
         }
     }
