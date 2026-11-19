@@ -1,8 +1,9 @@
-//! The draft: the unsaved editor text of the open note.
+//! The draft: the unsaved editor text of the open note, and of the notes the editor left.
 //!
-//! The draft keeps its text until a write of that text succeeds. A failed write keeps it, so
-//! the next job writes it again. It follows the moves of its note, and an outside delete makes
-//! it a restore of the note.
+//! The draft keeps each text until a write of that text succeeds. A failed write keeps it, so
+//! the next job writes it again. When the draft takes text of another note, it gives the write
+//! of the old text first. Only [`Draft::drop_text`] drops a text with no write. Each text
+//! follows the moves of its note, and an outside delete makes it a restore of the note.
 
 use holm_core::model::{Change, Note, NoteInfo, Source};
 use holm_core::{Core, NotePath, Snapshot};
@@ -46,8 +47,9 @@ impl NoteText {
     }
 }
 
-/// One write of the draft. Its version tells the draft which text it wrote.
+/// One write of the draft. Its id and version tell the draft which text it wrote.
 pub(super) struct DraftSave {
+    pub(super) id: u64,
     pub(super) version: u64,
     pub(super) text: NoteText,
 }
@@ -59,118 +61,194 @@ pub(super) enum Written {
     Saved,
     /// The write failed, and the draft keeps the text.
     Failed,
-    /// The draft dropped the text or took another note, so the end means nothing.
+    /// The end tells the user nothing. The draft dropped the text, or the open text gives
+    /// its own end.
     Stale,
 }
 
-#[derive(Default)]
-pub(super) struct Draft {
-    text: Option<NoteText>,
-    /// It grows with each new text.
+/// One text of the draft, and the state of its writes.
+struct Text {
+    note: NoteText,
+    /// The version at which the draft took the note. The end of a write finds its text by it.
+    id: u64,
+    /// The version of the body.
     version: u64,
-    /// The version at which the draft took its note. A write before it is of another text.
-    since: u64,
     /// The version of the save in the write line, until it ends.
     writing: Option<u64>,
     /// The last write of the text failed.
     failed: bool,
 }
 
-impl Draft {
-    /// The text of the note at `path` is now `body`. A restore of the note stays a restore.
-    pub(super) fn set(&mut self, path: NotePath, body: String) {
-        self.version += 1;
-        match &mut self.text {
-            Some(text) if *text.path() == path => *text.body_mut() = body,
-            _ => {
-                self.text = Some(NoteText::Save { path, body });
-                self.since = self.version;
-                self.failed = false;
-            }
-        }
-    }
-
-    /// Drops the text with no write.
-    pub(super) fn drop_text(&mut self) {
-        self.version += 1;
-        self.since = self.version;
-        self.text = None;
-        self.failed = false;
-    }
-
-    /// Whether the draft has text that is not on disk.
-    pub(super) fn unsaved(&self) -> bool {
-        self.text.is_some()
-    }
-
-    /// Whether the text is not on disk, because its last write failed.
-    pub(super) fn failed(&self) -> bool {
-        self.failed
-    }
-
-    /// The save to put in the write line before a job. It is `None` with no text, or when the
-    /// write line already holds a save of this text.
-    pub(super) fn write(&mut self) -> Option<DraftSave> {
-        let text = self.text.clone()?;
+impl Text {
+    /// The save to put in the write line. It is `None` when the line already holds a save
+    /// of this body.
+    fn save(&mut self) -> Option<DraftSave> {
         if self.writing == Some(self.version) {
             return None;
         }
         self.writing = Some(self.version);
         Some(DraftSave {
+            id: self.id,
             version: self.version,
-            text,
+            text: self.note.clone(),
         })
     }
 
-    /// Takes the end of the write of `version`. The text goes only when this write saved it
-    /// and no newer text came.
-    pub(super) fn written(&mut self, version: u64, ok: bool) -> Written {
-        if self.writing == Some(version) {
-            self.writing = None;
-        }
-        if self.text.is_none() || version < self.since {
-            return Written::Stale;
-        }
-        if ok {
-            if version == self.version {
-                self.text = None;
-            }
-            self.failed = false;
-            Written::Saved
-        } else {
-            self.failed = true;
-            Written::Failed
-        }
-    }
-
-    /// Follows `change` from `source`. `before` is the snapshot before it.
-    pub(super) fn follow(&mut self, source: Source, change: &Change, before: &Snapshot) {
-        let Some(text) = &mut self.text else {
-            return;
-        };
-        if let Some(new) = change.note_after(text.path()) {
-            *text.path_mut() = new;
+    fn follow(&mut self, source: Source, change: &Change, before: &Snapshot) {
+        if let Some(new) = change.note_after(self.note.path()) {
+            *self.note.path_mut() = new;
             return;
         }
         let Change::Removed(gone) = change else {
             return;
         };
-        if source != Source::Outside || gone != text.path() {
+        if source != Source::Outside || gone != self.note.path() {
             return;
         }
-        if let NoteText::Save { path, body } = text
+        if let NoteText::Save { path, body } = &mut self.note
             && let Some(info) = before.note(path)
         {
-            *text = NoteText::Restore {
+            self.note = NoteText::Restore {
                 info: info.clone(),
                 body: std::mem::take(body),
             };
         }
     }
+}
 
-    /// At quit: takes the text for its last write.
-    pub(super) fn take(&mut self) -> Option<NoteText> {
-        self.text.take()
+#[derive(Default)]
+pub(super) struct Draft {
+    /// The text of the note that the editor took last.
+    open: Option<Text>,
+    /// The texts of the notes that the editor left, until a write of each succeeds.
+    left: Vec<Text>,
+    /// It grows with each new body.
+    version: u64,
+}
+
+impl Draft {
+    /// The text of the note at `path` is now `body`. A restore of the note stays a restore.
+    /// When the open text is of another note, it gives the write of that text, and the caller
+    /// puts it in the write line.
+    #[must_use = "the write of the old text goes in the write line"]
+    pub(super) fn set(&mut self, path: NotePath, body: String) -> Option<DraftSave> {
+        self.version += 1;
+        let version = self.version;
+        if let Some(open) = self.open.as_mut().filter(|open| *open.note.path() == path) {
+            *open.note.body_mut() = body;
+            open.version = version;
+            return None;
+        }
+        let mut new = match self.left.iter().position(|text| *text.note.path() == path) {
+            Some(at) => self.left.remove(at),
+            None => Text {
+                note: NoteText::Save {
+                    path,
+                    body: String::new(),
+                },
+                id: version,
+                version,
+                writing: None,
+                failed: false,
+            },
+        };
+        *new.note.body_mut() = body;
+        new.version = version;
+        let mut old = self.open.replace(new)?;
+        let save = old.save();
+        self.left.push(old);
+        save
+    }
+
+    /// Drops the text of the note at `path` with no write.
+    pub(super) fn drop_text(&mut self, path: &NotePath) {
+        if self
+            .open
+            .as_ref()
+            .is_some_and(|open| open.note.path() == path)
+        {
+            self.open = None;
+        }
+        self.left.retain(|text| text.note.path() != path);
+    }
+
+    /// Whether the draft has text that is not on disk.
+    pub(super) fn unsaved(&self) -> bool {
+        self.open.is_some() || !self.left.is_empty()
+    }
+
+    /// Whether the draft has text of the note at `path` that is not on disk.
+    pub(super) fn unsaved_note(&self, path: &NotePath) -> bool {
+        self.texts().any(|text| text.note.path() == path)
+    }
+
+    /// Whether a text is not on disk, because its last write failed.
+    pub(super) fn failed(&self) -> bool {
+        self.texts().any(|text| text.failed)
+    }
+
+    /// The saves to put in the write line before a job, the left texts first. A text whose save
+    /// is already in the line gives none.
+    pub(super) fn writes(&mut self) -> Vec<DraftSave> {
+        self.left
+            .iter_mut()
+            .chain(&mut self.open)
+            .filter_map(Text::save)
+            .collect()
+    }
+
+    /// Takes the end of the write of `version` of the text `id`. The text goes only when this
+    /// write saved it and no newer body came. A saved left text tells the user only when
+    /// no other text waits.
+    pub(super) fn written(&mut self, id: u64, version: u64, ok: bool) -> Written {
+        let is_open = self.open.as_ref().is_some_and(|open| open.id == id);
+        let text = if is_open {
+            self.open.as_mut()
+        } else {
+            self.left.iter_mut().find(|text| text.id == id)
+        };
+        let Some(text) = text else {
+            return Written::Stale;
+        };
+        if text.writing == Some(version) {
+            text.writing = None;
+        }
+        text.failed = !ok;
+        if !ok {
+            return Written::Failed;
+        }
+        if version == text.version {
+            if is_open {
+                self.open = None;
+            } else {
+                self.left.retain(|text| text.id != id);
+            }
+        }
+        if is_open || (self.open.is_none() && !self.failed()) {
+            Written::Saved
+        } else {
+            Written::Stale
+        }
+    }
+
+    /// Follows `change` from `source`. `before` is the snapshot before it.
+    pub(super) fn follow(&mut self, source: Source, change: &Change, before: &Snapshot) {
+        for text in self.left.iter_mut().chain(&mut self.open) {
+            text.follow(source, change, before);
+        }
+    }
+
+    /// At quit: takes every text for its last write, the left texts first.
+    pub(super) fn take(&mut self) -> Vec<NoteText> {
+        self.left
+            .drain(..)
+            .chain(self.open.take())
+            .map(|text| text.note)
+            .collect()
+    }
+
+    fn texts(&self) -> impl Iterator<Item = &Text> {
+        self.left.iter().chain(&self.open)
     }
 }
 
@@ -188,73 +266,140 @@ mod tests {
         }
     }
 
+    fn set(draft: &mut Draft, path: &str, body: &str) {
+        assert!(draft.set(note_path(path), body.into()).is_none());
+    }
+
+    fn one_write(draft: &mut Draft) -> DraftSave {
+        let mut writes = draft.writes();
+        assert_eq!(writes.len(), 1);
+        writes.pop().unwrap()
+    }
+
     #[test]
     fn the_line_holds_one_write_of_a_text() {
         let mut draft = Draft::default();
-        assert!(draft.write().is_none(), "no text");
-        draft.set(note_path("A.md"), "one".into());
-        let write = draft.write().unwrap();
+        assert!(draft.writes().is_empty(), "no text");
+        set(&mut draft, "A.md", "one");
+        let write = one_write(&mut draft);
         assert_eq!(write.text, save("A.md", "one"));
-        assert!(draft.write().is_none());
+        assert!(draft.writes().is_empty());
 
-        assert_eq!(draft.written(write.version, true), Written::Saved);
+        assert_eq!(draft.written(write.id, write.version, true), Written::Saved);
         assert!(!draft.unsaved());
-        assert!(draft.write().is_none());
+        assert!(draft.writes().is_empty());
     }
 
     #[test]
     fn a_newer_text_stays_after_the_write_of_an_older_one() {
         let mut draft = Draft::default();
-        draft.set(note_path("A.md"), "one".into());
-        let write = draft.write().unwrap();
-        draft.set(note_path("A.md"), "two".into());
+        set(&mut draft, "A.md", "one");
+        let write = one_write(&mut draft);
+        set(&mut draft, "A.md", "two");
 
-        assert_eq!(draft.written(write.version, true), Written::Saved);
+        assert_eq!(draft.written(write.id, write.version, true), Written::Saved);
         assert!(draft.unsaved());
-        assert_eq!(draft.write().unwrap().text, save("A.md", "two"));
+        assert_eq!(one_write(&mut draft).text, save("A.md", "two"));
     }
 
     #[test]
     fn a_failed_write_keeps_the_text_for_the_next_write() {
         let mut draft = Draft::default();
-        draft.set(note_path("A.md"), "one".into());
-        let write = draft.write().unwrap();
+        set(&mut draft, "A.md", "one");
+        let write = one_write(&mut draft);
 
-        assert_eq!(draft.written(write.version, false), Written::Failed);
+        assert_eq!(
+            draft.written(write.id, write.version, false),
+            Written::Failed
+        );
         assert!(draft.unsaved());
         assert!(draft.failed());
-        let again = draft.write().unwrap();
+        let again = one_write(&mut draft);
         assert_eq!(again.text, save("A.md", "one"));
 
-        assert_eq!(draft.written(again.version, true), Written::Saved);
+        assert_eq!(draft.written(again.id, again.version, true), Written::Saved);
         assert!(!draft.failed());
     }
 
     #[test]
     fn the_end_of_a_write_of_dropped_text_means_nothing() {
         let mut draft = Draft::default();
-        draft.set(note_path("A.md"), "one".into());
-        let write = draft.write().unwrap();
-        draft.drop_text();
-        assert_eq!(draft.written(write.version, false), Written::Stale);
+        set(&mut draft, "A.md", "one");
+        let write = one_write(&mut draft);
+        draft.drop_text(&note_path("A.md"));
+        assert_eq!(
+            draft.written(write.id, write.version, false),
+            Written::Stale
+        );
         assert!(!draft.failed());
-
-        draft.set(note_path("A.md"), "one".into());
-        let old = draft.write().unwrap();
-        draft.set(note_path("B.md"), "two".into());
-        assert_eq!(draft.written(old.version, false), Written::Stale);
-        assert!(draft.unsaved());
+        assert!(!draft.unsaved());
     }
 
     #[test]
-    fn the_text_follows_a_move_of_its_note() {
+    fn a_text_of_another_note_gives_the_write_of_the_old_text_first() {
         let mut draft = Draft::default();
-        draft.set(note_path("A.md"), "one".into());
-        let moved = Change::Moved {
-            from: note_path("A.md"),
-            to: note_path("work/B.md"),
+        set(&mut draft, "A.md", "one");
+        let old = draft.set(note_path("B.md"), "two".into()).unwrap();
+        assert_eq!(old.text, save("A.md", "one"));
+        assert_eq!(one_write(&mut draft).text, save("B.md", "two"));
+
+        assert_eq!(draft.written(old.id, old.version, false), Written::Failed);
+        assert!(draft.unsaved_note(&note_path("A.md")));
+        assert!(draft.failed());
+        let writes: Vec<NoteText> = draft.writes().into_iter().map(|write| write.text).collect();
+        assert_eq!(writes, [save("A.md", "one")], "B is in the line");
+    }
+
+    #[test]
+    fn the_old_text_is_one_write_when_its_save_is_in_the_line() {
+        let mut draft = Draft::default();
+        set(&mut draft, "A.md", "one");
+        let write = one_write(&mut draft);
+        assert!(draft.set(note_path("B.md"), "two".into()).is_none());
+
+        assert_eq!(draft.written(write.id, write.version, true), Written::Stale);
+        assert!(!draft.unsaved_note(&note_path("A.md")));
+        assert!(draft.unsaved_note(&note_path("B.md")));
+    }
+
+    #[test]
+    fn a_left_text_comes_back_when_the_editor_takes_its_note_again() {
+        let mut draft = Draft::default();
+        set(&mut draft, "A.md", "one");
+        let old = draft.set(note_path("B.md"), "two".into()).unwrap();
+        let _ = draft.set(note_path("A.md"), "three".into());
+
+        assert_eq!(draft.written(old.id, old.version, true), Written::Saved);
+        assert!(draft.unsaved_note(&note_path("A.md")), "a newer body came");
+        assert_eq!(
+            draft.take(),
+            [save("B.md", "two"), save("A.md", "three")],
+            "the left texts first"
+        );
+    }
+
+    #[test]
+    fn each_text_follows_a_move_of_its_note() {
+        let mut draft = Draft::default();
+        set(&mut draft, "A.md", "one");
+        let _ = draft.set(note_path("B.md"), "two".into());
+        let moved = |from: &str, to: &str| Change::Moved {
+            from: note_path(from),
+            to: note_path(to),
         };
-        draft.follow(Source::Holm, &moved, &Snapshot::default());
-        assert_eq!(draft.take(), Some(save("work/B.md", "one")));
+        draft.follow(
+            Source::Holm,
+            &moved("A.md", "work/A.md"),
+            &Snapshot::default(),
+        );
+        draft.follow(
+            Source::Holm,
+            &moved("B.md", "work/B.md"),
+            &Snapshot::default(),
+        );
+        assert_eq!(
+            draft.take(),
+            [save("work/A.md", "one"), save("work/B.md", "two")]
+        );
     }
 }

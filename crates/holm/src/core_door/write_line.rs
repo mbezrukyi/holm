@@ -167,14 +167,14 @@ impl WriteLine {
 
     /// Runs the work that left the line, every job that waits, and then `last`. Later jobs do
     /// not run. It works on the UI thread, because no task runs after the window is gone.
-    pub(super) fn drain(&mut self, last: Option<Work>) {
+    pub(super) fn drain(&mut self, last: Work) {
         self.closed = true;
         let mut slot = lock(&self.work);
         let works = slot
             .take()
             .into_iter()
             .chain(self.jobs.drain(..).map(|job| job.work))
-            .chain(last);
+            .chain(std::iter::once(last));
         for work in works {
             if let Some(failure) = work(&self.core) {
                 tracing::warn!(error = %failure, "a job at quit failed");

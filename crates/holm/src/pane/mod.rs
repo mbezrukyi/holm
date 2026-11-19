@@ -305,6 +305,10 @@ impl NotePane {
 
     /// Drops the open note and its text, with no save.
     fn drop_note(&mut self, cx: &mut Context<Self>) {
+        if let Some(path) = self.content.editor().cloned() {
+            self.core_door
+                .update(cx, |core_door, _| core_door.drop_text(&path));
+        }
         self.title.update(cx, TitleField::close);
         self.content = Content::Empty;
         self.next = None;
@@ -313,8 +317,6 @@ impl NotePane {
         self.opening += 1;
         self.mark_synced(cx);
         self.editor.update(cx, |editor, cx| editor.set_text("", cx));
-        self.core_door
-            .update(cx, |core_door, _| core_door.drop_text());
         self.links.update(cx, |links, cx| links.show(None, cx));
         self.show_fields(cx);
         cx.notify();
@@ -552,7 +554,7 @@ impl NotePane {
                 .to_disk(self.editor.read(cx).text())
                 .into_owned();
             self.core_door
-                .update(cx, |core_door, _| core_door.set_text(path, body));
+                .update(cx, |core_door, cx| core_door.set_text(path, body, cx));
         }
         self.schedule_save(cx);
     }
@@ -637,7 +639,7 @@ impl NotePane {
         let Some(path) = self.content.editor() else {
             return;
         };
-        let unsaved = self.unsaved(cx);
+        let unsaved = self.core_door.read(cx).unsaved_note(path);
         match change {
             Change::Changed(changed) if changed == path => {
                 if unsaved {
@@ -680,7 +682,7 @@ impl NotePane {
         // The write line must not write the text that the reload drops.
         self.core_door.update(cx, |core_door, cx| {
             if discard {
-                core_door.drop_text();
+                core_door.drop_text(&path);
             }
             core_door.read(path, done, cx);
         });
@@ -757,8 +759,10 @@ impl NotePane {
                     .update(cx, |core_door, cx| core_door.wait_saved(read, cx));
             }
             Leave::Drop => {
-                self.core_door
-                    .update(cx, |core_door, _| core_door.drop_text());
+                if let Some(gone) = self.content.editor().cloned() {
+                    self.core_door
+                        .update(cx, |core_door, _| core_door.drop_text(&gone));
+                }
                 self.read_note(path, opening, cx);
             }
         }

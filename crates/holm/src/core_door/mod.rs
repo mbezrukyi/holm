@@ -12,9 +12,11 @@
 //! ends in time ends in the update of the call, so no frame falls between the key and the end
 //! of its job. A late job ends in a later update, and [`CoreDoor::writing`] is true until then.
 //!
-//! It holds one [`Draft`]: the unsaved editor text of the open note. Before each job, the write
-//! line writes the draft. So no job sees a note file older than the editor text. The draft
-//! keeps the text until a write of it succeeds, and each write of it ends in one [`SaveEvent`].
+//! It holds one [`Draft`]: the unsaved editor text of the open note, and of the notes the editor
+//! left. Before each job, the write line writes the draft. So no job sees a note file older than
+//! the editor text. When the editor takes text of another note, the old text goes in the line at
+//! once. The draft keeps each text until a write of it succeeds, and each write of it ends in at
+//! most one [`SaveEvent`].
 //!
 //! A change list from outside Holm wakes it when no job runs, and it sends one event. During a
 //! job, the lists wait for the event of the job. When its window closes or the app quits, it runs
@@ -41,7 +43,7 @@ use holm_editor::PastedFile;
 
 use crate::error::AppError;
 use crate::tags::TagChange;
-use draft::{Draft, Written};
+use draft::{Draft, DraftSave, Written};
 use write_line::{End, Work, WriteLine};
 
 mod draft;
@@ -201,19 +203,28 @@ impl CoreDoor {
         self.write_line.is_late()
     }
 
-    /// The editor text of the note at `path` is now `body`. It writes nothing yet.
-    pub(crate) fn set_text(&mut self, path: NotePath, body: String) {
-        self.draft.set(path, body);
+    /// The editor text of the note at `path` is now `body`. It writes nothing yet. Text of
+    /// another note before it goes in the write line now.
+    pub(crate) fn set_text(&mut self, path: NotePath, body: String, cx: &mut Context<Self>) {
+        if let Some(old) = self.draft.set(path, body) {
+            self.push_save(old);
+            self.run(None, cx);
+        }
     }
 
-    /// Drops the editor text with no write.
-    pub(crate) fn drop_text(&mut self) {
-        self.draft.drop_text();
+    /// Drops the editor text of the note at `path` with no write.
+    pub(crate) fn drop_text(&mut self, path: &NotePath) {
+        self.draft.drop_text(path);
     }
 
     /// Whether the draft has text that is not on disk.
     pub(crate) fn unsaved(&self) -> bool {
         self.draft.unsaved()
+    }
+
+    /// Whether the draft has text of the note at `path` that is not on disk.
+    pub(crate) fn unsaved_note(&self, path: &NotePath) -> bool {
+        self.draft.unsaved_note(path)
     }
 
     /// Puts the draft in the write line now. It does not wait for the job.
@@ -600,9 +611,12 @@ impl CoreDoor {
     }
 
     fn push_draft(&mut self) {
-        let Some(save) = self.draft.write() else {
-            return;
-        };
+        for save in self.draft.writes() {
+            self.push_save(save);
+        }
+    }
+
+    fn push_save(&mut self, save: DraftSave) {
         let (send, mut receive) = oneshot::channel();
         let work: Work = Box::new(move |core: &Core| {
             let failure = save.text.write(core).err().map(AppError::from);
@@ -610,12 +624,12 @@ impl CoreDoor {
             send.send(failure).ok();
             chain
         });
-        let version = save.version;
+        let (id, version) = (save.id, save.version);
         let end: End = Box::new(move |door, cx| {
             let Ok(Some(failure)) = receive.try_recv() else {
                 return;
             };
-            match (door.draft.written(version, failure.is_none()), failure) {
+            match (door.draft.written(id, version, failure.is_none()), failure) {
                 (Written::Saved, _) => cx.emit(SaveEvent::Saved),
                 (Written::Failed, Some(error)) => cx.emit(SaveEvent::Failed(error)),
                 _ => {}
@@ -691,9 +705,14 @@ impl CoreDoor {
 
     /// Runs every job that waits, and then writes the draft. Later jobs do not run.
     fn drain(&mut self) {
-        let draft = self.draft.take().map(|text| {
-            Box::new(move |core: &Core| text.write(core).err().map(|error| crate::chain(&error)))
-                as Work
+        let texts = self.draft.take();
+        let draft: Work = Box::new(move |core: &Core| {
+            let failures: Vec<String> = texts
+                .into_iter()
+                .filter_map(|text| text.write(core).err())
+                .map(|error| crate::chain(&error))
+                .collect();
+            (!failures.is_empty()).then(|| failures.join("; "))
         });
         self.write_line.drain(draft);
     }
@@ -939,7 +958,7 @@ mod tests {
     fn the_writes_in_the_line_reach_the_files_at_quit_with_the_draft_last(cx: &mut TestAppContext) {
         let (dir, core_door) = core_door(cx);
         core_door.update(cx, |core_door, cx| {
-            core_door.set_text(note_path("A.md"), "# A\n\nfirst\n".into());
+            core_door.set_text(note_path("A.md"), "# A\n\nfirst\n".into(), cx);
             core_door.change_tag(
                 note_path("A.md"),
                 TagChange::Add(tag_name("work")),
@@ -947,7 +966,7 @@ mod tests {
                 cx,
             );
             core_door.create_folder(FolderPath::root(), "B".into(), Done::value(|_, _| {}), cx);
-            core_door.set_text(note_path("A.md"), "# A\n\nlast\n".into());
+            core_door.set_text(note_path("A.md"), "# A\n\nlast\n".into(), cx);
         });
         cx.quit();
 
@@ -970,11 +989,11 @@ mod tests {
             );
         };
         core_door.update(cx, |core_door, cx| {
-            core_door.set_text(note_path("A.md"), "# A\n\nold\n".into());
-            core_door.set_text(note_path("A.md"), "# A\n\nnew\n".into());
+            core_door.set_text(note_path("A.md"), "# A\n\nold\n".into(), cx);
+            core_door.set_text(note_path("A.md"), "# A\n\nnew\n".into(), cx);
             read(core_door, cx);
             read(core_door, cx);
-            core_door.set_text(note_path("A.md"), "# A\n\nlater\n".into());
+            core_door.set_text(note_path("A.md"), "# A\n\nlater\n".into(), cx);
         });
         cx.run_until_parked();
         core_door.update(cx, |core_door, cx| read(core_door, cx));
@@ -1020,7 +1039,7 @@ mod tests {
 
         read_only(true);
         core_door.update(cx, |core_door, cx| {
-            core_door.set_text(note_path("A.md"), "# A\n\nmine\n".into());
+            core_door.set_text(note_path("A.md"), "# A\n\nmine\n".into(), cx);
             core_door.save_text(cx);
         });
         cx.run_until_parked();
@@ -1051,7 +1070,7 @@ mod tests {
         fs::write(&file, "---\ntags: [theirs]\n---\n# A\n").unwrap();
 
         core_door.update(cx, |core_door, cx| {
-            core_door.set_text(note_path("A.md"), "# A\n\nmine\n".into());
+            core_door.set_text(note_path("A.md"), "# A\n\nmine\n".into(), cx);
             core_door.save_text(cx);
         });
         cx.run_until_parked();

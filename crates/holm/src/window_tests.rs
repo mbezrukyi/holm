@@ -2355,6 +2355,48 @@ fn quick_open_opens_a_note_by_its_title(cx: &mut TestAppContext) {
     assert_eq!(focus(cx, handle), "sidebar");
 }
 
+/// Presses `key`, and runs no task.
+fn press_only(cx: &mut TestAppContext, handle: AnyWindowHandle, key: &'static str) {
+    cx.dispatch_keystroke(handle, gpui_kit::Keystroke::parse(key).unwrap());
+}
+
+/// The keys that the old note takes while another note opens reach its file, also after keys in
+/// the new note.
+#[gpui_kit::test]
+fn text_typed_while_another_note_opens_reaches_its_file(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    three_notes(&fixture.notes());
+    let startup = Startup {
+        write_budget: Duration::ZERO,
+        ..fixture.startup(None)
+    };
+    let handle = open(cx, startup);
+    keys(cx, handle, "ctrl-shift-o");
+    cx.simulate_input(handle, "Top");
+    settle(cx);
+
+    press_only(cx, handle, "enter");
+    let mut typed = 0;
+    while editor_text(cx, handle).contains("# Plan") {
+        press_only(cx, handle, "m");
+        typed += 1;
+        if !cx.executor().tick() {
+            break;
+        }
+    }
+    assert!(typed > 1, "the open took {typed} keys");
+    assert_eq!(editor_text(cx, handle), "# Top\n");
+    cx.simulate_input(handle, "xy");
+    autosave(cx);
+
+    let plan = read(&fixture.notes().join("Plan.md"));
+    assert!(
+        plan.ends_with(&format!("{}# Plan\nbuy milk\n", "m".repeat(typed))),
+        "{typed}: {plan}"
+    );
+    assert!(read(&fixture.notes().join("Top.md")).ends_with("xy# Top\n"));
+}
+
 /// The folder in each option of the popup `id`, or `None` for an option with no folder.
 fn folders(cx: &mut TestAppContext, handle: AnyWindowHandle, id: &str) -> Vec<Option<String>> {
     let id = id.to_owned();
