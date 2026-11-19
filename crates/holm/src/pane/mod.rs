@@ -41,7 +41,7 @@ use gpui_kit::{
     StatefulInteractiveElement as _, Styled, Subscription, Task, TestSupportExt as _, Window, div,
     px,
 };
-use holm_core::model::{Change, Note, NoteInfo};
+use holm_core::model::{Change, Note, NoteInfo, Source};
 use holm_core::{FolderPath, NotePath, TagName};
 use holm_editor::{Changed, Editor, UpFromStart};
 use holm_markdown::Target;
@@ -72,9 +72,9 @@ pub(crate) enum PaneEvent {
     Opened(NotePath),
     /// The pane shows no note.
     Closed,
-    /// Another tool deleted the open note at this path, and the pane has no text to keep.
-    /// The app must open another note or call [`NotePane::close`]. The pane cannot pick the
-    /// note, because the neighbor comes from the sidebar list.
+    /// The open note at this path is gone, by a Holm delete or another tool, and the pane has
+    /// no text to keep. The app must open another note or call [`NotePane::close`]. The pane
+    /// cannot pick the note, because the neighbor comes from the sidebar list.
     Gone(NotePath),
 }
 
@@ -194,8 +194,8 @@ impl NotePane {
         let subscriptions = vec![
             cx.subscribe(&core_door, |pane, _, event: &FolderEvent, cx| {
                 pane.follow(event, cx);
-                for change in event.outside() {
-                    pane.outside_change(change, cx);
+                for (source, change) in event.sourced() {
+                    pane.take_change(source, change, cx);
                 }
                 pane.show_fields(cx);
             }),
@@ -620,14 +620,16 @@ impl NotePane {
         cx.notify();
     }
 
-    /// Takes a change of the open note by another tool. [`Self::follow`] takes the moves.
-    fn outside_change(&mut self, change: &Change, cx: &mut Context<Self>) {
+    /// Takes a change of the open note. Only a change by another tool can ask the disk
+    /// question. [`Self::follow`] takes the moves.
+    fn take_change(&mut self, source: Source, change: &Change, cx: &mut Context<Self>) {
         let Some(path) = self.content.editor() else {
             return;
         };
-        let unsaved = self.core_door.read(cx).unsaved_note(path);
+        let outside = source == Source::Outside;
+        let unsaved = outside && self.core_door.read(cx).unsaved_note(path);
         match change {
-            Change::Changed(changed) if changed == path => {
+            Change::Changed(changed) if outside && changed == path => {
                 if unsaved {
                     self.set_disk(Some(DiskQuestion::Changed), cx);
                 } else {

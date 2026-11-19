@@ -3029,6 +3029,20 @@ fn an_outside_delete_after_a_view_change_opens_the_first_note(cx: &mut TestAppCo
 }
 
 #[gpui_kit::test]
+fn a_delete_of_the_open_note_opens_its_neighbor(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    three_notes(&fixture.notes());
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-shift-l down");
+    assert_eq!(editor_text(cx, handle), "# Goals\nread more\n");
+
+    keys(cx, handle, "delete");
+    keys(cx, handle, "enter");
+    assert_eq!(editor_text(cx, handle), "# Top\n");
+    assert_eq!(files(&fixture.notes()), ["Plan.md", "Top.md"]);
+}
+
+#[gpui_kit::test]
 fn close_after_an_outside_delete_writes_no_file(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     let notes_dir = fixture.notes();

@@ -476,12 +476,8 @@ impl NotesView {
         );
     }
 
+    /// Deletes the target. The pane sends [`PaneEvent::Gone`] when the open note goes with it.
     fn delete(&mut self, target: Target, window: &mut Window, cx: &mut Context<Self>) {
-        let open = self.pane.read(cx).path().cloned();
-        let gone = open.filter(|open| match &target {
-            Target::Note(path) => path == open,
-            Target::Folder(folder) => open.is_below(folder),
-        });
         self.write(
             window,
             cx,
@@ -489,12 +485,7 @@ impl NotesView {
                 Target::Note(path) => core_door.delete_note(path, done, cx),
                 Target::Folder(path) => core_door.delete_folder(path, done, cx),
             },
-            move |this, (), window, cx| {
-                if let Some(gone) = gone {
-                    let next = this.sidebar.read(cx).next_note(&gone, cx);
-                    this.show_next(next, window, cx);
-                }
-            },
+            |_, (), _, _| {},
         );
     }
 

@@ -62,12 +62,11 @@ impl FolderEvent {
         self.changes.iter().map(|(_, change)| change)
     }
 
-    /// The changes that other tools made, in order.
-    pub(crate) fn outside(&self) -> impl Iterator<Item = &Change> {
+    /// Every change with its source, in order.
+    pub(crate) fn sourced(&self) -> impl Iterator<Item = (Source, &Change)> {
         self.changes
             .iter()
-            .filter(|(source, _)| *source == Source::Outside)
-            .map(|(_, change)| change)
+            .map(|(source, change)| (*source, change))
     }
 
     /// Whether the snapshot stayed the same.

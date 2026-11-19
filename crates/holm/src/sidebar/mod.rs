@@ -133,7 +133,7 @@ pub(crate) struct Sidebar {
     /// The pane, for the open note. The open note is the selected row of a list.
     pane: Entity<NotePane>,
     /// The open note after it is gone from the notes folder, with its neighbor in the list
-    /// before.
+    /// before. The app asks for the next note only after the list lost the gone note.
     left: Option<(NotePath, NotePath)>,
     field: Option<Naming>,
     search: Entity<InputState>,
