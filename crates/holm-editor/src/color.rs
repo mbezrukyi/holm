@@ -9,6 +9,7 @@ use holm_markdown::Color;
 use crate::element::Theme;
 use crate::model::Format;
 use crate::palette;
+use crate::shortcuts::{self, Command, Place};
 
 /// How many custom colors the window keeps.
 pub(crate) const CUSTOM_COUNT: usize = 3;
@@ -44,6 +45,11 @@ impl Paint {
     }
 }
 
+/// The index of a color with `number`, which counts from 1.
+fn nth(number: u8) -> usize {
+    usize::from(number).wrapping_sub(1)
+}
+
 /// What a key in the window does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum KeyResult {
@@ -74,15 +80,15 @@ impl ColorWindow {
     /// Keys 1 to 6 pick a palette color, 7 to 9 a custom color, and 0 removes the color. `+`
     /// opens the hex field. In the field, Enter takes a `rgb` or `rrggbb` value. Esc closes.
     pub(crate) fn key(&mut self, keystroke: &Keystroke, custom: &[Color]) -> KeyResult {
-        let key = keystroke.key.as_str();
-        if key == "escape" {
+        let command = shortcuts::command(Place::ColorWindow, keystroke);
+        if command == Some(Command::CloseColor) {
             return KeyResult::Close;
         }
         if let Some(hex) = &mut self.hex {
-            return match key {
-                "enter" => Color::from_hex(&format!("#{hex}"))
+            return match command {
+                Some(Command::TakeHex) => Color::from_hex(&format!("#{hex}"))
                     .map_or(KeyResult::Stay, |color| KeyResult::Apply(Some(color))),
-                "backspace" => {
+                _ if keystroke.key == "backspace" => {
                     hex.pop();
                     KeyResult::Stay
                 }
@@ -90,20 +96,17 @@ impl ColorWindow {
                 _ => KeyResult::Stay,
             };
         }
-        if keystroke.key_char.as_deref() == Some("+") || key == "+" {
-            self.hex = Some(String::new());
-            return KeyResult::Stay;
-        }
-        let Some(digit) = key.parse::<usize>().ok().filter(|_| key.len() == 1) else {
-            return KeyResult::Stay;
+        let picked = match command {
+            Some(Command::HexField) => {
+                self.hex = Some(String::new());
+                return KeyResult::Stay;
+            }
+            Some(Command::RemoveColor) => return KeyResult::Apply(None),
+            Some(Command::PaletteColor(number)) => self.paint.palette().get(nth(number)),
+            Some(Command::CustomColor(number)) => custom.get(nth(number)),
+            _ => None,
         };
-        match digit {
-            0 => KeyResult::Apply(None),
-            1..=6 => KeyResult::Apply(Some(self.paint.palette()[digit - 1])),
-            _ => custom
-                .get(digit - 7)
-                .map_or(KeyResult::Stay, |color| KeyResult::Apply(Some(*color))),
-        }
+        picked.map_or(KeyResult::Stay, |color| KeyResult::Apply(Some(*color)))
     }
 
     /// Adds typed or pasted text to the hex field. It keeps only hex digits.

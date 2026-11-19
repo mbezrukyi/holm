@@ -20,6 +20,7 @@ use crate::find::Find;
 use crate::highlight::{self, Highlighter};
 use crate::ink;
 use crate::model::{Caret, Format, GoalRow, LinkForm, Model};
+use crate::shortcuts::{self, Command, Place};
 
 /// Spaces that Tab types outside a list.
 const TAB: &str = "    ";
@@ -495,98 +496,76 @@ impl Editor {
         if !self.focus.is_focused(window) {
             return false;
         }
-        let modifiers = event.keystroke.modifiers;
+        let keystroke = &event.keystroke;
+        let modifiers = keystroke.modifiers;
         if modifiers.alt || modifiers.platform || modifiers.function {
             return false;
         }
-        let key = event.keystroke.key.as_str();
         if self.color.is_some() {
             return self.color_key(event, cx);
         }
         if self.find.is_some() {
-            return self.find_key(key, modifiers, cx);
+            return self.find_key(event, cx);
         }
-        if modifiers.control {
-            self.control_key(key, modifiers.shift, cx)
-        } else {
-            self.plain_key(key, modifiers.shift, cx)
+        if let Some(command) = editor_command(keystroke) {
+            return self.command(command, modifiers.shift, cx);
         }
+        !modifiers.control && self.plain_key(keystroke.key.as_str(), modifiers.shift, cx)
     }
 
-    /// A key with Ctrl. Ctrl+Shift with a letter belongs to the app.
-    fn control_key(&mut self, key: &str, shift: bool, cx: &mut Context<Self>) -> bool {
+    /// A shortcut of the editor. Shift extends the selection of a cursor move. Ctrl+Shift with a
+    /// letter belongs to the app. It returns whether the key stops here.
+    fn command(&mut self, command: Command, shift: bool, cx: &mut Context<Self>) -> bool {
         let now = cx.background_executor().now();
-        let format = match key {
-            "b" => Some(Format::Bold),
-            "i" => Some(Format::Italic),
-            "u" => Some(Format::Underline),
-            "d" => Some(Format::Strikethrough),
-            "h" => Some(Format::Highlight),
-            "e" => Some(Format::Code),
-            _ => None,
-        };
-        let heading = key
-            .parse::<u8>()
-            .ok()
-            .filter(|level| *level <= 6 && key.len() == 1);
-        match key {
-            "left" => self.model.move_word_left(shift),
-            "right" => self.model.move_word_right(shift),
-            "home" => self.model.set_cursor(0, shift),
-            "end" => self.model.set_cursor(self.model.text().len(), shift),
-            "enter" if !shift => {
+        match command {
+            Command::WordLeft => self.model.move_word_left(shift),
+            Command::WordRight => self.model.move_word_right(shift),
+            Command::NoteStart => self.model.set_cursor(0, shift),
+            Command::NoteEnd => self.model.set_cursor(self.model.text().len(), shift),
+            Command::SelectAll => self.model.select_all(),
+            Command::OpenLink => {
                 let Some(link) = self.model.link_at(self.model.cursor()) else {
                     return false;
                 };
                 self.open_link(link.target.clone(), cx);
                 return true;
             }
-            "backspace" | "delete" if !shift => {
-                let changed = if key == "backspace" {
-                    self.model.backspace(true, now)
-                } else {
-                    self.model.delete(true, now)
-                };
-                self.finish(changed, cx);
-                return true;
-            }
-            _ if shift => return false,
-            "a" => self.model.select_all(),
-            "l" => {
-                let changed = self.model.toggle_tasks();
-                self.finish(changed, cx);
-                return true;
-            }
-            "c" => {
+            Command::Copy => {
                 self.copy(cx);
                 return true;
             }
-            "f" => {
-                self.open_find(cx);
-                return true;
-            }
-            "x" => {
+            Command::Cut => {
                 self.copy(cx);
                 let changed = self.model.remove_selection();
                 self.finish(changed, cx);
                 return true;
             }
-            "v" => {
+            Command::Paste => {
                 self.paste(cx);
                 return true;
             }
-            "z" | "y" => {
-                let changed = if key == "z" {
-                    self.model.undo()
-                } else {
-                    self.model.redo()
+            Command::Find => {
+                self.open_find(cx);
+                return true;
+            }
+            Command::Indent | Command::Outdent => {
+                let outdent = command == Command::Outdent;
+                let indented = self
+                    .help
+                    .indent_lists
+                    .then(|| self.model.indent(outdent))
+                    .flatten();
+                let changed = match indented {
+                    Some(changed) => changed,
+                    None if outdent => false,
+                    None => self.model.type_text(TAB, now),
                 };
                 self.finish(changed, cx);
                 return true;
             }
-            _ if !self.help.format_keys => return false,
-            "t" | "m" => {
-                let paint = if key == "t" {
+            _ if command.is_format_key() && !self.help.format_keys => return false,
+            Command::TextColor | Command::HighlightColor => {
+                let paint = if command == Command::TextColor {
                     Paint::Text
                 } else {
                     Paint::Highlight
@@ -595,16 +574,22 @@ impl Editor {
                 cx.notify();
                 return true;
             }
-            _ if format.is_some() || heading.is_some() => {
-                let changed = match (format, heading) {
-                    (Some(format), _) => self.model.toggle_format(format),
-                    (None, Some(level)) => self.model.toggle_heading(level),
-                    (None, None) => false,
+            _ => {
+                let changed = match command {
+                    Command::DeleteWordLeft => self.model.backspace(true, now),
+                    Command::DeleteWordRight => self.model.delete(true, now),
+                    Command::Undo => self.model.undo(),
+                    Command::Redo => self.model.redo(),
+                    Command::Tasks => self.model.toggle_tasks(),
+                    Command::Heading(level) => self.model.toggle_heading(level),
+                    _ => match format_of(command) {
+                        Some(format) => self.model.toggle_format(format),
+                        None => return false,
+                    },
                 };
                 self.finish(changed, cx);
                 return true;
             }
-            _ => return false,
         }
         self.moved(cx);
         true
@@ -618,7 +603,7 @@ impl Editor {
         };
         let keystroke = &event.keystroke;
         if keystroke.modifiers.control {
-            if keystroke.key == "v"
+            if shortcuts::command(Place::Text, keystroke) == Some(Command::Paste)
                 && let Some(text) = cx.read_from_clipboard().and_then(|item| item.text())
             {
                 window.push(&text);
@@ -678,32 +663,38 @@ impl Editor {
     /// A key while find is open. It returns whether the key stops here.
     /// Typed chars go on to the text input, which adds them to the query.
     /// Other keys with Ctrl go on to the app. Other named keys do nothing.
-    fn find_key(&mut self, key: &str, modifiers: Modifiers, cx: &mut Context<Self>) -> bool {
+    fn find_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
         let Some(find) = &mut self.find else {
             return false;
         };
-        match (modifiers.control, key) {
-            (false, "escape") => self.find = None,
-            (false, "enter") => find.step(modifiers.shift, &mut self.model),
-            (_, "backspace") => {
-                find.pop(modifiers.control);
+        let keystroke = &event.keystroke;
+        let key = keystroke.key.as_str();
+        let control = keystroke.modifiers.control;
+        match shortcuts::command(Place::Find, keystroke) {
+            Some(Command::CloseFind) => self.find = None,
+            Some(Command::NextMatch) => find.step(false, &mut self.model),
+            Some(Command::PreviousMatch) => find.step(true, &mut self.model),
+            _ if key == "backspace" => {
+                find.pop(control);
                 find.refresh(&mut self.model);
             }
-            (true, "f") if !modifiers.shift => {}
-            (true, "v") => {
-                if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-                    find.push(&text);
-                    find.refresh(&mut self.model);
+            _ if !control => return key.chars().count() > 1 && key != "space",
+            _ => match editor_command(keystroke) {
+                Some(Command::Find) => {}
+                Some(Command::Paste) => {
+                    if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+                        find.push(&text);
+                        find.refresh(&mut self.model);
+                    }
                 }
-            }
-            (true, _) => return false,
-            (false, _) => return key.chars().count() > 1 && key != "space",
+                _ => return false,
+            },
         }
         self.moved(cx);
         true
     }
 
-    /// A key with no Ctrl. Shift extends the selection.
+    /// A key with no Ctrl that is not a shortcut. Shift extends the selection.
     fn plain_key(&mut self, key: &str, shift: bool, cx: &mut Context<Self>) -> bool {
         let now = cx.background_executor().now();
         match key {
@@ -748,20 +739,6 @@ impl Editor {
             }
             "enter" => {
                 let changed = self.model.newline(self.help.continue_lists, now);
-                self.finish(changed, cx);
-                return true;
-            }
-            "tab" => {
-                let indented = self
-                    .help
-                    .indent_lists
-                    .then(|| self.model.indent(shift))
-                    .flatten();
-                let changed = match indented {
-                    Some(changed) => changed,
-                    None if shift => false,
-                    None => self.model.type_text(TAB, now),
-                };
                 self.finish(changed, cx);
                 return true;
             }
@@ -1133,6 +1110,25 @@ impl EntityInputHandler for Editor {
 }
 
 /// The files or the image on the clipboard. Files come first. It is empty for text.
+/// The command of `keystroke` in the editor, also for a key of each text input.
+fn editor_command(keystroke: &Keystroke) -> Option<Command> {
+    shortcuts::command(Place::Text, keystroke)
+        .or_else(|| shortcuts::command(Place::Editor, keystroke))
+}
+
+/// The inline format of a format key.
+fn format_of(command: Command) -> Option<Format> {
+    Some(match command {
+        Command::Bold => Format::Bold,
+        Command::Italic => Format::Italic,
+        Command::Underline => Format::Underline,
+        Command::Strikethrough => Format::Strikethrough,
+        Command::Highlight => Format::Highlight,
+        Command::Code => Format::Code,
+        _ => return None,
+    })
+}
+
 fn pasted_files(item: &ClipboardItem) -> Vec<PastedFile> {
     let paths: Vec<PastedFile> = item
         .entries()

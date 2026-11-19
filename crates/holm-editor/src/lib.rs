@@ -11,6 +11,7 @@ mod highlight;
 mod ink;
 mod model;
 mod palette;
+pub mod shortcuts;
 
 pub use editor::{
     Appearance, Changed, CursorLink, CustomColors, Editor, OpenFile, OpenLink, PasteFiles,
