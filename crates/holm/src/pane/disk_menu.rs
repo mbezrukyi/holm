@@ -17,6 +17,7 @@ use gpui_kit::{
 };
 
 use crate::popup::{self, Dropdown};
+use crate::shortcuts::{self, Command, Place};
 use crate::text;
 
 /// A question about the open note after another tool changed its file, while the editor had
@@ -110,15 +111,16 @@ impl DiskMenu {
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        if event.keystroke.modifiers.modified() {
-            return;
-        }
-        match event.keystroke.key.as_str() {
-            "up" => self.cursor = 0,
-            "down" => self.cursor = 1,
-            "enter" => self.pick(self.cursor, cx),
-            "escape" => self.close(cx),
-            _ => return,
+        let keystroke = &event.keystroke;
+        match shortcuts::command(Place::ListPopup, keystroke) {
+            Some(Command::Pick) => self.pick(self.cursor, cx),
+            Some(Command::Close) => self.close(cx),
+            _ if keystroke.modifiers.modified() => return,
+            _ => match keystroke.key.as_str() {
+                "up" => self.cursor = 0,
+                "down" => self.cursor = 1,
+                _ => return,
+            },
         }
         cx.notify();
         cx.stop_propagation();

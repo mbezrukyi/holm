@@ -19,6 +19,7 @@ use holm_core::NotePath;
 use holm_core::model::NoteInfo;
 
 use crate::popup::{self, Dropdown};
+use crate::shortcuts::{self, Command, Place};
 use crate::text;
 
 /// The padding on each side of the count, inside its hover background.
@@ -99,15 +100,16 @@ impl Backlinks {
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        if event.keystroke.modifiers.modified() {
-            return;
-        }
-        match event.keystroke.key.as_str() {
-            "up" => self.cursor = self.cursor.saturating_sub(1),
-            "down" => self.cursor = (self.cursor + 1).min(self.notes.len().saturating_sub(1)),
-            "enter" => self.pick(self.cursor, cx),
-            "escape" => self.close(cx),
-            _ => return,
+        let keystroke = &event.keystroke;
+        match shortcuts::command(Place::ListPopup, keystroke) {
+            Some(Command::Pick) => self.pick(self.cursor, cx),
+            Some(Command::Close) => self.close(cx),
+            _ if keystroke.modifiers.modified() => return,
+            _ => match keystroke.key.as_str() {
+                "up" => self.cursor = self.cursor.saturating_sub(1),
+                "down" => self.cursor = (self.cursor + 1).min(self.notes.len().saturating_sub(1)),
+                _ => return,
+            },
         }
         self.scroll.scroll_to_item(self.cursor);
         cx.notify();

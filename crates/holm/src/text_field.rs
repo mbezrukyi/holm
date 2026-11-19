@@ -20,11 +20,14 @@ use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::{
     App, Bounds, ClipboardItem, ContentMask, Context, Element, ElementId, ElementInputHandler,
     Entity, EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId,
-    InspectorElementId, InteractiveElement as _, IntoElement, KeyDownEvent, LayoutId, MouseButton,
-    MouseDownEvent, MouseMoveEvent, ParentElement as _, Pixels, Point, Render, Role, ShapedLine,
-    SharedString, StatefulInteractiveElement as _, Style, Styled as _, Subscription,
+    InspectorElementId, InteractiveElement as _, IntoElement, KeyDownEvent, Keystroke, LayoutId,
+    MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement as _, Pixels, Point, Render, Role,
+    ShapedLine, SharedString, StatefulInteractiveElement as _, Style, Styled as _, Subscription,
     TestSupportExt as _, TextAlign, UTF16Selection, Window, div, fill, point, px, size,
 };
+use holm_editor::shortcuts::Command as TextCommand;
+
+use crate::shortcuts::{self, Command, Place};
 
 const CARET_WIDTH: Pixels = px(1.);
 
@@ -159,11 +162,36 @@ impl TextField {
         if self.locked || modifiers.alt || modifiers.platform {
             return;
         }
-        let shift = modifiers.shift;
         let selection = self.selection();
-        match (modifiers.control, keystroke.key.as_str()) {
-            (false, "enter") => cx.emit(FieldEvent::Enter),
-            (false, "escape") => cx.emit(FieldEvent::Escape),
+        match shortcuts::command(Place::TextField, keystroke) {
+            Some(Command::Confirm) => cx.emit(FieldEvent::Enter),
+            Some(Command::Cancel) => cx.emit(FieldEvent::Escape),
+            _ => match shortcuts::text_command(keystroke) {
+                Some(TextCommand::SelectAll) => self.select_all(cx),
+                Some(command @ (TextCommand::Copy | TextCommand::Cut)) => {
+                    if !selection.is_empty() {
+                        let text = self.text[selection.clone()].to_owned();
+                        cx.write_to_clipboard(ClipboardItem::new_string(text));
+                        if command == TextCommand::Cut {
+                            self.replace(selection, "", cx);
+                        }
+                    }
+                }
+                Some(TextCommand::Paste) => {
+                    if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+                        self.replace(selection, &text, cx);
+                    }
+                }
+                _ => return self.edit_key(keystroke, selection, cx),
+            },
+        }
+        cx.stop_propagation();
+    }
+
+    /// A cursor key, Backspace or Delete. It stops the key when the field takes it.
+    fn edit_key(&mut self, keystroke: &Keystroke, selection: Range<usize>, cx: &mut Context<Self>) {
+        let shift = keystroke.modifiers.shift;
+        match (keystroke.modifiers.control, keystroke.key.as_str()) {
             (false, "left") if !shift && !selection.is_empty() => {
                 self.select(selection.start, false, cx);
             }
@@ -181,21 +209,6 @@ impl TextField {
                 self.replace(self.head..self.next(self.head), "", cx);
             }
             (false, "backspace" | "delete") => self.replace(selection, "", cx),
-            (true, "a") if !shift => self.select_all(cx),
-            (true, "c" | "x") if !shift => {
-                if !selection.is_empty() {
-                    let text = self.text[selection.clone()].to_owned();
-                    cx.write_to_clipboard(ClipboardItem::new_string(text));
-                    if keystroke.key == "x" {
-                        self.replace(selection, "", cx);
-                    }
-                }
-            }
-            (true, "v") if !shift => {
-                if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-                    self.replace(selection, &text, cx);
-                }
-            }
             _ => return,
         }
         cx.stop_propagation();

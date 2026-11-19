@@ -19,6 +19,7 @@ use holm_core::TagName;
 use holm_core::model::DeleteCount;
 
 use crate::core_door::Then;
+use crate::shortcuts::{self, Command, Place};
 use crate::{popup, text};
 
 /// The change that the dialog asks about.
@@ -101,14 +102,10 @@ impl Dialog {
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        let modifiers = event.keystroke.modifiers;
-        if modifiers.modified() {
-            return;
-        }
-        match event.keystroke.key.as_str() {
-            "enter" => self.decide(true, cx),
-            "escape" => self.decide(false, cx),
-            "space" => self.toggle(cx),
+        match shortcuts::command(Place::Dialog, &event.keystroke) {
+            Some(Command::Yes) => self.decide(true, cx),
+            Some(Command::No) => self.decide(false, cx),
+            Some(Command::SwitchAsk) => self.toggle(cx),
             _ => return,
         }
         cx.stop_propagation();

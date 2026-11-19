@@ -30,6 +30,7 @@ use crate::message_line::MessageLine;
 use crate::pane::{Leave, NotePane, PaneEvent, Pick};
 use crate::picker::{FolderPicker, PickerEvent};
 use crate::quick_open::{QuickOpen, QuickOpenEvent};
+use crate::shortcuts::{self, Command, Place};
 use crate::sidebar::{Item, Sidebar, SidebarEvent, TagRename, Target};
 use crate::tags::RenameTag;
 use crate::window_step::window_step;
@@ -586,37 +587,37 @@ impl NotesView {
             return;
         }
         let keystroke = &event.keystroke;
-        let modifiers = keystroke.modifiers;
-        if !modifiers.modified() && keystroke.key == "f2" && self.editor_focused(window, cx) {
-            self.pane.update(cx, |pane, cx| pane.edit_title(window, cx));
-            cx.stop_propagation();
+        let command = shortcuts::command(Place::Window, keystroke).or_else(|| {
+            self.editor_focused(window, cx)
+                .then(|| shortcuts::command(Place::Note, keystroke))
+                .flatten()
+        });
+        let Some(command) = command else {
             return;
-        }
-        if !modifiers.control || modifiers.alt || modifiers.platform {
-            return;
-        }
-        let in_editor = self.editor_focused(window, cx);
-        match (modifiers.shift, keystroke.key.as_str()) {
-            (true, "d") => self.pane.update(cx, |pane, cx| pane.open_state(window, cx)),
-            (true, "l") => self.toggle_sidebar(window, cx),
-            (true, "f") => self.focus_search(window, cx),
-            (true, "o") => self.open_quick_open(window, cx),
-            (true, "p") => self.pane.update(cx, NotePane::toggle_pin),
-            (true, "t") => self.pane.update(cx, |pane, cx| pane.focus_tags(window, cx)),
-            (true, "b") => self
+        };
+        match command {
+            Command::EditTitle => self.pane.update(cx, |pane, cx| pane.edit_title(window, cx)),
+            Command::DiskState => self.pane.update(cx, |pane, cx| pane.open_state(window, cx)),
+            Command::ToggleSidebar => self.toggle_sidebar(window, cx),
+            Command::Search => self.focus_search(window, cx),
+            Command::QuickOpen => self.open_quick_open(window, cx),
+            Command::Pin => self.pane.update(cx, NotePane::toggle_pin),
+            Command::Tags => self.pane.update(cx, |pane, cx| pane.focus_tags(window, cx)),
+            Command::Backlinks => self
                 .pane
                 .update(cx, |pane, cx| pane.show_backlinks(window, cx)),
-            (false, "n") => self.new_note(window, cx),
-            (true, "n") => self.new_folder(window, cx),
-            (false, "k") if in_editor => self.open_link_picker(window, cx),
-            (false, "o") if in_editor => {
+            Command::NewNote => self.new_note(window, cx),
+            Command::NewFolder => self.new_folder(window, cx),
+            Command::LinkNote => self.open_link_picker(window, cx),
+            Command::LinkFiles => {
                 self.pane
                     .update(cx, |pane, cx| pane.link_paths(Pick::Files, cx));
             }
-            (false, "j") if in_editor => {
+            Command::LinkFolders => {
                 self.pane
                     .update(cx, |pane, cx| pane.link_paths(Pick::Folders, cx));
             }
+            // The settings, the shortcut list, quit and the app menu have no action yet.
             _ => return,
         }
         cx.stop_propagation();

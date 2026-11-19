@@ -23,6 +23,7 @@ use gpui_kit::{
 
 use crate::path_text::PathText;
 use crate::problem_list::ProblemList;
+use crate::shortcuts::{self, Command, Place};
 use crate::text;
 
 /// The user clicked the state.
@@ -110,12 +111,7 @@ impl MessageLine {
         if self.message.take().is_some() {
             cx.notify();
         }
-        let modifiers = keystroke.modifiers;
-        if modifiers.control
-            && modifiers.shift
-            && !(modifiers.alt || modifiers.platform)
-            && keystroke.key == "e"
-        {
+        if shortcuts::command(Place::Window, keystroke) == Some(Command::Problems) {
             self.toggle_problems(window, cx);
         }
     }

@@ -15,6 +15,7 @@ use gpui_kit::{
 };
 
 use crate::popup::{self, Dropdown};
+use crate::shortcuts::{self, Command, Place};
 
 const WIDTH: f32 = 240.;
 
@@ -88,7 +89,9 @@ impl ProblemList {
         match event.keystroke.key.as_str() {
             "up" => self.cursor = self.cursor.saturating_sub(1),
             "down" => self.cursor = (self.cursor + 1).min(last),
-            "escape" => self.close(window, cx),
+            _ if shortcuts::command(Place::ListPopup, &event.keystroke) == Some(Command::Close) => {
+                self.close(window, cx);
+            }
             _ => return,
         }
         cx.notify();

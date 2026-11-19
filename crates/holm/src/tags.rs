@@ -46,6 +46,7 @@ use crate::core_door::CoreDoor;
 use crate::fold::Fold;
 use crate::lowercase::Lowercase;
 use crate::popup::{self, Dropdown};
+use crate::shortcuts::{self, Command, Place};
 use crate::text;
 use crate::title::TitleField;
 
@@ -269,8 +270,7 @@ impl TagRow {
 
     /// `F2`: dispatches [`RenameTag`] for the tag line under the cursor.
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let keystroke = &event.keystroke;
-        if keystroke.key != "f2" || keystroke.modifiers.modified() {
+        if shortcuts::command(Place::Tags, &event.keystroke) != Some(Command::Rename) {
             return;
         }
         cx.stop_propagation();

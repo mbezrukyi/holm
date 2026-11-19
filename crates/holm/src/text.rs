@@ -193,6 +193,42 @@ pub(crate) fn create_note(title: &str) -> String {
     format!("Create “{title}”")
 }
 
+// The labels of the app shortcuts in the shortcut list.
+pub(crate) const KEY_NEW_NOTE: &str = "New note";
+pub(crate) const KEY_NEW_FOLDER: &str = "New folder";
+pub(crate) const KEY_QUICK_OPEN: &str = "Open a note by its title";
+pub(crate) const KEY_TOGGLE_SIDEBAR: &str = "Show or hide the sidebar";
+pub(crate) const KEY_SEARCH: &str = "Search the notes";
+pub(crate) const KEY_DISK_STATE: &str = "Open the disk menu";
+pub(crate) const KEY_PIN: &str = "Pin or unpin the note";
+pub(crate) const KEY_TAGS: &str = "Edit the tags";
+pub(crate) const KEY_BACKLINKS: &str = "Show the backlinks";
+pub(crate) const KEY_PROBLEMS: &str = "Show or hide the problem list";
+pub(crate) const KEY_SETTINGS: &str = "Settings";
+pub(crate) const KEY_SHORTCUT_LIST: &str = "Shortcuts";
+pub(crate) const KEY_QUIT: &str = "Quit";
+pub(crate) const KEY_APP_MENU: &str = "App menu";
+pub(crate) const KEY_EDIT_TITLE: &str = "Rename the note";
+pub(crate) const KEY_LINK_NOTE: &str = "Link a note";
+pub(crate) const KEY_LINK_FILES: &str = "Attach files";
+pub(crate) const KEY_LINK_FOLDERS: &str = "Link folders";
+pub(crate) const KEY_MOVE: &str = "Move to a folder";
+pub(crate) const KEY_SHOW_NOTES: &str = "Show the notes";
+pub(crate) const KEY_FOCUS_EDITOR: &str = "Go to the note";
+pub(crate) const KEY_BACK: &str = "Clear the search, or go back to the tree";
+pub(crate) const KEY_RENAME_ITEM: &str = "Rename the folder or tag";
+pub(crate) const KEY_DELETE_ITEM: &str = "Delete the folder or tag";
+pub(crate) const KEY_RENAME_NOTE: &str = "Rename the note";
+pub(crate) const KEY_DELETE_NOTE: &str = "Delete the note";
+pub(crate) const KEY_RENAME_TAG: &str = "Rename the tag";
+pub(crate) const KEY_YES: &str = "Yes";
+pub(crate) const KEY_NO: &str = "No";
+pub(crate) const KEY_SWITCH_ASK: &str = "Switch “Do not show again”";
+pub(crate) const KEY_PICK: &str = "Pick";
+pub(crate) const KEY_CLOSE: &str = "Close";
+pub(crate) const KEY_CONFIRM: &str = "Confirm";
+pub(crate) const KEY_CANCEL: &str = "Cancel";
+
 #[cfg(test)]
 mod tests {
     use super::*;
