@@ -243,7 +243,7 @@ impl Lists {
         match item {
             Item::All => true,
             Item::Folder(path) => self.folders.iter().any(|folder| folder.path == *path),
-            Item::Tag(name) => find_tag(&self.tags, name).is_some(),
+            Item::Tag(name) => Tag::walk(&self.tags).any(|tag| tag.name == *name),
         }
     }
 
@@ -340,18 +340,6 @@ fn tag_rows(tags: &[Tag], depth: usize, open: &HashSet<Item>, rows: &mut Vec<Tre
             tag_rows(&tag.children, depth + 1, open, rows);
         }
     }
-}
-
-fn find_tag<'a>(tags: &'a [Tag], name: &TagName) -> Option<&'a Tag> {
-    tags.iter().find_map(|tag| {
-        if tag.name == *name {
-            Some(tag)
-        } else if tag.name.holds(name) {
-            find_tag(&tag.children, name)
-        } else {
-            None
-        }
-    })
 }
 
 #[cfg(test)]

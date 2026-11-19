@@ -7,7 +7,7 @@ mod common;
 use std::fs;
 
 use common::{Folder, folder_path, note_path, tag_name};
-use holm_core::model::{NoteInfo, NoteSet, Order};
+use holm_core::model::{NoteInfo, NoteSet, Order, Tag};
 use holm_core::{Core, NotePath, Result, Snapshot, TagName};
 
 fn titles(snapshot: &Snapshot) -> Vec<String> {
@@ -291,6 +291,20 @@ fn paths_first_matching_keep_and_counts_agree_with_the_note_lists() {
     assert_eq!(
         common::paths(snapshot.paths(NoteSet::All, Order::LastChange)),
         ["c.md", "work/E.md", "work/d.md", "b.md", "A.md"]
+    );
+}
+
+#[test]
+fn the_walk_of_the_nested_tags_gives_each_tag_before_its_child_tags() {
+    let folder = Folder::new(&[
+        ("a.md", "---\ntags: [work/holm, home]\n---\n"),
+        ("b.md", "---\ntags: [work/deep/x]\n---\n"),
+    ]);
+    let tags = folder.core.snapshot().tags();
+    let names: Vec<&str> = Tag::walk(&tags).map(|tag| tag.name.as_str()).collect();
+    assert_eq!(
+        names,
+        ["home", "work", "work/deep", "work/deep/x", "work/holm"]
     );
 }
 

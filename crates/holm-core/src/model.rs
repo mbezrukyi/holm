@@ -116,6 +116,26 @@ pub struct Tag {
     pub children: Vec<Tag>,
 }
 
+impl Tag {
+    /// Each tag of `tags` and each child tag at any depth. A tag comes before its child tags.
+    pub fn walk(tags: &[Self]) -> impl Iterator<Item = &Self> {
+        let mut stack = vec![tags.iter()];
+        std::iter::from_fn(move || {
+            loop {
+                match stack.last_mut()?.next() {
+                    Some(tag) => {
+                        stack.push(tag.children.iter());
+                        return Some(tag);
+                    }
+                    None => {
+                        stack.pop();
+                    }
+                }
+            }
+        })
+    }
+}
+
 /// A link or an embedded file in a note.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Link {

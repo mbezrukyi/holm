@@ -166,7 +166,8 @@ impl TagRow {
         self.input.update(cx, |input, cx| input.focus(window, cx));
         let tags = self.core_door.read(cx).snapshot().tags();
         self.known.clear();
-        flatten(&tags, &mut self.known);
+        self.known
+            .extend(Tag::walk(&tags).map(|tag| tag.name.clone()));
         cx.notify();
     }
 
@@ -494,14 +495,6 @@ pub(crate) fn new_note_row(
     frame()
         .font_family(cx.theme().font_family.clone())
         .child(Fold::new(px(6.), chips, |_| div().into_any_element()).tail(Some(title)))
-}
-
-/// Every tag name of the nested tags, parents first.
-fn flatten(tags: &[Tag], names: &mut Vec<TagName>) {
-    for tag in tags {
-        names.push(tag.name.clone());
-        flatten(&tag.children, names);
-    }
 }
 
 impl EventEmitter<TagChange> for TagRow {}
