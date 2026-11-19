@@ -5,15 +5,15 @@
 //! `Right` pick an option. `Space` switches a switch. `Space` or `Enter` on the notes folder
 //! opens the folder picker. `Esc` closes the dialog.
 
-use gpui_kit::component::button::{Button, ButtonGroup};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme as _, Selectable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Global,
     InteractiveElement as _, IntoElement, KeyBinding, KeyDownEvent, Keystroke, ParentElement,
-    Render, Role, StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _,
-    Window, actions, div, px, transparent_black,
+    Pixels, Render, Role, StatefulInteractiveElement as _, Styled, Subscription,
+    TestSupportExt as _, Window, actions, div, px, transparent_black,
 };
 use holm_core::model::Order;
 use holm_editor::WritingHelp;
@@ -59,6 +59,9 @@ const THEMES: [(AppearanceSetting, &str); 3] = [
     (AppearanceSetting::Light, text::THEME_LIGHT),
     (AppearanceSetting::Dark, text::THEME_DARK),
 ];
+
+/// The height of an option button inside its frame: the height of a small button.
+const BUTTON_HEIGHT: Pixels = px(22.);
 
 const ORDERS: [(Order, &str); 2] = [
     (Order::LastChange, text::ORDER_LAST_CHANGE),
@@ -264,19 +267,13 @@ impl SettingsDialog {
                     )
                     .into_any_element()
             }
-            Row::Theme => options("theme", &THEMES, settings.theme, cx, |settings, theme| {
+            Row::Theme => options(&THEMES, settings.theme, cx, |settings, theme| {
                 settings.theme = theme;
             })
             .into_any_element(),
-            Row::Order => options(
-                "order",
-                &ORDERS,
-                settings.note_order,
-                cx,
-                |settings, order| {
-                    settings.note_order = order;
-                },
-            )
+            Row::Order => options(&ORDERS, settings.note_order, cx, |settings, order| {
+                settings.note_order = order;
+            })
             .into_any_element(),
             Row::FormatKeys | Row::ContinueLists | Row::IndentLists => {
                 let mut help = settings.writing_help;
@@ -293,45 +290,64 @@ impl SettingsDialog {
     }
 }
 
-/// The buttons of a row with options. A click picks the option.
+/// The buttons of a row with options, in one frame. A click picks the option.
+///
+/// The frame draws the outer border, and a line lies between each two buttons. The buttons
+/// have no border, so the chosen one is as wide as the others. Its fill stays inside the outer
+/// border, and the lines next to it take its fill, so it reads as one block.
 fn options<T: Copy + PartialEq + 'static>(
-    id: &'static str,
     options: &'static [(T, &'static str)],
     current: T,
     cx: &mut Context<SettingsDialog>,
     set: fn(&mut Settings, T),
-) -> ButtonGroup {
-    // A primary button has no border, so it would be narrower than the outline buttons, and
-    // the group would move on each choice. So each button is an outline button, and the chosen
-    // one gets the primary colors. Each line between two buttons belongs to the left one, so
-    // the chosen button also draws a left line over the line of its neighbor.
+) -> impl IntoElement {
     let theme = cx.theme();
-    let (fill, on_fill) = (theme.primary, theme.primary_foreground);
-    ButtonGroup::new(id)
-        .small()
-        .outline()
-        .children(
-            options
-                .iter()
-                .enumerate()
-                .map(move |(at, (option, label))| {
-                    let selected = *option == current;
-                    Button::new(*label)
-                        .label(*label)
-                        .selected(selected)
-                        .when(selected, |button| {
-                            button.bg(fill).border_color(fill).text_color(on_fill)
-                        })
-                        .when(selected && at > 0, |button| button.border_l_1().ml(px(-1.)))
-                        .tab_stop(false)
-                }),
-        )
-        .on_click(cx.listener(move |dialog, clicked: &Vec<usize>, _, cx| {
-            if let Some((option, _)) = clicked.first().and_then(|at| options.get(*at)) {
-                let option = *option;
-                dialog.change(|settings| set(settings, option), cx);
-            }
-        }))
+    let (fill, on_fill, line, radius) = (
+        theme.primary,
+        theme.primary_foreground,
+        theme.border,
+        theme.radius,
+    );
+    let inner = radius - px(1.);
+    let last = options.len() - 1;
+    let chosen = options.iter().position(|(option, _)| *option == current);
+    let mut frame = h_flex()
+        .flex_none()
+        .border_1()
+        .border_color(line)
+        .rounded(radius);
+    for (at, (option, label)) in options.iter().enumerate() {
+        if at > 0 {
+            let touches = chosen.is_some_and(|chosen| chosen == at || chosen + 1 == at);
+            frame =
+                frame.child(
+                    div()
+                        .w(px(1.))
+                        .h(BUTTON_HEIGHT)
+                        .bg(if touches { fill } else { line }),
+                );
+        }
+        let selected = chosen == Some(at);
+        let option = *option;
+        frame = frame.child(
+            Button::new(*label)
+                .label(*label)
+                .ghost()
+                .small()
+                .h(BUTTON_HEIGHT)
+                .rounded_none()
+                .when(at == 0, |button| button.rounded_l(inner))
+                .when(at == last, |button| button.rounded_r(inner))
+                .selected(selected)
+                .toggled(selected)
+                .when(selected, |button| button.bg(fill).text_color(on_fill))
+                .tab_stop(false)
+                .on_click(cx.listener(move |dialog, _, _, cx| {
+                    dialog.change(|settings| set(settings, option), cx);
+                })),
+        );
+    }
+    frame
 }
 
 impl EventEmitter<Close> for SettingsDialog {}
