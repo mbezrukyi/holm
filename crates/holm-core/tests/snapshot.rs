@@ -295,6 +295,30 @@ fn paths_first_matching_keep_and_counts_agree_with_the_note_lists() {
 }
 
 #[test]
+fn note_or_first_gives_the_note_while_it_exists_or_else_the_first_note() {
+    let folder = Folder::new(&[("b.md", ""), ("A.md", "")]);
+    let snapshot = folder.core.snapshot();
+    let path = |note: Option<&NoteInfo>| note.map(|note| note.path.to_string());
+
+    let b = note_path("b.md");
+    assert_eq!(
+        path(snapshot.note_or_first(Some(&b), Order::Title)),
+        Some("b.md".into())
+    );
+    let gone = note_path("gone.md");
+    assert_eq!(
+        path(snapshot.note_or_first(Some(&gone), Order::Title)),
+        Some("A.md".into())
+    );
+    assert_eq!(
+        path(snapshot.note_or_first(None, Order::Title)),
+        Some("A.md".into())
+    );
+    let empty = Folder::new(&[]).core.snapshot();
+    assert_eq!(empty.note_or_first(Some(&b), Order::Title), None);
+}
+
+#[test]
 fn newest_and_backlinks_put_the_newest_change_first_with_no_pins_on_top() {
     let mut folder = Folder::new(&[
         ("target.md", "---\nid: T\n---\n"),

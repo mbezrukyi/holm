@@ -26,7 +26,7 @@ use gpui_kit::{
     Styled, Subscription, Task, TestSupportExt as _, UniformListScrollHandle, Window, div, px,
     uniform_list,
 };
-use holm_core::model::{Change, NoteInfo, NoteSet, Order};
+use holm_core::model::{Change, NoteInfo, Order};
 use holm_core::{FolderPath, NotePath, TagName};
 
 use crate::config::SavedSidebarView;
@@ -368,15 +368,10 @@ impl Sidebar {
     /// The note to open after the open note `gone` is gone: its neighbor in the list when
     /// it still exists, else the first note. With no notes, it is `None`.
     pub(crate) fn next_note(&self, gone: &NotePath, cx: &App) -> Option<NotePath> {
-        let snapshot = self.core_door.read(cx).snapshot();
-        if let Some(next) = self
-            .neighbor(gone)
-            .filter(|next| snapshot.note(next).is_some())
-        {
-            return Some(next);
-        }
-        snapshot
-            .first(NoteSet::All, self.order)
+        self.core_door
+            .read(cx)
+            .snapshot()
+            .note_or_first(self.neighbor(gone).as_ref(), self.order)
             .map(|note| note.path.clone())
     }
 

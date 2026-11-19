@@ -98,6 +98,13 @@ impl Snapshot {
         }
     }
 
+    /// The note at `path` while it exists, or else the first note in `order`. With no notes, it
+    /// is `None`.
+    pub fn note_or_first(&self, path: Option<&NotePath>, order: Order) -> Option<&NoteInfo> {
+        path.and_then(|path| self.note(path))
+            .or_else(|| self.first(NoteSet::All, order))
+    }
+
     /// Every tag as nested tags. `work` holds `work/holm`.
     ///
     /// A parent tag shows even when no note has it, only its children.
