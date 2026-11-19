@@ -196,7 +196,6 @@ pub(crate) fn create_note(title: &str) -> String {
 // The labels of the app shortcuts in the shortcut list.
 pub(crate) const SETTINGS: &str = "Settings";
 pub(crate) const SETTING_FOLDER: &str = "Notes folder";
-pub(crate) const CHANGE_FOLDER: &str = "Change…";
 pub(crate) const SETTING_THEME: &str = "Theme";
 pub(crate) const THEME_SYSTEM: &str = "System";
 pub(crate) const THEME_LIGHT: &str = "Light";
@@ -205,7 +204,6 @@ pub(crate) const SETTING_ORDER: &str = "Note order";
 pub(crate) const ORDER_LAST_CHANGE: &str = "Last change";
 pub(crate) const ORDER_TITLE: &str = "Title";
 pub(crate) const SETTING_FORMAT_KEYS: &str = "Format keys";
-pub(crate) const FORMAT_KEYS_DETAIL: &str = "Ctrl+B, Ctrl+I, colors…";
 pub(crate) const SETTING_CONTINUE_LISTS: &str = "Continue lists on Enter";
 pub(crate) const SETTING_INDENT_LISTS: &str = "Indent lists with Tab";
 

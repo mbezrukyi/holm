@@ -3750,6 +3750,39 @@ fn enter_on_the_folder_row_picks_a_new_notes_folder(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn the_format_keys_row_shows_the_keys_of_the_editor_table(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-shift-s");
+
+    assert_eq!(
+        labels(cx, handle, "format-keys", Role::Label),
+        ["Ctrl+B", "Ctrl+I", "Ctrl+1–6"]
+    );
+}
+
+#[gpui_kit::test]
+fn a_click_on_the_folder_button_picks_a_new_notes_folder(cx: &mut TestAppContext) {
+    let (fixture, other) = two_folders();
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-shift-s");
+    assert_eq!(
+        label(cx, handle, "notes-folder"),
+        Some(text::home_path(&fixture.notes()))
+    );
+
+    click(cx, handle, "notes-folder");
+    assert!(cx.did_prompt_for_paths());
+    cx.simulate_path_prompt_response(|_| Some(vec![other.clone()]));
+    settle(cx);
+
+    assert_eq!(
+        Config::load(fixture.config()).settings().notes_folder,
+        Some(other)
+    );
+}
+
+#[gpui_kit::test]
 fn the_folder_screen_ignores_ctrl_shift_s(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     let handle = open(cx, fixture.startup(None));

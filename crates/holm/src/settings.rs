@@ -17,9 +17,10 @@ use gpui_kit::{
 };
 use holm_core::model::Order;
 use holm_editor::WritingHelp;
+use holm_editor::shortcuts::{self as editor, Keys, Shift};
 
 use crate::config::{AppearanceSetting, Config, Settings};
-use crate::path_text::PathText;
+use crate::icons::Icon;
 use crate::shortcuts::{self, Command, Place};
 use crate::{popup, text, window};
 
@@ -62,6 +63,9 @@ const THEMES: [(AppearanceSetting, &str); 3] = [
 
 /// The height of an option button inside its frame: the height of a small button.
 const BUTTON_HEIGHT: Pixels = px(22.);
+
+/// The size of the path in the folder button: the size of a path chip.
+const PATH_SIZE: Pixels = px(12.5);
 
 const ORDERS: [(Order, &str); 2] = [
     (Order::LastChange, text::ORDER_LAST_CHANGE),
@@ -249,22 +253,26 @@ impl SettingsDialog {
                     .as_deref()
                     .map(text::home_path)
                     .unwrap_or_default();
-                h_flex()
-                    .gap_2()
+                let theme = cx.theme();
+                let (muted, mono) = (theme.muted_foreground, theme.mono_font_family.clone());
+                // The button shrinks below the width of its path, so a long path ends in "…".
+                Button::new("notes-folder")
+                    .outline()
+                    .small()
+                    .flex_shrink(1.)
                     .min_w_0()
+                    .accessibility_label(folder.clone())
+                    .tab_stop(false)
+                    .child(Icon::Folder.view(muted))
                     .child(
                         div()
                             .min_w_0()
-                            .child(PathText::default().path(folder).one_line()),
+                            .text_ellipsis()
+                            .font_family(mono)
+                            .text_size(PATH_SIZE)
+                            .child(folder),
                     )
-                    .child(
-                        Button::new("change-folder")
-                            .label(text::CHANGE_FOLDER)
-                            .outline()
-                            .small()
-                            .tab_stop(false)
-                            .on_click(cx.listener(|dialog, _, _, cx| dialog.pick_folder(cx))),
-                    )
+                    .on_click(cx.listener(|dialog, _, _, cx| dialog.pick_folder(cx)))
                     .into_any_element()
             }
             Row::Theme => options(&THEMES, settings.theme, cx, |settings, theme| {
@@ -288,6 +296,82 @@ impl SettingsDialog {
             }
         }
     }
+}
+
+/// The format keys the settings show, from the editor key table: Bold, Italic, and the
+/// headings in one chip, like `Ctrl+1–6`.
+fn format_keys() -> Vec<String> {
+    let keys = |command| {
+        editor::shortcuts()
+            .iter()
+            .find(|shortcut| shortcut.command == command)
+            .map(|shortcut| shortcut.keys)
+    };
+    let mut chips: Vec<_> = [editor::Command::Bold, editor::Command::Italic]
+        .into_iter()
+        .filter_map(keys)
+        .map(keys_text)
+        .collect();
+    if let (Some(first), Some(last)) = (
+        keys(editor::Command::Heading(1)),
+        keys(editor::Command::Heading(6)),
+    ) {
+        chips.push(format!("{}–{}", keys_text(first), key_text(last.key)));
+    }
+    chips
+}
+
+/// The text of `keys`, like `Ctrl+B`.
+fn keys_text(keys: Keys) -> String {
+    let ctrl = if keys.ctrl { "Ctrl+" } else { "" };
+    let shift = if keys.shift == Shift::Down {
+        "Shift+"
+    } else {
+        ""
+    };
+    format!("{ctrl}{shift}{}", key_text(keys.key))
+}
+
+/// A GPUI key name with a capital first letter, like `B` or `Enter`.
+fn key_text(key: &str) -> String {
+    let mut chars = key.chars();
+    chars
+        .next()
+        .map(|first| first.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
+}
+
+/// The key chips of the format keys row, then a muted "…" for the other keys.
+fn format_key_chips(cx: &App) -> impl IntoElement + use<> {
+    let theme = cx.theme();
+    let chips = format_keys().into_iter().enumerate().map(|(at, keys)| {
+        div()
+            .id(("format-key", at))
+            .role(Role::Label)
+            .aria_label(keys.clone())
+            .test_support()
+            .px(px(4.))
+            .text_size(px(9.))
+            .line_height(px(14.))
+            .whitespace_nowrap()
+            .border_1()
+            .border_color(theme.border)
+            .rounded(px(4.))
+            .bg(theme.sidebar)
+            .child(keys)
+    });
+    h_flex()
+        .id("format-keys")
+        .test_support()
+        .mt(px(3.))
+        .gap(px(3.))
+        .children(chips)
+        .child(
+            div()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child("…"),
+        )
 }
 
 /// The buttons of a row with options, in one frame. A click picks the option.
@@ -364,18 +448,13 @@ impl Render for SettingsDialog {
         let theme = cx.theme();
         // The cursor row has a bar on its left and no fill, so the outlines of its controls stay
         // visible.
-        let (bar, muted, radius) = (theme.primary, theme.muted_foreground, theme.radius);
+        let (bar, radius) = (theme.primary, theme.radius);
         let rows: Vec<_> = ROWS
             .iter()
             .enumerate()
             .map(|(at, &row)| {
                 let current = at == self.cursor;
-                let detail = (row == Row::FormatKeys).then(|| {
-                    div()
-                        .text_xs()
-                        .text_color(muted)
-                        .child(text::FORMAT_KEYS_DETAIL)
-                });
+                let detail = (row == Row::FormatKeys).then(|| format_key_chips(cx));
                 h_flex()
                     .id(("setting", at))
                     .role(Role::ListItem)
