@@ -6,6 +6,7 @@
 //! opens the folder picker. `Esc` closes the dialog.
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme as _, Selectable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -17,7 +18,7 @@ use gpui_kit::{
 };
 use holm_core::model::Order;
 use holm_editor::WritingHelp;
-use holm_editor::shortcuts::{self as editor, Keys, Shift};
+use holm_editor::shortcuts::{self as editor, Keys};
 
 use crate::config::{AppearanceSetting, Config, Settings};
 use crate::icons::Icon;
@@ -316,29 +317,15 @@ fn format_keys() -> Vec<String> {
         keys(editor::Command::Heading(1)),
         keys(editor::Command::Heading(6)),
     ) {
-        chips.push(format!("{}–{}", keys_text(first), key_text(last.key)));
+        let last = keys_text(Keys::plain(last.key));
+        chips.push(format!("{}–{last}", keys_text(first)));
     }
     chips
 }
 
-/// The text of `keys`, like `Ctrl+B`.
+/// The text of `keys`, like `Ctrl+B`, as the shortcut list shows it.
 fn keys_text(keys: Keys) -> String {
-    let ctrl = if keys.ctrl { "Ctrl+" } else { "" };
-    let shift = if keys.shift == Shift::Down {
-        "Shift+"
-    } else {
-        ""
-    };
-    format!("{ctrl}{shift}{}", key_text(keys.key))
-}
-
-/// A GPUI key name with a capital first letter, like `B` or `Enter`.
-fn key_text(key: &str) -> String {
-    let mut chars = key.chars();
-    chars
-        .next()
-        .map(|first| first.to_uppercase().chain(chars).collect())
-        .unwrap_or_default()
+    Kbd::format(&shortcuts::keystroke(keys))
 }
 
 /// The key chips of the format keys row, then a muted "…" for the other keys.

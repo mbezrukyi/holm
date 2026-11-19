@@ -32,6 +32,8 @@ pub(crate) enum Place {
     TextField,
     /// The settings dialog.
     Settings,
+    /// The shortcut list.
+    ShortcutList,
     /// A place of the editor. Only [`list`] has it.
     Editor(editor::Place),
 }
@@ -403,6 +405,13 @@ const ROWS: &[Row] = &[
         G::Window,
         text::KEY_CLOSE_SETTINGS,
     ),
+    row(
+        P::ShortcutList,
+        Keys::plain("escape"),
+        C::Close,
+        G::Window,
+        text::KEY_CLOSE_SHORTCUT_LIST,
+    ),
 ];
 
 /// The command of `keystroke` in `place`.
@@ -417,9 +426,20 @@ pub(crate) fn text_command(keystroke: &Keystroke) -> Option<editor::Command> {
     editor::command(editor::Place::Text, keystroke)
 }
 
+/// The keystroke the shortcut list shows for `keys`. With [`Shift::Either`] it has no Shift,
+/// so Ctrl+? shows as "Ctrl+?".
+pub(crate) fn keystroke(keys: Keys) -> Keystroke {
+    let mut keystroke = Keystroke {
+        key: keys.key.to_owned(),
+        ..Keystroke::default()
+    };
+    keystroke.modifiers.control = keys.ctrl;
+    keystroke.modifiers.shift = keys.shift == Shift::Down;
+    keystroke
+}
+
 /// One shortcut in the shortcut list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(not(test), expect(dead_code, reason = "the shortcut list reads it"))]
 pub(crate) struct Shortcut {
     pub(crate) place: Place,
     pub(crate) keys: Keys,
@@ -428,7 +448,6 @@ pub(crate) struct Shortcut {
 }
 
 /// Every shortcut of the app and the editor.
-#[cfg_attr(not(test), expect(dead_code, reason = "the shortcut list reads it"))]
 pub(crate) fn list() -> Vec<Shortcut> {
     let app = ROWS.iter().map(|row| Shortcut {
         place: row.place,

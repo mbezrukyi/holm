@@ -3791,3 +3791,90 @@ fn the_folder_screen_ignores_ctrl_shift_s(cx: &mut TestAppContext) {
     keys(cx, handle, "ctrl-shift-s");
     assert_eq!(question(cx, handle), None);
 }
+
+/// The rows of the shortcut list, as "label: keys".
+fn shortcut_rows(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
+    labels(cx, handle, "shortcuts", Role::ListItem)
+}
+
+/// The top of the first row of the shortcut list.
+fn first_shortcut_top(cx: &mut TestAppContext, handle: AnyWindowHandle) -> gpui_kit::Pixels {
+    screen(cx, handle, |window| {
+        window.within("shortcuts").find_all_by_role(Role::ListItem)[0]
+            .bounds()
+            .top()
+    })
+}
+
+#[gpui_kit::test]
+fn ctrl_question_mark_opens_the_shortcut_list_and_esc_gives_the_focus_back(
+    cx: &mut TestAppContext,
+) {
+    use crate::shortcuts;
+    let fixture = Fixture::new().with_folder();
+    fs::write(fixture.notes().join("Note.md"), "a\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(focus(cx, handle), "editor");
+
+    keys(cx, handle, "ctrl-?");
+    assert_eq!(question(cx, handle).as_deref(), Some(text::SHORTCUT_LIST));
+    // The screen reads the two columns row by row, so the test compares the rows in any order.
+    let mut rows = shortcut_rows(cx, handle);
+    let mut want: Vec<_> = shortcuts::list()
+        .iter()
+        .map(|shortcut| {
+            let keys = gpui_kit::component::kbd::Kbd::format(&shortcuts::keystroke(shortcut.keys));
+            format!("{}: {keys}", shortcut.label)
+        })
+        .collect();
+    rows.sort();
+    want.sort();
+    assert_eq!(rows, want, "one row for each row of both tables");
+    for row in [
+        "Bold: Ctrl+B",
+        "Heading 6: Ctrl+6",
+        "Word left: Ctrl+Left",
+        "Next match: Enter",
+        "Previous match: Shift+Enter",
+        "New folder: Ctrl+Shift+N",
+        "Shortcuts: Ctrl+?",
+        "App menu: F10",
+        "Close the shortcut list: Esc",
+    ] {
+        assert!(rows.iter().any(|shown| shown == row), "{row} is missing");
+    }
+
+    keys(cx, handle, "escape");
+    assert_eq!(question(cx, handle), None);
+    assert_eq!(focus(cx, handle), "editor");
+    assert_eq!(editor_text(cx, handle), "a\n");
+}
+
+#[gpui_kit::test]
+fn up_and_down_scroll_the_shortcut_list(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-?");
+    let top = first_shortcut_top(cx, handle);
+
+    keys(cx, handle, "up");
+    assert_eq!(first_shortcut_top(cx, handle), top, "Up stops at the top");
+    keys(cx, handle, "down");
+    let down = first_shortcut_top(cx, handle);
+    assert!(down < top, "Down scrolls the list");
+    keys(cx, handle, "down");
+    assert!(first_shortcut_top(cx, handle) < down);
+    keys(cx, handle, "up up");
+    assert_eq!(first_shortcut_top(cx, handle), top);
+    assert_eq!(question(cx, handle).as_deref(), Some(text::SHORTCUT_LIST));
+}
+
+#[gpui_kit::test]
+fn the_folder_screen_ignores_ctrl_question_mark(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(folder_screen(cx, handle).as_deref(), Some(text::ASK_FOLDER));
+
+    keys(cx, handle, "ctrl-?");
+    assert_eq!(question(cx, handle), None);
+}

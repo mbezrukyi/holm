@@ -246,6 +246,13 @@ pub(crate) const KEY_PREVIOUS_SETTING: &str = "Previous setting";
 pub(crate) const KEY_SWITCH_SETTING: &str = "Switch the setting, or change the notes folder";
 pub(crate) const KEY_CHANGE_FOLDER: &str = "Change the notes folder";
 pub(crate) const KEY_CLOSE_SETTINGS: &str = "Close the settings";
+pub(crate) const KEY_CLOSE_SHORTCUT_LIST: &str = "Close the shortcut list";
+
+pub(crate) const SHORTCUT_LIST: &str = "Shortcuts";
+pub(crate) const GROUP_TEXT: &str = "TEXT";
+pub(crate) const GROUP_NOTE: &str = "NOTE";
+pub(crate) const GROUP_SIDEBAR: &str = "SIDEBAR";
+pub(crate) const GROUP_WINDOW: &str = "WINDOW";
 
 #[cfg(test)]
 mod tests {
