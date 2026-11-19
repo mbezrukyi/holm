@@ -39,19 +39,10 @@ use crate::text;
 
 use list::NoteList;
 pub(crate) use tree::Item;
-use tree::{Lists, SidebarView, TreeRow};
+use tree::{Entry, Label, Lists, SidebarView, Tree};
 
 const TREE_ROW: f32 = 28.;
 const NOTE_ROW: f32 = 52.;
-
-/// One line of the tree: a group label or a row.
-#[derive(Clone, Copy, Debug)]
-enum Entry {
-    Label(&'static str),
-    Row(usize),
-    /// The name field of a new folder, at this depth.
-    NewFolder(usize),
-}
 
 /// A note or a folder, for a delete or a move.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -126,9 +117,7 @@ pub(crate) struct Sidebar {
     lists: Lists,
     view: SidebarView,
     open: HashSet<Item>,
-    rows: Vec<TreeRow>,
-    /// The rows of the tree with the group labels between them.
-    entries: Vec<Entry>,
+    tree: Tree,
     list: NoteList,
     /// The pane, for the open note. The open note is the selected row of a list.
     pane: Entity<NotePane>,
@@ -179,8 +168,7 @@ impl Sidebar {
             lists: Lists::default(),
             view: SidebarView::from(view),
             open: HashSet::new(),
-            rows: Vec::new(),
-            entries: Vec::new(),
+            tree: Tree::default(),
             list: NoteList::default(),
             pane,
             left: None,
@@ -334,23 +322,7 @@ impl Sidebar {
             Some(Named::NewFolder(parent)) => Some(parent),
             _ => None,
         };
-        self.rows = self.lists.rows(&self.open, new_folder);
-        self.entries.clear();
-        for (at, row) in self.rows.iter().enumerate() {
-            let first = |kind: fn(&Item) -> bool| {
-                kind(&row.item) && !self.rows[..at].iter().any(|row| kind(&row.item))
-            };
-            if first(|item| matches!(item, Item::Folder(_))) {
-                self.entries.push(Entry::Label(text::FOLDERS));
-            }
-            if first(|item| matches!(item, Item::Tag(_))) {
-                self.entries.push(Entry::Label(text::TAGS));
-            }
-            self.entries.push(Entry::Row(at));
-        }
-        if let Some(Named::NewFolder(parent)) = self.field.as_ref().map(|naming| &naming.named) {
-            self.add_new_folder_entry(&parent.clone());
-        }
+        self.tree = self.lists.tree(&self.open, new_folder);
     }
 
     fn rebuild_list(&mut self, cx: &App) {
@@ -366,32 +338,6 @@ impl Sidebar {
             self.left = Some((open.clone(), next));
         }
         self.list = list;
-    }
-
-    /// Puts the field of a new folder in `parent` as its first child row. A new folder at the
-    /// root comes first under the folder label.
-    fn add_new_folder_entry(&mut self, parent: &FolderPath) {
-        let depth = parent.depth();
-        let label = self
-            .entries
-            .iter()
-            .position(|entry| matches!(entry, Entry::Label(text::FOLDERS)));
-        let at = if parent.is_root() {
-            label.map(|at| at + 1)
-        } else {
-            let item = Item::Folder(parent.clone());
-            self.entries
-                .iter()
-                .position(|entry| matches!(entry, Entry::Row(at) if self.rows[*at].item == item))
-                .map(|at| at + 1)
-        };
-        if let Some(at) = at {
-            self.entries.insert(at, Entry::NewFolder(depth));
-        } else {
-            // With no folders, the label comes after "All notes".
-            self.entries.insert(1, Entry::NewFolder(depth));
-            self.entries.insert(1, Entry::Label(text::FOLDERS));
-        }
     }
 
     fn open_note<'a>(&self, cx: &'a App) -> Option<&'a NotePath> {
@@ -483,10 +429,7 @@ impl Sidebar {
     fn scroll_to_selection(&self, cx: &App) {
         let at = match &self.view {
             _ if self.shows_list() => self.selected_note(cx),
-            SidebarView::Tree(item) => self
-                .entries
-                .iter()
-                .position(|entry| matches!(entry, Entry::Row(at) if &self.rows[*at].item == item)),
+            SidebarView::Tree(item) => self.tree.entry_of(item),
             SidebarView::List(_) => self.selected_note(cx),
         };
         if let Some(at) = at {
@@ -699,28 +642,29 @@ impl Sidebar {
             return false;
         };
         let item = item.clone();
-        let at = self.rows.iter().position(|row| row.item == item);
+        let rows = &self.tree.rows;
+        let at = self.tree.row_of(&item);
         match key {
             "up" | "down" => {
                 let next = match (at, key) {
                     (Some(at), "up") => at.saturating_sub(1),
-                    (Some(at), _) => (at + 1).min(self.rows.len().saturating_sub(1)),
+                    (Some(at), _) => (at + 1).min(rows.len().saturating_sub(1)),
                     (None, _) => 0,
                 };
-                if let Some(row) = self.rows.get(next) {
+                if let Some(row) = rows.get(next) {
                     let item = row.item.clone();
                     self.set_view(SidebarView::Tree(item), cx);
                 }
             }
             "right" => {
-                if at.is_some_and(|at| self.rows[at].has_children) {
+                if at.is_some_and(|at| rows[at].has_children) {
                     self.open.insert(item);
                     self.rebuild(cx);
                     cx.notify();
                 }
             }
             "left" => {
-                if at.is_some_and(|at| self.rows[at].open) {
+                if at.is_some_and(|at| rows[at].open) {
                     self.open.remove(&item);
                     self.rebuild(cx);
                     cx.notify();
@@ -821,7 +765,7 @@ impl Sidebar {
 
     fn tree_rows(&mut self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let entries: Vec<Entry> = range
-            .filter_map(|at| self.entries.get(at).copied())
+            .filter_map(|at| self.tree.entries.get(at).copied())
             .collect();
         entries
             .into_iter()
@@ -835,7 +779,10 @@ impl Sidebar {
                     .items_end()
                     .text_size(px(11.))
                     .text_color(cx.theme().muted_foreground)
-                    .child(label)
+                    .child(match label {
+                        Label::Folders => text::FOLDERS,
+                        Label::Tags => text::TAGS,
+                    })
                     .into_any_element(),
                 Entry::Row(at) => self.tree_row(at, cx),
                 Entry::NewFolder(depth) => self.new_folder_row(depth, cx),
@@ -845,7 +792,7 @@ impl Sidebar {
 
     fn tree_row(&mut self, at: usize, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
-        let row = &self.rows[at];
+        let row = &self.tree.rows[at];
         let selected = matches!(&self.view, SidebarView::Tree(item) if item == &row.item);
         let icon = match &row.item {
             Item::All => Icon::All,
@@ -1136,7 +1083,7 @@ impl Render for Sidebar {
         } else {
             uniform_list(
                 "tree",
-                self.entries.len(),
+                self.tree.entries.len(),
                 cx.processor(|sidebar, range, _, cx| sidebar.tree_rows(range, cx)),
             )
         };

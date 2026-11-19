@@ -138,6 +138,62 @@ pub(crate) struct TreeRow {
     pub(crate) open: bool,
 }
 
+/// A group label of the tree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Label {
+    Folders,
+    Tags,
+}
+
+/// One line of the tree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Entry {
+    Label(Label),
+    /// The row at this place in [`Tree::rows`].
+    Row(usize),
+    /// The name field of a new folder, at this depth.
+    NewFolder(usize),
+}
+
+/// The visible tree: its rows, and its lines with the group labels between the rows.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Tree {
+    pub(crate) rows: Vec<TreeRow>,
+    pub(crate) entries: Vec<Entry>,
+}
+
+impl Tree {
+    /// The place of the row of `item` in the rows.
+    pub(crate) fn row_of(&self, item: &Item) -> Option<usize> {
+        self.rows.iter().position(|row| row.item == *item)
+    }
+
+    fn add_new_folder(&mut self, parent: &FolderPath) {
+        let depth = parent.depth();
+        let at = if parent.is_root() {
+            self.entries
+                .iter()
+                .position(|entry| *entry == Entry::Label(Label::Folders))
+        } else {
+            self.entry_of(&Item::Folder(parent.clone()))
+        };
+        if let Some(at) = at {
+            self.entries.insert(at + 1, Entry::NewFolder(depth));
+        } else {
+            // With no folders, the label comes after "All notes".
+            self.entries.insert(1, Entry::NewFolder(depth));
+            self.entries.insert(1, Entry::Label(Label::Folders));
+        }
+    }
+
+    /// The place of the line of `item` in the entries.
+    pub(crate) fn entry_of(&self, item: &Item) -> Option<usize> {
+        self.entries
+            .iter()
+            .position(|entry| matches!(entry, Entry::Row(at) if self.rows[*at].item == *item))
+    }
+}
+
 /// A folder of the tree and the count of notes right in it.
 #[derive(Clone, Debug)]
 pub(crate) struct Folder {
@@ -201,13 +257,37 @@ impl Lists {
         item
     }
 
-    /// The visible rows: "All notes", then the folders, then the tags. Only the children of
-    /// `open` items show. `new_folder` is the parent of the field of a new folder.
-    pub(crate) fn rows(
-        &self,
-        open: &HashSet<Item>,
-        new_folder: Option<&FolderPath>,
-    ) -> Vec<TreeRow> {
+    /// The visible tree: "All notes", then the folders, then the tags, each group under its
+    /// label. Only the children of `open` items show. `new_folder` is the parent of the field of
+    /// a new folder. The field is the first child line of its parent. A field at the root comes
+    /// first under the folder label.
+    pub(crate) fn tree(&self, open: &HashSet<Item>, new_folder: Option<&FolderPath>) -> Tree {
+        let rows = self.rows(open, new_folder);
+        let mut entries = Vec::with_capacity(rows.len() + 3);
+        let (mut folders, mut tags) = (false, false);
+        for (at, row) in rows.iter().enumerate() {
+            match row.item {
+                Item::Folder(_) if !folders => {
+                    folders = true;
+                    entries.push(Entry::Label(Label::Folders));
+                }
+                Item::Tag(_) if !tags => {
+                    tags = true;
+                    entries.push(Entry::Label(Label::Tags));
+                }
+                _ => {}
+            }
+            entries.push(Entry::Row(at));
+        }
+        let mut tree = Tree { rows, entries };
+        if let Some(parent) = new_folder {
+            tree.add_new_folder(parent);
+        }
+        tree
+    }
+
+    /// The visible rows of [`Self::tree`]. The parent of a new folder has children.
+    fn rows(&self, open: &HashSet<Item>, new_folder: Option<&FolderPath>) -> Vec<TreeRow> {
         let mut rows = vec![TreeRow {
             item: Item::All,
             name: String::new(),
@@ -360,6 +440,53 @@ mod tests {
 
         let rows = lists().rows(&open, Some(&folder_path("home")));
         assert!(rows[1].has_children && rows[1].open);
+    }
+
+    #[test]
+    fn labels_come_before_the_first_folder_and_the_first_tag() {
+        let tree = lists().tree(&HashSet::new(), None);
+        assert_eq!(
+            tree.entries,
+            [
+                Entry::Row(0),
+                Entry::Label(Label::Folders),
+                Entry::Row(1),
+                Entry::Row(2),
+                Entry::Label(Label::Tags),
+                Entry::Row(3),
+                Entry::Row(4),
+            ]
+        );
+        assert_eq!(tree.entry_of(&Item::Tag(tag_name("work"))), Some(5));
+        assert_eq!(tree.row_of(&Item::Tag(tag_name("work"))), Some(3));
+    }
+
+    #[test]
+    fn a_new_folder_is_the_first_child_line_of_its_parent() {
+        let root = lists().tree(&HashSet::new(), Some(&FolderPath::root()));
+        assert_eq!(
+            &root.entries[1..3],
+            [Entry::Label(Label::Folders), Entry::NewFolder(0)]
+        );
+        assert_eq!(root.entries[3], Entry::Row(1));
+
+        let open = HashSet::from([Item::Folder(folder_path("home"))]);
+        let home = lists().tree(&open, Some(&folder_path("home")));
+        assert_eq!(&home.entries[2..4], [Entry::Row(1), Entry::NewFolder(1)]);
+        assert!(home.rows[1].open);
+    }
+
+    #[test]
+    fn a_new_folder_with_no_folders_gets_the_folder_label() {
+        let tree = Lists::default().tree(&HashSet::new(), Some(&FolderPath::root()));
+        assert_eq!(
+            tree.entries,
+            [
+                Entry::Row(0),
+                Entry::Label(Label::Folders),
+                Entry::NewFolder(0)
+            ]
+        );
     }
 
     #[test]
