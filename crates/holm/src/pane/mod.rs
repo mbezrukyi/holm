@@ -31,6 +31,7 @@ mod new_note;
 mod open;
 
 use std::borrow::Cow;
+use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -152,6 +153,9 @@ pub(crate) struct NotePane {
     open_heading: Option<String>,
     /// A save for a close of the window runs.
     closing: bool,
+    /// A close failed to save, and the next close closes. The next key clears it, as it clears
+    /// the answer that asks for the close.
+    close_again: Rc<Cell<bool>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -189,6 +193,7 @@ impl NotePane {
         });
         let links =
             cx.new(|cx| Links::new(core_door.clone(), editor.clone(), backlinks.clone(), cx));
+        let close_again = Rc::new(Cell::new(false));
         let subscriptions = vec![
             cx.subscribe(&core_door, |pane, _, event: &DoorEvent, cx| {
                 pane.follow(event, cx);
@@ -227,6 +232,7 @@ impl NotePane {
                     pane.open(path.clone(), Leave::Keep, cx);
                 },
             ),
+            Self::clear_close_again(close_again.clone(), cx),
             cx.observe_global::<Ui>(|pane, cx| {
                 let appearance = theme::appearance(cx);
                 pane.editor
@@ -253,12 +259,22 @@ impl NotePane {
             opens: Opens::default(),
             open_heading: None,
             closing: false,
+            close_again,
             _subscriptions: subscriptions,
         };
         if let Some(note) = note {
             pane.show(note, false, cx);
         }
         pane
+    }
+
+    /// Clears the "close again" flag at each key, as the message line clears its answer.
+    fn clear_close_again(close_again: Rc<Cell<bool>>, cx: &mut Context<Self>) -> Subscription {
+        cx.intercept_keystrokes(move |event, _, _| {
+            if !event.keystroke.is_modifier_key() {
+                close_again.set(false);
+            }
+        })
     }
 
     /// Puts `note` from the disk into the editor. A reload keeps the view and is one undo step.
@@ -502,12 +518,12 @@ impl NotePane {
 
     /// A close of the window: gives whether the window may close now. With unsaved text, the
     /// pane saves first and closes the window when the save works. When it fails, the answer
-    /// asks for a second close. A close while that answer shows gives `true`.
+    /// asks for a second close. A close before the next key gives `true`.
     pub(crate) fn may_close(&mut self, window: &Window, cx: &mut Context<Self>) -> bool {
         if self.closing {
             return false;
         }
-        if !self.unsaved(cx) || self.message_line.read(cx).message() == Some(text::CLOSE_AGAIN) {
+        if !self.unsaved(cx) || self.close_again.get() {
             return true;
         }
         self.closing = true;
@@ -515,6 +531,7 @@ impl NotePane {
         let done = step(cx, move |pane, saved: Result<(), NotSaved>, cx| {
             pane.closing = false;
             if saved.is_err() {
+                pane.close_again.set(true);
                 pane.answer(text::CLOSE_AGAIN, cx);
             } else {
                 // The close handler of the window may still run, so the window goes later.

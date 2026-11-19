@@ -49,10 +49,6 @@ impl PathText {
     }
 
     /// The whole text, with the paths as plain text.
-    pub(crate) fn as_str(&self) -> &str {
-        &self.plain
-    }
-
     pub(crate) fn plain_text(&self) -> SharedString {
         self.plain.clone()
     }
@@ -506,7 +502,7 @@ mod tests {
 
     #[test]
     fn the_plain_text_holds_the_paths() {
-        assert_eq!(missing().as_str(), "Not at ~/Gone. Pick one.");
+        assert_eq!(missing().plain_text(), "Not at ~/Gone. Pick one.");
         assert_eq!(PathText::from("a").plain("b"), PathText::from("ab"));
     }
 

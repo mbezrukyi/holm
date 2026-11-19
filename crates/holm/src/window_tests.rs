@@ -789,6 +789,26 @@ fn each_sidebar_action_sees_the_typed_text(cx: &mut TestAppContext) {
     assert_eq!(fields(&note).0, Vec::<String>::new());
 }
 
+/// Another answer between the two closes, like the reason after a click on the state, does
+/// not stop the second close.
+#[gpui_kit::test]
+fn a_click_between_two_closes_still_lets_the_second_close_close(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    fs::write(notes_dir.join("Note.md"), "old\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    read_only(&notes_dir, true);
+    cx.simulate_input(handle, "a");
+    assert!(close(cx, handle));
+    assert_eq!(message(cx, handle).as_deref(), Some(text::CLOSE_AGAIN));
+    click(cx, handle, "message-state");
+    assert_ne!(message(cx, handle).as_deref(), Some(text::CLOSE_AGAIN));
+
+    assert!(!close(cx, handle), "the second close closes");
+    read_only(&notes_dir, false);
+}
+
 #[gpui_kit::test]
 fn a_close_with_a_note_that_cannot_be_saved_asks_for_a_second_close(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
