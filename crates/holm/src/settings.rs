@@ -11,10 +11,10 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme as _, Selectable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Global,
-    InteractiveElement as _, IntoElement, KeyBinding, KeyDownEvent, Keystroke, ParentElement,
-    Pixels, Render, Role, StatefulInteractiveElement as _, Styled, Subscription,
-    TestSupportExt as _, Window, actions, div, px, transparent_black,
+    App, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
+    InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement, Pixels, Render, Role,
+    StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _, Window, div, px,
+    transparent_black,
 };
 use holm_core::model::Order;
 use holm_editor::WritingHelp;
@@ -22,17 +22,8 @@ use holm_editor::shortcuts::{self as editor, Keys};
 
 use crate::config::{AppearanceSetting, Config, Settings};
 use crate::icons::Icon;
-use crate::shortcuts::{self, Command, Place};
+use crate::shortcuts::{self, Command, Place, Run};
 use crate::{popup, text, window};
-
-actions!(settings, [Tab, ShiftTab]);
-
-const KEY_CONTEXT: &str = "Settings";
-
-/// Marks that the app has the bindings of [`Tab`] and [`ShiftTab`].
-struct TabKeys;
-
-impl Global for TabKeys {}
 
 /// The dialog asks its owner to close it.
 pub(crate) struct Close;
@@ -121,15 +112,6 @@ pub(crate) struct SettingsDialog {
 impl SettingsDialog {
     /// The dialog with the cursor on the first row. It takes the focus.
     pub(crate) fn new(config: Entity<Config>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        // A key binding runs before the key handlers. So the dialog needs bindings for Tab
-        // and Shift+Tab, or the focus bindings of the window root take them.
-        if !cx.has_global::<TabKeys>() {
-            cx.set_global(TabKeys);
-            cx.bind_keys([
-                KeyBinding::new("tab", Tab, Some(KEY_CONTEXT)),
-                KeyBinding::new("shift-tab", ShiftTab, Some(KEY_CONTEXT)),
-            ]);
-        }
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         let subscription = cx.observe(&config, |_, _, cx| cx.notify());
@@ -202,48 +184,35 @@ impl SettingsDialog {
         );
     }
 
-    fn key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        if self.key(&event.keystroke, cx) {
-            cx.stop_propagation();
-        }
-    }
-
-    /// Tab or Shift+Tab from the key binding.
-    fn tab(&mut self, keys: &'static str, cx: &mut Context<Self>) {
-        if let Ok(keystroke) = Keystroke::parse(keys)
-            && !self.key(&keystroke, cx)
-        {
-            cx.propagate();
-        }
-    }
-
-    /// A key down. It returns whether the key stops here.
-    fn key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) -> bool {
+    fn run(&mut self, Run(command): &Run, _window: &mut Window, cx: &mut Context<Self>) {
         let row = self.row();
-        match shortcuts::command(Place::Settings, keystroke) {
-            Some(Command::NextSetting) => self.move_cursor(true, cx),
-            Some(Command::PreviousSetting) => self.move_cursor(false, cx),
-            Some(Command::SwitchSetting) if row == Row::Folder => self.pick_folder(cx),
-            Some(Command::SwitchSetting) => self.toggle(row, cx),
-            Some(Command::ChangeFolder) => {
+        match command {
+            Command::NextSetting => self.move_cursor(true, cx),
+            Command::PreviousSetting => self.move_cursor(false, cx),
+            Command::SwitchSetting if row == Row::Folder => self.pick_folder(cx),
+            Command::SwitchSetting => self.toggle(row, cx),
+            Command::ChangeFolder => {
                 if row == Row::Folder {
                     self.pick_folder(cx);
                 }
             }
-            Some(Command::Close) => cx.emit(Close),
-            _ => {
-                let modifiers = keystroke.modifiers;
-                if modifiers.modified() {
-                    return false;
-                }
-                match keystroke.key.as_str() {
-                    "left" => self.pick_option(false, cx),
-                    "right" => self.pick_option(true, cx),
-                    _ => return false,
-                }
-            }
+            Command::Close => cx.emit(Close),
+            _ => cx.propagate(),
         }
-        true
+    }
+
+    /// `Left` and `Right` pick an option.
+    fn key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        let keystroke = &event.keystroke;
+        if keystroke.modifiers.modified() {
+            return;
+        }
+        match keystroke.key.as_str() {
+            "left" => self.pick_option(false, cx),
+            "right" => self.pick_option(true, cx),
+            _ => return,
+        }
+        cx.stop_propagation();
     }
 
     fn control(row: Row, settings: &Settings, cx: &mut Context<Self>) -> impl IntoElement {
@@ -263,7 +232,6 @@ impl SettingsDialog {
                     .flex_shrink(1.)
                     .min_w_0()
                     .accessibility_label(folder.clone())
-                    .tab_stop(false)
                     .child(Icon::Folder.view(muted))
                     .child(
                         div()
@@ -290,7 +258,6 @@ impl SettingsDialog {
                 Switch::new(row.label())
                     .checked(on)
                     .small()
-                    .tab_stop(false)
                     .accessibility_label(row.label())
                     .on_click(cx.listener(move |dialog, _: &bool, _, cx| dialog.toggle(row, cx)))
                     .into_any_element()
@@ -412,7 +379,6 @@ fn options<T: Copy + PartialEq + 'static>(
                 .selected(selected)
                 .toggled(selected)
                 .when(selected, |button| button.bg(fill).text_color(on_fill))
-                .tab_stop(false)
                 .on_click(cx.listener(move |dialog, _, _, cx| {
                     dialog.change(|settings| set(settings, option), cx);
                 })),
@@ -487,11 +453,10 @@ impl Render for SettingsDialog {
             .role(Role::Dialog)
             .aria_label(text::SETTINGS)
             .test_support()
-            .key_context(KEY_CONTEXT)
+            .key_context(Place::Settings.key_context())
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key_down))
-            .on_action(cx.listener(|dialog, _: &Tab, _, cx| dialog.tab("tab", cx)))
-            .on_action(cx.listener(|dialog, _: &ShiftTab, _, cx| dialog.tab("shift-tab", cx)))
+            .on_action(cx.listener(Self::run))
             .child(panel)
     }
 }

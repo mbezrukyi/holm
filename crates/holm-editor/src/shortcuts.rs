@@ -631,14 +631,6 @@ pub fn shortcuts() -> &'static [Shortcut] {
     SHORTCUTS
 }
 
-/// The command of `keystroke` in `place`.
-pub fn command(place: Place, keystroke: &Keystroke) -> Option<Command> {
-    SHORTCUTS
-        .iter()
-        .find(|shortcut| shortcut.place == place && shortcut.keys.matches(keystroke))
-        .map(|shortcut| shortcut.command)
-}
-
 #[cfg(test)]
 mod tests {
     use gpui_kit::{TestAppContext, TestDispatcher};

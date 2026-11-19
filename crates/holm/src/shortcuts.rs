@@ -1,10 +1,11 @@
-//! The shortcuts of the app. Each key handler of the app matches only on a [`Command`] from
-//! this table. [`list`] joins it with the editor table for the shortcut list.
+//! The shortcuts of the app. [`bind`] turns this table into the GPUI bindings, so each key
+//! reaches its view as a [`Run`] action. [`list`] joins it with the editor table for the
+//! shortcut list.
 //!
 //! Plain cursor keys, Backspace, Delete in a text field, and typing are not shortcuts, so they
 //! are not in the table.
 
-use gpui_kit::Keystroke;
+use gpui_kit::{Action, App, KeyBinding, Keystroke, NoAction};
 use holm_editor::shortcuts::{self as editor, Keys, Shift};
 
 use crate::text;
@@ -37,6 +38,32 @@ pub(crate) enum Place {
     /// A place of the editor. Only [`list`] has it.
     Editor(editor::Place),
 }
+
+impl Place {
+    /// The key context name of this place. The view of the place sets it while it is in the
+    /// place. A [`Place::Note`] key works while the editor has the focus, so it has the
+    /// context of the editor element, like each place of the editor.
+    pub(crate) const fn key_context(self) -> &'static str {
+        match self {
+            Self::Window => "Notes",
+            Self::Sidebar => "Sidebar",
+            Self::Tree => "Tree",
+            Self::NoteList => "NoteList",
+            Self::Tags => "Tags",
+            Self::Dialog => "Dialog",
+            Self::ListPopup => "ListPopup",
+            Self::TextField => "TextField",
+            Self::Settings => "Settings",
+            Self::ShortcutList => "ShortcutList",
+            Self::Note | Self::Editor(_) => "Editor",
+        }
+    }
+}
+
+/// A shortcut of the table, from its GPUI binding.
+#[derive(Clone, Debug, PartialEq, Eq, Action)]
+#[action(namespace = holm, no_json)]
+pub(crate) struct Run(pub(crate) Command);
 
 /// The group of a shortcut in the shortcut list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -98,6 +125,8 @@ pub(crate) enum Command {
     SwitchSetting,
     /// Opens the folder picker on the notes folder row.
     ChangeFolder,
+    /// A key of the editor table that works in each text input.
+    Text(editor::Command),
 }
 
 /// One shortcut of the app.
@@ -428,9 +457,74 @@ pub(crate) fn keys(place: Place, command: Command) -> Option<Keys> {
         .map(|row| row.keys)
 }
 
-/// The command of `keystroke` in each text input. Its keys come from the editor table.
-pub(crate) fn text_command(keystroke: &Keystroke) -> Option<editor::Command> {
-    editor::command(editor::Place::Text, keystroke)
+/// The context of a text input of `gpui-component`.
+const INPUT: &str = "Input";
+
+/// The context of the window root of `gpui-component`. It binds Tab to a focus move.
+const ROOT: &str = "Root";
+
+/// Binds the keys of each row to [`Run`], and the editor [`editor::Place::Text`] rows in the
+/// text fields. Then it gives the text inputs their keys back with `NoAction`:
+///
+/// - each text input keeps each key that types a char and that some place binds;
+/// - a text field keeps each plain key of the other places, except the [`Place::Window`] keys.
+///
+/// Tab and Shift+Tab do nothing where no place names them.
+pub(crate) fn bind(cx: &mut App) {
+    let text_field = Place::TextField.key_context();
+    let mut bindings: Vec<KeyBinding> = ROWS
+        .iter()
+        .flat_map(|row| {
+            let command = row.command;
+            row.keys
+                .bindings(row.place.key_context(), |_| Run(command), cx)
+        })
+        .collect();
+    for shortcut in text_keys() {
+        let command = Command::Text(shortcut.command);
+        bindings.extend(shortcut.keys.bindings(text_field, |_| Run(command), cx));
+    }
+    for keys in typed_keys() {
+        bindings.extend(keys.bindings(INPUT, |_| NoAction, cx));
+    }
+    for keys in kept_by_text_fields() {
+        bindings.extend(keys.bindings(text_field, |_| NoAction, cx));
+    }
+    for keys in [Keys::plain("tab"), Keys::plain("tab").shift(Shift::Down)] {
+        bindings.extend(keys.bindings(ROOT, |_| NoAction, cx));
+    }
+    cx.bind_keys(bindings);
+}
+
+/// The editor rows that work in each text input.
+fn text_keys() -> impl Iterator<Item = &'static editor::Shortcut> {
+    editor::shortcuts()
+        .iter()
+        .filter(|shortcut| shortcut.place == editor::Place::Text)
+}
+
+/// The keys of every place that type a char, like Space.
+fn typed_keys() -> Vec<Keys> {
+    list()
+        .into_iter()
+        .map(|shortcut| shortcut.keys)
+        .filter(|keys| !keys.ctrl && (keys.key == "space" || keys.key.chars().count() == 1))
+        .collect()
+}
+
+/// The plain keys of the places other than [`Place::Window`] that no text field row names.
+fn kept_by_text_fields() -> Vec<Keys> {
+    let named: Vec<Keys> = ROWS
+        .iter()
+        .filter(|row| row.place == Place::TextField)
+        .map(|row| row.keys)
+        .chain(text_keys().map(|shortcut| shortcut.keys))
+        .collect();
+    ROWS.iter()
+        .filter(|row| !matches!(row.place, Place::TextField | Place::Window) && !row.keys.ctrl)
+        .map(|row| row.keys)
+        .filter(|keys| !named.iter().any(|name| name.overlaps(keys)))
+        .collect()
 }
 
 /// The keystroke the shortcut list shows for `keys`. With [`Shift::Either`] it has no Shift,
@@ -491,6 +585,46 @@ mod tests {
             )
         };
         one == other || one_way(one, other) || one_way(other, one)
+    }
+
+    #[test]
+    fn each_row_of_the_app_binds_its_keys_in_its_place() {
+        let cx = gpui_kit::TestAppContext::build(gpui_kit::TestDispatcher::new(0), None);
+        cx.update(|cx| {
+            for row in ROWS {
+                let context = row.place.key_context();
+                let bindings = row.keys.bindings(context, |_| Run(row.command), cx);
+                let count = if row.keys.shift == Shift::Either {
+                    2
+                } else {
+                    1
+                };
+                assert_eq!(bindings.len(), count, "{:?} {:?}", row.place, row.keys);
+            }
+        });
+    }
+
+    #[test]
+    fn text_inputs_keep_space_and_text_fields_keep_the_plain_keys_of_other_places() {
+        let typed = typed_keys();
+        assert!(typed.iter().all(|keys| !keys.ctrl), "{typed:?}");
+        assert!(typed.iter().any(|keys| keys.key == "space"), "{typed:?}");
+        assert!(
+            typed.iter().any(|keys| keys.key == "1"),
+            "a color of the color window"
+        );
+        assert!(!typed.iter().any(|keys| keys.key == "enter"));
+
+        let kept = kept_by_text_fields();
+        let has = |keys: Keys| kept.iter().any(|kept| kept.overlaps(&keys));
+        assert!(has(Keys::plain("tab")), "the tab of the settings");
+        assert!(has(Keys::plain("space")));
+        assert!(has(Keys::plain("delete")), "the delete of the tree");
+        assert!(has(Keys::plain("f2")), "the rename of the tree");
+        assert!(!has(Keys::plain("enter")), "the text field names it");
+        assert!(!has(Keys::plain("escape")), "the text field names it");
+        assert!(!has(Keys::plain("f10")), "a window key passes");
+        assert!(kept.iter().all(|keys| !keys.ctrl));
     }
 
     #[test]

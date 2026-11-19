@@ -18,7 +18,7 @@ use gpui_kit::{
 
 use holm_editor::shortcuts as editor;
 
-use crate::shortcuts::{self, Command, Group, Place, Shortcut};
+use crate::shortcuts::{self, Command, Group, Place, Run, Shortcut};
 use crate::{popup, text};
 
 /// The groups of each column.
@@ -117,20 +117,16 @@ impl ShortcutList {
 
     fn key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let keystroke = &event.keystroke;
-        if shortcuts::command(Place::ShortcutList, keystroke) == Some(Command::Close) {
-            cx.emit(Close);
-        } else if keystroke.modifiers.modified() {
+        if keystroke.modifiers.modified() {
             return;
-        } else {
-            match keystroke.key.as_str() {
-                "up" => self.scroll_by(false, cx),
-                "down" => self.scroll_by(true, cx),
-                _ => return,
-            }
+        }
+        match keystroke.key.as_str() {
+            "up" => self.scroll_by(false, cx),
+            "down" => self.scroll_by(true, cx),
+            _ => return,
         }
         cx.stop_propagation();
     }
-
     fn group(&self, group: Group, cx: &App) -> impl IntoElement + use<> {
         let theme = cx.theme();
         let muted = theme.muted_foreground;
@@ -255,8 +251,13 @@ impl Render for ShortcutList {
             .role(Role::Dialog)
             .aria_label(text::SHORTCUT_LIST)
             .test_support()
+            .key_context(Place::ShortcutList.key_context())
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key_down))
+            .on_action(cx.listener(|_, Run(command): &Run, _, cx| match command {
+                Command::Close => cx.emit(Close),
+                _ => cx.propagate(),
+            }))
             .child(panel)
     }
 }

@@ -19,7 +19,7 @@ use holm_core::NotePath;
 use holm_core::model::NoteInfo;
 
 use crate::popup::{self, Dropdown};
-use crate::shortcuts::{self, Command, Place};
+use crate::shortcuts::{Command, Place, Run};
 use crate::text;
 
 /// The padding on each side of the count, inside its hover background.
@@ -99,17 +99,24 @@ impl Backlinks {
         }
     }
 
+    fn run(&mut self, Run(command): &Run, _window: &mut Window, cx: &mut Context<Self>) {
+        match command {
+            Command::Pick => self.pick(self.cursor, cx),
+            Command::Close => self.close(cx),
+            _ => return cx.propagate(),
+        }
+        cx.notify();
+    }
+
     fn key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let keystroke = &event.keystroke;
-        match shortcuts::command(Place::ListPopup, keystroke) {
-            Some(Command::Pick) => self.pick(self.cursor, cx),
-            Some(Command::Close) => self.close(cx),
-            _ if keystroke.modifiers.modified() => return,
-            _ => match keystroke.key.as_str() {
-                "up" => self.cursor = self.cursor.saturating_sub(1),
-                "down" => self.cursor = (self.cursor + 1).min(self.notes.len().saturating_sub(1)),
-                _ => return,
-            },
+        if keystroke.modifiers.modified() {
+            return;
+        }
+        match keystroke.key.as_str() {
+            "up" => self.cursor = self.cursor.saturating_sub(1),
+            "down" => self.cursor = (self.cursor + 1).min(self.notes.len().saturating_sub(1)),
+            _ => return,
         }
         self.scroll.scroll_to_item(self.cursor);
         cx.notify();
@@ -168,7 +175,9 @@ impl Backlinks {
         self.dropdown
             .panel(LIST_WIDTH, window, cx)
             .right_0()
+            .key_context(Place::ListPopup.key_context())
             .on_key_down(cx.listener(Self::key_down))
+            .on_action(cx.listener(Self::run))
             .id("backlinks")
             .role(Role::Dialog)
             .aria_label(text::LINKED_FROM)

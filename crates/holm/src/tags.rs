@@ -34,9 +34,9 @@ use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Action, AnyElement, App, AppContext as _, Context, CursorStyle, ElementId, Entity,
-    EventEmitter, FocusHandle, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
-    ParentElement, Pixels, Render, Role, StatefulInteractiveElement, Styled, Subscription,
-    TestSupportExt as _, Toggled, Window, div, px,
+    EventEmitter, FocusHandle, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels,
+    Render, Role, StatefulInteractiveElement, Styled, Subscription, TestSupportExt as _, Toggled,
+    Window, div, px,
 };
 use holm_core::model::Tag;
 use holm_core::{NotePath, TagName};
@@ -46,7 +46,7 @@ use crate::core_door::CoreDoor;
 use crate::fold::Fold;
 use crate::lowercase::Lowercase;
 use crate::popup::{self, Dropdown};
-use crate::shortcuts::{self, Command, Place};
+use crate::shortcuts::{Command, Place, Run};
 use crate::text;
 use crate::title::TitleField;
 
@@ -269,11 +269,10 @@ impl TagRow {
     }
 
     /// `F2`: dispatches [`RenameTag`] for the tag line under the cursor.
-    fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if shortcuts::command(Place::Tags, &event.keystroke) != Some(Command::Rename) {
-            return;
+    fn run(&mut self, Run(command): &Run, window: &mut Window, cx: &mut Context<Self>) {
+        if *command != Command::Rename {
+            return cx.propagate();
         }
-        cx.stop_propagation();
         let line = self.cursor.and_then(|at| self.lines().get(at).cloned());
         if let Some(Line::Tag { name, .. }) = line {
             window.dispatch_action(Box::new(RenameTag(name)), cx);
@@ -413,8 +412,8 @@ impl TagRow {
         self.dropdown
             .panel(POPUP_WIDTH, window, cx)
             .left_0()
-            .key_context("TagRow")
-            .on_key_down(cx.listener(Self::key_down))
+            .key_context(Place::Tags.key_context())
+            .on_action(cx.listener(Self::run))
             .capture_action(cx.listener(|row, _: &Enter, window, cx| {
                 row.choose(window, cx);
                 cx.stop_propagation();

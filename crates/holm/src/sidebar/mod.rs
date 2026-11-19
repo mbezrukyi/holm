@@ -23,7 +23,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, CursorStyle, Div, ElementId,
     Entity, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement as _, IntoElement,
-    KeyDownEvent, Keystroke, MouseButton, ParentElement, Pixels, Render, Role, ScrollStrategy,
+    KeyContext, KeyDownEvent, MouseButton, ParentElement, Pixels, Render, Role, ScrollStrategy,
     SharedString, StatefulInteractiveElement as _, Styled, Subscription, Task, TestSupportExt as _,
     UniformListScrollHandle, Window, div, px, uniform_list,
 };
@@ -36,7 +36,7 @@ use crate::error::AppError;
 use crate::icons::Icon;
 use crate::name_field::{NameEvent, NameField, NameWrite, Wording};
 use crate::pane::{NotePane, PaneEvent};
-use crate::shortcuts::{self, Command, Place};
+use crate::shortcuts::{Command, Place, Run};
 use crate::text;
 
 use list::NoteList;
@@ -617,26 +617,52 @@ impl Sidebar {
             .is_some_and(|naming| naming.field.read(cx).writing())
     }
 
+    /// The key context of the sidebar while it has the focus itself: [`Place::Sidebar`] with
+    /// [`Place::Tree`] or [`Place::NoteList`]. The search field and the name field get no
+    /// sidebar keys.
+    fn key_context(&self) -> KeyContext {
+        let mut context = KeyContext::default();
+        context.add(Place::Sidebar.key_context());
+        let place = if self.shows_list() {
+            Place::NoteList
+        } else {
+            Place::Tree
+        };
+        context.add(place.key_context());
+        context
+    }
+
+    /// A shortcut of the tree or the note list.
+    fn run(&mut self, Run(command): &Run, window: &mut Window, cx: &mut Context<Self>) {
+        let handled = match command {
+            Command::Move => {
+                if let Some(target) = self.target(cx) {
+                    cx.emit(SidebarEvent::Move(target));
+                }
+                true
+            }
+            _ if self.shows_list() => self.list_command(*command, window, cx),
+            _ => self.tree_command(*command, window, cx),
+        };
+        if !handled {
+            cx.propagate();
+        }
+    }
+
+    /// Up, Down, Left and Right in the tree or the note list.
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let keystroke = &event.keystroke;
-        let modifiers = keystroke.modifiers;
-        if self.field.is_some() {
+        if self.field.is_some()
+            || keystroke.modifiers.modified()
+            || self.search.focus_handle(cx).is_focused(window)
+        {
             return;
         }
-        if modifiers.alt || modifiers.platform || self.search.focus_handle(cx).is_focused(window) {
-            return;
-        }
-        let handled = if shortcuts::command(Place::Sidebar, keystroke) == Some(Command::Move) {
-            if let Some(target) = self.target(cx) {
-                cx.emit(SidebarEvent::Move(target));
-            }
-            true
-        } else if modifiers.control || modifiers.shift {
-            false
-        } else if self.shows_list() {
-            self.list_key(keystroke, window, cx)
+        let key = keystroke.key.as_str();
+        let handled = if self.shows_list() {
+            self.list_move(key, cx)
         } else {
-            self.tree_key(keystroke, window, cx)
+            self.tree_move(key, cx)
         };
         if handled {
             cx.stop_propagation();
@@ -655,10 +681,10 @@ impl Sidebar {
         }
     }
 
-    /// A key with no Ctrl and no Shift in the tree.
-    fn tree_key(
+    /// A shortcut of the tree.
+    fn tree_command(
         &mut self,
-        keystroke: &Keystroke,
+        command: Command,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -666,38 +692,32 @@ impl Sidebar {
             return false;
         };
         let item = item.clone();
+        match command {
+            Command::ShowNotes => self.set_view(SidebarView::List(item), cx),
+            Command::FocusEditor => cx.emit(SidebarEvent::FocusEditor),
+            Command::Rename => match item {
+                Item::Tag(tag) => cx.emit(SidebarEvent::RenameTag(tag)),
+                Item::Folder(folder) => self.rename_folder(folder, window, cx),
+                Item::All => {}
+            },
+            Command::Delete => match item {
+                Item::Tag(tag) => cx.emit(SidebarEvent::DeleteTag(tag)),
+                Item::Folder(folder) => cx.emit(SidebarEvent::Delete(Target::Folder(folder))),
+                Item::All => {}
+            },
+            _ => return false,
+        }
+        true
+    }
+
+    /// Up, Down, Left or Right in the tree.
+    fn tree_move(&mut self, key: &str, cx: &mut Context<Self>) -> bool {
+        let SidebarView::Tree(item) = &self.view else {
+            return false;
+        };
+        let item = item.clone();
         let rows = &self.tree.rows;
         let at = self.tree.row_of(&item);
-        let key = keystroke.key.as_str();
-        match shortcuts::command(Place::Tree, keystroke) {
-            Some(Command::ShowNotes) => {
-                self.set_view(SidebarView::List(item), cx);
-                return true;
-            }
-            Some(Command::FocusEditor) => {
-                cx.emit(SidebarEvent::FocusEditor);
-                return true;
-            }
-            Some(Command::Rename) => {
-                match item {
-                    Item::Tag(tag) => cx.emit(SidebarEvent::RenameTag(tag)),
-                    Item::Folder(folder) => self.rename_folder(folder, window, cx),
-                    Item::All => {}
-                }
-                return true;
-            }
-            Some(Command::Delete) => {
-                match item {
-                    Item::Tag(tag) => cx.emit(SidebarEvent::DeleteTag(tag)),
-                    Item::Folder(folder) => {
-                        cx.emit(SidebarEvent::Delete(Target::Folder(folder)));
-                    }
-                    Item::All => {}
-                }
-                return true;
-            }
-            _ => {}
-        }
         match key {
             "up" | "down" => {
                 let next = match (at, key) {
@@ -731,31 +751,31 @@ impl Sidebar {
         true
     }
 
-    /// A key with no Ctrl and no Shift in the note list.
-    fn list_key(
+    /// A shortcut of the note list.
+    fn list_command(
         &mut self,
-        keystroke: &Keystroke,
+        command: Command,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        match shortcuts::command(Place::NoteList, keystroke) {
-            Some(Command::FocusEditor) => cx.emit(SidebarEvent::FocusEditor),
-            Some(Command::Back) if self.searching() => self.clear_search(window, cx),
-            Some(Command::Back) => {
+        match command {
+            Command::FocusEditor => cx.emit(SidebarEvent::FocusEditor),
+            Command::Back if self.searching() => self.clear_search(window, cx),
+            Command::Back => {
                 let item = self.view.item().clone();
                 self.show_in_tree(item, cx);
             }
-            Some(Command::Rename) => {
+            Command::Rename => {
                 if self.selected_note(cx).is_some() {
                     cx.emit(SidebarEvent::RenameNote);
                 }
             }
-            Some(Command::Delete) => {
+            Command::Delete => {
                 if let Some(target) = self.target(cx) {
                     cx.emit(SidebarEvent::Delete(target));
                 }
             }
-            _ => return self.list_move(keystroke.key.as_str(), cx),
+            _ => return false,
         }
         true
     }
@@ -1174,9 +1194,12 @@ impl Render for Sidebar {
         v_flex()
             .id("sidebar")
             .test_support()
-            .key_context("Sidebar")
+            .when(self.focus.is_focused(window), |sidebar| {
+                sidebar.key_context(self.key_context())
+            })
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key_down))
+            .on_action(cx.listener(Self::run))
             .size_full()
             .bg(theme.sidebar)
             .child(self.search_field(window, cx))

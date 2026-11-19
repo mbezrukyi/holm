@@ -104,6 +104,7 @@ fn open(cx: &mut TestAppContext, startup: Startup) -> AnyWindowHandle {
     let opened = cx.update(|cx| {
         gpui_kit::init(cx);
         holm_editor::init(cx);
+        crate::shortcuts::bind(cx);
         theme::init(cx);
         gpui_kit::open_window(gpui_kit::WindowOptions::default(), cx, |window, cx| {
             cx.new(|cx| HolmWindow::new(startup, window, cx))
@@ -1132,6 +1133,80 @@ fn keys_make_rename_and_move_notes_and_folders(cx: &mut TestAppContext) {
     autosave(cx);
     assert!(read(&notes_dir.join("work/Top.md")).contains('x'));
     assert!(!notes_dir.join("Top.md").exists());
+}
+
+/// Opens a notes folder with the folder `work`, and selects it in the tree.
+fn open_on_work(cx: &mut TestAppContext) -> AnyWindowHandle {
+    let fixture = Fixture::new().with_folder();
+    fs::create_dir(fixture.notes().join("work")).unwrap();
+    fs::write(fixture.notes().join("Top.md"), "# Top\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-shift-l escape down");
+    assert_eq!(sidebar(cx, handle), "tree work");
+    handle
+}
+
+#[gpui_kit::test]
+fn space_types_a_space_in_the_rename_field_of_the_tree(cx: &mut TestAppContext) {
+    let handle = open_on_work(cx);
+    // Ticket 155 gives Space to the tree. This binding stands for its row.
+    cx.update(|cx| {
+        let bindings = holm_editor::shortcuts::Keys::plain("space").bindings(
+            crate::shortcuts::Place::Tree.key_context(),
+            |_| crate::shortcuts::Run(crate::shortcuts::Command::ShowNotes),
+            cx,
+        );
+        cx.bind_keys(bindings);
+    });
+    keys(cx, handle, "f2 end space");
+    assert_eq!(tree_field(cx, handle).as_deref(), Some("work "));
+    assert_eq!(sidebar(cx, handle), "tree work");
+}
+
+#[gpui_kit::test]
+fn space_types_a_space_in_an_input_inside_a_place_that_binds_it(cx: &mut TestAppContext) {
+    let handle = open_on_work(cx);
+    // A Space row of the notes view would take the space from the search field.
+    cx.update(|cx| {
+        let bindings = holm_editor::shortcuts::Keys::plain("space").bindings(
+            crate::shortcuts::Place::Window.key_context(),
+            |_| crate::shortcuts::Run(crate::shortcuts::Command::NewNote),
+            cx,
+        );
+        cx.bind_keys(bindings);
+    });
+    keys(cx, handle, "ctrl-shift-f a space b");
+    let search = screen(cx, handle, |window| {
+        window
+            .try_find("search")
+            .and_then(|field| field.value().map(str::to_owned))
+    });
+    assert_eq!(search.as_deref(), Some("a b"));
+}
+
+#[gpui_kit::test]
+fn tab_in_the_rename_field_leaves_the_tree_cursor(cx: &mut TestAppContext) {
+    let handle = open_on_work(cx);
+    keys(cx, handle, "f2 tab shift-tab");
+    assert_eq!(tree_field(cx, handle).as_deref(), Some("work"));
+    assert_eq!(sidebar(cx, handle), "tree work");
+    keys(cx, handle, "end x");
+    assert_eq!(
+        tree_field(cx, handle).as_deref(),
+        Some("workx"),
+        "the field keeps the focus"
+    );
+}
+
+#[gpui_kit::test]
+fn tab_where_no_place_names_it_leaves_the_focus(cx: &mut TestAppContext) {
+    let handle = open_on_work(cx);
+    assert_eq!(focus(cx, handle), "sidebar");
+    keys(cx, handle, "tab");
+    assert_eq!(focus(cx, handle), "sidebar");
+    keys(cx, handle, "shift-tab");
+    assert_eq!(focus(cx, handle), "sidebar");
+    assert_eq!(sidebar(cx, handle), "tree work");
 }
 
 #[gpui_kit::test]

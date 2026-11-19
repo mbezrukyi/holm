@@ -21,7 +21,7 @@ use gpui_kit::{
 };
 
 use crate::popup::{self, Dropdown};
-use crate::shortcuts::{self, Command, Place};
+use crate::shortcuts::{self, Command, Place, Run};
 use crate::{shortcut_list, text};
 
 /// The items of the menu, as the commands they run.
@@ -163,17 +163,24 @@ impl AppMenu {
         }
     }
 
-    fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn run(&mut self, Run(command): &Run, window: &mut Window, cx: &mut Context<Self>) {
+        match command {
+            Command::Pick => self.pick(self.cursor, window, cx),
+            Command::Close => self.leave(window, cx),
+            _ => return cx.propagate(),
+        }
+        cx.notify();
+    }
+
+    fn key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let keystroke = &event.keystroke;
-        match shortcuts::command(Place::ListPopup, keystroke) {
-            Some(Command::Pick) => self.pick(self.cursor, window, cx),
-            Some(Command::Close) => self.leave(window, cx),
-            _ if keystroke.modifiers.modified() => return,
-            _ => match keystroke.key.as_str() {
-                "up" => self.step(false),
-                "down" => self.step(true),
-                _ => return,
-            },
+        if keystroke.modifiers.modified() {
+            return;
+        }
+        match keystroke.key.as_str() {
+            "up" => self.step(false),
+            "down" => self.step(true),
+            _ => return,
         }
         cx.notify();
         cx.stop_propagation();
@@ -237,7 +244,9 @@ impl Render for AppMenu {
         let panel = self
             .dropdown
             .frame(WIDTH, window, cx)
+            .key_context(Place::ListPopup.key_context())
             .on_key_down(cx.listener(Self::key_down))
+            .on_action(cx.listener(Self::run))
             .id("app-menu")
             .role(Role::ListBox)
             .test_support()

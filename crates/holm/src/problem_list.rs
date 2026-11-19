@@ -15,7 +15,7 @@ use gpui_kit::{
 };
 
 use crate::popup::{self, Dropdown};
-use crate::shortcuts::{self, Command, Place};
+use crate::shortcuts::{Command, Place, Run};
 
 const WIDTH: f32 = 240.;
 
@@ -81,7 +81,15 @@ impl ProblemList {
         }
     }
 
-    fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn run(&mut self, Run(command): &Run, window: &mut Window, cx: &mut Context<Self>) {
+        match command {
+            Command::Close => self.close(window, cx),
+            _ => return cx.propagate(),
+        }
+        cx.notify();
+    }
+
+    fn key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         if event.keystroke.modifiers.modified() {
             return;
         }
@@ -89,9 +97,6 @@ impl ProblemList {
         match event.keystroke.key.as_str() {
             "up" => self.cursor = self.cursor.saturating_sub(1),
             "down" => self.cursor = (self.cursor + 1).min(last),
-            _ if shortcuts::command(Place::ListPopup, &event.keystroke) == Some(Command::Close) => {
-                self.close(window, cx);
-            }
             _ => return,
         }
         cx.notify();
@@ -124,7 +129,9 @@ impl Render for ProblemList {
         let mark = dropdown.opener();
         let panel = dropdown
             .frame(px(WIDTH), window, cx)
+            .key_context(Place::ListPopup.key_context())
             .on_key_down(cx.listener(Self::key_down))
+            .on_action(cx.listener(Self::run))
             .id("problem-list")
             .role(Role::ListBox)
             .test_support()

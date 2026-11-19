@@ -17,7 +17,7 @@ use gpui_kit::{
 };
 
 use crate::popup::{self, Dropdown};
-use crate::shortcuts::{self, Command, Place};
+use crate::shortcuts::{Command, Place, Run};
 use crate::text;
 
 /// A question about the open note after another tool changed its file, while the editor had
@@ -110,17 +110,24 @@ impl DiskMenu {
         }
     }
 
+    fn run(&mut self, Run(command): &Run, _window: &mut Window, cx: &mut Context<Self>) {
+        match command {
+            Command::Pick => self.pick(self.cursor, cx),
+            Command::Close => self.close(cx),
+            _ => return cx.propagate(),
+        }
+        cx.notify();
+    }
+
     fn key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let keystroke = &event.keystroke;
-        match shortcuts::command(Place::ListPopup, keystroke) {
-            Some(Command::Pick) => self.pick(self.cursor, cx),
-            Some(Command::Close) => self.close(cx),
-            _ if keystroke.modifiers.modified() => return,
-            _ => match keystroke.key.as_str() {
-                "up" => self.cursor = 0,
-                "down" => self.cursor = 1,
-                _ => return,
-            },
+        if keystroke.modifiers.modified() {
+            return;
+        }
+        match keystroke.key.as_str() {
+            "up" => self.cursor = 0,
+            "down" => self.cursor = 1,
+            _ => return,
         }
         cx.notify();
         cx.stop_propagation();
@@ -157,7 +164,9 @@ impl Render for DiskMenu {
         let panel = self
             .dropdown
             .frame(state.size.width, window, cx)
+            .key_context(Place::ListPopup.key_context())
             .on_key_down(cx.listener(Self::key_down))
+            .on_action(cx.listener(Self::run))
             .id("disk-menu")
             .role(Role::ListBox)
             .test_support()

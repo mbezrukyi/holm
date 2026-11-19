@@ -219,7 +219,10 @@ mod tests {
     fn field(
         cx: &mut TestAppContext,
     ) -> (Entity<NameField<String>>, Events, &mut VisualTestContext) {
-        cx.update(gpui_kit::init);
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::shortcuts::bind(cx);
+        });
         let wording = Wording {
             id: "name",
             label: "Name".into(),

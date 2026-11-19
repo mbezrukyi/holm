@@ -62,6 +62,7 @@ fn main() -> ExitCode {
         move |cx| {
             gpui_kit::init(cx);
             holm_editor::init(cx);
+            shortcuts::bind(cx);
             theme::init(cx);
             if let Err(error) = window::open(startup, cx) {
                 fail(&error);

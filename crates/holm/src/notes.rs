@@ -13,10 +13,11 @@
 use std::rc::Rc;
 
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AppContext as _, Context, CursorStyle, Entity, FocusHandle, Focusable as _,
-    InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseMoveEvent, MouseUpEvent,
-    ParentElement, Pixels, Render, Styled, Subscription, Window, div, px,
+    InteractiveElement as _, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement,
+    Pixels, Render, Styled, Subscription, Window, div, px,
 };
 use holm_core::model::Note;
 use holm_core::{FolderPath, NotePath, TagName};
@@ -33,7 +34,7 @@ use crate::picker::{FolderPicker, PickerEvent};
 use crate::quick_open::{QuickOpen, QuickOpenEvent};
 use crate::settings::{self, SettingsDialog};
 use crate::shortcut_list::{self, ShortcutList};
-use crate::shortcuts::{self, Command, Place};
+use crate::shortcuts::{Command, Place, Run};
 use crate::sidebar::{Item, Sidebar, SidebarEvent, TagRename, Target};
 use crate::tags::RenameTag;
 use crate::window::Quit;
@@ -625,10 +626,6 @@ impl NotesView {
         window.focus(&self.pane.focus_handle(cx), cx);
     }
 
-    fn editor_focused(&self, window: &Window, cx: &Context<Self>) -> bool {
-        self.pane.focus_handle(cx).is_focused(window)
-    }
-
     /// Gives the focus to the editor. On the empty pane, the sidebar gets it when it shows.
     fn focus_home(&self, window: &mut Window, cx: &mut Context<Self>) {
         if self.pane.read(cx).path().is_none() && !self.hidden {
@@ -669,26 +666,20 @@ impl NotesView {
         cx.notify();
     }
 
-    fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if self.dialog.is_some()
+    /// Whether a dialog, a picker, the settings or the shortcut list is open. Then the keys of
+    /// [`Place::Window`] do nothing.
+    fn covered(&self) -> bool {
+        self.dialog.is_some()
             || self.picker.is_some()
             || self.quick_open.is_some()
             || self.link_picker.is_some()
             || self.settings.is_some()
             || self.shortcut_list.is_some()
-        {
-            return;
-        }
-        let keystroke = &event.keystroke;
-        let command = shortcuts::command(Place::Window, keystroke).or_else(|| {
-            self.editor_focused(window, cx)
-                .then(|| shortcuts::command(Place::Note, keystroke))
-                .flatten()
-        });
-        if let Some(command) = command
-            && self.run(command, window, cx)
-        {
-            cx.stop_propagation();
+    }
+
+    fn run_key(&mut self, Run(command): &Run, window: &mut Window, cx: &mut Context<Self>) {
+        if self.covered() || !self.run(*command, window, cx) {
+            cx.propagate();
         }
     }
 
@@ -796,7 +787,10 @@ impl Render for NotesView {
             .id("notes")
             .size_full()
             .relative()
-            .on_key_down(cx.listener(Self::key_down))
+            .when(!self.covered(), |view| {
+                view.key_context(Place::Window.key_context())
+            })
+            .on_action(cx.listener(Self::run_key))
             .on_action(cx.listener(Self::rename_tag_from_line))
             .on_mouse_move(cx.listener(Self::mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))

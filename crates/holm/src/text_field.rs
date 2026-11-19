@@ -27,7 +27,7 @@ use gpui_kit::{
 };
 use holm_editor::shortcuts::Command as TextCommand;
 
-use crate::shortcuts::{self, Command, Place};
+use crate::shortcuts::{Command, Place, Run};
 
 const CARET_WIDTH: Pixels = px(1.);
 
@@ -162,30 +162,34 @@ impl TextField {
         if self.locked || modifiers.alt || modifiers.platform {
             return;
         }
-        let selection = self.selection();
-        match shortcuts::command(Place::TextField, keystroke) {
-            Some(Command::Confirm) => cx.emit(FieldEvent::Enter),
-            Some(Command::Cancel) => cx.emit(FieldEvent::Escape),
-            _ => match shortcuts::text_command(keystroke) {
-                Some(TextCommand::SelectAll) => self.select_all(cx),
-                Some(command @ (TextCommand::Copy | TextCommand::Cut)) => {
-                    if !selection.is_empty() {
-                        let text = self.text[selection.clone()].to_owned();
-                        cx.write_to_clipboard(ClipboardItem::new_string(text));
-                        if command == TextCommand::Cut {
-                            self.replace(selection, "", cx);
-                        }
-                    }
-                }
-                Some(TextCommand::Paste) => {
-                    if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-                        self.replace(selection, &text, cx);
-                    }
-                }
-                _ => return self.edit_key(keystroke, selection, cx),
-            },
+        self.edit_key(keystroke, self.selection(), cx);
+    }
+
+    fn run(&mut self, Run(command): &Run, _: &mut Window, cx: &mut Context<Self>) {
+        if self.locked {
+            return cx.propagate();
         }
-        cx.stop_propagation();
+        let selection = self.selection();
+        match command {
+            Command::Confirm => cx.emit(FieldEvent::Enter),
+            Command::Cancel => cx.emit(FieldEvent::Escape),
+            Command::Text(TextCommand::SelectAll) => self.select_all(cx),
+            Command::Text(command @ (TextCommand::Copy | TextCommand::Cut)) => {
+                if !selection.is_empty() {
+                    let text = self.text[selection.clone()].to_owned();
+                    cx.write_to_clipboard(ClipboardItem::new_string(text));
+                    if *command == TextCommand::Cut {
+                        self.replace(selection, "", cx);
+                    }
+                }
+            }
+            Command::Text(TextCommand::Paste) => {
+                if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+                    self.replace(selection, &text, cx);
+                }
+            }
+            _ => cx.propagate(),
+        }
     }
 
     /// A cursor key, Backspace or Delete. It stops the key when the field takes it.
@@ -282,10 +286,12 @@ impl Render for TextField {
             .aria_label(self.label.clone())
             .aria_value(SharedString::from(self.text.clone()))
             .test_support()
+            .key_context(Place::TextField.key_context())
             .track_focus(&self.focus)
             .flex_shrink_1()
             .min_w_0()
             .on_key_down(cx.listener(Self::key_down))
+            .on_action(cx.listener(Self::run))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_move(cx.listener(Self::mouse_move))
             .on_mouse_up(
@@ -339,8 +345,14 @@ impl EntityInputHandler for TextField {
         if self.locked {
             return;
         }
+        // A key that no binding takes can come here as its control char, like Tab on the test
+        // platform.
+        let text: String = text.chars().filter(|char| !char.is_control()).collect();
+        if text.is_empty() {
+            return;
+        }
         let range = range.map_or_else(|| self.selection(), |range| self.range_from_utf16(&range));
-        self.replace(range, text, cx);
+        self.replace(range, &text, cx);
     }
 
     fn replace_and_mark_text_in_range(
@@ -555,7 +567,10 @@ mod tests {
         cx: &'a mut TestAppContext,
         text: &str,
     ) -> (Entity<TextField>, &'a mut VisualTestContext) {
-        cx.update(gpui_kit::init);
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::shortcuts::bind(cx);
+        });
         let (field, cx) =
             cx.add_window_view(|window, cx| TextField::new("f", "F", text, window, cx));
         cx.update(|window, cx| window.focus(&field.focus_handle(cx), cx));

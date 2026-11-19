@@ -10,16 +10,15 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex};
 use gpui_kit::{
-    App, Context, FocusHandle, Focusable, InteractiveElement as _, IntoElement, KeyDownEvent,
-    ParentElement, Render, Role, StatefulInteractiveElement as _, Styled, TestSupportExt as _,
-    Window, div, px,
+    App, Context, FocusHandle, Focusable, InteractiveElement as _, IntoElement, ParentElement,
+    Render, Role, StatefulInteractiveElement as _, Styled, TestSupportExt as _, Window, div, px,
 };
 
 use holm_core::TagName;
 use holm_core::model::DeleteCount;
 
 use crate::core_door::Then;
-use crate::shortcuts::{self, Command, Place};
+use crate::shortcuts::{Command, Place, Run};
 use crate::{popup, text};
 
 /// The change that the dialog asks about.
@@ -101,14 +100,13 @@ impl Dialog {
         }
     }
 
-    fn key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        match shortcuts::command(Place::Dialog, &event.keystroke) {
-            Some(Command::Yes) => self.decide(true, cx),
-            Some(Command::No) => self.decide(false, cx),
-            Some(Command::SwitchAsk) => self.toggle(cx),
-            _ => return,
+    fn run(&mut self, Run(command): &Run, _window: &mut Window, cx: &mut Context<Self>) {
+        match command {
+            Command::Yes => self.decide(true, cx),
+            Command::No => self.decide(false, cx),
+            Command::SwitchAsk => self.toggle(cx),
+            _ => cx.propagate(),
         }
-        cx.stop_propagation();
     }
 }
 
@@ -143,7 +141,6 @@ impl Render for Dialog {
                         .checked(self.do_not_ask)
                         .label(text::DO_NOT_ASK)
                         .small()
-                        .tab_stop(false)
                         .on_click(cx.listener(|dialog, _: &bool, _, cx| dialog.toggle(cx))),
                 )
         });
@@ -174,8 +171,9 @@ impl Render for Dialog {
             .role(Role::Dialog)
             .aria_label(question)
             .test_support()
+            .key_context(Place::Dialog.key_context())
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(Self::key_down))
+            .on_action(cx.listener(Self::run))
             .child(dialog)
     }
 }
