@@ -334,7 +334,7 @@ impl Render for SettingsDialog {
         let theme = cx.theme();
         // The cursor row has a bar on its left and no fill, so the outlines of its controls stay
         // visible.
-        let (bar, muted) = (theme.primary, theme.muted_foreground);
+        let (bar, muted, radius) = (theme.primary, theme.muted_foreground, theme.radius);
         let rows: Vec<_> = ROWS
             .iter()
             .enumerate()
@@ -354,8 +354,11 @@ impl Render for SettingsDialog {
                     .test_support()
                     .justify_between()
                     .gap_4()
-                    .px_2()
+                    // The bar lies inside the left padding, so the label does not move.
+                    .pl(px(5.))
+                    .pr_2()
                     .py_1p5()
+                    .rounded(radius)
                     .border_l(px(3.))
                     .border_color(if current { bar } else { transparent_black() })
                     .child(
@@ -363,7 +366,7 @@ impl Render for SettingsDialog {
                             .flex_none()
                             .child(
                                 div()
-                                    .when(current, |label| label.font_weight(FontWeight::MEDIUM))
+                                    .when(current, |label| label.font_weight(FontWeight::SEMIBOLD))
                                     .child(row.label()),
                             )
                             .children(detail),
