@@ -206,11 +206,7 @@ impl LinkPicker {
     fn load_headings(&self, path: NotePath, cx: &mut Context<Self>) {
         let job = self.core_door.read(cx).headings(path.clone(), cx);
         cx.spawn(async move |this, cx| {
-            let headings = job.await.unwrap_or_else(|error| {
-                let error = crate::error::AppError::from(error);
-                tracing::warn!(error = %crate::chain(&error), "cannot read the headings of a note");
-                Vec::new()
-            });
+            let headings = job.await;
             this.update(cx, |this, cx| this.headings_loaded(path, headings, cx))
                 .ok();
         })

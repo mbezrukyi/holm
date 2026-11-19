@@ -7,9 +7,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use gpui_kit::{
-    AppContext as _, Context, Entity, EventEmitter, PathPromptOptions, Subscription, Task,
-};
+use gpui_kit::{Context, Entity, EventEmitter, PathPromptOptions, Subscription, Task};
 use holm_core::NotePath;
 use holm_core::model::LinkTarget;
 use holm_editor::{Editor, OpenFile, OpenLink, PasteFiles, PastedFile};
@@ -17,7 +15,6 @@ use holm_markdown::Target;
 
 use crate::backlinks::Backlinks;
 use crate::core_door::{CoreDoor, FolderEvent};
-use crate::error::AppError;
 use crate::text;
 
 /// What the links tell the pane.
@@ -137,28 +134,20 @@ impl Links {
         let core_door = self.core_door.read(cx);
         let backlinks = core_door.snapshot().backlinks(&path);
         let broken = core_door.broken_links(path.clone(), cx);
-        let job = cx.background_spawn(async move {
-            Ok::<_, holm_core::Error>((path, backlinks, broken.await?))
-        });
         self.reading = Some(cx.spawn(async move |links, cx| {
-            let result = job.await;
+            let broken = broken.await;
             links
-                .update(cx, |links, cx| match result {
-                    Ok((path, backlinks, broken)) if links.note.as_ref() == Some(&path) => {
-                        links
-                            .backlinks
-                            .update(cx, |list, cx| list.show(backlinks, cx));
-                        let broken: HashSet<Target> =
-                            broken.into_iter().filter_map(target).collect();
-                        links
-                            .editor
-                            .update(cx, |editor, cx| editor.set_link_states(broken, cx));
+                .update(cx, |links, cx| {
+                    if links.note.as_ref() != Some(&path) {
+                        return;
                     }
-                    Ok(_) => {}
-                    Err(error) => {
-                        let error = AppError::from(error);
-                        tracing::warn!(error = %crate::chain(&error), "cannot read the links of the note");
-                    }
+                    links
+                        .backlinks
+                        .update(cx, |list, cx| list.show(backlinks, cx));
+                    let broken: HashSet<Target> = broken.into_iter().filter_map(target).collect();
+                    links
+                        .editor
+                        .update(cx, |editor, cx| editor.set_link_states(broken, cx));
                 })
                 .ok();
         }));

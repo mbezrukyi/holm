@@ -601,23 +601,22 @@ impl CoreDoor {
         })
     }
 
-    /// The headings of the note at `path`. It does not wait for the line.
-    pub(crate) fn headings(
-        &self,
-        path: NotePath,
-        cx: &App,
-    ) -> Task<holm_core::Result<Vec<String>>> {
-        self.look(move |core| core.headings(&path), cx)
+    /// The headings of the note at `path`. It does not wait for the line. After a failure, it
+    /// gives none.
+    pub(crate) fn headings(&self, path: NotePath, cx: &App) -> Task<Vec<String>> {
+        self.look(
+            move |core| logged(core.headings(&path), "cannot read the headings"),
+            cx,
+        )
     }
 
     /// The note links in the note at `path` whose note or heading is gone. It does not wait
-    /// for the line.
-    pub(crate) fn broken_links(
-        &self,
-        path: NotePath,
-        cx: &App,
-    ) -> Task<holm_core::Result<Vec<LinkTarget>>> {
-        self.look(move |core| core.broken_links(&path), cx)
+    /// for the line. After a failure, it gives none.
+    pub(crate) fn broken_links(&self, path: NotePath, cx: &App) -> Task<Vec<LinkTarget>> {
+        self.look(
+            move |core| logged(core.broken_links(&path), "cannot read the broken links"),
+            cx,
+        )
     }
 
     /// Puts `job` in the write line, and waits for it up to the budget. When it ends, the entity
@@ -838,6 +837,14 @@ fn answered<T>(result: holm_core::Result<T>, cx: &mut Context<CoreDoor>) -> Resu
         let error = AppError::from(error);
         answer(&error, cx);
         error
+    })
+}
+
+/// The value of a read of Holm's own work. A failure goes to the log, and gives no value.
+fn logged<T: Default>(result: holm_core::Result<T>, what: &'static str) -> T {
+    result.unwrap_or_else(|error| {
+        tracing::warn!(error = %crate::chain(&AppError::from(error)), "{what}");
+        T::default()
     })
 }
 
