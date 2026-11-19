@@ -28,6 +28,7 @@
 mod disk_menu;
 mod links;
 mod new_note;
+mod open;
 
 use std::borrow::Cow;
 use std::rc::Rc;
@@ -46,7 +47,7 @@ use holm_core::{FolderPath, NotePath, TagName};
 use holm_editor::{Changed, Editor, UpFromStart};
 
 use crate::backlinks::{Backlinks, OpenBacklink};
-use crate::core_door::{CoreDoor, Done, FolderEvent, NotSaved, SaveEvent, Then, window_step};
+use crate::core_door::{CoreDoor, Done, FolderEvent, NotSaved, SaveEvent, Then};
 use crate::error::AppError;
 use crate::link_picker::{LinkChoice, LinkStart};
 use crate::message_line::{MessageLine, OpenState};
@@ -58,6 +59,7 @@ use disk_menu::{Choice, Chosen, DiskMenu, DiskQuestion};
 pub(crate) use links::Pick;
 use links::{Links, LinksEvent};
 use new_note::{NewNote, NewNoteEvent};
+use open::{Open, Opens};
 
 /// How long the pane waits after the last change before it saves.
 const AUTOSAVE: Duration = Duration::from_millis(500);
@@ -145,8 +147,7 @@ pub(crate) struct NotePane {
     autosave: Option<Task<()>>,
     /// Another tool changed or deleted the note while the editor had unsaved changes.
     disk: Option<DiskQuestion>,
-    /// The number of the last open or drop of a note. A read for an older one is dropped.
-    opening: u64,
+    opens: Opens,
     /// The heading to show when the note that opens is ready.
     open_heading: Option<String>,
     /// A save for a close of the window runs.
@@ -249,7 +250,7 @@ impl NotePane {
             ending: LineEnding::Lf,
             autosave: None,
             disk: None,
-            opening: 0,
+            opens: Opens::default(),
             open_heading: None,
             closing: false,
             _subscriptions: subscriptions,
@@ -307,7 +308,7 @@ impl NotePane {
         self.next = None;
         self.last_info = None;
         self.autosave = None;
-        self.opening += 1;
+        self.opens.cancel();
         self.set_disk(None, cx);
         self.editor.update(cx, |editor, cx| editor.set_text("", cx));
         self.links.update(cx, |links, cx| links.show(None, cx));
@@ -578,12 +579,8 @@ impl NotePane {
         let Some(path) = self.content.editor().cloned() else {
             return;
         };
-        let opening = self.opening;
-        let done = Done::value(step(cx, move |pane: &mut Self, note, cx| {
-            if pane.opening == opening {
-                pane.show(note, true, cx);
-            }
-        }));
+        let open = self.opens.current();
+        let done = Done::value(open.step(cx, |pane, note, cx| pane.show(note, true, cx)));
         self.core_door.update(cx, |core_door, cx| {
             core_door.read_and_drop_text(path, done, cx);
         });
@@ -643,24 +640,17 @@ impl NotePane {
             self.content = kept.take().map_or(Content::Empty, Content::Note);
             cx.notify();
         }
-        self.opening += 1;
-        let opening = self.opening;
+        let open = self.opens.start();
         self.next = Some(path.clone());
         cx.emit(PaneEvent::Opening(path.clone()));
         match leave {
             Leave::Keep => {
-                let read = step(
-                    cx,
-                    move |pane: &mut Self, saved: Result<(), NotSaved>, cx| {
-                        if pane.opening != opening {
-                            return;
-                        }
-                        match (saved, pane.next.clone()) {
-                            (Ok(()), Some(next)) => pane.read_note(next, opening, cx),
-                            _ => pane.stop_opening(cx),
-                        }
-                    },
-                );
+                let read = open.step(cx, move |pane, saved: Result<(), NotSaved>, cx| {
+                    match (saved, pane.next.clone()) {
+                        (Ok(()), Some(next)) => pane.read_note(next, open, cx),
+                        _ => pane.stop_opening(cx),
+                    }
+                });
                 self.core_door
                     .update(cx, |core_door, cx| core_door.wait_saved(read, cx));
             }
@@ -669,21 +659,17 @@ impl NotePane {
                     self.core_door
                         .update(cx, |core_door, _| core_door.drop_text(&gone));
                 }
-                self.read_note(path, opening, cx);
+                self.read_note(path, open, cx);
             }
         }
     }
 
-    /// Reads the note at `path` and shows it, when no newer open came after `opening`.
-    fn read_note(&mut self, path: NotePath, opening: u64, cx: &mut Context<Self>) {
+    /// Reads the note at `path` and shows it, when no newer open came after `open`.
+    fn read_note(&mut self, path: NotePath, open: Open, cx: &mut Context<Self>) {
         // The pane owns the error: a failed read stops the open.
-        let done = Done::result(step(cx, move |pane: &mut Self, note, cx| {
-            if pane.opening == opening {
-                match note {
-                    Ok(note) => pane.opened(note, cx),
-                    Err(_) => pane.stop_opening(cx),
-                }
-            }
+        let done = Done::result(open.step(cx, |pane, note, cx| match note {
+            Ok(note) => pane.opened(note, cx),
+            Err(_) => pane.stop_opening(cx),
         }));
         self.core_door
             .update(cx, |core_door, cx| core_door.read(path, done, cx));
@@ -701,7 +687,7 @@ impl NotePane {
         if self.next.take().is_none() {
             return;
         }
-        self.opening += 1;
+        self.opens.cancel();
         if let Some(path) = self.content.editor() {
             cx.emit(PaneEvent::Opened(path.clone()));
         }
@@ -777,13 +763,12 @@ impl NotePane {
             return;
         }
         self.stop_opening(cx);
-        self.opening += 1;
-        let opening = self.opening;
-        let start = window_step(
+        let open = self.opens.start();
+        let start = open.window_step(
             window,
             cx,
-            move |pane: &mut Self, saved: Result<(), NotSaved>, window, cx| {
-                if pane.opening != opening || saved.is_err() {
+            move |pane, saved: Result<(), NotSaved>, window, cx| {
+                if saved.is_err() {
                     return;
                 }
                 pane.title.update(cx, TitleField::close);
@@ -816,7 +801,7 @@ impl NotePane {
         cx.notify();
         match (event, kept) {
             (NewNoteEvent::Created(note), _) => {
-                self.opening += 1;
+                self.opens.cancel();
                 self.opened(note.clone(), cx);
             }
             (NewNoteEvent::Cancelled, Some(kept)) => self.content = Content::Note(kept),
