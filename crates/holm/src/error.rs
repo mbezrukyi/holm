@@ -46,4 +46,12 @@ impl AppError {
             Self::Window(_) => text::WINDOW,
         }
     }
+
+    /// Whether the core refused a typed name: it is taken, or not a valid name.
+    pub(crate) fn is_refused_name(&self) -> bool {
+        matches!(
+            self,
+            Self::Core(holm_core::Error::NameTaken { .. } | holm_core::Error::BadName { .. })
+        )
+    }
 }

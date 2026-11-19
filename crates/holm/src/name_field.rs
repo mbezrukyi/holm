@@ -173,11 +173,7 @@ impl<T: Clone + 'static> NameField<T> {
             }
             Err(error) => error,
         };
-        let refused = matches!(
-            error,
-            AppError::Core(holm_core::Error::NameTaken { .. } | holm_core::Error::BadName { .. })
-        );
-        if !refused {
+        if !error.is_refused_name() {
             self.go_home(window, cx);
             cx.emit(NameEvent::Closed);
         }
