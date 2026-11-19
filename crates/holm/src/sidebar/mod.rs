@@ -456,8 +456,8 @@ impl Sidebar {
     }
 
     /// Every folder, sorted by path, for the folder picker.
-    pub(crate) fn folders(&self) -> &[FolderPath] {
-        &self.lists.folders
+    pub(crate) fn folders(&self) -> impl Iterator<Item = &FolderPath> {
+        self.lists.folders.iter().map(|folder| &folder.path)
     }
 
     /// Shows the tree with `item` selected, and opens its parents.

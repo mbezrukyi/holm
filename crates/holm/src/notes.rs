@@ -245,7 +245,7 @@ impl NotesView {
             }
             SidebarEvent::Delete(target) => self.ask_delete(target.clone(), window, cx),
             SidebarEvent::Move(target) => {
-                let folders = self.sidebar.read(cx).folders().to_vec();
+                let folders: Vec<_> = self.sidebar.read(cx).folders().cloned().collect();
                 let target = target.clone();
                 let picker = cx.new(|cx| FolderPicker::new(target, &folders, window, cx));
                 self.subscriptions

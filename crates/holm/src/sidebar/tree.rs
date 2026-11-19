@@ -138,6 +138,13 @@ pub(crate) struct TreeRow {
     pub(crate) open: bool,
 }
 
+/// A folder of the tree and the count of notes right in it.
+#[derive(Clone, Debug)]
+pub(crate) struct Folder {
+    pub(crate) path: FolderPath,
+    pub(crate) notes: usize,
+}
+
 /// The facts of one snapshot in the form the sidebar needs.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Lists {
@@ -145,16 +152,24 @@ pub(crate) struct Lists {
     /// Every note, in the order of the sidebar.
     pub(crate) notes: NoteList,
     /// Every folder, sorted by path, so a folder comes before its children.
-    pub(crate) folders: Vec<FolderPath>,
+    pub(crate) folders: Vec<Folder>,
     pub(crate) tags: Vec<Tag>,
 }
 
 impl Lists {
     pub(crate) fn new(snapshot: &Snapshot, order: Order) -> Self {
+        let counts = snapshot.folder_counts();
+        let folders = snapshot
+            .folders()
+            .map(|path| Folder {
+                path: path.clone(),
+                notes: counts.get(path).copied().unwrap_or(0),
+            })
+            .collect();
         Self {
             snapshot: snapshot.clone(),
             notes: NoteList::all(snapshot.clone(), order),
-            folders: snapshot.folders().cloned().collect(),
+            folders,
             tags: snapshot.tags(),
         }
     }
@@ -172,7 +187,7 @@ impl Lists {
     pub(crate) fn has(&self, item: &Item) -> bool {
         match item {
             Item::All => true,
-            Item::Folder(path) => self.folders.contains(path),
+            Item::Folder(path) => self.folders.iter().any(|folder| folder.path == *path),
             Item::Tag(name) => find_tag(&self.tags, name).is_some(),
         }
     }
@@ -193,7 +208,6 @@ impl Lists {
         open: &HashSet<Item>,
         new_folder: Option<&FolderPath>,
     ) -> Vec<TreeRow> {
-        let counts = self.snapshot.folder_counts();
         let mut rows = vec![TreeRow {
             item: Item::All,
             name: String::new(),
@@ -202,24 +216,24 @@ impl Lists {
             has_children: false,
             open: false,
         }];
-        for (i, folder) in self.folders.iter().enumerate() {
-            let parent_open = folder
+        for (i, Folder { path, notes }) in self.folders.iter().enumerate() {
+            let parent_open = path
                 .parents()
                 .take_while(|parent| !parent.is_root())
                 .all(|parent| open.contains(&Item::Folder(parent)));
             if !parent_open {
                 continue;
             }
-            let item = Item::Folder(folder.clone());
-            let has_children = new_folder == Some(folder)
+            let item = Item::Folder(path.clone());
+            let has_children = new_folder == Some(path)
                 || self
                     .folders
                     .get(i + 1)
-                    .is_some_and(|next| next.is_below(folder));
+                    .is_some_and(|next| next.path.is_below(path));
             rows.push(TreeRow {
                 name: item.name(),
-                depth: folder.depth() - 1,
-                count: counts.get(folder).copied().unwrap_or(0),
+                depth: path.depth() - 1,
+                count: *notes,
                 has_children,
                 open: has_children && open.contains(&item),
                 item,
