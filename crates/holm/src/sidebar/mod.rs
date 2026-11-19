@@ -29,7 +29,7 @@ use gpui_kit::{
 use holm_core::model::{Change, NoteInfo, Order};
 use holm_core::{FolderPath, NotePath, TagName};
 
-use crate::config::SavedSidebarView;
+use crate::config::{Config, SavedSidebarView};
 use crate::core_door::{CoreDoor, Done, DoorEvent, Then};
 use crate::error::AppError;
 use crate::icons::Icon;
@@ -114,7 +114,7 @@ impl Named {
 
 pub(crate) struct Sidebar {
     core_door: Entity<CoreDoor>,
-    order: Order,
+    config: Entity<Config>,
     lists: Lists,
     view: SidebarView,
     open: HashSet<Item>,
@@ -140,7 +140,7 @@ impl Sidebar {
     pub(crate) fn new(
         core_door: Entity<CoreDoor>,
         pane: Entity<NotePane>,
-        order: Order,
+        config: Entity<Config>,
         view: &SavedSidebarView,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -151,6 +151,11 @@ impl Sidebar {
         let opened = cx.subscribe(&pane, |sidebar, _, event: &PaneEvent, cx| {
             if !matches!(event, PaneEvent::Gone(_)) {
                 sidebar.open_changed(cx);
+            }
+        });
+        let config_changed = cx.observe(&config, |sidebar, _, cx| {
+            if sidebar.lists.order != sidebar.order(cx) {
+                sidebar.refresh(cx);
             }
         });
         let search = cx.new(|cx| InputState::new(window, cx).placeholder(text::SEARCH));
@@ -165,7 +170,7 @@ impl Sidebar {
         });
         let mut sidebar = Self {
             core_door,
-            order,
+            config,
             lists: Lists::default(),
             view: SidebarView::from(view),
             open: HashSet::new(),
@@ -180,10 +185,15 @@ impl Sidebar {
             finding: None,
             focus: cx.focus_handle(),
             scroll: UniformListScrollHandle::new(),
-            _subscriptions: vec![changed, opened, search_changed],
+            _subscriptions: vec![changed, opened, config_changed, search_changed],
         };
         sidebar.refresh(cx);
         sidebar
+    }
+
+    /// The note order of the settings.
+    fn order(&self, cx: &App) -> Order {
+        self.config.read(cx).settings().note_order
     }
 
     pub(crate) fn view(&self) -> SavedSidebarView {
@@ -232,7 +242,7 @@ impl Sidebar {
     /// sidebar view and the open items.
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let snapshot = self.core_door.read(cx).snapshot();
-        self.lists = Lists::new(snapshot, self.order);
+        self.lists = Lists::new(snapshot, self.order(cx));
         let item = self.lists.nearest(self.view.item());
         if &item != self.view.item() {
             self.show_in_tree(item, cx);
@@ -263,7 +273,7 @@ impl Sidebar {
             cx.notify();
             return;
         }
-        let (query, order) = (self.query.clone(), self.order);
+        let (query, order) = (self.query.clone(), self.order(cx));
         let search = self.core_door.update(cx, |core_door, cx| {
             core_door.search(query.clone(), order, cx)
         });
@@ -372,7 +382,7 @@ impl Sidebar {
         self.core_door
             .read(cx)
             .snapshot()
-            .note_or_first(self.neighbor(gone).as_ref(), self.order)
+            .note_or_first(self.neighbor(gone).as_ref(), self.order(cx))
             .map(|note| note.path.clone())
     }
 

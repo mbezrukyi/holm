@@ -25,6 +25,7 @@ use crate::log::Log;
 use crate::message_line::MessageLine;
 use crate::notes::NotesView;
 use crate::path_text::PathText;
+use crate::window_step::window_step;
 use crate::{core_door, text, theme};
 
 pub(crate) const APP_ID: &str = "io.github.mbezrukyi.Holm";
@@ -77,6 +78,11 @@ pub(crate) struct HolmWindow {
     index_dir: PathBuf,
     default_folder: PathBuf,
     write_budget: Duration,
+    /// The notes folder that the window shows or opens. It differs from the settings while the
+    /// open folder writes its text before a change.
+    folder: Option<PathBuf>,
+    /// The open notes folder writes its text before a change of the folder.
+    leaving: bool,
     stage: Stage,
     message_line: Entity<MessageLine>,
     _subscriptions: [Subscription; 2],
@@ -105,7 +111,7 @@ impl HolmWindow {
         theme::set_mode(config.settings().theme, window, cx);
         let appearance = cx.observe_window_appearance(window, |this, window, cx| {
             if this.config.read(cx).settings().theme == AppearanceSetting::System {
-                theme::set_mode(AppearanceSetting::System, window, cx);
+                theme::update_mode(AppearanceSetting::System, window, cx);
             }
         });
         let message_line = cx.new(MessageLine::new);
@@ -115,7 +121,7 @@ impl HolmWindow {
         }
         let folder = config.settings().notes_folder.clone();
         let config = cx.new(|_| config);
-        let config_changed = cx.observe(&config, |this, _, cx| this.show_problems(cx));
+        let config_changed = cx.observe_in(&config, window, Self::config_changed);
         let this = cx.weak_entity();
         window.on_window_should_close(cx, move |window, cx| {
             this.update(cx, |this, cx| this.may_close(window, cx))
@@ -128,6 +134,8 @@ impl HolmWindow {
             index_dir,
             default_folder,
             write_budget,
+            folder: None,
+            leaving: false,
             stage: Stage::Ask,
             message_line,
             _subscriptions: [appearance, config_changed],
@@ -137,6 +145,50 @@ impl HolmWindow {
             this.open_folder(folder, false, window, cx);
         }
         this
+    }
+
+    /// Applies the settings to the window: the problems, the theme, and the notes folder.
+    fn config_changed(&mut self, _: Entity<Config>, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_problems(cx);
+        let settings = self.config.read(cx).settings();
+        let (mode, folder) = (settings.theme, settings.notes_folder.clone());
+        theme::update_mode(mode, window, cx);
+        if let Some(folder) = folder
+            && self.folder.as_ref() != Some(&folder)
+        {
+            self.change_folder(folder, window, cx);
+        }
+    }
+
+    /// A new notes folder in the settings. The open folder writes its text first. A failed
+    /// write keeps the open folder, also in the settings.
+    fn change_folder(&mut self, folder: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let Stage::Open(notes) = &self.stage else {
+            self.choose(folder, false, window, cx);
+            return;
+        };
+        if self.leaving {
+            return;
+        }
+        self.leaving = true;
+        let left = window_step(window, cx, |this: &mut Self, saved, window, cx| {
+            this.leaving = false;
+            let new = this.config.read(cx).settings().notes_folder.clone();
+            match new {
+                Some(new) if saved => {
+                    if this.folder.as_ref() != Some(&new) {
+                        this.choose(new, false, window, cx);
+                    }
+                }
+                _ => {
+                    let old = this.folder.clone();
+                    this.config.update(cx, |config, cx| {
+                        config.change(|settings| settings.notes_folder = old, cx);
+                    });
+                }
+            }
+        });
+        notes.update(cx, |notes, cx| notes.leave(left, cx));
     }
 
     /// Shows the problems of the settings and the log in the message line.
@@ -167,6 +219,7 @@ impl HolmWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.folder = Some(folder.clone());
         self.stage = Stage::Opening;
         cx.notify();
         let index_dir = self.index_dir.clone();
@@ -185,6 +238,10 @@ impl HolmWindow {
         cx.spawn_in(window, async move |this, cx| {
             let result = job.await;
             this.update_in(cx, |this, window, cx| {
+                // A later open wins.
+                if this.folder.as_ref() != Some(&folder) {
+                    return;
+                }
                 this.stage = match result {
                     Ok((core, note)) => {
                         let folder = folder.clone();
@@ -192,7 +249,7 @@ impl HolmWindow {
                         let core_door =
                             cx.new(|cx| CoreDoor::new(core, folder, budget, window, cx));
                         Stage::Open(cx.new(|cx| {
-                            NotesView::new(core_door, note, order, config, message_line, window, cx)
+                            NotesView::new(core_door, note, config, message_line, window, cx)
                         }))
                     }
                     Err(error) => {

@@ -52,17 +52,30 @@ pub(crate) fn init(cx: &mut App) {
     });
 }
 
-/// Sets light or dark mode. [`AppearanceSetting::System`] takes the mode of `window`.
+/// Sets light or dark mode, and loads its theme. [`AppearanceSetting::System`] takes the mode
+/// of `window`.
 pub(crate) fn set_mode(theme: AppearanceSetting, window: &mut Window, cx: &mut App) {
-    let mode = match theme {
+    Ui::change(mode(theme, window), Some(window), cx);
+}
+
+/// Sets light or dark mode when `theme` gives another mode than the current one. Each change
+/// draws every window again.
+pub(crate) fn update_mode(theme: AppearanceSetting, window: &mut Window, cx: &mut App) {
+    let mode = mode(theme, window);
+    if Ui::global(cx).mode != mode {
+        Ui::change(mode, Some(window), cx);
+    }
+}
+
+fn mode(theme: AppearanceSetting, window: &Window) -> ThemeMode {
+    match theme {
         AppearanceSetting::Light => ThemeMode::Light,
         AppearanceSetting::Dark => ThemeMode::Dark,
         AppearanceSetting::System => match window.appearance() {
             WindowAppearance::Dark | WindowAppearance::VibrantDark => ThemeMode::Dark,
             WindowAppearance::Light | WindowAppearance::VibrantLight => ThemeMode::Light,
         },
-    };
-    Ui::change(mode, Some(window), cx);
+    }
 }
 
 /// The editor mode that matches the window.

@@ -48,6 +48,7 @@ use holm_core::{FolderPath, NotePath, TagName};
 use holm_editor::{Changed, Editor, UpFromStart};
 
 use crate::backlinks::{Backlinks, OpenBacklink};
+use crate::config::Config;
 use crate::core_door::{CoreDoor, Done, DoorEvent, NotSaved, SaveEvent, Then};
 use crate::error::AppError;
 use crate::link_picker::{LinkChoice, LinkStart};
@@ -160,8 +161,10 @@ pub(crate) struct NotePane {
 }
 
 impl NotePane {
+    /// The editor takes the writing help of `config`, also after each change.
     pub(crate) fn new(
         core_door: Entity<CoreDoor>,
+        config: &Entity<Config>,
         line: Entity<MessageLine>,
         note: Option<Note>,
         window: &mut Window,
@@ -233,6 +236,7 @@ impl NotePane {
                 },
             ),
             Self::clear_close_again(close_again.clone(), cx),
+            Self::take_writing_help(&editor, config, cx),
             cx.observe_global::<Ui>(|pane, cx| {
                 let appearance = theme::appearance(cx);
                 pane.editor
@@ -546,6 +550,21 @@ impl NotePane {
         self.core_door
             .update(cx, |core_door, cx| core_door.wait_saved(done, cx));
         false
+    }
+
+    /// Gives the writing help of `config` to `editor`, now and after each change.
+    fn take_writing_help(
+        editor: &Entity<Editor>,
+        config: &Entity<Config>,
+        cx: &mut Context<Self>,
+    ) -> Subscription {
+        let help = config.read(cx).settings().writing_help;
+        editor.update(cx, |editor, _| editor.set_writing_help(help));
+        cx.observe(config, |pane, config, cx| {
+            let help = config.read(cx).settings().writing_help;
+            pane.editor
+                .update(cx, |editor, _| editor.set_writing_help(help));
+        })
     }
 
     /// Takes the end of a write of the editor text. After a failed write, the core door

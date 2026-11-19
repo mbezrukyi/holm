@@ -9,11 +9,13 @@ use std::time::Duration;
 
 use gpui_kit::test::{TestQueryExt as _, TestWindowExt as _};
 use gpui_kit::{AnyWindowHandle, AppContext as _, Role, TestAppContext, VisualTestContext, Window};
+use holm_core::model::Order;
 use holm_core::{Core, Feed};
+use holm_editor::WritingHelp;
 use tempfile::TempDir;
 
 use super::{HolmWindow, Startup};
-use crate::config::{Config, SavedSidebarView, SidebarItem};
+use crate::config::{AppearanceSetting, Config, SavedSidebarView, Settings, SidebarItem};
 use crate::log::Log;
 use crate::{text, theme};
 
@@ -3478,3 +3480,148 @@ fn ctrl_n_after_a_refused_title_starts_clean(cx: &mut TestAppContext) {
 
 #[path = "window_speed.rs"]
 mod speed;
+
+/// Changes the settings, as the settings dialog does.
+fn change_settings(
+    cx: &mut TestAppContext,
+    handle: AnyWindowHandle,
+    change: impl FnOnce(&mut Settings),
+) {
+    cx.update_window(handle, |root, _, cx| {
+        let root = root.downcast::<gpui_kit::base::Root>().unwrap();
+        let view = root.read(cx).view().clone();
+        let config = view
+            .downcast::<HolmWindow>()
+            .unwrap()
+            .read(cx)
+            .config
+            .clone();
+        config.update(cx, |config, cx| config.change(change, cx));
+    })
+    .unwrap();
+    settle(cx);
+}
+
+fn dark(cx: &mut TestAppContext) -> bool {
+    cx.update(|cx| theme::appearance(cx) == holm_editor::Appearance::Dark)
+}
+
+#[gpui_kit::test]
+fn a_new_theme_applies_at_once(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let handle = open(cx, fixture.startup(None));
+    assert!(!dark(cx));
+
+    change_settings(cx, handle, |settings| {
+        settings.theme = AppearanceSetting::Dark;
+    });
+    assert!(dark(cx));
+    change_settings(cx, handle, |settings| {
+        settings.theme = AppearanceSetting::System;
+    });
+    assert!(!dark(cx));
+}
+
+#[gpui_kit::test]
+fn a_new_note_order_sorts_the_sidebar_at_once(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    three_notes(&fixture.notes());
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(notes_list(cx, handle), ["Plan*", "Goals", "Top"]);
+
+    change_settings(cx, handle, |settings| settings.note_order = Order::Title);
+    assert_eq!(notes_list(cx, handle), ["Goals", "Plan*", "Top"]);
+}
+
+/// Opens an empty note, types `text` and presses `key` with `help`. Gives the editor text.
+fn typed_with(cx: &mut TestAppContext, help: WritingHelp, text: &str, key: &str) -> String {
+    let fixture = Fixture::new().with_folder();
+    fs::write(fixture.notes().join("Note.md"), "").unwrap();
+    let handle = open(cx, fixture.startup(None));
+    change_settings(cx, handle, |settings| settings.writing_help = help);
+    type_unsaved(cx, handle, text);
+    keys(cx, handle, key);
+    editor_text(cx, handle)
+}
+
+#[gpui_kit::test]
+fn format_keys_off_apply_at_once(cx: &mut TestAppContext) {
+    let off = WritingHelp {
+        format_keys: false,
+        ..WritingHelp::default()
+    };
+    assert_eq!(typed_with(cx, off, "a", "shift-left ctrl-b"), "a");
+}
+
+#[gpui_kit::test]
+fn continue_lists_off_applies_at_once(cx: &mut TestAppContext) {
+    let off = WritingHelp {
+        continue_lists: false,
+        ..WritingHelp::default()
+    };
+    assert_eq!(typed_with(cx, off, "- a", "enter"), "- a\n");
+}
+
+#[gpui_kit::test]
+fn indent_lists_off_applies_at_once(cx: &mut TestAppContext) {
+    let off = WritingHelp {
+        indent_lists: false,
+        ..WritingHelp::default()
+    };
+    assert_eq!(typed_with(cx, off, "- a", "tab"), "- a    ");
+}
+
+/// A notes folder with the note `Note.md` and the folder `other` with `A.md`.
+fn two_folders() -> (Fixture, PathBuf) {
+    let fixture = Fixture::new().with_folder();
+    fs::write(fixture.notes().join("Note.md"), "old\n").unwrap();
+    let other = fixture.dir.path().join("other");
+    fs::create_dir(&other).unwrap();
+    fs::write(other.join("A.md"), "a\n").unwrap();
+    (fixture, other)
+}
+
+#[gpui_kit::test]
+fn a_new_notes_folder_saves_the_text_and_opens_at_once(cx: &mut TestAppContext) {
+    let (fixture, other) = two_folders();
+    let handle = open(cx, fixture.startup(None));
+    type_unsaved(cx, handle, "x");
+
+    change_settings(cx, handle, |settings| {
+        settings.notes_folder = Some(other.clone());
+    });
+
+    assert_eq!(editor_text(cx, handle), "a\n");
+    assert!(read(&fixture.notes().join("Note.md")).ends_with("\nxold\n"));
+    let config = Config::load(fixture.config());
+    assert_eq!(config.settings().notes_folder, Some(other));
+    assert_eq!(
+        config.settings().last_note.as_ref().map(AsRef::as_ref),
+        Some(Path::new("A.md"))
+    );
+}
+
+#[gpui_kit::test]
+fn a_new_notes_folder_with_a_failed_save_keeps_the_old_folder(cx: &mut TestAppContext) {
+    let (fixture, other) = two_folders();
+    let handle = open(cx, fixture.startup(None));
+    read_only(&fixture.notes(), true);
+    type_unsaved(cx, handle, "x");
+
+    change_settings(cx, handle, |settings| {
+        settings.notes_folder = Some(other.clone());
+    });
+
+    assert_eq!(editor_text(cx, handle), "xold\n");
+    assert_eq!(state(cx, handle).as_deref(), Some(text::NOT_SAVED));
+    let config = Config::load(fixture.config());
+    assert_eq!(config.settings().notes_folder, Some(fixture.notes()));
+
+    // The user picks again after the save works.
+    read_only(&fixture.notes(), false);
+    change_settings(cx, handle, |settings| {
+        settings.notes_folder = Some(other.clone());
+    });
+    assert_eq!(editor_text(cx, handle), "a\n");
+    assert!(read(&fixture.notes().join("Note.md")).ends_with("\nxold\n"));
+}

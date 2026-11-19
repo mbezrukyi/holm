@@ -18,11 +18,11 @@ use gpui_kit::{
     InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseMoveEvent, MouseUpEvent,
     ParentElement, Pixels, Render, Styled, Subscription, Window, div, px,
 };
-use holm_core::model::{Note, Order};
+use holm_core::model::Note;
 use holm_core::{FolderPath, NotePath, TagName};
 
 use crate::config::{Config, SidebarSettings};
-use crate::core_door::{CoreDoor, Done, JobFailed, Then};
+use crate::core_door::{CoreDoor, Done, JobFailed, NotSaved, Then};
 use crate::dialog::{self, Ask, Dialog};
 use crate::error::AppError;
 use crate::link_picker::{LinkPicker, LinkPickerEvent, LinkStart};
@@ -60,24 +60,31 @@ pub(crate) struct NotesView {
 }
 
 impl NotesView {
-    /// The view of `core_door` with `note` open. Its note lists keep `order`.
+    /// The view of `core_door` with `note` open.
     pub(crate) fn new(
         core_door: Entity<CoreDoor>,
         note: Option<Note>,
-        order: Order,
         config: Entity<Config>,
         message_line: Entity<MessageLine>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let settings = config.read(cx).settings().clone();
-        let pane =
-            cx.new(|cx| NotePane::new(core_door.clone(), message_line.clone(), note, window, cx));
+        let pane = cx.new(|cx| {
+            NotePane::new(
+                core_door.clone(),
+                &config,
+                message_line.clone(),
+                note,
+                window,
+                cx,
+            )
+        });
         let sidebar = cx.new(|cx| {
             Sidebar::new(
                 core_door.clone(),
                 pane.clone(),
-                order,
+                config.clone(),
                 &settings.sidebar.view,
                 window,
                 cx,
@@ -511,6 +518,18 @@ impl NotesView {
 
     pub(crate) fn may_close(&self, window: &Window, cx: &mut Context<Self>) -> bool {
         self.pane.update(cx, |pane, cx| pane.may_close(window, cx))
+    }
+
+    /// Before the notes folder closes for another one: writes the unsaved text and waits for
+    /// the jobs. `done` gets whether the text is on disk. A failed write keeps the text in the
+    /// editor and shows "Not saved".
+    pub(crate) fn leave(&self, done: Then<bool>, cx: &mut Context<Self>) {
+        self.core_door.update(cx, |core_door, cx| {
+            core_door.wait_saved(
+                move |saved: Result<(), NotSaved>, cx| done(saved.is_ok(), cx),
+                cx,
+            );
+        });
     }
 
     /// Puts the job of `start` in the write line. `done` gets its value in the update where

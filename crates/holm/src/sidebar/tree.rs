@@ -204,6 +204,8 @@ pub(crate) struct Folder {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Lists {
     pub(crate) snapshot: Snapshot,
+    /// The order of `notes`.
+    pub(crate) order: Order,
     /// Every note, in the order of the sidebar.
     pub(crate) notes: NoteList,
     /// Every folder, sorted by path, so a folder comes before its children.
@@ -223,6 +225,7 @@ impl Lists {
             .collect();
         Self {
             snapshot: snapshot.clone(),
+            order,
             notes: NoteList::all(snapshot.clone(), order),
             folders,
             tags: snapshot.tags(),
