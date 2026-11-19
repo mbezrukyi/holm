@@ -22,7 +22,7 @@ use holm_core::model::{Note, Order};
 use holm_core::{FolderPath, NotePath, TagName};
 
 use crate::config::{Config, SidebarSettings};
-use crate::core_door::{CoreDoor, Done, JobFailed, Then, window_step};
+use crate::core_door::{CoreDoor, Done, JobFailed, Then};
 use crate::dialog::{self, Ask, Dialog};
 use crate::error::AppError;
 use crate::link_picker::{LinkPicker, LinkPickerEvent, LinkStart};
@@ -32,6 +32,7 @@ use crate::picker::{FolderPicker, PickerEvent};
 use crate::quick_open::{QuickOpen, QuickOpenEvent};
 use crate::sidebar::{Item, Sidebar, SidebarEvent, TagRename, Target};
 use crate::tags::RenameTag;
+use crate::window_step::window_step;
 
 const MIN_WIDTH: f32 = 160.;
 const MAX_WIDTH: f32 = 600.;

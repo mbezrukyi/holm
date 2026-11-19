@@ -22,9 +22,10 @@ use gpui_kit::{
     Render, SharedString, Subscription, Window,
 };
 
-use crate::core_door::{Then, window_step};
+use crate::core_door::Then;
 use crate::error::AppError;
 use crate::text_field::{FieldEvent, TextField};
+use crate::window_step::window_step;
 
 /// Writes a typed name, and ends with the result of the job. It shows the answer of a fail.
 pub(crate) type NameWrite<T> = Rc<dyn Fn(String, Then<Result<T, AppError>>, &mut Window, &mut App)>;

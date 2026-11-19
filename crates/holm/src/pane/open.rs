@@ -5,7 +5,8 @@
 use gpui_kit::{Context, Window};
 
 use super::{NotePane, step};
-use crate::core_door::{Then, window_step};
+use crate::core_door::Then;
+use crate::window_step::window_step;
 
 /// The opens of the pane.
 #[derive(Default)]
