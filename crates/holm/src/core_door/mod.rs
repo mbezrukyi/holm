@@ -23,9 +23,9 @@
 //! every job that waits in the write line, and then writes the draft.
 //!
 //! Each job of the line, the search and the file links are work of the user. When one fails, it
-//! sends one [`JobFailed`] with the answer for the message line. So a caller gets only the
-//! value, unless it owns the error. The draft is Holm's own work, and its fail is a
-//! [`SaveEvent`]. The other reads give their error, for the log.
+//! sends one [`JobFailed`] with the answer for the message line. The draft is Holm's own work.
+//! Each failed write of it sends a [`SaveEvent`], and the first fail of the draft also sends a
+//! [`JobFailed`]. The other reads log their error and give an empty value.
 
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -94,13 +94,15 @@ impl<T: 'static> Done<T> {
         }))
     }
 
-    /// `step` gets the result, for a caller that owns the error.
+    /// `step` gets the result. A failure also sends its [`JobFailed`], so the step does not
+    /// show it.
     pub(crate) fn result(step: impl FnOnce(Result<T, AppError>, &mut App) + 'static) -> Self {
         Self(Box::new(step))
     }
 }
 
-/// A job of the user failed. It holds the answer for the message line.
+/// A job of the user, or the first write of the draft, failed. It holds the answer for the
+/// message line.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct JobFailed(pub(crate) &'static str);
 
@@ -126,13 +128,12 @@ pub(crate) fn window_step<V: 'static, R: 'static>(
 pub(crate) enum SaveEvent {
     /// The text of the write is on disk.
     Saved,
-    /// The write failed. The draft keeps the text, and the next job writes it again. It is
-    /// `first` when no other text of the draft had a failed write.
-    Failed { error: AppError, first: bool },
+    /// The write failed. The draft keeps the text, and the next job writes it again.
+    Failed,
 }
 
 /// The editor text is not on disk after the writes: the last write of the draft failed, or a
-/// disk question holds the text. The [`SaveEvent`] of a failed write has the error.
+/// disk question holds the text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct NotSaved;
 
@@ -666,7 +667,12 @@ impl CoreDoor {
             match (door.draft.written(id, version, reason), failure) {
                 (Written::Saved, _) => cx.emit(SaveEvent::Saved),
                 (Written::Failed { first }, Some(error)) => {
-                    cx.emit(SaveEvent::Failed { error, first });
+                    if first {
+                        answer(&error, cx);
+                    } else {
+                        tracing::warn!(error = %crate::chain(&error), "a save failed again");
+                    }
+                    cx.emit(SaveEvent::Failed);
                 }
                 _ => {}
             }
@@ -830,10 +836,15 @@ impl EventEmitter<JobFailed> for CoreDoor {}
 fn answered<T>(result: holm_core::Result<T>, cx: &mut Context<CoreDoor>) -> Result<T, AppError> {
     result.map_err(|error| {
         let error = AppError::from(error);
-        tracing::warn!(error = %crate::chain(&error), "a job of the user failed");
-        cx.emit(JobFailed(error.message()));
+        answer(&error, cx);
         error
     })
+}
+
+/// Logs `error` and sends its answer.
+fn answer(error: &AppError, cx: &mut Context<CoreDoor>) {
+    tracing::warn!(error = %crate::chain(error), "a job failed");
+    cx.emit(JobFailed(error.message()));
 }
 
 /// Gives the end of a job to its caller, after [`answered`].
@@ -1087,9 +1098,16 @@ mod tests {
             cx.subscribe(&core_door, move |_, event: &SaveEvent, _| {
                 let end = match event {
                     SaveEvent::Saved => "saved",
-                    SaveEvent::Failed { .. } => "failed",
+                    SaveEvent::Failed => "failed",
                 };
                 steps.borrow_mut().push(end.to_owned());
+            })
+            .detach();
+        });
+        cx.update(|cx| {
+            let steps = steps.clone();
+            cx.subscribe(&core_door, move |_, JobFailed(answer), _| {
+                steps.borrow_mut().push(format!("answer {answer}"));
             })
             .detach();
         });
@@ -1119,11 +1137,12 @@ mod tests {
         assert_eq!(
             *steps.borrow(),
             [
-                "failed",
-                "failed",
-                "wait Err(NotSaved)",
-                "saved",
-                "wait Ok(())"
+                format!("answer {}", crate::text::WRITE),
+                "failed".to_owned(),
+                "failed".to_owned(),
+                "wait Err(NotSaved)".to_owned(),
+                "saved".to_owned(),
+                "wait Ok(())".to_owned()
             ]
         );
         let text = fs::read_to_string(notes.join("A.md")).unwrap();

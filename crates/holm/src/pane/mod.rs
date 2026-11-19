@@ -615,13 +615,7 @@ impl NotePane {
                     self.schedule_save(cx);
                 }
             }
-            SaveEvent::Failed { error, first } => {
-                tracing::warn!(error = %crate::chain(error), "cannot save the note");
-                if *first {
-                    self.answer(error.message(), cx);
-                }
-                self.show_state(cx);
-            }
+            SaveEvent::Failed => self.show_state(cx),
         }
         cx.notify();
     }
