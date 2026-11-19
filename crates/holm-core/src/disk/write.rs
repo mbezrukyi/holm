@@ -200,7 +200,7 @@ impl Write<'_> {
         let rewritten = store.rewrite(&paths, |_, old| {
             let mut text = holm_markdown::NoteFile::parse(old);
             let tags = TagName::of_note(&text);
-            let new = edit.apply(&tags);
+            let new = edit.retag(&tags);
             (new != tags).then(|| {
                 text.set_tags(&new);
                 text.to_string()

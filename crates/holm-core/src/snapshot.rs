@@ -261,7 +261,7 @@ impl Snapshot {
 
     /// Takes out the notes at `removed`, then puts in `put`. So a note can move to a path and
     /// keep its id.
-    pub(crate) fn apply(
+    pub(crate) fn swap(
         &mut self,
         removed: Vec<NotePath>,
         put: impl IntoIterator<Item = (NoteInfo, Vec<Link>)>,

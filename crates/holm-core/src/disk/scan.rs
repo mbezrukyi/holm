@@ -3,10 +3,10 @@
 
 use crate::error::Result;
 use crate::facts::Facts;
+use crate::links::{self, LinkSource};
 use crate::model::{Note, NoteId};
 use crate::nodes::Nodes;
 use crate::reconcile::{self, Plan, Read, Settled};
-use crate::relink::{self, LinkSource};
 use crate::store::{Stamp, Store};
 
 /// Brings the notes at or below each of `nodes` up to date with the files, from `facts`.
@@ -61,7 +61,7 @@ fn read(store: &Store, facts: &Facts, note: Note, stamp: Stamp) -> Read {
     let links = if facts.link_source(path) == Some(source) {
         facts.snapshot().links(path).to_vec()
     } else {
-        relink::links(store.root(), &note)
+        links::links(store.root(), &note)
     };
     Read {
         note,

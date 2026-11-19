@@ -12,10 +12,10 @@ use rustix::fs::{Mode, OFlags};
 use tempfile::NamedTempFile;
 
 use crate::error::{Error, NameProblem, Result};
+use crate::links::{FolderMove, relink};
 use crate::model::{Note, NoteId, NoteInfo};
 use crate::nodes::Node;
 use crate::paths::{FolderPath, Name, NotePath};
-use crate::relink::{FolderMove, relink};
 use crate::tag::TagName;
 
 pub(crate) mod attachment;
@@ -87,7 +87,7 @@ impl Store {
             });
         }
         let file = fs::canonicalize(file).unwrap_or_else(|_| file.to_owned());
-        Ok(crate::relink::link(&self.root, note, &file))
+        Ok(crate::links::link(&self.root, note, &file))
     }
 
     /// Every note file at `node` or below it, with its stamp.
@@ -99,13 +99,13 @@ impl Store {
     pub(crate) fn files(&self, node: &Node) -> Result<Vec<(NotePath, Stamp)>> {
         let start = match node {
             Node::Note(path) => {
-                return Ok(match self.entry(path.folder(), &path.file()) {
-                    Entry::Note(path, stamp) => vec![(path, stamp)],
+                return Ok(match self.at(path.folder(), &path.file()) {
+                    AtPath::Note(path, stamp) => vec![(path, stamp)],
                     _ => Vec::new(),
                 });
             }
-            Node::Folder(folder) => match self.folder_entry(folder) {
-                Entry::Folder(folder) => folder,
+            Node::Folder(folder) => match self.folder_at(folder) {
+                AtPath::Folder(folder) => folder,
                 _ => return Ok(Vec::new()),
             },
         };
@@ -124,7 +124,7 @@ impl Store {
     /// What is at `name` in `folder` now.
     ///
     /// Like the folder walk, it does not follow symlinks.
-    pub(crate) fn entry(&self, folder: &FolderPath, name: &Name) -> Entry {
+    pub(crate) fn at(&self, folder: &FolderPath, name: &Name) -> AtPath {
         let real_dir = |dir: FolderPath| {
             fs::symlink_metadata(self.root.join(dir)).is_ok_and(|meta| meta.is_dir())
         };
@@ -132,25 +132,25 @@ impl Store {
             .chain(folder.parents())
             .all(real_dir)
         {
-            return Entry::Missing;
+            return AtPath::Missing;
         }
         let path = self.root.join(folder).join(name.as_os_str());
         match fs::symlink_metadata(path) {
-            Ok(meta) if meta.is_dir() => Entry::Folder(folder.child(name)),
+            Ok(meta) if meta.is_dir() => AtPath::Folder(folder.child(name)),
             Ok(meta) if meta.is_file() => folder
                 .note_file(name)
-                .map_or(Entry::Other, |note| Entry::Note(note, Stamp::of(&meta))),
-            Ok(_) => Entry::Other,
-            Err(_) => Entry::Missing,
+                .map_or(AtPath::Other, |note| AtPath::Note(note, Stamp::of(&meta))),
+            Ok(_) => AtPath::Other,
+            Err(_) => AtPath::Missing,
         }
     }
 
     /// What is at `folder` now. The root is always a folder, so a walk of a missing notes
     /// folder fails.
-    fn folder_entry(&self, folder: &FolderPath) -> Entry {
+    fn folder_at(&self, folder: &FolderPath) -> AtPath {
         match folder.split() {
-            Some((parent, name)) => self.entry(&parent, &name),
-            None => Entry::Folder(FolderPath::root()),
+            Some((parent, name)) => self.at(&parent, &name),
+            None => AtPath::Folder(FolderPath::root()),
         }
     }
 
@@ -168,7 +168,7 @@ impl Store {
     pub(crate) fn folders(&self, folder: &FolderPath) -> Result<Vec<FolderPath>> {
         let listed = |rel: &FolderPath| !attachment::is(rel);
         let mut folders = Vec::new();
-        let Entry::Folder(start) = self.folder_entry(folder) else {
+        let AtPath::Folder(start) = self.folder_at(folder) else {
             return Ok(folders);
         };
         if !start.is_root() && listed(&start) {
@@ -483,7 +483,7 @@ impl Store {
 
     /// Deletes the folder `rel` with everything in it. A folder that is already gone is no error.
     pub(crate) fn delete_folder(&self, rel: &FolderPath) -> Result<()> {
-        if self.folder_entry(rel) == Entry::Missing {
+        if self.folder_at(rel) == AtPath::Missing {
             return Ok(());
         }
         self.check_user_folder(rel)?;
@@ -498,13 +498,13 @@ impl Store {
         if rel.is_root() || attachment::is(rel) {
             return Err(bad_path(rel.as_ref()));
         }
-        match self.folder_entry(rel) {
-            Entry::Folder(_) => Ok(()),
-            Entry::Missing => Err(Error::Read {
+        match self.folder_at(rel) {
+            AtPath::Folder(_) => Ok(()),
+            AtPath::Missing => Err(Error::Read {
                 path: self.root.join(rel),
                 source: io::ErrorKind::NotFound.into(),
             }),
-            Entry::Note(..) | Entry::Other => Err(Error::Read {
+            AtPath::Note(..) | AtPath::Other => Err(Error::Read {
                 path: self.root.join(rel),
                 source: io::ErrorKind::NotADirectory.into(),
             }),
@@ -574,7 +574,7 @@ impl Store {
 
 /// What is at a path in the notes folder.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Entry {
+pub(crate) enum AtPath {
     Note(NotePath, Stamp),
     Folder(FolderPath),
     /// A file that is not a note, or a symlink.

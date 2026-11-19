@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest as _, Sha256};
 
-use super::{Entry, Store, remove, sync_dir, temp_file, write_error};
+use super::{AtPath, Store, remove, sync_dir, temp_file, write_error};
 use crate::error::{Error, Result};
 use crate::paths::{FolderPath, Name, NotePath};
 
@@ -82,7 +82,7 @@ impl Store {
         content: impl io::Read,
     ) -> Result<PathBuf> {
         let file = self.add_attachment(stem, ext, content)?;
-        Ok(crate::relink::link(&self.root, note, &file))
+        Ok(crate::links::link(&self.root, note, &file))
     }
 
     /// Copies `content` into the attachment folder as `<stem>-<hash>.<ext>`, and returns its
@@ -104,9 +104,9 @@ impl Store {
             return Err(write_error(&self.root, io::ErrorKind::InvalidInput.into()));
         };
         let dir = self.root.join(&folder);
-        match self.folder_entry(&folder) {
-            Entry::Folder(_) => {}
-            Entry::Missing => {
+        match self.folder_at(&folder) {
+            AtPath::Folder(_) => {}
+            AtPath::Missing => {
                 match fs::create_dir(&dir) {
                     Err(e) if e.kind() != io::ErrorKind::AlreadyExists => {
                         return Err(write_error(&dir, e));
@@ -168,7 +168,7 @@ impl Store {
             return false;
         };
         holds(&folder)
-            && self.entry(&folder, &name) == Entry::Other
+            && self.at(&folder, &name) == AtPath::Other
             && fs::symlink_metadata(self.root.join(rel)).is_ok_and(|meta| !meta.is_dir())
     }
 }

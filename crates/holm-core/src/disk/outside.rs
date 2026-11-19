@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use crate::nodes::{Node, Nodes};
 use crate::paths::FolderPath;
 use crate::snapshot::Snapshot;
-use crate::store::{Entry, Store};
+use crate::store::{AtPath, Store};
 
 /// The nodes for outside changes at the raw paths `paths`: what is there now, and what was
 /// there in `before`.
@@ -30,10 +30,10 @@ fn at(store: &Store, before: &Snapshot, path: &Path) -> Vec<Node> {
         return Vec::new();
     };
     let mut nodes = Vec::new();
-    let now = match store.entry(&folder, &name) {
-        Entry::Note(note, _) => Some(Node::Note(note)),
-        Entry::Folder(folder) => Some(Node::Folder(folder)),
-        Entry::Other | Entry::Missing => None,
+    let now = match store.at(&folder, &name) {
+        AtPath::Note(note, _) => Some(Node::Note(note)),
+        AtPath::Folder(folder) => Some(Node::Folder(folder)),
+        AtPath::Other | AtPath::Missing => None,
     };
     let note = folder
         .note_file(&name)

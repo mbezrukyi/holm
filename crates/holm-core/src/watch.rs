@@ -20,7 +20,7 @@ use crate::error::{Error, Result};
 pub(crate) type Batch = BTreeSet<PathBuf>;
 
 /// Gives a batch to the core. It returns `None` when the core is gone.
-pub(crate) type Apply = Arc<dyn Fn(Batch) -> Option<Result<()>> + Send + Sync>;
+pub(crate) type Handler = Arc<dyn Fn(Batch) -> Option<Result<()>> + Send + Sync>;
 
 /// A batch waits until no event came for this long...
 const QUIET: Duration = Duration::from_millis(50);
@@ -55,18 +55,18 @@ pub(crate) fn start(root: &Path) -> notify::Result<(Watcher, Events)> {
 }
 
 impl Events {
-    /// Gives the events to `apply` in batches, on a new thread.
+    /// Gives the events to `handler` in batches, on a new thread.
     /// The thread ends when the [`Watcher`] or the core is gone.
-    pub(crate) fn run(self, apply: Apply) {
+    pub(crate) fn run(self, handler: Handler) {
         let spawned = thread::Builder::new()
             .name("holm-watch".to_owned())
-            .spawn(move || self.serve(&apply));
+            .spawn(move || self.serve(&handler));
         if let Err(error) = spawned {
             tracing::warn!(%error, "cannot watch the notes folder");
         }
     }
 
-    fn serve(&self, apply: &Apply) {
+    fn serve(&self, handler: &Handler) {
         while let Ok(first) = self.queue.recv() {
             let mut batch = Batch::new();
             self.add(&mut batch, first);
@@ -78,7 +78,7 @@ impl Events {
                     Err(RecvTimeoutError::Disconnected) => return,
                 }
             }
-            match apply(batch) {
+            match handler(batch) {
                 None => return,
                 Some(Err(error)) => tracing::warn!(%error, "cannot take in outside changes"),
                 Some(Ok(())) => {}
@@ -117,7 +117,7 @@ impl Events {
 /// [`Core::open_with_feed`](crate::Core::open_with_feed) gives it. Tests use it in place of
 /// real file events, so they decide when the core sees a change.
 pub struct Feed {
-    pub(crate) apply: Apply,
+    pub(crate) handler: Handler,
 }
 
 impl Feed {
@@ -151,6 +151,6 @@ impl Feed {
             }
             batch.insert(path.to_owned());
         }
-        (self.apply)(batch).unwrap_or(Ok(()))
+        (self.handler)(batch).unwrap_or(Ok(()))
     }
 }

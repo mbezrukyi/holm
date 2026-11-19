@@ -2,11 +2,11 @@
 
 use std::collections::HashMap;
 
+use crate::links::LinkSource;
 use crate::model::{Link, Note, NoteInfo};
 use crate::nodes::{Node, Nodes};
 use crate::paths::{FolderPath, NotePath};
 use crate::reconcile::Settled;
-use crate::relink::LinkSource;
 use crate::snapshot::Snapshot;
 use crate::store::Stamp;
 
@@ -89,7 +89,7 @@ impl Facts {
         for (info, _, stamp, source) in &put {
             self.files.insert(info.path.clone(), (*stamp, *source));
         }
-        self.snapshot.apply(
+        self.snapshot.swap(
             removed,
             put.into_iter().map(|(info, links, _, _)| (info, links)),
         );

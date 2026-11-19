@@ -7,10 +7,10 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 
 use crate::facts::Facts;
+use crate::links::LinkSource;
 use crate::model::{Link, LinkTarget, Note, NoteId, NoteInfo};
 use crate::nodes::Nodes;
 use crate::paths::NotePath;
-use crate::relink::LinkSource;
 use crate::snapshot::Snapshot;
 use crate::store::Stamp;
 

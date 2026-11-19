@@ -18,9 +18,9 @@ use rusqlite::{Connection, OptionalExtension as _, params};
 
 use crate::error::{Error, Result};
 use crate::facts::NoteFacts;
+use crate::links::LinkSource;
 use crate::model::{Link, LinkTarget, Note, NoteId, NoteInfo};
 use crate::paths::{NotePath, NoteReader};
-use crate::relink::LinkSource;
 use crate::store::{Stamp, time};
 use crate::tag::TagName;
 

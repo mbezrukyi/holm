@@ -8,11 +8,11 @@ mod disk;
 mod error;
 mod facts;
 mod index;
+mod links;
 pub mod model;
 mod nodes;
 mod paths;
 mod reconcile;
-mod relink;
 mod retag;
 #[cfg(feature = "test-support")]
 pub mod sample;
@@ -39,7 +39,7 @@ use model::{DeleteCount, LinkTarget, Note, NoteId, NoteInfo, Order, SearchResult
 use nodes::Node;
 use paths::Name;
 use retag::TagEdit;
-use watch::{Apply, Batch};
+use watch::{Batch, Handler};
 
 /// The handle to one notes folder.
 ///
@@ -99,7 +99,7 @@ impl Core {
             }
         })?;
         if let Some(events) = events {
-            events.run(core.apply());
+            events.run(core.handler());
         }
         Ok(core)
     }
@@ -117,7 +117,7 @@ impl Core {
     ) -> Result<(Self, Feed)> {
         let (core, ()) = Self::build(notes_folder.as_ref(), index_dir.as_ref(), |_| (None, ()))?;
         let feed = Feed {
-            apply: core.apply(),
+            handler: core.handler(),
         };
         Ok((core, feed))
     }
@@ -164,7 +164,7 @@ impl Core {
     ///
     /// As in [`Core::read`].
     pub fn headings(&self, path: &NotePath) -> Result<Vec<String>> {
-        self.read(path).map(|note| relink::headings(&note))
+        self.read(path).map(|note| links::headings(&note))
     }
 
     /// The note links in the note at `path` that point to a missing note or heading,
@@ -175,7 +175,7 @@ impl Core {
     /// As in [`Core::read`], when a linked note can't be read.
     pub fn broken_links(&self, path: &NotePath) -> Result<Vec<LinkTarget>> {
         self.inner.with(|locked| {
-            relink::broken(locked.facts.snapshot(), path, |note| locked.disk.read(note))
+            links::broken(locked.facts.snapshot(), path, |note| locked.disk.read(note))
         })
     }
 
@@ -516,9 +516,9 @@ impl Core {
 
     /// The target of the watch seam. It holds the core weakly, so the watch thread
     /// does not keep the core alive.
-    fn apply(&self) -> Apply {
+    fn handler(&self) -> Handler {
         let inner = Arc::downgrade(&self.inner);
-        Arc::new(move |batch| inner.upgrade().map(|inner| inner.apply(batch)))
+        Arc::new(move |batch| inner.upgrade().map(|inner| inner.outside(batch)))
     }
 }
 
@@ -552,7 +552,7 @@ impl Inner {
 
     /// Checks the disk at each path of `batch`, and updates the index, the snapshot and the
     /// change list.
-    fn apply(&self, batch: Batch) -> Result<()> {
+    fn outside(&self, batch: Batch) -> Result<()> {
         self.run(Source::Outside, |write| write.outside(batch))
     }
 }
