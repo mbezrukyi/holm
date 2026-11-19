@@ -183,15 +183,22 @@ impl ShortcutList {
                     .child(shortcut.label),
             )
             .child(
-                div().id("keys").test_support().flex_none().child(
-                    Kbd::new(keystroke)
-                        .outline()
-                        .text_size(KEY_SIZE)
-                        .px(px(5.))
-                        .py(px(2.)),
-                ),
+                div()
+                    .id("keys")
+                    .test_support()
+                    .flex_none()
+                    .child(key_chip(shortcut.keys)),
             )
     }
+}
+
+/// The chip of `keys`, as the shortcut list shows it.
+pub(crate) fn key_chip(keys: editor::Keys) -> Kbd {
+    Kbd::new(shortcuts::keystroke(keys))
+        .outline()
+        .text_size(KEY_SIZE)
+        .px(px(5.))
+        .py(px(2.))
 }
 
 impl EventEmitter<Close> for ShortcutList {}

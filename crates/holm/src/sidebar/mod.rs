@@ -11,6 +11,7 @@
 mod list;
 mod tree;
 
+use std::cell::Cell;
 use std::collections::HashSet;
 use std::ops::Range;
 use std::rc::Rc;
@@ -20,10 +21,10 @@ use gpui_kit::component::input::{Enter, Escape, Input, InputEvent, InputState, M
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, ClickEvent, Context, Div, ElementId, Entity, EventEmitter,
-    FocusHandle, Focusable, FontWeight, InteractiveElement as _, IntoElement, KeyDownEvent,
-    Keystroke, ParentElement, Render, Role, ScrollStrategy, SharedString,
-    StatefulInteractiveElement as _, Styled, Subscription, Task, TestSupportExt as _,
+    AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, CursorStyle, Div, ElementId,
+    Entity, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement as _, IntoElement,
+    KeyDownEvent, Keystroke, MouseButton, ParentElement, Pixels, Render, Role, ScrollStrategy,
+    SharedString, StatefulInteractiveElement as _, Styled, Subscription, Task, TestSupportExt as _,
     UniformListScrollHandle, Window, div, px, uniform_list,
 };
 use holm_core::model::{Change, NoteInfo, Order};
@@ -70,6 +71,8 @@ pub(crate) enum SidebarEvent {
     DeleteTag(TagName),
     /// The sidebar view changed. The app keeps it in the config.
     ViewChanged,
+    /// Open or close the app menu.
+    AppMenu,
 }
 
 /// Renames the tag `from` to a typed name, and ends with the result. It shows the answer of
@@ -133,6 +136,8 @@ pub(crate) struct Sidebar {
     finding: Option<Task<()>>,
     focus: FocusHandle,
     scroll: UniformListScrollHandle,
+    /// The window bounds of the app menu button in the last frame.
+    menu_button: Rc<Cell<Bounds<Pixels>>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -185,10 +190,17 @@ impl Sidebar {
             finding: None,
             focus: cx.focus_handle(),
             scroll: UniformListScrollHandle::new(),
+            menu_button: Rc::default(),
             _subscriptions: vec![changed, opened, config_changed, search_changed],
         };
         sidebar.refresh(cx);
         sidebar
+    }
+
+    /// The window bounds of the app menu button in the last frame. The sidebar updates them
+    /// at each frame.
+    pub(crate) fn menu_button(&self) -> Rc<Cell<Bounds<Pixels>>> {
+        self.menu_button.clone()
     }
 
     /// The note order of the settings.
@@ -769,10 +781,17 @@ impl Sidebar {
 
     fn search_field(&self, window: &Window, cx: &Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
-        div()
+        let button = self.menu_button.clone();
+        h_flex()
             .flex_none()
+            .gap_1()
             .px_2()
             .py_2()
+            .on_children_prepainted(move |children, _, _| {
+                if let Some(bounds) = children.get(1) {
+                    button.set(*bounds);
+                }
+            })
             .capture_action(cx.listener(|sidebar, _: &Escape, window, cx| {
                 sidebar.clear_search(window, cx);
                 cx.stop_propagation();
@@ -787,23 +806,47 @@ impl Sidebar {
             }))
             .capture_action(cx.listener(|_, _: &MoveUp, _, cx| cx.stop_propagation()))
             .child(
-                Input::new(&self.search)
-                    .id("search")
-                    .aria_label(text::SEARCH)
-                    .prefix(Icon::view(Icon::Search, theme.muted_foreground))
-                    .small()
-                    .appearance(false)
+                div().flex_1().min_w_0().child(
+                    Input::new(&self.search)
+                        .id("search")
+                        .aria_label(text::SEARCH)
+                        .prefix(Icon::view(Icon::Search, theme.muted_foreground))
+                        .small()
+                        .appearance(false)
+                        .rounded(theme.radius)
+                        .border_1()
+                        .map(|field| {
+                            if self.search.focus_handle(cx).is_focused(window) {
+                                field.bg(theme.background).border_color(theme.border)
+                            } else {
+                                field
+                                    .bg(theme.accent)
+                                    .border_color(gpui_kit::transparent_black())
+                            }
+                        }),
+                ),
+            )
+            .child(
+                div()
+                    .id("app-menu-button")
+                    .role(Role::Button)
+                    .aria_label(text::APP_MENU)
+                    .test_support()
+                    .flex_none()
+                    .p_1()
                     .rounded(theme.radius)
-                    .border_1()
-                    .map(|field| {
-                        if self.search.focus_handle(cx).is_focused(window) {
-                            field.bg(theme.background).border_color(theme.border)
-                        } else {
-                            field
-                                .bg(theme.accent)
-                                .border_color(gpui_kit::transparent_black())
-                        }
-                    }),
+                    .cursor(CursorStyle::PointingHand)
+                    .hover(|button| button.bg(theme.secondary_hover))
+                    .child(Icon::view(Icon::Menu, theme.muted_foreground))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|_, _, window, cx| {
+                            // The sidebar would take the focus from the part that has it.
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            cx.emit(SidebarEvent::AppMenu);
+                        }),
+                    ),
             )
     }
 

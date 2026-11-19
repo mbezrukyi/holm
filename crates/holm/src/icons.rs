@@ -15,10 +15,11 @@ pub(crate) enum Icon {
     Tags,
     TagsOpen,
     Search,
+    Menu,
 }
 
 impl Icon {
-    const EVERY: [Self; 7] = [
+    const EVERY: [Self; 8] = [
         Self::All,
         Self::Folder,
         Self::FolderOpen,
@@ -26,6 +27,7 @@ impl Icon {
         Self::Tags,
         Self::TagsOpen,
         Self::Search,
+        Self::Menu,
     ];
 
     /// The asset path and the SVG file.
@@ -44,6 +46,7 @@ impl Icon {
                 include_bytes!("../icons/tags-open.svg"),
             ),
             Self::Search => ("icons/search.svg", include_bytes!("../icons/search.svg")),
+            Self::Menu => ("icons/menu.svg", include_bytes!("../icons/menu.svg")),
         }
     }
 

@@ -21,6 +21,7 @@ use gpui_kit::{
 use holm_core::model::Note;
 use holm_core::{FolderPath, NotePath, TagName};
 
+use crate::app_menu::{AppMenu, Picked, Spot};
 use crate::config::{Config, SidebarSettings};
 use crate::core_door::{CoreDoor, Done, JobFailed, NotSaved, Then};
 use crate::dialog::{self, Ask, Dialog};
@@ -35,6 +36,7 @@ use crate::shortcut_list::{self, ShortcutList};
 use crate::shortcuts::{self, Command, Place};
 use crate::sidebar::{Item, Sidebar, SidebarEvent, TagRename, Target};
 use crate::tags::RenameTag;
+use crate::window::Quit;
 use crate::window_step::window_step;
 
 const MIN_WIDTH: f32 = 160.;
@@ -56,6 +58,7 @@ pub(crate) struct NotesView {
     link_picker: Option<Entity<LinkPicker>>,
     settings: Option<Entity<SettingsDialog>>,
     shortcut_list: Option<Entity<ShortcutList>>,
+    app_menu: Entity<AppMenu>,
     /// The part that had the focus before quick open, the link picker, the settings or the
     /// shortcut list. It gets the focus back on `Esc`.
     before_popup: Option<FocusHandle>,
@@ -94,7 +97,14 @@ impl NotesView {
                 cx,
             )
         });
+        let app_menu = cx.new(|cx| {
+            let button = sidebar.read(cx).menu_button();
+            AppMenu::new(pane.focus_handle(cx), button, window, cx)
+        });
         let subscriptions = vec![
+            cx.subscribe_in(&app_menu, window, |this, _, Picked(command), window, cx| {
+                this.run(*command, window, cx);
+            }),
             cx.observe(&core_door, |this, core_door, cx| {
                 let writing = core_door.read(cx).writing();
                 this.message_line
@@ -125,6 +135,7 @@ impl NotesView {
             link_picker: None,
             settings: None,
             shortcut_list: None,
+            app_menu,
             before_popup: None,
             message_line,
             subscriptions,
@@ -301,6 +312,7 @@ impl NotesView {
                 );
             }
             SidebarEvent::ViewChanged => self.save_place(cx),
+            SidebarEvent::AppMenu => self.toggle_app_menu(window, cx),
         }
     }
 
@@ -413,6 +425,19 @@ impl NotesView {
         ));
         self.shortcut_list = Some(list);
         cx.notify();
+    }
+
+    /// F10 or the button of the sidebar head: opens or closes the app menu. With the sidebar
+    /// hidden, it opens at the window corner, and the sidebar stays hidden.
+    fn toggle_app_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let spot = if self.hidden {
+            Spot::Corner
+        } else {
+            Spot::Button
+        };
+        let note = self.pane.read(cx).path().is_some();
+        self.app_menu
+            .update(cx, |menu, cx| menu.toggle(spot, note, window, cx));
     }
 
     /// Ctrl+K: opens the link picker.
@@ -660,9 +685,15 @@ impl NotesView {
                 .then(|| shortcuts::command(Place::Note, keystroke))
                 .flatten()
         });
-        let Some(command) = command else {
-            return;
-        };
+        if let Some(command) = command
+            && self.run(command, window, cx)
+        {
+            cx.stop_propagation();
+        }
+    }
+
+    /// Runs `command` of a key or the app menu. Gives whether the view has an action for it.
+    fn run(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) -> bool {
         match command {
             Command::EditTitle => self.pane.update(cx, |pane, cx| pane.edit_title(window, cx)),
             Command::DiskState => self.pane.update(cx, |pane, cx| pane.open_state(window, cx)),
@@ -687,10 +718,11 @@ impl NotesView {
             }
             Command::Settings => self.open_settings(window, cx),
             Command::ShortcutList => self.open_shortcut_list(window, cx),
-            // Quit and the app menu have no action yet.
-            _ => return,
+            Command::AppMenu => self.toggle_app_menu(window, cx),
+            Command::Quit => window.dispatch_action(Box::new(Quit), cx),
+            _ => return false,
         }
-        cx.stop_propagation();
+        true
     }
 
     fn mouse_move(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -782,6 +814,7 @@ impl Render for NotesView {
             .children(self.link_picker.clone())
             .children(self.settings.clone())
             .children(self.shortcut_list.clone())
+            .child(self.app_menu.clone())
     }
 }
 

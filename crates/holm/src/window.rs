@@ -14,7 +14,7 @@ use gpui_kit::{
     AnyElement, App, AppContext as _, Bounds, Context, Entity, InteractiveElement as _,
     IntoElement, ParentElement, PathPromptOptions, Render, Role, SharedString,
     StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _, TitlebarOptions,
-    Window, WindowBounds, WindowDecorations, WindowOptions, div, px, size,
+    Window, WindowBounds, WindowDecorations, WindowOptions, actions, div, px, size,
 };
 use holm_core::Core;
 
@@ -29,6 +29,9 @@ use crate::window_step::window_step;
 use crate::{core_door, text, theme};
 
 pub(crate) const APP_ID: &str = "io.github.mbezrukyi.Holm";
+
+// Quit closes the window with the close rule. Ctrl+Shift+Q and the app menu dispatch it.
+actions!(holm, [Quit]);
 
 /// Opens the core on a notes folder and an index folder. The app uses [`Core::open`].
 pub(crate) type OpenCore = Arc<dyn Fn(&Path, &Path) -> holm_core::Result<Core> + Send + Sync>;
@@ -208,6 +211,13 @@ impl HolmWindow {
         match &self.stage {
             Stage::Open(notes) => notes.update(cx, |notes, cx| notes.may_close(window, cx)),
             _ => true,
+        }
+    }
+
+    /// [`Quit`]: closes the window, like its close button.
+    fn quit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.may_close(window, cx) {
+            window.remove_window();
         }
     }
 
@@ -405,6 +415,7 @@ impl Render for HolmWindow {
             .font_family(theme.font_family.clone())
             .text_size(theme.font_size)
             .relative()
+            .on_action(cx.listener(|this, _: &Quit, window, cx| this.quit(window, cx)))
             .child(self.folder_screen(cx))
             .map(|root| {
                 if matches!(self.stage, Stage::Open(_)) {

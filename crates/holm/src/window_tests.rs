@@ -3945,3 +3945,211 @@ fn the_folder_screen_ignores_ctrl_question_mark(cx: &mut TestAppContext) {
     keys(cx, handle, "ctrl-?");
     assert_eq!(question(cx, handle), None);
 }
+
+/// The rows of the open app menu. The row under the cursor has `*`.
+fn app_menu(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
+    labels(cx, handle, "app-menu", Role::ListBoxOption)
+}
+
+/// Clicks the item at `at` in the app menu.
+fn click_menu_item(cx: &mut TestAppContext, handle: AnyWindowHandle, at: u64) {
+    cx.update_window(handle, |_, window, cx| {
+        window.click(
+            gpui_kit::ElementId::NamedInteger("menu-item".into(), at),
+            cx,
+        );
+    })
+    .unwrap();
+    settle(cx);
+}
+
+fn window_open(cx: &mut TestAppContext, handle: AnyWindowHandle) -> bool {
+    cx.update_window(handle, |_, _, _| ()).is_ok()
+}
+
+#[gpui_kit::test]
+fn f10_and_the_menu_button_open_the_app_menu_under_the_button(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    fs::write(fixture.notes().join("Note.md"), "a\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    keys(cx, handle, "f10");
+    assert_eq!(
+        app_menu(cx, handle),
+        ["Settings*", "Shortcuts", "Pin note", "Quit"]
+    );
+    let menu = bounds_of(cx, handle, "app-menu").unwrap();
+    let button = bounds_of(cx, handle, "app-menu-button").unwrap();
+    assert_eq!(menu.left(), button.left());
+    assert!(menu.top() >= button.bottom());
+    keys(cx, handle, "down down down");
+    assert_eq!(
+        app_menu(cx, handle),
+        ["Settings", "Shortcuts", "Pin note", "Quit*"]
+    );
+    keys(cx, handle, "escape");
+    assert_eq!(app_menu(cx, handle), Vec::<String>::new());
+    assert_eq!(focus(cx, handle), "editor");
+
+    // A second F10 or click closes the menu.
+    keys(cx, handle, "f10");
+    keys(cx, handle, "f10");
+    assert_eq!(app_menu(cx, handle), Vec::<String>::new());
+    assert_eq!(focus(cx, handle), "editor");
+    click(cx, handle, "app-menu-button");
+    assert_eq!(app_menu(cx, handle).len(), 4);
+    click(cx, handle, "app-menu-button");
+    assert_eq!(app_menu(cx, handle), Vec::<String>::new());
+    assert_eq!(focus(cx, handle), "editor");
+
+    // A click outside closes it too.
+    click(cx, handle, "app-menu-button");
+    click(cx, handle, "editor");
+    assert_eq!(app_menu(cx, handle), Vec::<String>::new());
+    assert_eq!(editor_text(cx, handle), "a\n");
+}
+
+#[gpui_kit::test]
+fn each_app_menu_item_runs_its_action_by_keys_and_by_click(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let note = fixture.notes().join("Note.md");
+    fs::write(&note, "a\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    keys(cx, handle, "f10 enter");
+    assert_eq!(question(cx, handle).as_deref(), Some(text::SETTINGS));
+    keys(cx, handle, "escape");
+    assert_eq!(focus(cx, handle), "editor");
+    keys(cx, handle, "f10");
+    click_menu_item(cx, handle, 0);
+    assert_eq!(question(cx, handle).as_deref(), Some(text::SETTINGS));
+    keys(cx, handle, "escape");
+
+    keys(cx, handle, "f10 down enter");
+    assert_eq!(question(cx, handle).as_deref(), Some(text::SHORTCUT_LIST));
+    keys(cx, handle, "escape");
+    keys(cx, handle, "f10");
+    click_menu_item(cx, handle, 1);
+    assert_eq!(question(cx, handle).as_deref(), Some(text::SHORTCUT_LIST));
+    keys(cx, handle, "escape");
+    assert_eq!(focus(cx, handle), "editor");
+
+    keys(cx, handle, "f10 down down enter");
+    assert!(read(&note).contains("pinned: true"));
+    keys(cx, handle, "f10");
+    click_menu_item(cx, handle, 2);
+    assert!(!read(&note).contains("pinned: true"));
+    assert_eq!(focus(cx, handle), "editor");
+
+    keys(cx, handle, "f10");
+    click_menu_item(cx, handle, 3);
+    assert!(!window_open(cx, handle), "Quit closes the window");
+}
+
+#[gpui_kit::test]
+fn quit_in_the_app_menu_closes_the_window_by_keys(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    fs::write(fixture.notes().join("Note.md"), "a\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    keys(cx, handle, "f10 up");
+    assert_eq!(
+        app_menu(cx, handle),
+        ["Settings*", "Shortcuts", "Pin note", "Quit"],
+        "up stays on the first item"
+    );
+    keys(cx, handle, "down down down enter");
+    assert!(!window_open(cx, handle));
+}
+
+#[gpui_kit::test]
+fn pin_note_is_off_with_no_note_open(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let handle = open(cx, fixture.startup(None));
+    assert!(empty_pane(cx, handle));
+
+    keys(cx, handle, "f10 down down");
+    assert_eq!(
+        app_menu(cx, handle),
+        ["Settings", "Shortcuts", "Pin note", "Quit*"]
+    );
+    keys(cx, handle, "up");
+    assert_eq!(
+        app_menu(cx, handle),
+        ["Settings", "Shortcuts*", "Pin note", "Quit"]
+    );
+    click_menu_item(cx, handle, 2);
+    assert_eq!(
+        app_menu(cx, handle).len(),
+        4,
+        "a click on Pin note does nothing"
+    );
+    keys(cx, handle, "escape");
+    assert_eq!(focus(cx, handle), "sidebar");
+}
+
+#[gpui_kit::test]
+fn f10_with_the_sidebar_hidden_opens_the_menu_at_the_corner(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    fs::write(fixture.notes().join("Note.md"), "a\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-shift-l ctrl-shift-l");
+    assert_eq!(sidebar(cx, handle), "hidden");
+
+    keys(cx, handle, "f10");
+    assert_eq!(app_menu(cx, handle).len(), 4);
+    assert_eq!(sidebar(cx, handle), "hidden");
+    let menu = bounds_of(cx, handle, "app-menu").unwrap();
+    assert_eq!(
+        (menu.left(), menu.top()),
+        (gpui_kit::px(4.), gpui_kit::px(4.))
+    );
+
+    keys(cx, handle, "enter");
+    assert_eq!(question(cx, handle).as_deref(), Some(text::SETTINGS));
+    assert_eq!(sidebar(cx, handle), "hidden");
+}
+
+#[gpui_kit::test]
+fn the_folder_screen_ignores_f10_and_ctrl_shift_q(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(folder_screen(cx, handle).as_deref(), Some(text::ASK_FOLDER));
+
+    keys(cx, handle, "f10");
+    assert_eq!(app_menu(cx, handle), Vec::<String>::new());
+    keys(cx, handle, "ctrl-shift-q");
+    assert!(window_open(cx, handle));
+    assert_eq!(folder_screen(cx, handle).as_deref(), Some(text::ASK_FOLDER));
+}
+
+#[gpui_kit::test]
+fn ctrl_shift_q_with_text_that_cannot_be_saved_needs_a_second_press(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    fs::write(notes_dir.join("Note.md"), "old\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    read_only(&notes_dir, true);
+    cx.simulate_input(handle, "a");
+    keys(cx, handle, "ctrl-shift-q");
+    assert!(window_open(cx, handle));
+    assert_eq!(message(cx, handle).as_deref(), Some(text::CLOSE_AGAIN));
+
+    keys(cx, handle, "ctrl-shift-q");
+    assert!(!window_open(cx, handle));
+    read_only(&notes_dir, false);
+}
+
+#[gpui_kit::test]
+fn ctrl_shift_q_saves_the_typed_text_first(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let note = fixture.notes().join("Note.md");
+    fs::write(&note, "old\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    cx.simulate_input(handle, "a");
+    keys(cx, handle, "ctrl-shift-q");
+    assert!(!window_open(cx, handle));
+    assert!(read(&note).ends_with("\naold\n"));
+}

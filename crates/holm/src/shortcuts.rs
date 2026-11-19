@@ -26,7 +26,7 @@ pub(crate) enum Place {
     Tags,
     /// A dialog that asks a question.
     Dialog,
-    /// A popup with a list: the problem list, the backlinks and the disk menu.
+    /// A popup with a list: the problem list, the backlinks, the disk menu and the app menu.
     ListPopup,
     /// A text field, like the name field or the search field.
     TextField,
@@ -419,6 +419,13 @@ pub(crate) fn command(place: Place, keystroke: &Keystroke) -> Option<Command> {
     ROWS.iter()
         .find(|row| row.place == place && row.keys.matches(keystroke))
         .map(|row| row.command)
+}
+
+/// The keys of `command` in `place`.
+pub(crate) fn keys(place: Place, command: Command) -> Option<Keys> {
+    ROWS.iter()
+        .find(|row| row.place == place && row.command == command)
+        .map(|row| row.keys)
 }
 
 /// The command of `keystroke` in each text input. Its keys come from the editor table.

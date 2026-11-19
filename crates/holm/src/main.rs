@@ -2,6 +2,7 @@
 //!
 //! The binary joins the core and the editor. It owns windows, settings and themes.
 
+mod app_menu;
 mod backlinks;
 mod config;
 mod core_door;

@@ -54,6 +54,7 @@ use crate::error::AppError;
 use crate::link_picker::{LinkChoice, LinkStart};
 use crate::message_line::{MessageLine, OpenState};
 use crate::name_field::{NameEvent, NameWrite};
+use crate::shortcuts::{self, Command, Place};
 use crate::tags::{TagChange, TagRow};
 use crate::title::TitleField;
 use crate::{text, theme};
@@ -272,10 +273,12 @@ impl NotePane {
         pane
     }
 
-    /// Clears the "close again" flag at each key, as the message line clears its answer.
+    /// Clears the "close again" flag at each key, as the message line clears its answer. The
+    /// quit key keeps it, so a second press quits.
     fn clear_close_again(close_again: Rc<Cell<bool>>, cx: &mut Context<Self>) -> Subscription {
         cx.intercept_keystrokes(move |event, _, _| {
-            if !event.keystroke.is_modifier_key() {
+            let quit = shortcuts::command(Place::Window, &event.keystroke) == Some(Command::Quit);
+            if !event.keystroke.is_modifier_key() && !quit {
                 close_again.set(false);
             }
         })

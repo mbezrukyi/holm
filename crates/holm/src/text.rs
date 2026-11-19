@@ -207,6 +207,12 @@ pub(crate) const SETTING_FORMAT_KEYS: &str = "Format keys";
 pub(crate) const SETTING_CONTINUE_LISTS: &str = "Continue lists on Enter";
 pub(crate) const SETTING_INDENT_LISTS: &str = "Indent lists with Tab";
 
+pub(crate) const APP_MENU: &str = "App menu";
+pub(crate) const MENU_SETTINGS: &str = "Settings";
+pub(crate) const MENU_SHORTCUTS: &str = "Shortcuts";
+pub(crate) const MENU_PIN: &str = "Pin note";
+pub(crate) const MENU_QUIT: &str = "Quit";
+
 pub(crate) const KEY_NEW_NOTE: &str = "New note";
 pub(crate) const KEY_NEW_FOLDER: &str = "New folder";
 pub(crate) const KEY_QUICK_OPEN: &str = "Open a note by its title";
