@@ -7,6 +7,9 @@
 //!
 //! A disk question holds the text of its note: the draft gives no write of it until
 //! [`Draft::release`] or [`Draft::drop_text`].
+//!
+//! A read of a note file can replace its text: [`Draft::drop_for_read`]. The text gives no
+//! write while the read runs, and it comes back when the read fails.
 
 use holm_core::model::{Change, Note, NoteInfo, Source};
 use holm_core::{Core, NotePath, Snapshot};
@@ -127,6 +130,8 @@ pub(super) struct Draft {
     open: Option<Text>,
     /// The texts of the notes that the editor left, until a write of each succeeds.
     left: Vec<Text>,
+    /// The texts that a read of their file replaces, until the read ends.
+    reading: Vec<Text>,
     /// It grows with each new body.
     version: u64,
 }
@@ -176,6 +181,45 @@ impl Draft {
             self.open = None;
         }
         self.left.retain(|text| text.note.path() != path);
+        self.reading.retain(|text| text.note.path() != path);
+    }
+
+    /// Takes out the text of the note at `path` for a read of its file, and gives the id of the
+    /// text. Until [`Self::read_ended`], the text gives no write and is not unsaved.
+    pub(super) fn drop_for_read(&mut self, path: &NotePath) -> Option<u64> {
+        let text = if self
+            .open
+            .as_ref()
+            .is_some_and(|open| open.note.path() == path)
+        {
+            self.open.take()
+        } else {
+            let at = self.left.iter().position(|text| text.note.path() == path)?;
+            Some(self.left.remove(at))
+        }?;
+        let id = text.id;
+        self.reading.push(text);
+        Some(id)
+    }
+
+    /// The read for the text `id` ended. A failed read gives the text back, with its hold.
+    /// When a newer text of the note came during the read, the newer text stays and takes the
+    /// hold.
+    pub(super) fn read_ended(&mut self, id: u64, ok: bool) {
+        let Some(at) = self.reading.iter().position(|text| text.id == id) else {
+            return;
+        };
+        let text = self.reading.remove(at);
+        if ok {
+            return;
+        }
+        if let Some(newer) = self.text_mut(text.note.path()) {
+            newer.held |= text.held;
+        } else if self.open.is_none() {
+            self.open = Some(text);
+        } else {
+            self.left.push(text);
+        }
     }
 
     /// Holds the text of the note at `path` while its disk question is open.
@@ -259,7 +303,8 @@ impl Draft {
 
     /// Follows `change` from `source`. `before` is the snapshot before it.
     pub(super) fn follow(&mut self, source: Source, change: &Change, before: &Snapshot) {
-        for text in self.left.iter_mut().chain(&mut self.open) {
+        let texts = self.left.iter_mut().chain(&mut self.open);
+        for text in texts.chain(&mut self.reading) {
             text.follow(source, change, before);
         }
     }
@@ -493,6 +538,72 @@ mod tests {
         assert!(draft.writes().is_empty());
         draft.release(&note_path("work/A.md"));
         assert_eq!(one_write(&mut draft).text, save("work/A.md", "one"));
+    }
+
+    #[test]
+    fn a_failed_read_gives_the_text_back_with_its_hold() {
+        let mut draft = Draft::default();
+        set(&mut draft, "A.md", "one");
+        draft.hold(&note_path("A.md"));
+        let id = draft.drop_for_read(&note_path("A.md")).unwrap();
+        assert!(!draft.unsaved());
+        assert!(draft.writes().is_empty());
+
+        draft.read_ended(id, false);
+        assert!(draft.unsaved_note(&note_path("A.md")));
+        assert!(draft.writes().is_empty(), "the hold came back");
+        draft.release(&note_path("A.md"));
+        assert_eq!(one_write(&mut draft).text, save("A.md", "one"));
+    }
+
+    #[test]
+    fn a_read_that_works_drops_the_text() {
+        let mut draft = Draft::default();
+        set(&mut draft, "A.md", "one");
+        let id = draft.drop_for_read(&note_path("A.md")).unwrap();
+        draft.read_ended(id, true);
+        assert!(!draft.unsaved());
+        assert_eq!(draft.take(), []);
+    }
+
+    #[test]
+    fn a_newer_text_during_a_failed_read_stays_and_takes_the_hold() {
+        let mut draft = Draft::default();
+        set(&mut draft, "A.md", "one");
+        draft.hold(&note_path("A.md"));
+        let id = draft.drop_for_read(&note_path("A.md")).unwrap();
+        set(&mut draft, "A.md", "one two");
+
+        draft.read_ended(id, false);
+        assert!(draft.writes().is_empty(), "the newer text is held");
+        assert_eq!(draft.take(), [save("A.md", "one two")]);
+    }
+
+    #[test]
+    fn a_drop_during_a_read_keeps_the_text_away() {
+        let mut draft = Draft::default();
+        set(&mut draft, "A.md", "one");
+        let id = draft.drop_for_read(&note_path("A.md")).unwrap();
+        draft.drop_text(&note_path("A.md"));
+        draft.read_ended(id, false);
+        assert!(!draft.unsaved());
+    }
+
+    #[test]
+    fn a_text_in_a_read_follows_a_move_of_its_note() {
+        let mut draft = Draft::default();
+        set(&mut draft, "A.md", "one");
+        let id = draft.drop_for_read(&note_path("A.md")).unwrap();
+        draft.follow(
+            Source::Outside,
+            &Change::Moved {
+                from: note_path("A.md"),
+                to: note_path("work/A.md"),
+            },
+            &Snapshot::default(),
+        );
+        draft.read_ended(id, false);
+        assert_eq!(draft.take(), [save("work/A.md", "one")]);
     }
 
     #[test]

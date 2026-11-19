@@ -271,6 +271,27 @@ impl CoreDoor {
         self.write(move |core| core.read(&path), done, cx);
     }
 
+    /// Reads the note at `path` to replace its editor text. The text drops now with no write,
+    /// and comes back with its hold when the read fails.
+    pub(crate) fn read_and_drop_text(
+        &mut self,
+        path: NotePath,
+        done: Done<Note>,
+        cx: &mut Context<Self>,
+    ) {
+        let text = self.draft.drop_for_read(&path);
+        self.queue(
+            move |core| core.read(&path),
+            move |door, note, cx| {
+                if let Some(id) = text {
+                    door.draft.read_ended(id, note.is_ok());
+                }
+                give(note, done, cx);
+            },
+            cx,
+        );
+    }
+
     /// Ends after the writes before it, so `done` sees their snapshot.
     pub(crate) fn wait(&mut self, done: Done<()>, cx: &mut Context<Self>) {
         self.write(|_| Ok(()), done, cx);
@@ -523,7 +544,7 @@ impl CoreDoor {
                     })
                     .collect::<Vec<_>>())
             },
-            |copies, cx| {
+            |_, copies, cx| {
                 let copies = each_answered(copies.unwrap_or_default(), cx);
                 cx.defer(move |cx| done(copies, cx));
             },
@@ -600,22 +621,14 @@ impl CoreDoor {
         done: Done<T>,
         cx: &mut Context<Self>,
     ) {
-        self.queue(
-            job,
-            |result, cx| {
-                let result = answered(result, cx);
-                // A deferred step runs after the views took the event, in the same update.
-                cx.defer(move |cx| (done.0)(result, cx));
-            },
-            cx,
-        );
+        self.queue(job, |_, result, cx| give(result, done, cx), cx);
     }
 
     /// Like [`Self::write`], but `end` gets the result on the entity, before the deferred steps.
     fn queue<T: Send + 'static>(
         &mut self,
         job: impl FnOnce(&Core) -> holm_core::Result<T> + Send + 'static,
-        end: impl FnOnce(holm_core::Result<T>, &mut Context<Self>) + 'static,
+        end: impl FnOnce(&mut Self, holm_core::Result<T>, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) {
         self.push_draft();
@@ -655,7 +668,7 @@ impl CoreDoor {
     fn push<T: Send + 'static>(
         &mut self,
         job: impl FnOnce(&Core) -> holm_core::Result<T> + Send + 'static,
-        end: impl FnOnce(holm_core::Result<T>, &mut Context<Self>) + 'static,
+        end: impl FnOnce(&mut Self, holm_core::Result<T>, &mut Context<Self>) + 'static,
     ) -> u64 {
         let (send, mut receive) = oneshot::channel();
         let work: Work = Box::new(move |core: &Core| {
@@ -664,9 +677,9 @@ impl CoreDoor {
             send.send(result).ok();
             failure
         });
-        let end: End = Box::new(move |_, cx: &mut Context<Self>| {
+        let end: End = Box::new(move |door, cx: &mut Context<Self>| {
             if let Ok(Some(result)) = receive.try_recv() {
-                end(result, cx);
+                end(door, result, cx);
             }
         });
         self.write_line.push(work, end)
@@ -811,6 +824,13 @@ fn answered<T>(result: holm_core::Result<T>, cx: &mut Context<CoreDoor>) -> Resu
         cx.emit(JobFailed(error.message()));
         error
     })
+}
+
+/// Gives the end of a job to its caller, after [`answered`].
+fn give<T: 'static>(result: holm_core::Result<T>, done: Done<T>, cx: &mut Context<CoreDoor>) {
+    let result = answered(result, cx);
+    // A deferred step runs after the views took the event, in the same update.
+    cx.defer(move |cx| (done.0)(result, cx));
 }
 
 /// The value of each result, or `None` after its failure went to [`answered`].

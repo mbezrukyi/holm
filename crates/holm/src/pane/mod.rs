@@ -391,7 +391,7 @@ impl NotePane {
         match (question, choice) {
             (DiskQuestion::Changed, Choice::KeepMine) => self.keep_mine(cx),
             (DiskQuestion::Deleted, Choice::KeepMine) => self.keep_text(cx),
-            (_, Choice::Reload) => self.reload(true, cx),
+            (_, Choice::Reload) => self.reload(cx),
             (_, Choice::Close) => self.close_deleted(cx),
         }
     }
@@ -649,7 +649,7 @@ impl NotePane {
                     self.set_disk(Some(DiskQuestion::Changed), cx);
                 } else {
                     self.set_disk(None, cx);
-                    self.reload(false, cx);
+                    self.reload(cx);
                 }
             }
             Change::Removed(gone) if gone == path => {
@@ -663,33 +663,19 @@ impl NotePane {
         }
     }
 
-    /// Reads the note again. With `discard`, it drops the unsaved text first, and gives it
-    /// back when the read fails.
-    fn reload(&mut self, discard: bool, cx: &mut Context<Self>) {
+    /// Reads the note again, in place of its unsaved text. A failed read keeps the text.
+    fn reload(&mut self, cx: &mut Context<Self>) {
         let Some(path) = self.content.editor().cloned() else {
             return;
         };
         let opening = self.opening;
-        // The pane owns the error: a failed read gives the dropped text back.
-        let done = Done::result(step(cx, move |pane: &mut Self, result, cx| {
-            if pane.opening != opening {
-                return;
-            }
-            match result {
-                Ok(note) => pane.show(note, true, cx),
-                Err(_) if discard => {
-                    pane.edited(cx);
-                    pane.hold_text(cx);
-                }
-                Err(_) => {}
+        let done = Done::value(step(cx, move |pane: &mut Self, note, cx| {
+            if pane.opening == opening {
+                pane.show(note, true, cx);
             }
         }));
-        // The write line must not write the text that the reload drops.
         self.core_door.update(cx, |core_door, cx| {
-            if discard {
-                core_door.drop_text(&path);
-            }
-            core_door.read(path, done, cx);
+            core_door.read_and_drop_text(path, done, cx);
         });
     }
 
@@ -837,7 +823,7 @@ impl NotePane {
                 .update(cx, |editor, cx| editor.set_folder(folder, cx));
         }
         if other_folder && !unsaved {
-            self.reload(false, cx);
+            self.reload(cx);
         } else {
             self.links.update(cx, |links, cx| links.show(Some(new), cx));
         }

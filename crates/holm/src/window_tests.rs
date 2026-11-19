@@ -427,6 +427,30 @@ fn a_pin_or_a_tag_change_during_a_disk_question_keeps_the_outside_text(cx: &mut 
     assert_eq!(fields(&note).0, ["x"]);
 }
 
+#[gpui_kit::test]
+fn a_failed_reload_keeps_the_text_and_the_question(cx: &mut TestAppContext) {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let fixture = Fixture::new().with_folder();
+    let note = fixture.notes().join("Note.md");
+    fs::write(&note, "old\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+    cx.simulate_input(handle, "mine ");
+    fixture.write_outside(cx, "Note.md", "theirs\n");
+    fs::set_permissions(&note, fs::Permissions::from_mode(0o000)).unwrap();
+
+    keys(cx, handle, "ctrl-shift-d down enter");
+    assert_eq!(editor_text(cx, handle), "mine old\n");
+    assert_eq!(state(cx, handle).as_deref(), Some(text::CHANGED_ON_DISK));
+    fs::set_permissions(&note, fs::Permissions::from_mode(0o644)).unwrap();
+    autosave(cx);
+    assert_eq!(read(&note), "theirs\n", "the question still holds the text");
+
+    keys(cx, handle, "ctrl-shift-d enter");
+    assert_eq!(state(cx, handle), None);
+    assert!(read(&note).ends_with("\n---\nmine old\n"));
+}
+
 /// The text that a disk question holds is not saved, so the pane stays on its note.
 #[gpui_kit::test]
 fn a_disk_question_keeps_the_pane_on_its_note(cx: &mut TestAppContext) {
