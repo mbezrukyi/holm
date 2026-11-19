@@ -116,7 +116,13 @@ fn window_speed(cx: &mut TestAppContext) {
     keys(cx, handle, "escape");
 
     // Quick open gives the focus back to the note list, after the search.
-    keys(cx, handle, "escape down");
+    keys(cx, handle, "escape");
+    assert!(sidebar(cx, handle).starts_with("tree "));
+    time("tree step down", || {
+        cx.simulate_keystrokes(handle, "down");
+        settle(cx);
+        frame(cx);
+    });
     type_new_name(cx, handle, "renamed");
     time("folder rename", || {
         cx.simulate_keystrokes(handle, "enter");
