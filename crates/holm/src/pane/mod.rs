@@ -22,8 +22,8 @@
 //! scrolls with the text. The pane writes the changes of the tags and the pin at once. The
 //! editor undo stack holds only the text, so Ctrl+Z does not undo them.
 //!
-//! The pane runs the link picker flow. `links` opens the links of the note and reads its
-//! backlinks. The backlinks show in the tag row.
+//! `links` runs the link picker flow, opens the links of the note and reads its backlinks.
+//! The backlinks show in the tag row.
 
 mod disk_menu;
 mod links;
@@ -44,7 +44,6 @@ use gpui_kit::{
 use holm_core::model::{Change, Note, NoteInfo, Source};
 use holm_core::{FolderPath, NotePath, TagName};
 use holm_editor::{Changed, Editor, UpFromStart};
-use holm_markdown::Target;
 
 use crate::backlinks::{Backlinks, OpenBacklink};
 use crate::core_door::{CoreDoor, Done, FolderEvent, NotSaved, SaveEvent, Then, window_step};
@@ -150,8 +149,6 @@ pub(crate) struct NotePane {
     opening: u64,
     /// The heading to show when the note that opens is ready.
     open_heading: Option<String>,
-    /// Whether the link picker changes the link at the cursor, not inserts a new one.
-    replace_link: bool,
     /// A save for a close of the window runs.
     closing: bool,
     _subscriptions: Vec<Subscription>,
@@ -254,7 +251,6 @@ impl NotePane {
             disk: None,
             opening: 0,
             open_heading: None,
-            replace_link: false,
             closing: false,
             _subscriptions: subscriptions,
         };
@@ -395,98 +391,27 @@ impl NotePane {
         self.links.update(cx, |links, cx| links.pick(pick, cx));
     }
 
-    /// Ctrl+K: gives `done` what the link picker starts with, after the write line writes the
-    /// unsaved text. In a note link, the field starts with its target, and the pick changes that
-    /// link.
-    /// With no open note, it does nothing.
+    /// Ctrl+K: gives `done` what the link picker starts with. See [`Links::start`]. With no
+    /// note in the editor, it does nothing.
     pub(crate) fn start_link(
         &mut self,
         done: impl FnOnce(LinkStart, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
-        let Some(open_note) = self.content.note().cloned() else {
-            return;
-        };
-        let link = self.editor.read(cx).link_at_cursor();
-        self.replace_link = link.as_ref().is_some_and(|link| !link.embedded);
-        let target = link.map(|link| link.target);
-        let done = Done::value(step(cx, move |pane: &mut Self, (), cx| {
-            let snapshot = pane.core_door.read(cx).snapshot();
-            let query = match target {
-                Some(Target::Note { id, heading }) => match snapshot.note_with_id(&id) {
-                    Some(note) => match heading {
-                        Some(heading) => format!("{}#{heading}", note.title),
-                        None => note.title.clone(),
-                    },
-                    None => String::new(),
-                },
-                Some(Target::Heading(heading)) => format!("#{heading}"),
-                _ => String::new(),
-            };
-            done(LinkStart::new(snapshot, open_note, query), cx);
-        }));
-        self.core_door
-            .update(cx, |core_door, cx| core_door.wait(done, cx));
+        if self.content.note().is_some() {
+            self.links.update(cx, |links, cx| links.start(done, cx));
+        }
     }
 
-    /// Makes the link that the user picked in the link picker, and puts it at the cursor.
-    /// A new note goes in the folder of the open note. With no open note, it does nothing.
-    /// `done` runs when the link is in place.
+    /// Puts the link that the user picked in the link picker at the cursor. See
+    /// [`Links::link`]. With no note in the editor, it does nothing. `done` runs at the end.
     pub(crate) fn link(&mut self, choice: LinkChoice, done: Then<()>, cx: &mut Context<Self>) {
-        let Some(path) = self.content.note().cloned() else {
+        if self.content.note().is_some() {
+            self.links
+                .update(cx, |links, cx| links.link(choice, done, cx));
+        } else {
             cx.defer(move |cx| done((), cx));
-            return;
-        };
-        let folder = path.folder().clone();
-        let pane = cx.weak_entity();
-        let put = move |target: Target, text: String, cx: &mut App| {
-            pane.update(cx, |pane, cx| pane.put_link(&target, &text, cx))
-                .ok();
-        };
-        match choice {
-            LinkChoice::Note {
-                path,
-                title,
-                heading,
-            } => self.core_door.update(cx, |core_door, cx| {
-                core_door.link_id(
-                    path,
-                    Done::value(move |id, cx| {
-                        let text = heading.clone().unwrap_or(title);
-                        put(Target::Note { id, heading }, text, cx);
-                        done((), cx);
-                    }),
-                    cx,
-                );
-            }),
-            LinkChoice::SameNote(heading) => {
-                self.put_link(&Target::Heading(heading.clone()), &heading, cx);
-                cx.defer(move |cx| done((), cx));
-            }
-            LinkChoice::Create(title) => self.core_door.update(cx, |core_door, cx| {
-                core_door.create_linked_note(
-                    folder,
-                    title.clone(),
-                    Done::value(move |id, cx| {
-                        put(Target::Note { id, heading: None }, title, cx);
-                        done((), cx);
-                    }),
-                    cx,
-                );
-            }),
         }
-    }
-
-    fn put_link(&mut self, target: &Target, text: &str, cx: &mut Context<Self>) {
-        if self.content.note().is_none() {
-            return;
-        }
-        let replace = self.replace_link;
-        self.editor.update(cx, |editor, cx| {
-            if !(replace && editor.set_link_target(target, cx)) {
-                editor.insert_link(text, target, false, cx);
-            }
-        });
     }
 
     /// Shows the tags and the pin of the open note from the snapshot.

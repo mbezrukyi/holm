@@ -14,6 +14,7 @@ use gpui_kit::{
 };
 use holm_core::model::{NoteInfo, NoteSet};
 use holm_core::{NotePath, Snapshot};
+use holm_markdown::Target;
 
 use crate::core_door::CoreDoor;
 use crate::link_rows::{self, LinkRow, Query};
@@ -32,8 +33,16 @@ impl LinkStart {
     /// The picker lists the notes of `snapshot` with the newest change first, as
     /// [`Snapshot::newest`] gives them. It does not take the note order of the sidebar: a link
     /// most often goes to a note of late. The link goes into `open_note`. The field starts with
-    /// `query`.
-    pub(crate) fn new(snapshot: &Snapshot, open_note: NotePath, query: String) -> Self {
+    /// `target`, the link at the cursor, when it is a note or a heading.
+    pub(crate) fn new(snapshot: &Snapshot, open_note: NotePath, target: Option<&Target>) -> Self {
+        let query = match target {
+            Some(Target::Note { id, heading }) => snapshot
+                .note_with_id(id)
+                .map(|note| Query::text(Some(&note.title), heading.as_deref()))
+                .unwrap_or_default(),
+            Some(Target::Heading(heading)) => Query::text(None, Some(heading)),
+            _ => String::new(),
+        };
         Self {
             notes: snapshot.newest(NoteSet::All),
             open_note,
@@ -184,7 +193,7 @@ impl LinkPicker {
         let Some(LinkRow::Note(at)) = selected.and_then(|at| self.rows.get(at)) else {
             return;
         };
-        let query = format!("{}#", self.notes[*at].title);
+        let query = Query::text(Some(&self.notes[*at].title), Some(""));
         self.list
             .update(cx, |list, cx| list.set_query(query, window, cx));
         self.query_changed(cx);

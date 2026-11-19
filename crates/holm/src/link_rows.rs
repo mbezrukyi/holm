@@ -34,6 +34,18 @@ impl<'a> Query<'a> {
         }
         Self::Titles(text)
     }
+
+    /// The field text that [`Self::parse`] reads back: `title#heading`, `title`, or
+    /// `#heading` for the open note. An empty heading gives `title#`, the headings of the
+    /// note with no filter.
+    pub(crate) fn text(title: Option<&str>, heading: Option<&str>) -> String {
+        match (title, heading) {
+            (Some(title), Some(heading)) => format!("{title}#{heading}"),
+            (Some(title), None) => title.to_owned(),
+            (None, Some(heading)) => format!("#{heading}"),
+            (None, None) => String::new(),
+        }
+    }
 }
 
 /// The most note rows the picker shows. The list lays out each row it has, so more rows cost
@@ -221,6 +233,27 @@ mod tests {
         );
         let list = notes(&["C# notes"]);
         assert_eq!(parse("C# no", &list), Query::Titles("C# no"));
+    }
+
+    #[test]
+    fn parse_reads_what_text_writes() {
+        let list = notes(&["Plans", "Ideas"]);
+        let notes = PickNotes::new(list);
+        let parse = |title, heading| match Query::parse(&Query::text(title, heading), &notes) {
+            Query::Titles(text) => (None, text.to_owned()),
+            Query::Headings { note, filter } => (Some(note), filter.to_owned()),
+        };
+        assert_eq!(
+            parse(Some("Ideas"), Some("Bug")),
+            (Some(Some(1)), "Bug".to_owned())
+        );
+        assert_eq!(
+            parse(Some("Ideas"), Some("")),
+            (Some(Some(1)), String::new())
+        );
+        assert_eq!(parse(None, Some("Top")), (Some(None), "Top".to_owned()));
+        assert_eq!(parse(Some("Plans"), None), (None, "Plans".to_owned()));
+        assert_eq!(parse(None, None), (None, String::new()));
     }
 
     #[test]

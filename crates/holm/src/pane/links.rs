@@ -3,18 +3,22 @@
 //! It opens the links of the editor: a note, a heading in a note, a file in its system app, or
 //! a web address. It copies pasted files into `attachments/`. After each change in the notes
 //! folder, it reads the backlinks again and tells the editor which note links are broken.
+//!
+//! It also runs the link picker flow. Ctrl+K gives the start of the picker, and the pick puts
+//! a link at the cursor.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use gpui_kit::{Context, Entity, EventEmitter, PathPromptOptions, Subscription, Task};
+use gpui_kit::{App, Context, Entity, EventEmitter, PathPromptOptions, Subscription, Task};
 use holm_core::NotePath;
 use holm_core::model::LinkTarget;
 use holm_editor::{Editor, OpenFile, OpenLink, PasteFiles, PastedFile};
 use holm_markdown::Target;
 
 use crate::backlinks::Backlinks;
-use crate::core_door::{CoreDoor, FolderEvent};
+use crate::core_door::{CoreDoor, Done, FolderEvent, Then};
+use crate::link_picker::{LinkChoice, LinkStart};
 use crate::text;
 
 /// What the links tell the pane.
@@ -43,6 +47,9 @@ pub(super) struct Links {
     /// The path of the open note.
     note: Option<NotePath>,
     reading: Option<Task<()>>,
+    /// Whether the pick of the link picker changes the link at the cursor, not inserts a new
+    /// one.
+    replace: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -76,6 +83,7 @@ impl Links {
             backlinks,
             note: None,
             reading: None,
+            replace: false,
             _subscriptions: subscriptions,
         }
     }
@@ -121,6 +129,100 @@ impl Links {
                 .ok();
         })
         .detach();
+    }
+
+    /// Gives `done` what the link picker starts with, after the write line writes the unsaved
+    /// text. In a note link, the field starts with its target, and the pick changes that link.
+    /// With no open note, it does nothing.
+    pub(super) fn start(
+        &mut self,
+        done: impl FnOnce(LinkStart, &mut App) + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(open_note) = self.note.clone() else {
+            return;
+        };
+        let link = self.editor.read(cx).link_at_cursor();
+        self.replace = link.as_ref().is_some_and(|link| !link.embedded);
+        let target = link.map(|link| link.target);
+        let links = cx.weak_entity();
+        let done = Done::value(move |(), cx| {
+            let start = links.read_with(cx, |links, cx| {
+                LinkStart::new(
+                    links.core_door.read(cx).snapshot(),
+                    open_note,
+                    target.as_ref(),
+                )
+            });
+            if let Ok(start) = start {
+                done(start, cx);
+            }
+        });
+        self.core_door
+            .update(cx, |core_door, cx| core_door.wait(done, cx));
+    }
+
+    /// Makes the link of `choice`, and puts it at the cursor. A new note goes in the folder of
+    /// the open note. The link goes only into the note that was open at the call. `done` runs
+    /// at the end, also with no link.
+    pub(super) fn link(&mut self, choice: LinkChoice, done: Then<()>, cx: &mut Context<Self>) {
+        let Some(note) = self.note.clone() else {
+            cx.defer(move |cx| done((), cx));
+            return;
+        };
+        let folder = note.folder().clone();
+        let links = cx.weak_entity();
+        let into = note.clone();
+        let put = move |target: Target, text: String, cx: &mut App| {
+            links
+                .update(cx, |links, cx| links.put(&into, &target, &text, cx))
+                .ok();
+        };
+        match choice {
+            LinkChoice::Note {
+                path,
+                title,
+                heading,
+            } => self.core_door.update(cx, |core_door, cx| {
+                core_door.link_id(
+                    path,
+                    Done::value(move |id, cx| {
+                        let text = heading.clone().unwrap_or(title);
+                        put(Target::Note { id, heading }, text, cx);
+                        done((), cx);
+                    }),
+                    cx,
+                );
+            }),
+            LinkChoice::SameNote(heading) => {
+                self.put(&note, &Target::Heading(heading.clone()), &heading, cx);
+                cx.defer(move |cx| done((), cx));
+            }
+            LinkChoice::Create(title) => self.core_door.update(cx, |core_door, cx| {
+                core_door.create_linked_note(
+                    folder,
+                    title.clone(),
+                    Done::value(move |id, cx| {
+                        put(Target::Note { id, heading: None }, title, cx);
+                        done((), cx);
+                    }),
+                    cx,
+                );
+            }),
+        }
+    }
+
+    /// Puts a link to `target` at the cursor, when `note` is still the open note.
+    fn put(&mut self, note: &NotePath, target: &Target, text: &str, cx: &mut Context<Self>) {
+        if self.note.as_ref() != Some(note) {
+            return;
+        }
+        let replace = self.replace;
+        self.editor.update(cx, |editor, cx| {
+            if !(replace && editor.set_link_target(target, cx)) {
+                editor.insert_link(text, target, false, cx);
+            }
+        });
     }
 
     /// Reads the backlinks and the broken note links of the open note, and shows them.
