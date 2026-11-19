@@ -3899,6 +3899,25 @@ fn the_shortcut_list_names_each_place_once_and_no_label_runs_into_its_keys(
 }
 
 #[gpui_kit::test]
+fn a_popup_over_the_tag_field_gives_the_focus_home_when_it_closes(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    fs::write(fixture.notes().join("Note.md"), "a\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    for popup in ["ctrl-?", "ctrl-shift-s"] {
+        keys(cx, handle, "ctrl-shift-t");
+        assert_eq!(focus(cx, handle), "tag field");
+        // The popup takes the focus, so the tag field closes.
+        keys(cx, handle, popup);
+        keys(cx, handle, "escape");
+        assert_eq!(question(cx, handle), None);
+        assert_eq!(focus(cx, handle), "editor", "after {popup}");
+    }
+    keys(cx, handle, "ctrl-?");
+    assert_eq!(question(cx, handle).as_deref(), Some(text::SHORTCUT_LIST));
+}
+
+#[gpui_kit::test]
 fn up_and_down_scroll_the_shortcut_list(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     let handle = open(cx, fixture.startup(None));

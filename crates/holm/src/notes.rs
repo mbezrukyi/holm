@@ -106,6 +106,10 @@ impl NotesView {
             }),
             cx.subscribe_in(&sidebar, window, Self::sidebar_event),
             cx.subscribe_in(&pane, window, Self::pane_event),
+            // The focused part can leave the screen, like the tag field that closes when a
+            // popup takes the focus. With no focus, no key reaches this view, so the focus
+            // goes home.
+            cx.on_focus_lost(window, |this, window, cx| this.focus_home(window, cx)),
         ];
         let mut this = Self {
             core_door,
