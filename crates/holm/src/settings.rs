@@ -5,7 +5,7 @@
 //! `Right` pick an option. `Space` switches a switch. `Space` or `Enter` on the notes folder
 //! opens the folder picker. `Esc` closes the dialog.
 
-use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants};
+use gpui_kit::component::button::{Button, ButtonGroup};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme as _, Selectable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -301,15 +301,22 @@ fn options<T: Copy + PartialEq + 'static>(
     cx: &mut Context<SettingsDialog>,
     set: fn(&mut Settings, T),
 ) -> ButtonGroup {
+    // A primary button has no border, so it would be narrower than the outline buttons, and
+    // the group would move on each choice. So each button is an outline button, and the chosen
+    // one gets the primary colors.
+    let theme = cx.theme();
+    let (fill, on_fill) = (theme.primary, theme.primary_foreground);
     ButtonGroup::new(id)
         .small()
-        .children(options.iter().map(|(option, label)| {
+        .outline()
+        .children(options.iter().map(move |(option, label)| {
             let selected = *option == current;
             Button::new(*label)
                 .label(*label)
                 .selected(selected)
-                .when(selected, ButtonVariants::primary)
-                .when(!selected, Button::outline)
+                .when(selected, |button| {
+                    button.bg(fill).border_color(fill).text_color(on_fill)
+                })
                 .tab_stop(false)
         }))
         .on_click(cx.listener(move |dialog, clicked: &Vec<usize>, _, cx| {

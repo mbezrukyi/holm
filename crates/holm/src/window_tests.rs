@@ -3704,6 +3704,22 @@ fn each_setting_changes_by_keys_only(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn the_theme_options_keep_their_place_when_the_choice_moves(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-shift-s tab");
+    let places = |cx: &mut TestAppContext| {
+        ["System", "Light", "Dark"].map(|id| bounds_of(cx, handle, id).unwrap())
+    };
+
+    let first = places(cx);
+    keys(cx, handle, "right");
+    assert_eq!(places(cx), first);
+    keys(cx, handle, "right");
+    assert_eq!(places(cx), first);
+}
+
+#[gpui_kit::test]
 fn enter_on_the_folder_row_picks_a_new_notes_folder(cx: &mut TestAppContext) {
     let (fixture, other) = two_folders();
     let handle = open(cx, fixture.startup(None));
