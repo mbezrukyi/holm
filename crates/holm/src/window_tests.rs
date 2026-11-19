@@ -3708,8 +3708,10 @@ fn the_theme_options_keep_their_place_when_the_choice_moves(cx: &mut TestAppCont
     let fixture = Fixture::new().with_folder();
     let handle = open(cx, fixture.startup(None));
     keys(cx, handle, "ctrl-shift-s tab");
+    // The chosen option covers the line on its left, so only the right edges stay.
     let places = |cx: &mut TestAppContext| {
-        ["System", "Light", "Dark"].map(|id| bounds_of(cx, handle, id).unwrap())
+        let bounds = ["System", "Light", "Dark"].map(|id| bounds_of(cx, handle, id).unwrap());
+        (bounds[0].left(), bounds.map(|bounds| bounds.right()))
     };
 
     let first = places(cx);

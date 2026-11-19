@@ -303,22 +303,29 @@ fn options<T: Copy + PartialEq + 'static>(
 ) -> ButtonGroup {
     // A primary button has no border, so it would be narrower than the outline buttons, and
     // the group would move on each choice. So each button is an outline button, and the chosen
-    // one gets the primary colors.
+    // one gets the primary colors. Each line between two buttons belongs to the left one, so
+    // the chosen button also draws a left line over the line of its neighbor.
     let theme = cx.theme();
     let (fill, on_fill) = (theme.primary, theme.primary_foreground);
     ButtonGroup::new(id)
         .small()
         .outline()
-        .children(options.iter().map(move |(option, label)| {
-            let selected = *option == current;
-            Button::new(*label)
-                .label(*label)
-                .selected(selected)
-                .when(selected, |button| {
-                    button.bg(fill).border_color(fill).text_color(on_fill)
-                })
-                .tab_stop(false)
-        }))
+        .children(
+            options
+                .iter()
+                .enumerate()
+                .map(move |(at, (option, label))| {
+                    let selected = *option == current;
+                    Button::new(*label)
+                        .label(*label)
+                        .selected(selected)
+                        .when(selected, |button| {
+                            button.bg(fill).border_color(fill).text_color(on_fill)
+                        })
+                        .when(selected && at > 0, |button| button.border_l_1().ml(px(-1.)))
+                        .tab_stop(false)
+                }),
+        )
         .on_click(cx.listener(move |dialog, clicked: &Vec<usize>, _, cx| {
             if let Some((option, _)) = clicked.first().and_then(|at| options.get(*at)) {
                 let option = *option;
