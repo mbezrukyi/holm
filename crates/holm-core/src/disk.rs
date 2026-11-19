@@ -1,36 +1,67 @@
 //! The note files and the index rows, kept in step.
 
+pub(crate) mod write;
+
 use std::path::{Path, PathBuf};
 
 use crate::Result;
 use crate::facts::Facts;
 use crate::index::{Index, NoteRows, Rows};
-use crate::model::DeleteCount;
+use crate::model::{DeleteCount, Note};
 use crate::nodes::{Node, Nodes};
-use crate::paths::FolderPath;
+use crate::paths::{FolderPath, NotePath};
 use crate::reconcile::Settled;
 use crate::scan;
 use crate::snapshot::Snapshot;
 use crate::store::Store;
 
-/// The note files and the index rows.
+/// The note files and the index rows. Only a [`write::Write`] changes them.
 #[derive(Debug)]
 pub(crate) struct Disk {
-    pub(crate) store: Store,
+    store: Store,
     index: Index,
 }
 
 impl Disk {
-    /// Opens the index in `index_dir` for the notes folder of `store`. It returns the disk
-    /// and the facts, built from the index rows and the files. It brings the rows up to date.
+    /// Opens the notes folder and the index in `index_dir`. It returns the disk and the facts,
+    /// built from the index rows and the files. It brings the rows up to date.
     /// When the rows can't be read, it starts from no facts and rebuilds the index.
-    pub(crate) fn open(store: Store, index_dir: &Path) -> Result<(Self, Facts)> {
+    ///
+    /// It gives the notes folder, as an absolute path with no symlinks, to `before_read`.
+    /// That runs before the first read of a file, and its result comes back.
+    pub(crate) fn open<T>(
+        notes_folder: &Path,
+        index_dir: &Path,
+        before_read: impl FnOnce(&Path) -> T,
+    ) -> Result<(Self, Facts, T)> {
+        let store = Store::open(notes_folder)?;
+        let before = before_read(store.root());
         let mut disk = Self {
             store,
             index: Index::open(index_dir)?,
         };
         let facts = disk.start()?;
-        Ok((disk, facts))
+        Ok((disk, facts, before))
+    }
+
+    /// Reads one note.
+    pub(crate) fn read(&self, path: &NotePath) -> Result<Note> {
+        self.store.read(path).map(|(note, _)| note)
+    }
+
+    /// The path for a link from the note at `note` to the absolute path `file`, with no copy.
+    pub(crate) fn file_link(&self, note: &NotePath, file: &Path) -> Result<PathBuf> {
+        self.store.file_link(note, file)
+    }
+
+    /// The notes that hold every word of `text`. When SQLite fails, it rebuilds the index and
+    /// searches again.
+    pub(crate) fn search(&mut self, text: &str) -> Result<Vec<NotePath>> {
+        self.index.search(text).or_else(|error| {
+            tracing::warn!(%error, "the index failed, so Holm rebuilds it");
+            self.rebuild();
+            self.index.search(text)
+        })
     }
 
     fn start(&mut self) -> Result<Facts> {
@@ -68,15 +99,6 @@ impl Disk {
             tracing::warn!(%error, "the index failed, so Holm rebuilds it");
             self.rebuild();
         }
-    }
-
-    /// Runs `op` on the index. When SQLite fails, it rebuilds the index and runs `op` again.
-    pub(crate) fn read_index<T>(&mut self, op: impl Fn(&mut Index) -> Result<T>) -> Result<T> {
-        op(&mut self.index).or_else(|error| {
-            tracing::warn!(%error, "the index failed, so Holm rebuilds it");
-            self.rebuild();
-            op(&mut self.index)
-        })
     }
 
     /// Rebuilds the index from every note file, read with no facts. A failure leaves the

@@ -21,7 +21,6 @@ mod snapshot;
 mod store;
 mod tag;
 mod watch;
-mod write;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -35,14 +34,13 @@ pub use watch::Feed;
 
 use changes::Listeners;
 use disk::Disk;
+use disk::write::{self, Write};
 use facts::Facts;
 use model::{DeleteCount, LinkTarget, Note, NoteId, NoteInfo, Order, SearchResults, Source};
 use nodes::Node;
 use paths::Name;
 use retag::TagEdit;
-use store::Store;
 use watch::{Apply, Batch};
-use write::Write;
 
 /// The handle to one notes folder.
 ///
@@ -91,16 +89,16 @@ impl Core {
     /// - [`Error::Read`] when the notes folder can't be read.
     /// - [`Error::Index`] when the index can't be used, even in memory. Only a bug does this.
     pub fn open(notes_folder: impl AsRef<Path>, index_dir: impl AsRef<Path>) -> Result<Self> {
-        let store = Store::open(notes_folder.as_ref())?;
         // The watch starts before the first index sync, so no change falls between the two.
-        let (watcher, events) = match watch::start(store.root()) {
-            Ok((watcher, events)) => (Some(watcher), Some(events)),
-            Err(error) => {
-                tracing::warn!(%error, path = %store.root().display(), "cannot watch the notes folder");
-                (None, None)
+        let (core, events) = Self::build(notes_folder.as_ref(), index_dir.as_ref(), |root| {
+            match watch::start(root) {
+                Ok((watcher, events)) => (Some(watcher), Some(events)),
+                Err(error) => {
+                    tracing::warn!(%error, path = %root.display(), "cannot watch the notes folder");
+                    (None, None)
+                }
             }
-        };
-        let core = Self::build(store, index_dir.as_ref(), watcher)?;
+        })?;
         if let Some(events) = events {
             events.run(core.apply());
         }
@@ -118,8 +116,7 @@ impl Core {
         notes_folder: impl AsRef<Path>,
         index_dir: impl AsRef<Path>,
     ) -> Result<(Self, Feed)> {
-        let store = Store::open(notes_folder.as_ref())?;
-        let core = Self::build(store, index_dir.as_ref(), None)?;
+        let (core, ()) = Self::build(notes_folder.as_ref(), index_dir.as_ref(), |_| (None, ()))?;
         let feed = Feed {
             apply: core.apply(),
         };
@@ -156,7 +153,7 @@ impl Core {
     /// [`Error::Index`] as in [`Core::open`].
     pub fn search(&self, text: &str, order: Order) -> Result<SearchResults> {
         self.inner.with(|locked| {
-            let paths = locked.disk.read_index(|index| index.search(text))?;
+            let paths = locked.disk.search(text)?;
             let snapshot = locked.facts.snapshot().clone();
             Ok(SearchResults::new(snapshot, paths, order))
         })
@@ -179,9 +176,7 @@ impl Core {
     /// As in [`Core::read`], when a linked note can't be read.
     pub fn broken_links(&self, path: &NotePath) -> Result<Vec<LinkTarget>> {
         self.inner.with(|locked| {
-            relink::broken(locked.facts.snapshot(), path, |note| {
-                locked.disk.store.read(note).map(|(note, _)| note)
-            })
+            relink::broken(locked.facts.snapshot(), path, |note| locked.disk.read(note))
         })
     }
 
@@ -194,7 +189,7 @@ impl Core {
     /// [`Error::BadPath`] when `file` is not absolute.
     pub fn file_link(&self, note: &NotePath, file: impl AsRef<Path>) -> Result<PathBuf> {
         self.inner
-            .with(|locked| locked.disk.store.file_link(note, file.as_ref()))
+            .with(|locked| locked.disk.file_link(note, file.as_ref()))
     }
 
     /// Reads one note.
@@ -203,9 +198,7 @@ impl Core {
     ///
     /// [`Error::Read`] or [`Error::NotUtf8`] when the file can't be read as text.
     pub fn read(&self, path: &NotePath) -> Result<Note> {
-        self.inner
-            .with(|locked| locked.disk.store.read(path))
-            .map(|(note, _)| note)
+        self.inner.with(|locked| locked.disk.read(path))
     }
 
     /// Saves `body` as the body of the note at `path`, and returns the note as it is now on disk.
@@ -482,7 +475,7 @@ impl Core {
     /// - [`Error::Write`] when the copy can't be written.
     pub fn attach_file(&self, note: &NotePath, file: impl AsRef<Path>) -> Result<PathBuf> {
         self.inner
-            .with(|locked| locked.disk.store.attach_file(note, file.as_ref()))
+            .write(|write| write.attach_file(note, file.as_ref()))
     }
 
     /// Saves a pasted image into `attachments/`, and returns its path from the folder
@@ -495,7 +488,7 @@ impl Core {
     /// [`Error::Write`] when the image can't be written.
     pub fn paste_image(&self, note: &NotePath, extension: &str, bytes: &[u8]) -> Result<PathBuf> {
         self.inner
-            .with(|locked| locked.disk.store.paste_image(note, extension, bytes))
+            .write(|write| write.paste_image(note, extension, bytes))
     }
 
     fn tag_edit_count(&self, edit: &TagEdit<'_>) -> usize {
@@ -503,16 +496,23 @@ impl Core {
             .with(|locked| edit.count(locked.facts.snapshot()))
     }
 
-    fn build(store: Store, index_dir: &Path, watcher: Option<watch::Watcher>) -> Result<Self> {
-        let (disk, facts) = Disk::open(store, index_dir)?;
+    /// Opens the disk. `before_read` runs on the notes folder before the first read of a file,
+    /// and gives the watcher and a value that comes back.
+    fn build<T>(
+        notes_folder: &Path,
+        index_dir: &Path,
+        before_read: impl FnOnce(&Path) -> (Option<watch::Watcher>, T),
+    ) -> Result<(Self, T)> {
+        let (disk, facts, (watcher, value)) = Disk::open(notes_folder, index_dir, before_read)?;
         let inner = Inner {
             locked: Mutex::new(Locked { disk, facts }),
             listeners: Listeners::default(),
             _watcher: watcher,
         };
-        Ok(Self {
+        let core = Self {
             inner: Arc::new(inner),
-        })
+        };
+        Ok((core, value))
     }
 
     /// The target of the watch seam. It holds the core weakly, so the watch thread

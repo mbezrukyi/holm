@@ -1,9 +1,11 @@
 //! The steps of one write. Each step changes the disk, puts what it finds in the next facts,
 //! and records what it touched. So the change list of a write misses nothing.
 
+use super::Disk;
 use crate::diff::Touched;
-use crate::disk::Disk;
 use crate::facts::Facts;
+use std::path::{Path, PathBuf};
+
 use crate::model::{Change, ChangeList, Note, NoteId, NoteInfo, NoteSet, Order, Source};
 use crate::nodes::{Node, Nodes};
 use crate::paths::{FolderPath, Name, NotePath};
@@ -229,6 +231,21 @@ impl Write<'_> {
             });
         }
         first_error.map_or(Ok(changed), Err)
+    }
+
+    /// Copies `file` into `attachments/`, and returns its path from the folder of `note`.
+    pub(crate) fn attach_file(&mut self, note: &NotePath, file: &Path) -> Result<PathBuf> {
+        self.disk.store.attach_file(note, file)
+    }
+
+    /// Saves a pasted image into `attachments/`, and returns its path from the folder of `note`.
+    pub(crate) fn paste_image(
+        &mut self,
+        note: &NotePath,
+        extension: &str,
+        bytes: &[u8],
+    ) -> Result<PathBuf> {
+        self.disk.store.paste_image(note, extension, bytes)
     }
 
     /// Checks the disk at each path of `batch` after a change from another tool.
