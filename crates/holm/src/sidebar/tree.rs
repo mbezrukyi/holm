@@ -7,6 +7,7 @@ use holm_core::model::{Change, NoteSet, Order, Tag};
 
 use super::list::NoteList;
 use crate::config::{SavedSidebarView, SidebarItem};
+use crate::text;
 
 /// An item of the tree. Each item has a note list.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -47,10 +48,11 @@ impl Item {
         }
     }
 
-    /// The last part of the folder path or the tag name. "All notes" has none.
+    /// The name the tree shows: "All notes", the last part of the folder path, or the last
+    /// part of the tag name.
     pub(crate) fn name(&self) -> String {
         match self {
-            Self::All => String::new(),
+            Self::All => text::ALL_NOTES.to_owned(),
             Self::Folder(path) => path.last_part().into_owned(),
             Self::Tag(name) => name.last_part().to_owned(),
         }
@@ -125,7 +127,7 @@ impl SidebarView {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TreeRow {
     pub(crate) item: Item,
-    /// The last part of the folder path or the tag name.
+    /// The name of [`Item::name`].
     pub(crate) name: String,
     pub(crate) depth: usize,
     pub(crate) count: usize,
@@ -287,7 +289,7 @@ impl Lists {
     fn rows(&self, open: &HashSet<Item>, new_folder: Option<&FolderPath>) -> Vec<TreeRow> {
         let mut rows = vec![TreeRow {
             item: Item::All,
-            name: String::new(),
+            name: Item::All.name(),
             depth: 0,
             count: self.notes.len(),
             has_children: false,
@@ -396,7 +398,7 @@ mod tests {
         assert_eq!(
             names(&rows),
             owned(&[
-                ("", 0, 4),
+                ("All notes", 0, 4),
                 ("home", 0, 0),
                 ("work", 0, 2),
                 ("work", 0, 2),
@@ -417,7 +419,7 @@ mod tests {
         assert_eq!(
             names(&rows),
             owned(&[
-                ("", 0, 4),
+                ("All notes", 0, 4),
                 ("home", 0, 0),
                 ("work", 0, 2),
                 ("deep", 1, 1),

@@ -797,10 +797,7 @@ impl Sidebar {
             Item::Tag(_) if row.open => Icon::TagsOpen,
             Item::Tag(_) => Icon::Tags,
         };
-        let name = match &row.item {
-            Item::All => text::ALL_NOTES.into(),
-            _ => SharedString::from(row.name.clone()),
-        };
+        let name = SharedString::from(row.name.clone());
         let aria = item_label(&row.item);
         let named = Named::item(&row.item);
         let field = self
@@ -990,7 +987,7 @@ fn when(time: SystemTime) -> String {
 /// The accessible name of a tree item: "All notes", the folder path, or `#` and the tag.
 fn item_label(item: &Item) -> String {
     match item {
-        Item::All => text::ALL_NOTES.to_owned(),
+        Item::All => item.name(),
         Item::Folder(path) => text::folder_label(path),
         Item::Tag(name) => text::tag_label(name),
     }
@@ -1052,8 +1049,7 @@ impl Render for Sidebar {
             SidebarView::Tree(_) => None,
             SidebarView::List(item) => {
                 let name = match item {
-                    Item::All => text::ALL_NOTES.to_owned(),
-                    Item::Folder(_) => item.name(),
+                    Item::All | Item::Folder(_) => item.name(),
                     Item::Tag(name) => text::tag_label(name),
                 };
                 let label = item_label(item);
