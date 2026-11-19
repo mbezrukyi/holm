@@ -53,7 +53,7 @@ pub(crate) fn init(cx: &mut App) {
 }
 
 /// Sets light or dark mode. [`AppearanceSetting::System`] takes the mode of `window`.
-pub(crate) fn apply(theme: AppearanceSetting, window: &mut Window, cx: &mut App) {
+pub(crate) fn set_mode(theme: AppearanceSetting, window: &mut Window, cx: &mut App) {
     let mode = match theme {
         AppearanceSetting::Light => ThemeMode::Light,
         AppearanceSetting::Dark => ThemeMode::Dark,

@@ -17,7 +17,7 @@ use holm_editor::{Editor, OpenFile, OpenLink, PasteFiles, PastedFile};
 use holm_markdown::Target;
 
 use crate::backlinks::Backlinks;
-use crate::core_door::{CoreDoor, Done, FolderEvent, Then};
+use crate::core_door::{CoreDoor, Done, DoorEvent, Then};
 use crate::link_picker::{LinkChoice, LinkStart};
 use crate::text;
 
@@ -62,7 +62,7 @@ impl Links {
         cx: &mut Context<Self>,
     ) -> Self {
         let subscriptions = vec![
-            cx.subscribe(&core_door, |links, _, event: &FolderEvent, cx| {
+            cx.subscribe(&core_door, |links, _, event: &DoorEvent, cx| {
                 if !event.is_empty() {
                     links.read(cx);
                 }

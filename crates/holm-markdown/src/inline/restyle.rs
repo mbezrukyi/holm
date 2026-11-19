@@ -638,7 +638,7 @@ fn write_region(
     let region = list[range.start].source.start..list[range.end - 1].source.end;
     let mut pieces = pieces_of(&work.joined, &list[range], &work.selection);
     let at_line_start = region.start == 0 || work.joined.as_bytes()[region.start - 1] == b'\n';
-    apply(
+    act(
         &mut pieces,
         &outer,
         action,
@@ -766,7 +766,7 @@ fn widen(list: &[Node], mut range: Range<usize>) -> Range<usize> {
 }
 
 /// Changes the selected pieces for `action`. `outer` are the styles around all of them.
-fn apply(
+fn act(
     pieces: &mut Vec<Piece>,
     outer: &[Mark],
     action: Action,

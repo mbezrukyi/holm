@@ -155,7 +155,7 @@ impl NotesView {
         self.focus_sidebar(window, cx);
         cx.notify();
         // A new tag may still wait in the write line.
-        self.write(window, cx, CoreDoor::wait, move |this, (), window, cx| {
+        self.call(window, cx, CoreDoor::wait, move |this, (), window, cx| {
             this.rename_tag(tag, window, cx);
         });
     }
@@ -257,7 +257,7 @@ impl NotesView {
             SidebarEvent::RenameTag(tag) => self.rename_tag(tag.clone(), window, cx),
             SidebarEvent::DeleteTag(tag) => {
                 let tag = tag.clone();
-                self.write(
+                self.call(
                     window,
                     cx,
                     {
@@ -271,7 +271,7 @@ impl NotesView {
                         };
                         this.ask(ask, window, cx, move |this, confirmed, window, cx| {
                             if confirmed {
-                                this.write(
+                                this.call(
                                     window,
                                     cx,
                                     |core_door, done, cx| core_door.delete_tag(tag, done, cx),
@@ -332,13 +332,13 @@ impl NotesView {
             return;
         };
         match target {
-            Target::Note(path) => self.write(
+            Target::Note(path) => self.call(
                 window,
                 cx,
                 |core_door, done, cx| core_door.move_note(path, folder, done, cx),
                 |this, _, _, cx| this.save_place(cx),
             ),
-            Target::Folder(path) => self.write(
+            Target::Folder(path) => self.call(
                 window,
                 cx,
                 |core_door, done, cx| core_door.move_folder(path, folder, done, cx),
@@ -441,7 +441,7 @@ impl NotesView {
 
     fn ask_delete(&mut self, target: Target, window: &mut Window, cx: &mut Context<Self>) {
         let counted = target.clone();
-        self.write(
+        self.call(
             window,
             cx,
             |core_door, done, cx| match counted {
@@ -475,7 +475,7 @@ impl NotesView {
 
     /// Deletes the target. The pane sends [`PaneEvent::Gone`] when the open note goes with it.
     fn delete(&mut self, target: Target, window: &mut Window, cx: &mut Context<Self>) {
-        self.write(
+        self.call(
             window,
             cx,
             |core_door, done, cx| match target {
@@ -514,7 +514,7 @@ impl NotesView {
 
     /// Puts the job of `start` in the write line. `done` gets its value in the update where
     /// the job ends.
-    fn write<T: 'static>(
+    fn call<T: 'static>(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,

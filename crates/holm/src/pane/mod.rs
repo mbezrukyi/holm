@@ -47,7 +47,7 @@ use holm_core::{FolderPath, NotePath, TagName};
 use holm_editor::{Changed, Editor, UpFromStart};
 
 use crate::backlinks::{Backlinks, OpenBacklink};
-use crate::core_door::{CoreDoor, Done, FolderEvent, NotSaved, SaveEvent, Then};
+use crate::core_door::{CoreDoor, Done, DoorEvent, NotSaved, SaveEvent, Then};
 use crate::error::AppError;
 use crate::link_picker::{LinkChoice, LinkStart};
 use crate::message_line::{MessageLine, OpenState};
@@ -190,7 +190,7 @@ impl NotePane {
         let links =
             cx.new(|cx| Links::new(core_door.clone(), editor.clone(), backlinks.clone(), cx));
         let subscriptions = vec![
-            cx.subscribe(&core_door, |pane, _, event: &FolderEvent, cx| {
+            cx.subscribe(&core_door, |pane, _, event: &DoorEvent, cx| {
                 pane.follow(event, cx);
                 for (source, change) in event.sourced() {
                     pane.take_change(source, change, cx);
@@ -696,7 +696,7 @@ impl NotePane {
     /// Follows a move of the open note, or of a folder that holds it. A move to another
     /// folder can change the file links in the note, so the pane reads it again when the note
     /// has no unsaved text.
-    fn follow(&mut self, event: &FolderEvent, cx: &mut Context<Self>) {
+    fn follow(&mut self, event: &DoorEvent, cx: &mut Context<Self>) {
         if let Some(next) = &mut self.next
             && let Some(new) = event.changes().find_map(|change| change.note_after(next))
         {

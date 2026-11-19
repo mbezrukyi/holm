@@ -102,10 +102,10 @@ impl HolmWindow {
             log,
             write_budget,
         } = startup;
-        theme::apply(config.settings().theme, window, cx);
+        theme::set_mode(config.settings().theme, window, cx);
         let appearance = cx.observe_window_appearance(window, |this, window, cx| {
             if this.config.read(cx).settings().theme == AppearanceSetting::System {
-                theme::apply(AppearanceSetting::System, window, cx);
+                theme::set_mode(AppearanceSetting::System, window, cx);
             }
         });
         let message_line = cx.new(MessageLine::new);

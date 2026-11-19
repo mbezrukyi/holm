@@ -5,7 +5,7 @@
 //! a time, in the order the UI asked for them. A failed job does not stop the line.
 //!
 //! Each job ends in one update. The entity sets the snapshot after it and sends one
-//! [`FolderEvent`] with the changes up to that snapshot. Then, in the same update, the caller
+//! [`DoorEvent`] with the changes up to that snapshot. Then, in the same update, the caller
 //! gets the result. So no frame falls between them.
 //!
 //! A call waits on the UI thread for the jobs before it and its own, up to a budget. A job that
@@ -50,13 +50,13 @@ mod write_line;
 /// What the core door tells the views: a job of Holm ended, or changes from outside came in.
 /// Each job sends one, also a failed job.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct FolderEvent {
+pub(crate) struct DoorEvent {
     /// The changes of every revision up to [`CoreDoor::snapshot`], in order, each with
     /// its source. It is empty when the snapshot did not change.
     changes: Vec<(Source, Change)>,
 }
 
-impl FolderEvent {
+impl DoorEvent {
     /// Every change, in order.
     pub(crate) fn changes(&self) -> impl Iterator<Item = &Change> {
         self.changes.iter().map(|(_, change)| change)
@@ -75,7 +75,7 @@ impl FolderEvent {
     }
 }
 
-/// A step that gets the end of a write, on the UI thread.
+/// A step that gets the end of a job, on the UI thread.
 pub(crate) type Then<R> = Box<dyn FnOnce(R, &mut App)>;
 
 /// What the caller of a job gets at its end. A failure shows as an answer in both cases.
@@ -103,7 +103,7 @@ impl<T: 'static> Done<T> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct JobFailed(pub(crate) &'static str);
 
-/// The end of a write of the draft. It comes after the [`FolderEvent`] of the write.
+/// The end of a write of the draft. It comes after the [`DoorEvent`] of the write.
 #[derive(Debug)]
 pub(crate) enum SaveEvent {
     /// The text of the write is on disk.
@@ -261,7 +261,7 @@ impl CoreDoor {
 
     /// Reads the note at `path`, after the writes before it.
     pub(crate) fn read(&mut self, path: NotePath, done: Done<Note>, cx: &mut Context<Self>) {
-        self.write(move |core| core.read(&path), done, cx);
+        self.job(move |core| core.read(&path), done, cx);
     }
 
     /// Reads the note at `path` to replace its editor text. The text drops now with no write,
@@ -273,7 +273,7 @@ impl CoreDoor {
         cx: &mut Context<Self>,
     ) {
         let text = self.draft.drop_for_read(&path);
-        self.queue(
+        self.own_job(
             move |core| core.read(&path),
             move |door, note, cx| {
                 if let Some(id) = text {
@@ -287,7 +287,7 @@ impl CoreDoor {
 
     /// Ends after the writes before it, so `done` sees their snapshot.
     pub(crate) fn wait(&mut self, done: Done<()>, cx: &mut Context<Self>) {
-        self.write(|_| Ok(()), done, cx);
+        self.job(|_| Ok(()), done, cx);
     }
 
     /// Gives the note at `path` a new title, and gives its new path.
@@ -298,7 +298,7 @@ impl CoreDoor {
         done: Done<NotePath>,
         cx: &mut Context<Self>,
     ) {
-        self.write(
+        self.job(
             move |core| core.rename_note(&path, &title).map(|info| info.path),
             done,
             cx,
@@ -313,7 +313,7 @@ impl CoreDoor {
         done: Done<()>,
         cx: &mut Context<Self>,
     ) {
-        self.write(
+        self.job(
             move |core| {
                 match change {
                     TagChange::Add(tag) => core.add_tag(&path, &tag),
@@ -334,7 +334,7 @@ impl CoreDoor {
         done: Done<()>,
         cx: &mut Context<Self>,
     ) {
-        self.write(
+        self.job(
             move |core| core.set_pinned(&path, pinned).map(drop),
             done,
             cx,
@@ -350,7 +350,7 @@ impl CoreDoor {
         done: Done<Note>,
         cx: &mut Context<Self>,
     ) {
-        self.write(
+        self.job(
             move |core| {
                 let note = core.create(&folder, &title)?;
                 match tag {
@@ -374,7 +374,7 @@ impl CoreDoor {
         done: Done<String>,
         cx: &mut Context<Self>,
     ) {
-        self.write(
+        self.job(
             move |core| {
                 let note = core.create(&folder, &title)?;
                 Ok(core.link_id(&note.info.path)?.to_string())
@@ -386,7 +386,7 @@ impl CoreDoor {
 
     /// The id of the note at `path`, for a link. A note with no id gets one.
     pub(crate) fn link_id(&mut self, path: NotePath, done: Done<String>, cx: &mut Context<Self>) {
-        self.write(
+        self.job(
             move |core| core.link_id(&path).map(|id| id.to_string()),
             done,
             cx,
@@ -400,7 +400,7 @@ impl CoreDoor {
         done: Done<NotePath>,
         cx: &mut Context<Self>,
     ) {
-        self.write(
+        self.job(
             move |core| core.move_note(&path, &folder).map(|info| info.path),
             done,
             cx,
@@ -414,7 +414,7 @@ impl CoreDoor {
         done: Done<FolderPath>,
         cx: &mut Context<Self>,
     ) {
-        self.write(move |core| core.move_folder(&path, &folder), done, cx);
+        self.job(move |core| core.move_folder(&path, &folder), done, cx);
     }
 
     pub(crate) fn rename_folder(
@@ -424,7 +424,7 @@ impl CoreDoor {
         done: Done<FolderPath>,
         cx: &mut Context<Self>,
     ) {
-        self.write(move |core| core.rename_folder(&folder, &name), done, cx);
+        self.job(move |core| core.rename_folder(&folder, &name), done, cx);
     }
 
     pub(crate) fn create_folder(
@@ -434,11 +434,11 @@ impl CoreDoor {
         done: Done<FolderPath>,
         cx: &mut Context<Self>,
     ) {
-        self.write(move |core| core.create_folder(&parent, &name), done, cx);
+        self.job(move |core| core.create_folder(&parent, &name), done, cx);
     }
 
     pub(crate) fn delete_note(&mut self, path: NotePath, done: Done<()>, cx: &mut Context<Self>) {
-        self.write(move |core| core.delete_note(&path), done, cx);
+        self.job(move |core| core.delete_note(&path), done, cx);
     }
 
     pub(crate) fn delete_folder(
@@ -447,7 +447,7 @@ impl CoreDoor {
         done: Done<()>,
         cx: &mut Context<Self>,
     ) {
-        self.write(move |core| core.delete_folder(&path), done, cx);
+        self.job(move |core| core.delete_folder(&path), done, cx);
     }
 
     /// What a delete of the note at `path` removes, after the writes before it.
@@ -457,7 +457,7 @@ impl CoreDoor {
         done: Done<DeleteCount>,
         cx: &mut Context<Self>,
     ) {
-        self.write(move |core| Ok(core.note_delete_count(&path)), done, cx);
+        self.job(move |core| Ok(core.note_delete_count(&path)), done, cx);
     }
 
     /// What a delete of the folder at `path` removes, after the writes before it.
@@ -467,7 +467,7 @@ impl CoreDoor {
         done: Done<DeleteCount>,
         cx: &mut Context<Self>,
     ) {
-        self.write(move |core| Ok(core.folder_delete_count(&path)), done, cx);
+        self.job(move |core| Ok(core.folder_delete_count(&path)), done, cx);
     }
 
     /// Renames a tag in all notes, and gives the number of changed notes.
@@ -478,7 +478,7 @@ impl CoreDoor {
         done: Done<usize>,
         cx: &mut Context<Self>,
     ) {
-        self.write(move |core| core.rename_tag(&from, &to), done, cx);
+        self.job(move |core| core.rename_tag(&from, &to), done, cx);
     }
 
     /// The typed name `to` as a tag, and the number of notes that a rename to it changes,
@@ -490,7 +490,7 @@ impl CoreDoor {
         done: Done<(TagName, usize)>,
         cx: &mut Context<Self>,
     ) {
-        self.write(
+        self.job(
             move |core| {
                 let to = TagName::typed(&to)?;
                 let count = core.tag_rename_count(&from, &to);
@@ -503,7 +503,7 @@ impl CoreDoor {
 
     /// Removes a tag from all notes, and gives the number of changed notes.
     pub(crate) fn delete_tag(&mut self, tag: TagName, done: Done<usize>, cx: &mut Context<Self>) {
-        self.write(move |core| core.delete_tag(&tag), done, cx);
+        self.job(move |core| core.delete_tag(&tag), done, cx);
     }
 
     /// The number of notes that a tag delete changes, after the writes before it.
@@ -513,7 +513,7 @@ impl CoreDoor {
         done: Done<usize>,
         cx: &mut Context<Self>,
     ) {
-        self.write(move |core| Ok(core.tag_delete_count(&tag)), done, cx);
+        self.job(move |core| Ok(core.tag_delete_count(&tag)), done, cx);
     }
 
     /// Copies pasted or dropped files into `attachments/`, and gives the link to each copy
@@ -525,7 +525,7 @@ impl CoreDoor {
         done: impl FnOnce(Vec<Option<PathBuf>>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.queue(
+        self.own_job(
             move |core| {
                 Ok(files
                     .iter()
@@ -607,17 +607,17 @@ impl CoreDoor {
     /// Puts `job` in the write line, and waits for it up to the budget. When it ends, the entity
     /// sets the snapshot after it and sends the event. Then `done` gets its result, in the same
     /// update. When the entity is gone first, `done` never runs.
-    fn write<T: Send + 'static>(
+    fn job<T: Send + 'static>(
         &mut self,
         job: impl FnOnce(&Core) -> holm_core::Result<T> + Send + 'static,
         done: Done<T>,
         cx: &mut Context<Self>,
     ) {
-        self.queue(job, |_, result, cx| give(result, done, cx), cx);
+        self.own_job(job, |_, result, cx| give(result, done, cx), cx);
     }
 
-    /// Like [`Self::write`], but `end` gets the result on the entity, before the deferred steps.
-    fn queue<T: Send + 'static>(
+    /// Like [`Self::job`], but `end` gets the result on the entity, before the deferred steps.
+    fn own_job<T: Send + 'static>(
         &mut self,
         job: impl FnOnce(&Core) -> holm_core::Result<T> + Send + 'static,
         end: impl FnOnce(&mut Self, holm_core::Result<T>, &mut Context<Self>) + 'static,
@@ -770,7 +770,7 @@ impl CoreDoor {
     }
 
     /// Keeps the snapshot of the last list, and gives the event with the changes of all lists.
-    fn keep(&mut self, lists: Vec<ChangeList>) -> FolderEvent {
+    fn keep(&mut self, lists: Vec<ChangeList>) -> DoorEvent {
         let mut changes = Vec::new();
         for list in lists {
             for change in &list.changes {
@@ -779,11 +779,11 @@ impl CoreDoor {
             self.snapshot = list.snapshot;
             changes.extend(list.changes.into_iter().map(|change| (list.source, change)));
         }
-        FolderEvent { changes }
+        DoorEvent { changes }
     }
 }
 
-impl EventEmitter<FolderEvent> for CoreDoor {}
+impl EventEmitter<DoorEvent> for CoreDoor {}
 
 impl EventEmitter<SaveEvent> for CoreDoor {}
 
@@ -962,7 +962,7 @@ mod tests {
         let steps = Rc::new(RefCell::new(Vec::new()));
         cx.update(|cx| {
             let steps = steps.clone();
-            cx.subscribe(&core_door, move |_, event: &FolderEvent, _| {
+            cx.subscribe(&core_door, move |_, event: &DoorEvent, _| {
                 steps
                     .borrow_mut()
                     .push(format!("event {:?}", event.changes().collect::<Vec<_>>()));

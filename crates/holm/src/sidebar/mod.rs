@@ -30,7 +30,7 @@ use holm_core::model::{Change, NoteInfo, Order};
 use holm_core::{FolderPath, NotePath, TagName};
 
 use crate::config::SavedSidebarView;
-use crate::core_door::{CoreDoor, Done, FolderEvent, Then};
+use crate::core_door::{CoreDoor, Done, DoorEvent, Then};
 use crate::error::AppError;
 use crate::icons::Icon;
 use crate::name_field::{NameEvent, NameField, NameWrite, Wording};
@@ -144,7 +144,7 @@ impl Sidebar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let changed = cx.subscribe(&core_door, |sidebar, _, event: &FolderEvent, cx| {
+        let changed = cx.subscribe(&core_door, |sidebar, _, event: &DoorEvent, cx| {
             sidebar.changed(event, cx);
         });
         let opened = cx.subscribe(&pane, |sidebar, _, event: &PaneEvent, cx| {
@@ -191,7 +191,7 @@ impl Sidebar {
 
     /// Takes the end of a job or of outside changes: it follows the moves, and then shows
     /// the snapshot.
-    fn changed(&mut self, event: &FolderEvent, cx: &mut Context<Self>) {
+    fn changed(&mut self, event: &DoorEvent, cx: &mut Context<Self>) {
         if event.is_empty() {
             return;
         }
