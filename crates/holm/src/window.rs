@@ -290,22 +290,9 @@ impl HolmWindow {
     }
 
     fn pick(window: &mut Window, cx: &mut Context<Self>) {
-        let paths = cx.prompt_for_paths(PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: Some(text::PICK_PROMPT.into()),
-        });
+        let picked = pick_folder(cx);
         cx.spawn_in(window, async move |this, cx| {
-            let folder = match paths.await {
-                Ok(Ok(Some(paths))) => paths.into_iter().next(),
-                Ok(Err(error)) => {
-                    tracing::warn!(%error, "the folder picker failed");
-                    None
-                }
-                _ => None,
-            };
-            if let Some(folder) = folder {
+            if let Some(folder) = picked.await {
                 this.update_in(cx, |this, window, cx| {
                     this.choose(folder, false, window, cx);
                 })
@@ -384,6 +371,27 @@ impl HolmWindow {
                     .child(content),
             )
             .into_any_element()
+    }
+}
+
+/// Asks for a folder in the folder picker. It gives `None` when the user cancels or the picker
+/// fails.
+pub(crate) fn pick_folder(cx: &App) -> impl Future<Output = Option<PathBuf>> + 'static {
+    let paths = cx.prompt_for_paths(PathPromptOptions {
+        files: false,
+        directories: true,
+        multiple: false,
+        prompt: Some(text::PICK_PROMPT.into()),
+    });
+    async move {
+        match paths.await {
+            Ok(Ok(Some(paths))) => paths.into_iter().next(),
+            Ok(Err(error)) => {
+                tracing::warn!(%error, "the folder picker failed");
+                None
+            }
+            _ => None,
+        }
     }
 }
 

@@ -30,6 +30,7 @@ use crate::message_line::MessageLine;
 use crate::pane::{Leave, NotePane, PaneEvent, Pick};
 use crate::picker::{FolderPicker, PickerEvent};
 use crate::quick_open::{QuickOpen, QuickOpenEvent};
+use crate::settings::{self, SettingsDialog};
 use crate::shortcuts::{self, Command, Place};
 use crate::sidebar::{Item, Sidebar, SidebarEvent, TagRename, Target};
 use crate::tags::RenameTag;
@@ -52,8 +53,9 @@ pub(crate) struct NotesView {
     picker: Option<Entity<FolderPicker>>,
     quick_open: Option<Entity<QuickOpen>>,
     link_picker: Option<Entity<LinkPicker>>,
-    /// The part that had the focus before quick open or the link picker. It gets the focus
-    /// back on `Esc`.
+    settings: Option<Entity<SettingsDialog>>,
+    /// The part that had the focus before quick open, the link picker or the settings. It gets
+    /// the focus back on `Esc`.
     before_popup: Option<FocusHandle>,
     message_line: Entity<MessageLine>,
     subscriptions: Vec<Subscription>,
@@ -115,6 +117,7 @@ impl NotesView {
             picker: None,
             quick_open: None,
             link_picker: None,
+            settings: None,
             before_popup: None,
             message_line,
             subscriptions,
@@ -368,6 +371,25 @@ impl NotesView {
         cx.notify();
     }
 
+    /// Ctrl+Shift+S: opens the settings dialog.
+    fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.before_popup = window.focused(cx);
+        let config = self.config.clone();
+        let settings = cx.new(|cx| SettingsDialog::new(config, window, cx));
+        self.subscriptions.push(cx.subscribe_in(
+            &settings,
+            window,
+            |this, _, _: &settings::Close, window, cx| {
+                this.settings = None;
+                let before = this.before_popup.take();
+                this.focus_before(before, window, cx);
+                cx.notify();
+            },
+        ));
+        self.settings = Some(settings);
+        cx.notify();
+    }
+
     /// Ctrl+K: opens the link picker.
     fn open_link_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let done = window_step(window, cx, Self::show_link_picker);
@@ -602,6 +624,7 @@ impl NotesView {
             || self.picker.is_some()
             || self.quick_open.is_some()
             || self.link_picker.is_some()
+            || self.settings.is_some()
         {
             return;
         }
@@ -636,7 +659,8 @@ impl NotesView {
                 self.pane
                     .update(cx, |pane, cx| pane.link_paths(Pick::Folders, cx));
             }
-            // The settings, the shortcut list, quit and the app menu have no action yet.
+            Command::Settings => self.open_settings(window, cx),
+            // The shortcut list, quit and the app menu have no action yet.
             _ => return,
         }
         cx.stop_propagation();
@@ -729,6 +753,7 @@ impl Render for NotesView {
             .children(self.picker.clone())
             .children(self.quick_open.clone())
             .children(self.link_picker.clone())
+            .children(self.settings.clone())
     }
 }
 

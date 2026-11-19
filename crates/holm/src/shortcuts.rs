@@ -30,6 +30,8 @@ pub(crate) enum Place {
     ListPopup,
     /// A text field, like the name field or the search field.
     TextField,
+    /// The settings dialog.
+    Settings,
     /// A place of the editor. Only [`list`] has it.
     Editor(editor::Place),
 }
@@ -88,6 +90,12 @@ pub(crate) enum Command {
     Close,
     Confirm,
     Cancel,
+    NextSetting,
+    PreviousSetting,
+    /// Switches the switch of the row, or opens the folder picker on the notes folder row.
+    SwitchSetting,
+    /// Opens the folder picker on the notes folder row.
+    ChangeFolder,
 }
 
 /// One shortcut of the app.
@@ -359,6 +367,41 @@ const ROWS: &[Row] = &[
         C::Cancel,
         G::Text,
         text::KEY_CANCEL,
+    ),
+    row(
+        P::Settings,
+        Keys::plain("tab"),
+        C::NextSetting,
+        G::Window,
+        text::KEY_NEXT_SETTING,
+    ),
+    row(
+        P::Settings,
+        Keys::plain("tab").shift(Shift::Down),
+        C::PreviousSetting,
+        G::Window,
+        text::KEY_PREVIOUS_SETTING,
+    ),
+    row(
+        P::Settings,
+        Keys::plain("space"),
+        C::SwitchSetting,
+        G::Window,
+        text::KEY_SWITCH_SETTING,
+    ),
+    row(
+        P::Settings,
+        Keys::plain("enter"),
+        C::ChangeFolder,
+        G::Window,
+        text::KEY_CHANGE_FOLDER,
+    ),
+    row(
+        P::Settings,
+        Keys::plain("escape"),
+        C::Close,
+        G::Window,
+        text::KEY_CLOSE_SETTINGS,
     ),
 ];
 

@@ -3625,3 +3625,118 @@ fn a_new_notes_folder_with_a_failed_save_keeps_the_old_folder(cx: &mut TestAppCo
     assert_eq!(editor_text(cx, handle), "a\n");
     assert!(read(&fixture.notes().join("Note.md")).ends_with("\nxold\n"));
 }
+
+/// The rows of the settings dialog. The row with the cursor has `*`.
+fn setting_rows(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
+    labels(cx, handle, "settings", Role::ListItem)
+}
+
+#[gpui_kit::test]
+fn ctrl_shift_s_opens_the_settings_and_esc_gives_the_focus_back(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    fs::write(fixture.notes().join("Note.md"), "a\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(focus(cx, handle), "editor");
+
+    keys(cx, handle, "ctrl-shift-s");
+    assert_eq!(question(cx, handle).as_deref(), Some(text::SETTINGS));
+    assert_eq!(
+        setting_rows(cx, handle),
+        [
+            "Notes folder*",
+            "Theme",
+            "Note order",
+            "Format keys",
+            "Continue lists on Enter",
+            "Indent lists with Tab",
+        ]
+    );
+
+    keys(cx, handle, "escape");
+    assert_eq!(question(cx, handle), None);
+    assert_eq!(focus(cx, handle), "editor");
+    assert_eq!(editor_text(cx, handle), "a\n");
+}
+
+#[gpui_kit::test]
+fn each_setting_changes_by_keys_only(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let handle = open(cx, fixture.startup(None));
+    let settings = |fixture: &Fixture| Config::load(fixture.config()).settings().clone();
+    keys(cx, handle, "ctrl-shift-s");
+
+    keys(cx, handle, "tab right right");
+    assert_eq!(setting_rows(cx, handle)[1], "Theme*");
+    assert!(dark(cx));
+    keys(cx, handle, "right");
+    assert_eq!(
+        settings(&fixture).theme,
+        AppearanceSetting::Dark,
+        "Right stops at the end"
+    );
+    keys(cx, handle, "left");
+    assert_eq!(settings(&fixture).theme, AppearanceSetting::Light);
+    assert!(!dark(cx));
+
+    keys(cx, handle, "tab right");
+    assert_eq!(settings(&fixture).note_order, Order::Title);
+    keys(cx, handle, "left");
+    assert_eq!(settings(&fixture).note_order, Order::LastChange);
+
+    keys(cx, handle, "tab space");
+    assert!(!settings(&fixture).writing_help.format_keys);
+    keys(cx, handle, "tab space");
+    assert!(!settings(&fixture).writing_help.continue_lists);
+    keys(cx, handle, "tab space");
+    assert!(!settings(&fixture).writing_help.indent_lists);
+    keys(cx, handle, "space");
+    assert!(settings(&fixture).writing_help.indent_lists);
+
+    keys(cx, handle, "tab");
+    assert_eq!(setting_rows(cx, handle)[0], "Notes folder*", "Tab wraps");
+    keys(cx, handle, "shift-tab");
+    assert_eq!(
+        setting_rows(cx, handle)[5],
+        "Indent lists with Tab*",
+        "Shift+Tab wraps"
+    );
+    assert_eq!(question(cx, handle).as_deref(), Some(text::SETTINGS));
+}
+
+#[gpui_kit::test]
+fn enter_on_the_folder_row_picks_a_new_notes_folder(cx: &mut TestAppContext) {
+    let (fixture, other) = two_folders();
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-shift-s");
+
+    keys(cx, handle, "tab enter");
+    assert!(
+        !cx.did_prompt_for_paths(),
+        "Enter on a row with options picks nothing"
+    );
+    keys(cx, handle, "shift-tab enter");
+    assert!(cx.did_prompt_for_paths());
+    cx.simulate_path_prompt_response(|_| None);
+    settle(cx);
+    assert_eq!(question(cx, handle).as_deref(), Some(text::SETTINGS));
+
+    keys(cx, handle, "space");
+    cx.simulate_path_prompt_response(|_| Some(vec![other.clone()]));
+    settle(cx);
+
+    assert_eq!(editor_text(cx, handle), "a\n");
+    assert_eq!(
+        Config::load(fixture.config()).settings().notes_folder,
+        Some(other)
+    );
+}
+
+#[gpui_kit::test]
+fn the_folder_screen_ignores_ctrl_shift_s(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(folder_screen(cx, handle).as_deref(), Some(text::ASK_FOLDER));
+
+    keys(cx, handle, "ctrl-shift-s");
+    assert_eq!(question(cx, handle), None);
+}

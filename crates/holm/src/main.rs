@@ -24,6 +24,7 @@ mod picker;
 mod popup;
 mod problem_list;
 mod quick_open;
+mod settings;
 mod shortcuts;
 mod sidebar;
 mod tags;
