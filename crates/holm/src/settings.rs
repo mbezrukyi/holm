@@ -10,10 +10,10 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme as _, Selectable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, Context, Entity, EventEmitter, FocusHandle, Focusable, Global, InteractiveElement as _,
-    IntoElement, KeyBinding, KeyDownEvent, Keystroke, ParentElement, Render, Role,
-    StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _, Window, actions,
-    div, px,
+    App, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Global,
+    InteractiveElement as _, IntoElement, KeyBinding, KeyDownEvent, Keystroke, ParentElement,
+    Render, Role, StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _,
+    Window, actions, div, px, transparent_black,
 };
 use holm_core::model::Order;
 use holm_editor::WritingHelp;
@@ -332,7 +332,9 @@ impl Render for SettingsDialog {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let settings = self.config.read(cx).settings().clone();
         let theme = cx.theme();
-        let (current_bg, muted, radius) = (theme.selection, theme.muted_foreground, theme.radius);
+        // The cursor row has a bar on its left and no fill, so the outlines of its controls stay
+        // visible.
+        let (bar, muted) = (theme.primary, theme.muted_foreground);
         let rows: Vec<_> = ROWS
             .iter()
             .enumerate()
@@ -354,12 +356,16 @@ impl Render for SettingsDialog {
                     .gap_4()
                     .px_2()
                     .py_1p5()
-                    .rounded(radius)
-                    .when(current, |line| line.bg(current_bg))
+                    .border_l(px(3.))
+                    .border_color(if current { bar } else { transparent_black() })
                     .child(
                         v_flex()
                             .flex_none()
-                            .child(div().child(row.label()))
+                            .child(
+                                div()
+                                    .when(current, |label| label.font_weight(FontWeight::MEDIUM))
+                                    .child(row.label()),
+                            )
                             .children(detail),
                     )
                     .child(Self::control(row, &settings, cx))
@@ -373,7 +379,7 @@ impl Render for SettingsDialog {
                     .px_2()
                     .pb_1()
                     .text_lg()
-                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                    .font_weight(FontWeight::SEMIBOLD)
                     .child(text::SETTINGS),
             )
             .children(rows);
