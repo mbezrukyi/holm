@@ -65,8 +65,9 @@ pub(super) struct DraftSave {
 pub(super) enum Written {
     /// The text of the write is on disk.
     Saved,
-    /// The write failed, and the draft keeps the text.
-    Failed,
+    /// The write failed, and the draft keeps the text. It is `first` when no other text of the
+    /// draft had a failed write.
+    Failed { first: bool },
     /// The end tells the user nothing. The draft dropped the text, or the open text gives
     /// its own end.
     Stale,
@@ -81,8 +82,8 @@ struct Text {
     version: u64,
     /// The version of the save in the write line, until it ends.
     writing: Option<u64>,
-    /// The last write of the text failed.
-    failed: bool,
+    /// The reason why the last write of the text failed.
+    failed: Option<&'static str>,
     /// A disk question holds the text, so it gives no write.
     held: bool,
 }
@@ -159,7 +160,7 @@ impl Draft {
                 id: version,
                 version,
                 writing: None,
-                failed: false,
+                failed: None,
                 held: false,
             },
         };
@@ -247,14 +248,20 @@ impl Draft {
     }
 
     /// Whether a text is not on disk, because its last write failed.
-    pub(super) fn failed(&self) -> bool {
-        self.texts().any(|text| text.failed)
+    fn failed(&self) -> bool {
+        self.texts().any(|text| text.failed.is_some())
+    }
+
+    /// Why a text is not on disk: the reason of its failed write. The reason of the open text
+    /// wins.
+    pub(super) fn not_saved(&self) -> Option<&'static str> {
+        self.texts().filter_map(|text| text.failed).last()
     }
 
     /// Whether a text stays off the disk after the writes in the line: its last write failed,
     /// or a disk question holds it.
     pub(super) fn kept_back(&self) -> bool {
-        self.texts().any(|text| text.failed || text.held)
+        self.texts().any(|text| text.failed.is_some() || text.held)
     }
 
     /// The saves to put in the write line before a job, the left texts first. A text whose save
@@ -267,10 +274,16 @@ impl Draft {
             .collect()
     }
 
-    /// Takes the end of the write of `version` of the text `id`. The text goes only when this
-    /// write saved it and no newer body came. A saved left text tells the user only when
-    /// no other text waits.
-    pub(super) fn written(&mut self, id: u64, version: u64, ok: bool) -> Written {
+    /// Takes the end of the write of `version` of the text `id`, with the reason of its
+    /// `failure`. The text goes only when this write saved it and no newer body came. A saved
+    /// left text tells the user only when no other text waits.
+    pub(super) fn written(
+        &mut self,
+        id: u64,
+        version: u64,
+        failure: Option<&'static str>,
+    ) -> Written {
+        let first = !self.failed();
         let is_open = self.open.as_ref().is_some_and(|open| open.id == id);
         let text = if is_open {
             self.open.as_mut()
@@ -283,9 +296,9 @@ impl Draft {
         if text.writing == Some(version) {
             text.writing = None;
         }
-        text.failed = !ok;
-        if !ok {
-            return Written::Failed;
+        text.failed = failure;
+        if failure.is_some() {
+            return Written::Failed { first };
         }
         if version == text.version {
             if is_open {
@@ -363,7 +376,7 @@ mod tests {
         assert_eq!(write.text, save("A.md", "one"));
         assert!(draft.writes().is_empty());
 
-        assert_eq!(draft.written(write.id, write.version, true), Written::Saved);
+        assert_eq!(draft.written(write.id, write.version, None), Written::Saved);
         assert!(!draft.unsaved());
         assert!(draft.writes().is_empty());
     }
@@ -375,7 +388,7 @@ mod tests {
         let write = one_write(&mut draft);
         set(&mut draft, "A.md", "two");
 
-        assert_eq!(draft.written(write.id, write.version, true), Written::Saved);
+        assert_eq!(draft.written(write.id, write.version, None), Written::Saved);
         assert!(draft.unsaved());
         assert_eq!(one_write(&mut draft).text, save("A.md", "two"));
     }
@@ -387,16 +400,44 @@ mod tests {
         let write = one_write(&mut draft);
 
         assert_eq!(
-            draft.written(write.id, write.version, false),
-            Written::Failed
+            draft.written(write.id, write.version, Some("disk full")),
+            Written::Failed { first: true }
         );
         assert!(draft.unsaved());
-        assert!(draft.failed());
+        assert_eq!(draft.not_saved(), Some("disk full"));
         let again = one_write(&mut draft);
         assert_eq!(again.text, save("A.md", "one"));
 
-        assert_eq!(draft.written(again.id, again.version, true), Written::Saved);
-        assert!(!draft.failed());
+        assert_eq!(draft.written(again.id, again.version, None), Written::Saved);
+        assert_eq!(draft.not_saved(), None);
+    }
+
+    #[test]
+    fn only_the_first_failed_write_is_first() {
+        let mut draft = Draft::default();
+        set(&mut draft, "A.md", "one");
+        let write = one_write(&mut draft);
+        assert_eq!(
+            draft.written(write.id, write.version, Some("disk full")),
+            Written::Failed { first: true }
+        );
+        let again = one_write(&mut draft);
+        assert_eq!(
+            draft.written(again.id, again.version, Some("no access")),
+            Written::Failed { first: false }
+        );
+        assert_eq!(draft.not_saved(), Some("no access"), "the last reason");
+    }
+
+    #[test]
+    fn a_saved_open_text_keeps_the_reason_of_a_failed_left_text() {
+        let mut draft = Draft::default();
+        set(&mut draft, "A.md", "one");
+        let old = draft.set(note_path("B.md"), "two".into()).unwrap();
+        let open = one_write(&mut draft);
+        let _ = draft.written(old.id, old.version, Some("disk full"));
+        assert_eq!(draft.written(open.id, open.version, None), Written::Saved);
+        assert_eq!(draft.not_saved(), Some("disk full"));
     }
 
     #[test]
@@ -406,7 +447,7 @@ mod tests {
         let write = one_write(&mut draft);
         draft.drop_text(&note_path("A.md"));
         assert_eq!(
-            draft.written(write.id, write.version, false),
+            draft.written(write.id, write.version, Some("disk full")),
             Written::Stale
         );
         assert!(!draft.failed());
@@ -421,7 +462,10 @@ mod tests {
         assert_eq!(old.text, save("A.md", "one"));
         assert_eq!(one_write(&mut draft).text, save("B.md", "two"));
 
-        assert_eq!(draft.written(old.id, old.version, false), Written::Failed);
+        assert_eq!(
+            draft.written(old.id, old.version, Some("disk full")),
+            Written::Failed { first: true }
+        );
         assert!(draft.unsaved_note(&note_path("A.md")));
         assert!(draft.failed());
         let writes: Vec<NoteText> = draft.writes().into_iter().map(|write| write.text).collect();
@@ -435,7 +479,7 @@ mod tests {
         let write = one_write(&mut draft);
         assert!(draft.set(note_path("B.md"), "two".into()).is_none());
 
-        assert_eq!(draft.written(write.id, write.version, true), Written::Stale);
+        assert_eq!(draft.written(write.id, write.version, None), Written::Stale);
         assert!(!draft.unsaved_note(&note_path("A.md")));
         assert!(draft.unsaved_note(&note_path("B.md")));
     }
@@ -447,7 +491,7 @@ mod tests {
         let old = draft.set(note_path("B.md"), "two".into()).unwrap();
         let _ = draft.set(note_path("A.md"), "three".into());
 
-        assert_eq!(draft.written(old.id, old.version, true), Written::Saved);
+        assert_eq!(draft.written(old.id, old.version, None), Written::Saved);
         assert!(draft.unsaved_note(&note_path("A.md")), "a newer body came");
         assert_eq!(
             draft.take(),
@@ -496,7 +540,7 @@ mod tests {
         assert!(!draft.kept_back());
         let write = one_write(&mut draft);
         assert_eq!(write.text, save("A.md", "two"));
-        assert_eq!(draft.written(write.id, write.version, true), Written::Saved);
+        assert_eq!(draft.written(write.id, write.version, None), Written::Saved);
         assert!(!draft.unsaved());
     }
 

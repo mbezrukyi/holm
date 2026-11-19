@@ -126,8 +126,9 @@ pub(crate) fn window_step<V: 'static, R: 'static>(
 pub(crate) enum SaveEvent {
     /// The text of the write is on disk.
     Saved,
-    /// The write failed. The draft keeps the text, and the next job writes it again.
-    Failed(AppError),
+    /// The write failed. The draft keeps the text, and the next job writes it again. It is
+    /// `first` when no other text of the draft had a failed write.
+    Failed { error: AppError, first: bool },
 }
 
 /// The editor text is not on disk after the writes: the last write of the draft failed, or a
@@ -238,6 +239,12 @@ impl CoreDoor {
     /// Whether the draft has text of the note at `path` that is not on disk.
     pub(crate) fn unsaved_note(&self, path: &NotePath) -> bool {
         self.draft.unsaved_note(path)
+    }
+
+    /// Why the draft has text that is not on disk: the reason of a failed write. The reason
+    /// of the open note wins.
+    pub(crate) fn not_saved(&self) -> Option<&'static str> {
+        self.draft.not_saved()
     }
 
     /// Puts the draft in the write line now. It does not wait for the job.
@@ -655,9 +662,12 @@ impl CoreDoor {
             let Ok(Some(failure)) = receive.try_recv() else {
                 return;
             };
-            match (door.draft.written(id, version, failure.is_none()), failure) {
+            let reason = failure.as_ref().map(AppError::message);
+            match (door.draft.written(id, version, reason), failure) {
                 (Written::Saved, _) => cx.emit(SaveEvent::Saved),
-                (Written::Failed, Some(error)) => cx.emit(SaveEvent::Failed(error)),
+                (Written::Failed { first }, Some(error)) => {
+                    cx.emit(SaveEvent::Failed { error, first });
+                }
                 _ => {}
             }
         });
@@ -1077,7 +1087,7 @@ mod tests {
             cx.subscribe(&core_door, move |_, event: &SaveEvent, _| {
                 let end = match event {
                     SaveEvent::Saved => "saved",
-                    SaveEvent::Failed(_) => "failed",
+                    SaveEvent::Failed { .. } => "failed",
                 };
                 steps.borrow_mut().push(end.to_owned());
             })

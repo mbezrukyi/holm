@@ -146,8 +146,6 @@ pub(crate) struct NotePane {
     autosave: Option<Task<()>>,
     /// Another tool changed or deleted the note while the editor had unsaved changes.
     disk: Option<DiskQuestion>,
-    /// The reason of the last failed save, until a save works.
-    not_saved: Option<&'static str>,
     /// The number of the last open or drop of a note. A read for an older one is dropped.
     opening: u64,
     /// The heading to show when the note that opens is ready.
@@ -254,7 +252,6 @@ impl NotePane {
             ending: LineEnding::Lf,
             autosave: None,
             disk: None,
-            not_saved: None,
             opening: 0,
             open_heading: None,
             replace_link: false,
@@ -287,7 +284,7 @@ impl NotePane {
         }
         self.last_info = Some(note.info);
         self.show_fields(cx);
-        self.mark_synced(cx);
+        self.set_disk(None, cx);
         if !reload && let Some(heading) = self.open_heading.take() {
             self.editor
                 .update(cx, |editor, cx| editor.show_heading(&heading, cx));
@@ -315,7 +312,7 @@ impl NotePane {
         self.last_info = None;
         self.autosave = None;
         self.opening += 1;
-        self.mark_synced(cx);
+        self.set_disk(None, cx);
         self.editor.update(cx, |editor, cx| editor.set_text("", cx));
         self.links.update(cx, |links, cx| links.show(None, cx));
         self.show_fields(cx);
@@ -358,15 +355,9 @@ impl NotePane {
         }
     }
 
-    /// The editor text matches the file: no disk question, and no "Not saved".
-    fn mark_synced(&mut self, cx: &mut Context<Self>) {
-        self.not_saved = None;
-        self.set_disk(None, cx);
-    }
-
     /// Shows the state in the message line. A disk question wins over "Not saved".
     fn show_state(&self, cx: &mut Context<Self>) {
-        let state = match (self.disk, self.not_saved) {
+        let state = match (self.disk, self.core_door.read(cx).not_saved()) {
             (Some(DiskQuestion::Changed), _) => Some(text::CHANGED_ON_DISK),
             (Some(DiskQuestion::Deleted), _) => Some(text::DELETED_ON_DISK),
             (None, Some(_)) => Some(text::NOT_SAVED),
@@ -382,7 +373,7 @@ impl NotePane {
         if let Some(disk) = self.disk {
             self.disk_menu
                 .update(cx, |menu, cx| menu.toggle(disk, window, cx));
-        } else if let Some(reason) = self.not_saved {
+        } else if let Some(reason) = self.core_door.read(cx).not_saved() {
             self.answer(reason, cx);
         }
     }
@@ -619,18 +610,16 @@ impl NotePane {
     fn save_end(&mut self, event: &SaveEvent, cx: &mut Context<Self>) {
         match event {
             SaveEvent::Saved => {
-                self.mark_synced(cx);
+                self.set_disk(None, cx);
                 if self.unsaved(cx) {
                     self.schedule_save(cx);
                 }
             }
-            SaveEvent::Failed(error) => {
+            SaveEvent::Failed { error, first } => {
                 tracing::warn!(error = %crate::chain(error), "cannot save the note");
-                // Only the first fail since the last good save shows the reason.
-                if self.not_saved.is_none() {
+                if *first {
                     self.answer(error.message(), cx);
                 }
-                self.not_saved = Some(error.message());
                 self.show_state(cx);
             }
         }
@@ -798,8 +787,8 @@ impl NotePane {
     }
 
     /// Follows a move of the open note, or of a folder that holds it. A move to another
-    /// folder can change the file links in the note, so the pane reads it again when it has
-    /// no unsaved text.
+    /// folder can change the file links in the note, so the pane reads it again when the note
+    /// has no unsaved text.
     fn follow(&mut self, event: &FolderEvent, cx: &mut Context<Self>) {
         if let Some(next) = &mut self.next
             && let Some(new) = event.changes().find_map(|change| change.note_after(next))
@@ -807,7 +796,6 @@ impl NotePane {
             next.clone_from(&new);
             cx.emit(PaneEvent::Opening(new));
         }
-        let unsaved = self.unsaved(cx);
         let Some(path) = self.content.editor_mut() else {
             return;
         };
@@ -816,6 +804,7 @@ impl NotePane {
         };
         let other_folder = new.folder() != path.folder();
         path.clone_from(&new);
+        let unsaved = self.core_door.read(cx).unsaved_note(&new);
         cx.emit(PaneEvent::Opened(new.clone()));
         if other_folder {
             let folder = Some(self.core_door.read(cx).root().join(new.folder()));
