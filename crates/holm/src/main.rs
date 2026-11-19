@@ -29,6 +29,7 @@ mod settings;
 mod shortcut_list;
 mod shortcuts;
 mod sidebar;
+mod state_menu;
 mod tags;
 #[cfg(test)]
 mod test_paths;

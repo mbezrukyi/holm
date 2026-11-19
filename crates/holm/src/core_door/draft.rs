@@ -242,6 +242,11 @@ impl Draft {
         }
     }
 
+    /// It grows with each new body, so a change of the text changes it.
+    pub(super) fn version(&self) -> u64 {
+        self.version
+    }
+
     /// Whether the draft has text that is not on disk.
     pub(super) fn unsaved(&self) -> bool {
         self.open.is_some() || !self.left.is_empty()

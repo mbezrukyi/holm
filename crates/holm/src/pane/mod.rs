@@ -4,7 +4,7 @@
 //! The pane keeps its unsaved text in the draft of the core door. The write line writes the
 //! draft before each job, so each file action sees the text. The pane also saves a short time
 //! after the user stops typing, and when the app quits. A close of the window saves first.
-//! When that save fails, the window stays open until a second close.
+//! When that save fails, a second close closes the window while the text stays the same.
 //! An outside change of the note reloads it quietly when the pane has no unsaved
 //! changes. Else the message line asks to reload or to keep the text in the editor.
 //! When a save fails, the message line shows "Not saved", and the text stays in the editor.
@@ -25,13 +25,11 @@
 //! `links` runs the link picker flow, opens the links of the note and reads its backlinks.
 //! The backlinks show in the tag row.
 
-mod disk_menu;
 mod links;
 mod new_note;
 mod open;
 
 use std::borrow::Cow;
-use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -52,13 +50,12 @@ use crate::config::Config;
 use crate::core_door::{CoreDoor, Done, DoorEvent, NotSaved, SaveEvent, Then};
 use crate::error::AppError;
 use crate::link_picker::{LinkChoice, LinkStart};
-use crate::message_line::{MessageLine, OpenState};
+use crate::message_line::MessageLine;
 use crate::name_field::{NameEvent, NameWrite};
-use crate::shortcuts::{self, Command, Place};
+use crate::state_menu::{State, StatePick};
 use crate::tags::{TagChange, TagRow};
 use crate::title::TitleField;
 use crate::{text, theme};
-use disk_menu::{Choice, Chosen, DiskMenu, DiskQuestion};
 pub(crate) use links::Pick;
 use links::{Links, LinksEvent};
 use new_note::{NewNote, NewNoteEvent};
@@ -89,6 +86,49 @@ pub(crate) enum Leave {
     Keep,
     /// The note is gone. Drop its text.
     Drop,
+}
+
+/// A question about the open note after another tool changed its file, while the editor had
+/// unsaved changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DiskQuestion {
+    Changed,
+    Deleted,
+}
+
+/// A choice in the state menu of a disk question.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Choice {
+    KeepMine,
+    Reload,
+    Close,
+}
+
+impl DiskQuestion {
+    /// The choices in the state menu. The first one starts under the cursor.
+    fn choices(self) -> [Choice; 2] {
+        match self {
+            Self::Changed => [Choice::KeepMine, Choice::Reload],
+            Self::Deleted => [Choice::KeepMine, Choice::Close],
+        }
+    }
+
+    fn state(self) -> State {
+        let (label, reason) = match self {
+            Self::Changed => (text::CHANGED_ON_DISK, text::CHANGED_REASON),
+            Self::Deleted => (text::DELETED_ON_DISK, text::DELETED_REASON),
+        };
+        let choices = self.choices().map(|choice| match choice {
+            Choice::KeepMine => text::KEEP_MINE,
+            Choice::Reload => text::RELOAD,
+            Choice::Close => text::CLOSE,
+        });
+        State {
+            label: label.into(),
+            reason: reason.into(),
+            choices: choices.into_iter().map(Into::into).collect(),
+        }
+    }
 }
 
 /// What the pane shows.
@@ -135,7 +175,6 @@ impl Content {
 pub(crate) struct NotePane {
     core_door: Entity<CoreDoor>,
     message_line: Entity<MessageLine>,
-    disk_menu: Entity<DiskMenu>,
     editor: Entity<Editor>,
     tag_row: Entity<TagRow>,
     title: Entity<TitleField<NotePath>>,
@@ -155,9 +194,9 @@ pub(crate) struct NotePane {
     open_heading: Option<String>,
     /// A save for a close of the window runs.
     closing: bool,
-    /// A close failed to save, and the next close closes. The next key clears it, as it clears
-    /// the answer that asks for the close.
-    close_again: Rc<Cell<bool>>,
+    /// The draft version at a close that failed to save. A close at the same version closes,
+    /// so typed text stops it.
+    close_again: Option<u64>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -174,8 +213,6 @@ impl NotePane {
         let editor = cx.new(Editor::new);
         let text = editor.focus_handle(cx);
         let backlinks = cx.new(|cx| Backlinks::new(text.clone(), window, cx));
-        let state = line.read(cx).state_bounds();
-        let disk_menu = cx.new(|cx| DiskMenu::new(text.clone(), state, window, cx));
         let pane = cx.weak_entity();
         let rename: NameWrite<NotePath> = Rc::new(move |title, done, _, cx| {
             pane.update(cx, |pane, cx| pane.rename(title, done, cx))
@@ -197,7 +234,6 @@ impl NotePane {
         });
         let links =
             cx.new(|cx| Links::new(core_door.clone(), editor.clone(), backlinks.clone(), cx));
-        let close_again = Rc::new(Cell::new(false));
         let subscriptions = vec![
             cx.subscribe(&core_door, |pane, _, event: &DoorEvent, cx| {
                 pane.follow(event, cx);
@@ -222,11 +258,8 @@ impl NotePane {
                     title.update(cx, TitleField::close);
                 }
             }),
-            cx.subscribe(&disk_menu, |pane, _, chosen: &Chosen, cx| {
-                pane.choose(*chosen, cx);
-            }),
-            cx.subscribe_in(&line, window, |pane, _, _: &OpenState, window, cx| {
-                pane.open_state(window, cx);
+            cx.subscribe(&line, |pane, _, StatePick(at): &StatePick, cx| {
+                pane.choose(*at, cx);
             }),
             cx.subscribe_in(
                 &backlinks,
@@ -236,7 +269,6 @@ impl NotePane {
                     pane.open(path.clone(), Leave::Keep, cx);
                 },
             ),
-            Self::clear_close_again(close_again.clone(), cx),
             Self::take_writing_help(&editor, config, cx),
             cx.observe_global::<Ui>(|pane, cx| {
                 let appearance = theme::appearance(cx);
@@ -249,7 +281,6 @@ impl NotePane {
         let mut pane = Self {
             core_door,
             message_line: line,
-            disk_menu,
             editor,
             tag_row,
             title,
@@ -264,24 +295,13 @@ impl NotePane {
             opens: Opens::default(),
             open_heading: None,
             closing: false,
-            close_again,
+            close_again: None,
             _subscriptions: subscriptions,
         };
         if let Some(note) = note {
             pane.show(note, false, cx);
         }
         pane
-    }
-
-    /// Clears the "close again" flag at each key, as the message line clears its answer. The
-    /// quit key keeps it, so a second press quits.
-    fn clear_close_again(close_again: Rc<Cell<bool>>, cx: &mut Context<Self>) -> Subscription {
-        cx.intercept_keystrokes(move |event, _, _| {
-            let quit = shortcuts::command(Place::Window, &event.keystroke) == Some(Command::Quit);
-            if !event.keystroke.is_modifier_key() && !quit {
-                close_again.set(false);
-            }
-        })
     }
 
     /// Puts `note` from the disk into the editor. A reload keeps the view and is one undo step.
@@ -355,16 +375,12 @@ impl NotePane {
             .update(cx, |line, cx| line.show(message, cx));
     }
 
-    /// Sets the disk question. A new question closes the menu of the old one. A question holds
-    /// the text of the note in the draft.
+    /// Sets the disk question. A question holds the text of the note in the draft.
     fn set_disk(&mut self, disk: Option<DiskQuestion>, cx: &mut Context<Self>) {
         if disk.is_some() {
             self.hold_text(cx);
         }
-        if self.disk != disk {
-            self.disk = disk;
-            self.disk_menu.update(cx, DiskMenu::close);
-        }
+        self.disk = disk;
         self.show_state(cx);
     }
 
@@ -375,30 +391,30 @@ impl NotePane {
         }
     }
 
-    /// Shows the state in the message line. A disk question wins over "Not saved".
+    /// Shows the state in the message line. A disk question wins over "Not saved", which has
+    /// only its reason.
     fn show_state(&self, cx: &mut Context<Self>) {
         let state = match (self.disk, self.core_door.read(cx).not_saved()) {
-            (Some(DiskQuestion::Changed), _) => Some(text::CHANGED_ON_DISK),
-            (Some(DiskQuestion::Deleted), _) => Some(text::DELETED_ON_DISK),
-            (None, Some(_)) => Some(text::NOT_SAVED),
+            (Some(question), _) => Some(question.state()),
+            (None, Some(reason)) => Some(State {
+                label: text::NOT_SAVED.into(),
+                reason: reason.into(),
+                choices: Vec::new(),
+            }),
             (None, None) => None,
         };
         self.message_line
-            .update(cx, |line, cx| line.set_state(state.map(Into::into), cx));
+            .update(cx, |line, cx| line.set_state(state, cx));
     }
 
-    /// Ctrl+Shift+D or a click on the state: opens or closes the disk menu, or shows why the note is
-    /// not saved.
-    pub(crate) fn open_state(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(disk) = self.disk {
-            self.disk_menu
-                .update(cx, |menu, cx| menu.toggle(disk, window, cx));
-        } else if let Some(reason) = self.core_door.read(cx).not_saved() {
-            self.answer(reason, cx);
-        }
-    }
-
-    fn choose(&mut self, Chosen { question, choice }: Chosen, cx: &mut Context<Self>) {
+    /// Takes the pick at `at` in the state menu of the disk question.
+    fn choose(&mut self, at: usize, cx: &mut Context<Self>) {
+        let Some(question) = self.disk else {
+            return;
+        };
+        let Some(choice) = question.choices().get(at).copied() else {
+            return;
+        };
         match (question, choice) {
             (DiskQuestion::Changed, Choice::KeepMine) => self.keep_mine(cx),
             (DiskQuestion::Deleted, Choice::KeepMine) => self.keep_text(cx),
@@ -525,12 +541,13 @@ impl NotePane {
 
     /// A close of the window: gives whether the window may close now. With unsaved text, the
     /// pane saves first and closes the window when the save works. When it fails, the answer
-    /// asks for a second close. A close before the next key gives `true`.
+    /// asks for a second close. A close with the same text as at that failure gives `true`.
     pub(crate) fn may_close(&mut self, window: &Window, cx: &mut Context<Self>) -> bool {
         if self.closing {
             return false;
         }
-        if !self.unsaved(cx) || self.close_again.get() {
+        let version = self.core_door.read(cx).draft_version();
+        if !self.unsaved(cx) || self.close_again == Some(version) {
             return true;
         }
         self.closing = true;
@@ -538,7 +555,7 @@ impl NotePane {
         let done = step(cx, move |pane, saved: Result<(), NotSaved>, cx| {
             pane.closing = false;
             if saved.is_err() {
-                pane.close_again.set(true);
+                pane.close_again = Some(version);
                 pane.answer(text::CLOSE_AGAIN, cx);
             } else {
                 // The close handler of the window may still run, so the window goes later.
@@ -884,11 +901,7 @@ impl Render for NotePane {
                 .into_any_element(),
             Content::Empty => empty_pane(&self.editor.focus_handle(cx), cx).into_any_element(),
         };
-        v_flex()
-            .size_full()
-            .bg(cx.theme().background)
-            .child(body)
-            .child(self.disk_menu.clone())
+        v_flex().size_full().bg(cx.theme().background).child(body)
     }
 }
 

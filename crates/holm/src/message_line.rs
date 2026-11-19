@@ -4,8 +4,9 @@
 //! - The left side shows one answer or start message. A new one takes its place. The next key
 //!   clears it, and the key still works as usual.
 //! - `Ctrl+Shift+E` opens the problem list, wherever the focus is.
-//! - The right side shows a state, like "Not saved", after a mark. A click on it sends
-//!   [`OpenState`].
+//! - The right side shows a state, like "Not saved", after a mark. A click on it or
+//!   `Ctrl+Shift+D` opens the [`StateMenu`]. A pick in it goes back to the owner of the
+//!   state as a [`StatePick`].
 //! - While a job is late, the right side shows "Writing…" in place of the state. It takes
 //!   no clicks.
 //! - Right before the state, with no gap, a gray mark counts the problems of Holm. A click on
@@ -24,22 +25,19 @@ use gpui_kit::{
 use crate::path_text::PathText;
 use crate::problem_list::ProblemList;
 use crate::shortcuts::{self, Command, Place};
+use crate::state_menu::{State, StateMenu, StatePick};
 use crate::text;
-
-/// The user clicked the state.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct OpenState;
 
 pub(crate) struct MessageLine {
     message: Option<PathText>,
-    state: Option<SharedString>,
     writing: bool,
     /// The window bounds of the state in the last frame.
     state_bounds: Rc<Cell<Bounds<Pixels>>>,
     /// The window bounds of the problem mark in the last frame.
     mark_bounds: Rc<Cell<Bounds<Pixels>>>,
     problems: Entity<ProblemList>,
-    _pressed: Subscription,
+    state_menu: Entity<StateMenu>,
+    _subscriptions: [Subscription; 2],
 }
 
 impl MessageLine {
@@ -57,14 +55,20 @@ impl MessageLine {
             let mark_bounds = mark_bounds.clone();
             |cx| ProblemList::new(mark_bounds, cx)
         });
+        let state_bounds: Rc<Cell<Bounds<Pixels>>> = Rc::default();
+        let state_menu = cx.new({
+            let state_bounds = state_bounds.clone();
+            |cx| StateMenu::new(state_bounds, cx)
+        });
+        let picked = cx.subscribe(&state_menu, |_, _, pick: &StatePick, cx| cx.emit(*pick));
         Self {
             message: None,
-            state: None,
             writing: false,
-            state_bounds: Rc::default(),
+            state_bounds,
             mark_bounds,
             problems,
-            _pressed: pressed,
+            state_menu,
+            _subscriptions: [pressed, picked],
         }
     }
 
@@ -85,12 +89,18 @@ impl MessageLine {
         cx.notify();
     }
 
-    /// Shows `state` on the right, or no state with `None`.
-    pub(crate) fn set_state(&mut self, state: Option<SharedString>, cx: &mut Context<Self>) {
-        if self.state != state {
-            self.state = state;
-            cx.notify();
-        }
+    /// Shows `state` on the right, or no state with `None`. Another state closes the state
+    /// menu.
+    pub(crate) fn set_state(&mut self, state: Option<State>, cx: &mut Context<Self>) {
+        self.state_menu
+            .update(cx, |menu, cx| menu.set_state(state, cx));
+        cx.notify();
+    }
+
+    /// Opens the state menu, or closes it when it is open. With no state, it does nothing.
+    pub(crate) fn toggle_state_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.state_menu
+            .update(cx, |menu, cx| menu.toggle(window, cx));
     }
 
     /// Shows "Writing…" while `writing` is true.
@@ -99,11 +109,6 @@ impl MessageLine {
             self.writing = writing;
             cx.notify();
         }
-    }
-
-    /// The window bounds of the state in the last frame. The line updates them at each frame.
-    pub(crate) fn state_bounds(&self) -> Rc<Cell<Bounds<Pixels>>> {
-        self.state_bounds.clone()
     }
 
     /// Clears the message. Ctrl+Shift+E opens or closes the problem list.
@@ -141,8 +146,8 @@ impl MessageLine {
                     .child(label)
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(|_, _, window, cx| {
-                            cx.emit(OpenState);
+                        cx.listener(|line, _, window, cx| {
+                            line.toggle_state_menu(window, cx);
                             // The part under the line would take the focus.
                             window.prevent_default();
                             cx.stop_propagation();
@@ -188,12 +193,17 @@ impl MessageLine {
     }
 }
 
-impl EventEmitter<OpenState> for MessageLine {}
+impl EventEmitter<StatePick> for MessageLine {}
 
 impl Render for MessageLine {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let problems = self.problems.read(cx).problems().len();
-        if self.message.is_none() && self.state.is_none() && !self.writing && problems == 0 {
+        let state = self
+            .state_menu
+            .read(cx)
+            .state()
+            .map(|state| state.label.clone());
+        if self.message.is_none() && state.is_none() && !self.writing && problems == 0 {
             return div().into_any_element();
         }
         let theme = cx.theme();
@@ -226,11 +236,12 @@ impl Render for MessageLine {
                     .children(self.writing.then(|| writing(cx)))
                     .children(
                         (!self.writing)
-                            .then(|| self.state.clone())
+                            .then_some(state)
                             .flatten()
                             .map(|state| self.state(state, cx)),
                     )
-                    .child(self.problems.clone()),
+                    .child(self.problems.clone())
+                    .child(self.state_menu.clone()),
             )
             .into_any_element()
     }

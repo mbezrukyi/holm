@@ -223,6 +223,11 @@ impl CoreDoor {
         self.save_text(cx);
     }
 
+    /// The version of the draft. It grows with each new editor text.
+    pub(crate) fn draft_version(&self) -> u64 {
+        self.draft.version()
+    }
+
     /// Whether the draft has text that is not on disk.
     pub(crate) fn unsaved(&self) -> bool {
         self.draft.unsaved()

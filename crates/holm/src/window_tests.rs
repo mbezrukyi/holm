@@ -204,9 +204,14 @@ fn problem_list(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String>
     labels(cx, handle, "problem-list", Role::ListBoxOption)
 }
 
-/// The rows of the open disk menu. The selected one has `*`.
-fn disk_menu(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
-    labels(cx, handle, "disk-menu", Role::ListBoxOption)
+/// The choices of the open state menu. The selected one has `*`.
+fn state_menu(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
+    labels(cx, handle, "state-menu", Role::ListBoxOption)
+}
+
+/// The reason line of the open state menu.
+fn state_reason(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
+    label(cx, handle, "state-reason")
 }
 
 fn label(cx: &mut TestAppContext, handle: AnyWindowHandle, id: &'static str) -> Option<String> {
@@ -391,31 +396,36 @@ fn an_outside_change_with_unsaved_text_asks_to_reload_or_keep_mine(cx: &mut Test
 
     // The open menu takes every key, and Esc closes only the menu.
     keys(cx, handle, "ctrl-shift-d");
-    assert_eq!(disk_menu(cx, handle), ["Keep mine*", "Reload"]);
+    assert_eq!(state_menu(cx, handle), ["Keep mine*", "Reload"]);
+    assert_eq!(
+        state_reason(cx, handle).as_deref(),
+        Some(text::CHANGED_REASON)
+    );
     let text = editor_text(cx, handle);
     keys(cx, handle, "x backspace");
     assert_eq!(editor_text(cx, handle), text);
     keys(cx, handle, "escape");
-    assert_eq!(disk_menu(cx, handle), Vec::<String>::new());
+    assert_eq!(state_menu(cx, handle), Vec::<String>::new());
     assert_eq!(state(cx, handle).as_deref(), Some(text::CHANGED_ON_DISK));
     assert_eq!(focus(cx, handle), "editor");
 
     // A click outside the menu closes it, and so does a second click on the state.
     keys(cx, handle, "ctrl-shift-d");
     click(cx, handle, "editor");
-    assert_eq!(disk_menu(cx, handle), Vec::<String>::new());
+    assert_eq!(state_menu(cx, handle), Vec::<String>::new());
     assert_eq!(state(cx, handle).as_deref(), Some(text::CHANGED_ON_DISK));
     click(cx, handle, "message-state");
-    assert_eq!(disk_menu(cx, handle).len(), 2);
+    assert_eq!(state_menu(cx, handle).len(), 2);
     click(cx, handle, "message-state");
-    assert_eq!(disk_menu(cx, handle), Vec::<String>::new());
+    assert_eq!(state_menu(cx, handle), Vec::<String>::new());
     assert_eq!(focus(cx, handle), "editor");
 
-    // The menu is as wide as the state, right above it.
+    // The menu is right above the state, and its right edge meets the right edge of the state.
     keys(cx, handle, "ctrl-shift-d");
-    let menu = bounds_of(cx, handle, "disk-menu").unwrap();
+    let menu = bounds_of(cx, handle, "state-menu").unwrap();
     let opener = bounds_of(cx, handle, "message-state").unwrap();
-    assert_eq!((menu.left(), menu.right()), (opener.left(), opener.right()));
+    // The panel snaps to whole pixels.
+    assert!((menu.right() - opener.right()).abs() <= gpui_kit::px(0.5));
     assert!(menu.bottom() <= opener.top());
     keys(cx, handle, "escape");
 
@@ -427,7 +437,7 @@ fn an_outside_change_with_unsaved_text_asks_to_reload_or_keep_mine(cx: &mut Test
     cx.simulate_input(handle, "x");
     fixture.write_outside(cx, "Note.md", "theirs again\n");
     click(cx, handle, "message-state");
-    assert_eq!(disk_menu(cx, handle), ["Keep mine*", "Reload"]);
+    assert_eq!(state_menu(cx, handle), ["Keep mine*", "Reload"]);
     keys(cx, handle, "down enter");
     assert_eq!(editor_text(cx, handle), "theirs again\n");
     assert_eq!(state(cx, handle), None);
@@ -615,16 +625,18 @@ fn a_failed_save_shows_not_saved_until_a_save_works(cx: &mut TestAppContext) {
     assert_eq!(message(cx, handle), None);
     assert_eq!(state(cx, handle).as_deref(), Some(text::NOT_SAVED));
     keys(cx, handle, "ctrl-shift-d");
-    assert_eq!(message(cx, handle).as_deref(), Some(text::WRITE));
+    assert_eq!(state_reason(cx, handle).as_deref(), Some(text::WRITE));
+    assert_eq!(message(cx, handle), None);
     assert_eq!(
         editor_text(cx, handle),
         "aobld\n",
         "Ctrl+Shift+D types nothing"
     );
 
-    // A disk question wins over "Not saved".
+    // A disk question wins over "Not saved", and its state closes the menu.
     fixture.write_outside(cx, "Note.md", "theirs\n");
     assert_eq!(state(cx, handle).as_deref(), Some(text::CHANGED_ON_DISK));
+    assert_eq!(state_reason(cx, handle), None);
 
     read_only(&notes_dir, false);
     keys(cx, handle, "ctrl-shift-d enter");
@@ -793,8 +805,7 @@ fn each_sidebar_action_sees_the_typed_text(cx: &mut TestAppContext) {
     assert_eq!(fields(&note).0, Vec::<String>::new());
 }
 
-/// Another answer between the two closes, like the reason after a click on the state, does
-/// not stop the second close.
+/// A click on the state between the two closes does not stop the second close.
 #[gpui_kit::test]
 fn a_click_between_two_closes_still_lets_the_second_close_close(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
@@ -807,9 +818,35 @@ fn a_click_between_two_closes_still_lets_the_second_close_close(cx: &mut TestApp
     assert!(close(cx, handle));
     assert_eq!(message(cx, handle).as_deref(), Some(text::CLOSE_AGAIN));
     click(cx, handle, "message-state");
-    assert_ne!(message(cx, handle).as_deref(), Some(text::CLOSE_AGAIN));
+    assert_eq!(state_reason(cx, handle).as_deref(), Some(text::WRITE));
 
     assert!(!close(cx, handle), "the second close closes");
+    read_only(&notes_dir, false);
+}
+
+#[gpui_kit::test]
+fn ctrl_shift_d_on_not_saved_shows_its_reason(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    fs::write(notes_dir.join("Note.md"), "old\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    keys(cx, handle, "ctrl-shift-d");
+    assert_eq!(state_reason(cx, handle), None, "no state, no menu");
+
+    read_only(&notes_dir, true);
+    cx.simulate_input(handle, "a");
+    autosave(cx);
+    assert_eq!(state(cx, handle).as_deref(), Some(text::NOT_SAVED));
+    keys(cx, handle, "ctrl-shift-d");
+    assert_eq!(state_reason(cx, handle).as_deref(), Some(text::WRITE));
+    assert_eq!(state_menu(cx, handle), Vec::<String>::new());
+    assert_eq!(message(cx, handle), None);
+    keys(cx, handle, "enter");
+    assert_eq!(state_reason(cx, handle).as_deref(), Some(text::WRITE));
+    keys(cx, handle, "escape");
+    assert_eq!(state_reason(cx, handle), None);
+    assert_eq!(focus(cx, handle), "editor");
     read_only(&notes_dir, false);
 }
 
@@ -826,9 +863,40 @@ fn a_close_with_a_note_that_cannot_be_saved_asks_for_a_second_close(cx: &mut Tes
     assert_eq!(message(cx, handle).as_deref(), Some(text::CLOSE_AGAIN));
     assert_eq!(state(cx, handle).as_deref(), Some(text::NOT_SAVED));
 
-    // A key clears the answer, so the next close tries to save again.
-    keys(cx, handle, "right");
+    assert!(!close(cx, handle), "the second close closes");
+    read_only(&notes_dir, false);
+}
+
+/// A key that changes no text keeps the second close.
+#[gpui_kit::test]
+fn a_failed_close_then_an_arrow_key_then_a_close_quits(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    fs::write(notes_dir.join("Note.md"), "old\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    read_only(&notes_dir, true);
+    cx.simulate_input(handle, "a");
     assert!(close(cx, handle));
+    keys(cx, handle, "right");
+    assert_eq!(message(cx, handle), None);
+    assert!(!close(cx, handle));
+    read_only(&notes_dir, false);
+}
+
+/// Typed text after a failed close stops the second close, so the text is never lost.
+#[gpui_kit::test]
+fn a_failed_close_then_a_typed_letter_then_a_close_does_not_quit(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let notes_dir = fixture.notes();
+    fs::write(notes_dir.join("Note.md"), "old\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    read_only(&notes_dir, true);
+    cx.simulate_input(handle, "a");
+    assert!(close(cx, handle));
+    cx.simulate_input(handle, "b");
+    assert!(close(cx, handle), "the close tries to save again");
     assert_eq!(message(cx, handle).as_deref(), Some(text::CLOSE_AGAIN));
 
     assert!(!close(cx, handle));
@@ -3100,7 +3168,11 @@ fn an_outside_delete_with_unsaved_text_asks_to_keep_or_close(cx: &mut TestAppCon
     assert!(!notes_dir.join("Plan.md").exists(), "no autosave");
 
     keys(cx, handle, "ctrl-shift-d");
-    assert_eq!(disk_menu(cx, handle), ["Keep mine*", "Close"]);
+    assert_eq!(state_menu(cx, handle), ["Keep mine*", "Close"]);
+    assert_eq!(
+        state_reason(cx, handle).as_deref(),
+        Some(text::DELETED_REASON)
+    );
     keys(cx, handle, "escape");
     assert_eq!(state(cx, handle).as_deref(), Some(text::DELETED_ON_DISK));
     keys(cx, handle, "ctrl-shift-d enter");

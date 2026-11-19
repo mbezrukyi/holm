@@ -27,7 +27,7 @@ pub(crate) enum Place {
     Tags,
     /// A dialog that asks a question.
     Dialog,
-    /// A popup with a list: the problem list, the backlinks, the disk menu and the app menu.
+    /// A popup with a list: the problem list, the backlinks, the state menu and the app menu.
     ListPopup,
     /// A text field, like the name field or the search field.
     TextField,

@@ -687,7 +687,9 @@ impl NotesView {
     fn run(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) -> bool {
         match command {
             Command::EditTitle => self.pane.update(cx, |pane, cx| pane.edit_title(window, cx)),
-            Command::DiskState => self.pane.update(cx, |pane, cx| pane.open_state(window, cx)),
+            Command::DiskState => self
+                .message_line
+                .update(cx, |line, cx| line.toggle_state_menu(window, cx)),
             Command::ToggleSidebar => self.toggle_sidebar(window, cx),
             Command::Search => self.focus_search(window, cx),
             Command::QuickOpen => self.open_quick_open(window, cx),
