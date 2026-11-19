@@ -1,5 +1,8 @@
 //! The main window: the notes folder screen, the notes view, and the message line under them.
 //!
+//! The keys of [`Place::Anywhere`] work in each part of the window. Without a notes view, the
+//! window holds the focus itself, so the keys reach it.
+//!
 //! The first start asks for the notes folder. A notes folder that Holm can't open shows
 //! a screen that offers to pick another one.
 
@@ -11,10 +14,10 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Bounds, Context, Entity, InteractiveElement as _,
-    IntoElement, ParentElement, PathPromptOptions, Render, Role, SharedString,
-    StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _, TitlebarOptions,
-    Window, WindowBounds, WindowDecorations, WindowOptions, actions, div, px, size,
+    AnyElement, App, AppContext as _, Bounds, Context, Entity, FocusHandle,
+    InteractiveElement as _, IntoElement, ParentElement, PathPromptOptions, Render, Role,
+    SharedString, StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _,
+    TitlebarOptions, Window, WindowBounds, WindowDecorations, WindowOptions, div, px, size,
 };
 use holm_core::Core;
 
@@ -25,13 +28,11 @@ use crate::log::Log;
 use crate::message_line::MessageLine;
 use crate::notes::NotesView;
 use crate::path_text::PathText;
+use crate::shortcuts::{Command, Place, Run};
 use crate::window_step::window_step;
 use crate::{core_door, text, theme};
 
 pub(crate) const APP_ID: &str = "io.github.mbezrukyi.Holm";
-
-// Quit closes the window with the close rule. Ctrl+Shift+Q and the app menu dispatch it.
-actions!(holm, [Quit]);
 
 /// Opens the core on a notes folder and an index folder. The app uses [`Core::open`].
 pub(crate) type OpenCore = Arc<dyn Fn(&Path, &Path) -> holm_core::Result<Core> + Send + Sync>;
@@ -88,7 +89,9 @@ pub(crate) struct HolmWindow {
     leaving: bool,
     stage: Stage,
     message_line: Entity<MessageLine>,
-    _subscriptions: [Subscription; 2],
+    /// The focus of the window itself.
+    focus: FocusHandle,
+    _subscriptions: [Subscription; 3],
 }
 
 enum Stage {
@@ -125,6 +128,14 @@ impl HolmWindow {
         let folder = config.settings().notes_folder.clone();
         let config = cx.new(|_| config);
         let config_changed = cx.observe_in(&config, window, Self::config_changed);
+        let focus = cx.focus_handle();
+        window.focus(&focus, cx);
+        // With no focus, no key reaches the window. The notes view has its own focus home.
+        let focus_lost = cx.on_focus_lost(window, |this, window, cx| {
+            if !matches!(this.stage, Stage::Open(_)) {
+                window.focus(&this.focus, cx);
+            }
+        });
         let this = cx.weak_entity();
         window.on_window_should_close(cx, move |window, cx| {
             this.update(cx, |this, cx| this.may_close(window, cx))
@@ -141,7 +152,8 @@ impl HolmWindow {
             leaving: false,
             stage: Stage::Ask,
             message_line,
-            _subscriptions: [appearance, config_changed],
+            focus,
+            _subscriptions: [appearance, config_changed, focus_lost],
         };
         this.show_problems(cx);
         if let Some(folder) = folder {
@@ -214,7 +226,21 @@ impl HolmWindow {
         }
     }
 
-    /// [`Quit`]: closes the window, like its close button.
+    /// Runs a key of [`Place::Anywhere`]. Other commands go on to the parts under the window.
+    fn run_key(&mut self, Run(command): &Run, window: &mut Window, cx: &mut Context<Self>) {
+        match command {
+            Command::Quit => self.quit(window, cx),
+            Command::Problems => self
+                .message_line
+                .update(cx, |line, cx| line.toggle_problems(window, cx)),
+            Command::DiskState => self
+                .message_line
+                .update(cx, |line, cx| line.toggle_state_menu(window, cx)),
+            _ => cx.propagate(),
+        }
+    }
+
+    /// Closes the window, like its close button.
     fn quit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.may_close(window, cx) {
             window.remove_window();
@@ -415,7 +441,9 @@ impl Render for HolmWindow {
             .font_family(theme.font_family.clone())
             .text_size(theme.font_size)
             .relative()
-            .on_action(cx.listener(|this, _: &Quit, window, cx| this.quit(window, cx)))
+            .key_context(Place::Anywhere.key_context())
+            .track_focus(&self.focus)
+            .on_action(cx.listener(Self::run_key))
             .child(self.folder_screen(cx))
             .map(|root| {
                 if matches!(self.stage, Stage::Open(_)) {

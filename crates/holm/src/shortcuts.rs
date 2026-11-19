@@ -13,6 +13,8 @@ use crate::text;
 /// Where a shortcut works.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Place {
+    /// The whole window, also the folder screen, a dialog and the settings.
+    Anywhere,
     /// The whole notes view.
     Window,
     /// The notes view while the editor has the focus.
@@ -45,6 +47,7 @@ impl Place {
     /// context of the editor element, like each place of the editor.
     pub(crate) const fn key_context(self) -> &'static str {
         match self {
+            Self::Anywhere => "Anywhere",
             Self::Window => "Notes",
             Self::Sidebar => "Sidebar",
             Self::Tree => "Tree",
@@ -190,13 +193,6 @@ const ROWS: &[Row] = &[
     ),
     row(
         P::Window,
-        Keys::ctrl_shift("d"),
-        C::DiskState,
-        G::Note,
-        text::KEY_DISK_STATE,
-    ),
-    row(
-        P::Window,
         Keys::ctrl_shift("p"),
         C::Pin,
         G::Note,
@@ -218,13 +214,6 @@ const ROWS: &[Row] = &[
     ),
     row(
         P::Window,
-        Keys::ctrl_shift("e"),
-        C::Problems,
-        G::Window,
-        text::KEY_PROBLEMS,
-    ),
-    row(
-        P::Window,
         Keys::ctrl_shift("s"),
         C::Settings,
         G::Window,
@@ -240,17 +229,31 @@ const ROWS: &[Row] = &[
     ),
     row(
         P::Window,
-        Keys::ctrl_shift("q"),
-        C::Quit,
-        G::Window,
-        text::KEY_QUIT,
-    ),
-    row(
-        P::Window,
         Keys::plain("f10"),
         C::AppMenu,
         G::Window,
         text::KEY_APP_MENU,
+    ),
+    row(
+        P::Anywhere,
+        Keys::ctrl_shift("d"),
+        C::DiskState,
+        G::Note,
+        text::KEY_DISK_STATE,
+    ),
+    row(
+        P::Anywhere,
+        Keys::ctrl_shift("e"),
+        C::Problems,
+        G::Window,
+        text::KEY_PROBLEMS,
+    ),
+    row(
+        P::Anywhere,
+        Keys::ctrl_shift("q"),
+        C::Quit,
+        G::Window,
+        text::KEY_QUIT,
     ),
     row(
         P::Note,
@@ -443,17 +446,10 @@ const ROWS: &[Row] = &[
     ),
 ];
 
-/// The command of `keystroke` in `place`.
-pub(crate) fn command(place: Place, keystroke: &Keystroke) -> Option<Command> {
+/// The keys of `command` in the whole window: a [`Place::Anywhere`] or [`Place::Window`] row.
+pub(crate) fn window_keys(command: Command) -> Option<Keys> {
     ROWS.iter()
-        .find(|row| row.place == place && row.keys.matches(keystroke))
-        .map(|row| row.command)
-}
-
-/// The keys of `command` in `place`.
-pub(crate) fn keys(place: Place, command: Command) -> Option<Keys> {
-    ROWS.iter()
-        .find(|row| row.place == place && row.command == command)
+        .find(|row| matches!(row.place, Place::Anywhere | Place::Window) && row.command == command)
         .map(|row| row.keys)
 }
 
@@ -467,7 +463,7 @@ const ROOT: &str = "Root";
 /// text fields. Then it gives the text inputs their keys back with `NoAction`:
 ///
 /// - each text input keeps each key that types a char and that some place binds;
-/// - a text field keeps each plain key of the other places, except the [`Place::Window`] keys.
+/// - a text field keeps each plain key of the other places, except the keys of the whole window.
 ///
 /// Tab and Shift+Tab do nothing where no place names them.
 pub(crate) fn bind(cx: &mut App) {
@@ -512,7 +508,7 @@ fn typed_keys() -> Vec<Keys> {
         .collect()
 }
 
-/// The plain keys of the places other than [`Place::Window`] that no text field row names.
+/// The plain keys of the places other than the whole window that no text field row names.
 fn kept_by_text_fields() -> Vec<Keys> {
     let named: Vec<Keys> = ROWS
         .iter()
@@ -521,7 +517,12 @@ fn kept_by_text_fields() -> Vec<Keys> {
         .chain(text_keys().map(|shortcut| shortcut.keys))
         .collect();
     ROWS.iter()
-        .filter(|row| !matches!(row.place, Place::TextField | Place::Window) && !row.keys.ctrl)
+        .filter(|row| {
+            !matches!(
+                row.place,
+                Place::TextField | Place::Anywhere | Place::Window
+            ) && !row.keys.ctrl
+        })
         .map(|row| row.keys)
         .filter(|keys| !named.iter().any(|name| name.overlaps(keys)))
         .collect()
@@ -575,7 +576,7 @@ mod tests {
         let one_way = |a: Place, b: Place| {
             matches!(
                 (a, b),
-                (Place::Window, _)
+                (Place::Anywhere | Place::Window, _)
                     | (Place::Sidebar, Place::Tree | Place::NoteList)
                     | (Place::Note, Place::Editor(_))
                     | (

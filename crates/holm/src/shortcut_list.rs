@@ -48,13 +48,14 @@ fn title(group: Group) -> &'static str {
     }
 }
 
-/// The heading over the rows of `place`. The rows of the whole view, of the note, and of each
+/// The heading over the rows of `place`. The rows of the notes view, of the note, and of each
 /// text input have none.
 fn heading(place: Place) -> Option<&'static str> {
     match place {
         Place::Window
         | Place::Note
         | Place::Editor(editor::Place::Text | editor::Place::Editor) => None,
+        Place::Anywhere => Some(text::ANYWHERE),
         Place::Sidebar => Some(text::IN_SIDEBAR),
         Place::Tree => Some(text::IN_TREE),
         Place::NoteList => Some(text::IN_NOTE_LIST),

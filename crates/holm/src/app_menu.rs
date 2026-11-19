@@ -226,7 +226,7 @@ impl Render for AppMenu {
             .justify_between()
             .gap_4()
             .child(label)
-            .children(shortcuts::keys(Place::Window, command).map(shortcut_list::key_chip));
+            .children(shortcuts::window_keys(command).map(shortcut_list::key_chip));
             // A line sets Quit apart from the other items.
             div()
                 .when(command == Command::Quit, |item| {

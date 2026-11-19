@@ -259,6 +259,7 @@ pub(crate) const GROUP_TEXT: &str = "TEXT";
 pub(crate) const GROUP_NOTE: &str = "NOTE";
 pub(crate) const GROUP_SIDEBAR: &str = "SIDEBAR";
 pub(crate) const GROUP_WINDOW: &str = "WINDOW";
+pub(crate) const ANYWHERE: &str = "Anywhere";
 pub(crate) const IN_SIDEBAR: &str = "In the sidebar";
 pub(crate) const IN_TREE: &str = "In the tree";
 pub(crate) const IN_NOTE_LIST: &str = "In the note list";

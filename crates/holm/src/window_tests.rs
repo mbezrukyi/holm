@@ -536,6 +536,7 @@ fn a_broken_config_is_a_problem_in_the_message_line(cx: &mut TestAppContext) {
     assert_eq!(message(cx, handle), Some(text::crashed(&log).to_string()));
     assert_eq!(problem_mark(cx, handle), Some(text::problem_mark(1)));
 
+    // Ctrl+Shift+E works on the folder screen too.
     keys(cx, handle, "ctrl-shift-e");
     assert_eq!(
         problem_list(cx, handle),
@@ -4009,6 +4010,7 @@ fn the_shortcut_list_names_each_place_once_and_no_label_runs_into_its_keys(
     let mut headings = labels(cx, handle, "shortcuts", Role::Heading);
     headings.sort();
     let mut want = [
+        text::ANYWHERE,
         text::IN_SIDEBAR,
         text::IN_TREE,
         text::IN_NOTE_LIST,
@@ -4260,16 +4262,66 @@ fn f10_with_the_sidebar_hidden_opens_the_menu_at_the_corner(cx: &mut TestAppCont
 }
 
 #[gpui_kit::test]
-fn the_folder_screen_ignores_f10_and_ctrl_shift_q(cx: &mut TestAppContext) {
+fn the_folder_screen_ignores_f10_and_quits_with_ctrl_shift_q(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     let handle = open(cx, fixture.startup(None));
     assert_eq!(folder_screen(cx, handle).as_deref(), Some(text::ASK_FOLDER));
 
     keys(cx, handle, "f10");
     assert_eq!(app_menu(cx, handle), Vec::<String>::new());
-    keys(cx, handle, "ctrl-shift-q");
-    assert!(window_open(cx, handle));
     assert_eq!(folder_screen(cx, handle).as_deref(), Some(text::ASK_FOLDER));
+    keys(cx, handle, "ctrl-shift-q");
+    assert!(!window_open(cx, handle));
+}
+
+#[gpui_kit::test]
+fn ctrl_shift_q_with_a_dialog_open_closes_the_window_by_the_close_rule(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let note = fixture.notes().join("Note.md");
+    fs::write(&note, "old\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+
+    cx.simulate_input(handle, "a");
+    keys(cx, handle, "ctrl-shift-l delete");
+    assert!(question(cx, handle).is_some());
+    keys(cx, handle, "ctrl-shift-q");
+    assert!(!window_open(cx, handle));
+    assert!(
+        read(&note).ends_with("\naold\n"),
+        "the close saves the text"
+    );
+}
+
+#[gpui_kit::test]
+fn ctrl_shift_e_with_the_settings_open_opens_the_problem_list(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    fixture.write_config("version = [broken\n");
+    let handle = open(cx, fixture.startup(None));
+    click(cx, handle, "use-default");
+    assert!(empty_pane(cx, handle));
+
+    keys(cx, handle, "ctrl-shift-s");
+    assert_eq!(question(cx, handle).as_deref(), Some(text::SETTINGS));
+    keys(cx, handle, "ctrl-shift-e");
+    assert_eq!(
+        problem_list(cx, handle),
+        [format!("{}*", text::CONFIG_WRITE)]
+    );
+}
+
+#[gpui_kit::test]
+fn ctrl_shift_d_with_the_tree_focused_opens_the_state_menu(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    fs::write(fixture.notes().join("Note.md"), "old\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+    cx.simulate_input(handle, "mine ");
+    fixture.write_outside(cx, "Note.md", "theirs\n");
+    assert_eq!(state(cx, handle).as_deref(), Some(text::CHANGED_ON_DISK));
+
+    keys(cx, handle, "ctrl-shift-l");
+    assert_eq!(focus(cx, handle), "sidebar");
+    keys(cx, handle, "ctrl-shift-d");
+    assert_eq!(state_menu(cx, handle), ["Keep mine*", "Reload"]);
 }
 
 #[gpui_kit::test]

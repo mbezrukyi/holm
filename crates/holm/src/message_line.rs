@@ -18,13 +18,12 @@ use std::rc::Rc;
 use gpui_kit::component::{ActiveTheme as _, h_flex};
 use gpui_kit::{
     AppContext as _, Bounds, Context, CursorStyle, Entity, EventEmitter, InteractiveElement as _,
-    IntoElement, Keystroke, MouseButton, ParentElement, Pixels, Render, Role, SharedString,
+    IntoElement, MouseButton, ParentElement, Pixels, Render, Role, SharedString,
     StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _, Window, div,
 };
 
 use crate::path_text::PathText;
 use crate::problem_list::ProblemList;
-use crate::shortcuts::{self, Command, Place};
 use crate::state_menu::{State, StateMenu, StatePick};
 use crate::text;
 
@@ -44,10 +43,9 @@ impl MessageLine {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
         let this = cx.weak_entity();
         // It sees each key before any part of the window can stop it, also with no focus.
-        let pressed = cx.intercept_keystrokes(move |event, window, cx| {
+        let pressed = cx.intercept_keystrokes(move |event, _, cx| {
             if !event.keystroke.is_modifier_key() {
-                this.update(cx, |line, cx| line.pressed(&event.keystroke, window, cx))
-                    .ok();
+                this.update(cx, MessageLine::clear).ok();
             }
         });
         let mark_bounds: Rc<Cell<Bounds<Pixels>>> = Rc::default();
@@ -79,7 +77,8 @@ impl MessageLine {
         cx.notify();
     }
 
-    fn toggle_problems(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Opens the problem list, or closes it when it is open.
+    pub(crate) fn toggle_problems(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.problems.update(cx, |list, cx| list.toggle(window, cx));
     }
 
@@ -111,13 +110,10 @@ impl MessageLine {
         }
     }
 
-    /// Clears the message. Ctrl+Shift+E opens or closes the problem list.
-    fn pressed(&mut self, keystroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) {
+    /// Clears the message.
+    fn clear(&mut self, cx: &mut Context<Self>) {
         if self.message.take().is_some() {
             cx.notify();
-        }
-        if shortcuts::command(Place::Window, keystroke) == Some(Command::Problems) {
-            self.toggle_problems(window, cx);
         }
     }
 

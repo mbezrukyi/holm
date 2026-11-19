@@ -37,7 +37,6 @@ use crate::shortcut_list::{self, ShortcutList};
 use crate::shortcuts::{Command, Place, Run};
 use crate::sidebar::{Item, Sidebar, SidebarEvent, TagRename, Target};
 use crate::tags::RenameTag;
-use crate::window::Quit;
 use crate::window_step::window_step;
 
 const MIN_WIDTH: f32 = 160.;
@@ -103,8 +102,11 @@ impl NotesView {
             AppMenu::new(pane.focus_handle(cx), button, window, cx)
         });
         let subscriptions = vec![
+            // A command of the whole window, like Quit, goes to its owner as a key would.
             cx.subscribe_in(&app_menu, window, |this, _, Picked(command), window, cx| {
-                this.run(*command, window, cx);
+                if !this.run(*command, window, cx) {
+                    window.dispatch_action(Box::new(Run(*command)), cx);
+                }
             }),
             cx.observe(&core_door, |this, core_door, cx| {
                 let writing = core_door.read(cx).writing();
@@ -687,9 +689,6 @@ impl NotesView {
     fn run(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) -> bool {
         match command {
             Command::EditTitle => self.pane.update(cx, |pane, cx| pane.edit_title(window, cx)),
-            Command::DiskState => self
-                .message_line
-                .update(cx, |line, cx| line.toggle_state_menu(window, cx)),
             Command::ToggleSidebar => self.toggle_sidebar(window, cx),
             Command::Search => self.focus_search(window, cx),
             Command::QuickOpen => self.open_quick_open(window, cx),
@@ -712,7 +711,6 @@ impl NotesView {
             Command::Settings => self.open_settings(window, cx),
             Command::ShortcutList => self.open_shortcut_list(window, cx),
             Command::AppMenu => self.toggle_app_menu(window, cx),
-            Command::Quit => window.dispatch_action(Box::new(Quit), cx),
             _ => return false,
         }
         true
