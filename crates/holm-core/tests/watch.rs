@@ -197,7 +197,10 @@ fn a_move_with_the_new_path_first_is_one_change() {
 fn holm_s_own_saves_and_new_notes_come_from_holm() {
     let fed = Fed::new(&[("a.md", "# A\n")]);
 
-    let saved = fed.core.save(&note_path("a.md"), "# A\n\nMore.\n").unwrap();
+    let saved = fed
+        .core
+        .save(&note_path("a.md"), "# A\n\nMore.\n", None)
+        .unwrap();
     let tagged = fed
         .core
         .add_tag(&note_path("a.md"), &tag_name("work"))
@@ -346,7 +349,7 @@ fn a_list_never_comes_before_its_snapshot() {
     let path = note_path("a.md");
     let writer = std::thread::spawn(move || {
         for round in 0..300 {
-            core.save(&path, &format!("{round}\n")).unwrap();
+            core.save(&path, &format!("{round}\n"), None).unwrap();
         }
     });
     let mut seen = 0;
@@ -703,7 +706,9 @@ mod real_events {
     fn a_save_comes_from_holm_and_the_next_outside_change_from_outside() {
         let (dir, _cache, core, mut changes) = open(&[("a.md", "# A\n")]);
 
-        let saved = core.save(&note_path("a.md"), "# A\n\nMore.\n").unwrap();
+        let saved = core
+            .save(&note_path("a.md"), "# A\n\nMore.\n", None)
+            .unwrap();
         fs::write(dir.path().join("b.md"), "# B\n").unwrap();
 
         let list = next_list(&mut changes);
@@ -829,4 +834,103 @@ fn a_note_can_become_a_folder() {
 
     assert_eq!(paths(&fed.core), ["x.md/a.md"]);
     assert_eq!(common::paths(fed.core.snapshot().folders()), ["x.md"]);
+}
+
+#[test]
+fn a_save_from_before_an_outside_change_writes_nothing() {
+    let fed = Fed::new(&[("a.md", "old\n")]);
+    let seen = fed.core.snapshot().revision();
+    fed.write("a.md", "theirs\n");
+    fed.feed.changed(["a.md"]).unwrap();
+
+    let saved = fed.core.save(&note_path("a.md"), "mine\n", Some(seen));
+
+    assert!(matches!(saved, Err(Error::Changed { .. })), "{saved:?}");
+    assert_eq!(fs::read_to_string(fed.path("a.md")).unwrap(), "theirs\n");
+    let now = fed.core.snapshot().revision();
+    fed.core
+        .save(&note_path("a.md"), "mine\n", Some(now))
+        .unwrap();
+    assert!(
+        fs::read_to_string(fed.path("a.md"))
+            .unwrap()
+            .ends_with("\nmine\n")
+    );
+}
+
+#[test]
+fn a_save_refuses_a_change_on_disk_that_the_core_does_not_know_yet() {
+    let fed = Fed::new(&[("a.md", "old\n")]);
+    let seen = fed.core.snapshot().revision();
+    fed.write("a.md", "theirs\n");
+
+    let saved = fed.core.save(&note_path("a.md"), "mine\n", Some(seen));
+
+    assert!(matches!(saved, Err(Error::Changed { .. })), "{saved:?}");
+    assert_eq!(fs::read_to_string(fed.path("a.md")).unwrap(), "theirs\n");
+    fed.core.save(&note_path("a.md"), "mine\n", None).unwrap();
+    assert!(
+        fs::read_to_string(fed.path("a.md"))
+            .unwrap()
+            .ends_with("\nmine\n")
+    );
+}
+
+#[test]
+fn writes_of_holm_after_the_seen_revision_are_no_outside_change() {
+    let fed = Fed::new(&[("a.md", "old\n")]);
+    let seen = fed.core.snapshot().revision();
+
+    fed.core.set_pinned(&note_path("a.md"), true).unwrap();
+    fed.core
+        .save(&note_path("a.md"), "mine\n", Some(seen))
+        .unwrap();
+    fed.feed.changed(["a.md"]).unwrap();
+    fed.core
+        .save(&note_path("a.md"), "more\n", Some(seen))
+        .unwrap();
+
+    assert!(
+        fs::read_to_string(fed.path("a.md"))
+            .unwrap()
+            .ends_with("\nmore\n")
+    );
+}
+
+#[test]
+fn an_outside_change_stays_unseen_after_a_pin_and_a_rename() {
+    let fed = Fed::new(&[("a.md", "old\n")]);
+    let seen = fed.core.snapshot().revision();
+    fed.write("a.md", "theirs\n");
+    fed.feed.changed(["a.md"]).unwrap();
+
+    fed.core.set_pinned(&note_path("a.md"), true).unwrap();
+    fed.core.rename_note(&note_path("a.md"), "b").unwrap();
+    let saved = fed.core.save(&note_path("b.md"), "mine\n", Some(seen));
+
+    assert!(matches!(saved, Err(Error::Changed { .. })), "{saved:?}");
+    assert!(
+        fs::read_to_string(fed.path("b.md"))
+            .unwrap()
+            .ends_with("\ntheirs\n")
+    );
+}
+
+#[test]
+fn an_outside_change_stays_unseen_after_a_folder_rename() {
+    let fed = Fed::new(&[("work/a.md", "old\n")]);
+    let seen = fed.core.snapshot().revision();
+    fed.write("work/a.md", "theirs\n");
+    fed.feed.changed(["work/a.md"]).unwrap();
+
+    fed.core
+        .rename_folder(&folder_path("work"), "home")
+        .unwrap();
+    let saved = fed.core.save(&note_path("home/a.md"), "mine\n", Some(seen));
+
+    assert!(matches!(saved, Err(Error::Changed { .. })), "{saved:?}");
+    assert_eq!(
+        fs::read_to_string(fed.path("home/a.md")).unwrap(),
+        "theirs\n"
+    );
 }

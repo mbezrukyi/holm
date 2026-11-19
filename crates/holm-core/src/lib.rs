@@ -212,12 +212,17 @@ impl Core {
     ///
     /// The write goes to a temp file first, which then replaces the note in one step.
     ///
+    /// `seen` is the [`Snapshot::revision`] that `body` is based on. With it, the save never
+    /// writes over a change from another tool that this revision does not hold. Writes of Holm
+    /// are no such change. With `None`, the body wins over every change.
+    ///
     /// # Errors
     ///
+    /// - [`Error::Changed`] when another tool changed the file after `seen`. Nothing is written.
     /// - [`Error::Read`] or [`Error::NotUtf8`] when the file on disk can't be read.
     /// - [`Error::Write`] when the new file can't be written. The old file then stays.
-    pub fn save(&self, path: &NotePath, body: &str) -> Result<Note> {
-        self.inner.write(|write| write.save(path, body))
+    pub fn save(&self, path: &NotePath, body: &str, seen: Option<u64>) -> Result<Note> {
+        self.inner.write(|write| write.save(path, body, seen))
     }
 
     /// Writes `note` again at its path after another tool deleted its file, and returns it.

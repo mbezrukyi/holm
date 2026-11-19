@@ -66,6 +66,13 @@ pub enum Error {
         /// The path that the name asks for.
         path: PathBuf,
     },
+    /// A save with a seen revision found an outside change of the note that the revision does
+    /// not hold. Nothing was written.
+    #[error("{path} changed on disk")]
+    Changed {
+        /// The note file.
+        path: PathBuf,
+    },
     /// A typed name breaks a rule of file names.
     #[error("{name:?} is not a name: {problem:?}")]
     BadName {

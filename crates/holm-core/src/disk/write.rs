@@ -43,9 +43,20 @@ pub(crate) fn run<T>(
 }
 
 impl Write<'_> {
-    /// Saves `body` as the body of the note at `path`.
-    pub(crate) fn save(&mut self, path: &NotePath, body: &str) -> Result<Note> {
-        let (note, stamp) = self.disk.store.save(path, body)?;
+    /// Saves `body` as the body of the note at `path`. With `seen`, it refuses an outside
+    /// change of the note that revision `seen` does not hold: one that the facts know, or one on
+    /// disk that they do not know yet.
+    pub(crate) fn save(&mut self, path: &NotePath, body: &str, seen: Option<u64>) -> Result<Note> {
+        let base = match seen {
+            Some(seen) if self.next.changed_after(path, seen) => {
+                return Err(Error::Changed {
+                    path: self.disk.store.root().join(path),
+                });
+            }
+            Some(_) => self.next.stamp(path),
+            None => None,
+        };
+        let (note, stamp) = self.disk.store.save(path, body, base)?;
         self.update(&note, stamp)
     }
 
@@ -116,13 +127,16 @@ impl Write<'_> {
         self.update(&note, stamp)
     }
 
-    /// Moves the note from `from` to `to`, and returns it at its new path.
+    /// Moves the note from `from` to `to`, and returns it at its new path. The note keeps its
+    /// outside revision.
     pub(crate) fn move_note(&mut self, from: &NotePath, to: NotePath) -> Result<NoteInfo> {
+        let outside = self.next.outside(from);
         let to = self.disk.store.move_note(from, to)?;
         if *from == to {
             return self.disk.store.read(&to).map(|(note, _)| note.info);
         }
         self.refresh(vec![Node::Note(from.clone()), Node::Note(to.clone())])?;
+        self.next.mark_outside([&to], outside);
         let info = self.disk.store.read(&to)?.0.info;
         self.touched.moved(Change::Moved {
             from: from.clone(),

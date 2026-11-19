@@ -542,6 +542,7 @@ impl NotePane {
                 }
             }
             SaveEvent::Failed => self.show_state(cx),
+            SaveEvent::Changed => self.set_disk(Some(DiskQuestion::Changed), cx),
         }
         cx.notify();
     }

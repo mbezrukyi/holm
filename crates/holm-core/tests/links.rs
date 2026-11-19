@@ -67,7 +67,7 @@ fn a_save_follows_the_links_of_the_text() {
 
     folder
         .core
-        .save(&note_path("work/a.md"), "More words. [f](x.pdf)\n")
+        .save(&note_path("work/a.md"), "More words. [f](x.pdf)\n", None)
         .unwrap();
     assert_eq!(
         links_everywhere(&mut folder, "work/a.md"),
@@ -76,7 +76,7 @@ fn a_save_follows_the_links_of_the_text() {
 
     folder
         .core
-        .save(&note_path("work/a.md"), "More words. [f](y.pdf)\n")
+        .save(&note_path("work/a.md"), "More words. [f](y.pdf)\n", None)
         .unwrap();
     assert_eq!(
         links_everywhere(&mut folder, "work/a.md"),

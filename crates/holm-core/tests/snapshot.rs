@@ -62,7 +62,7 @@ fn note_writes_show_in_the_snapshot_after_them() {
     );
 
     let (_, snapshot) = one_step(core, |core| {
-        core.save(&note.info.path, "# Ideas\n[plans](holm:P)\n")
+        core.save(&note.info.path, "# Ideas\n[plans](holm:P)\n", None)
     });
     assert_eq!(titles(&snapshot), ["Plans", "Untitled"]);
     assert_eq!(
@@ -194,7 +194,7 @@ fn a_save_with_the_same_text_keeps_the_revision() {
     let note = folder.core.read(&note_path("A.md")).unwrap();
 
     let written = no_step(&folder.core, |core| {
-        core.save(&note_path("A.md"), &note.body)
+        core.save(&note_path("A.md"), &note.body, None)
     });
 
     assert_eq!(written.unwrap(), note);

@@ -310,7 +310,7 @@ fn save_and_create_update_the_index() {
 
     let saved = folder
         .core
-        .save(&note_path("a.md"), "# A\nPotatoes\n")
+        .save(&note_path("a.md"), "# A\nPotatoes\n", None)
         .unwrap();
     let created = folder.core.create(&folder_path(""), "New").unwrap();
 
@@ -429,7 +429,10 @@ fn saving_a_note_with_the_id_of_a_deleted_note_keeps_the_id() {
     let folder = Folder::new(&[("a.md", &note("01GONE", "", ""))]);
     fs::remove_file(folder.path("a.md")).unwrap();
     folder.write("b.md", &note("01GONE", "", ""));
-    let saved = folder.core.save(&note_path("b.md"), "Text\n").unwrap();
+    let saved = folder
+        .core
+        .save(&note_path("b.md"), "Text\n", None)
+        .unwrap();
 
     assert_eq!(saved.info.id.unwrap().as_str(), "01GONE");
     assert_eq!(
@@ -498,7 +501,7 @@ fn the_index_lives_in_memory_when_its_folder_cannot_be_written() {
     fs::set_permissions(cache.path(), fs::Permissions::from_mode(0o555)).unwrap();
 
     let core = Core::open(folder.dir.path(), cache.path()).unwrap();
-    let saved = core.save(&note_path("a.md"), "new\n");
+    let saved = core.save(&note_path("a.md"), "new\n", None);
 
     fs::set_permissions(cache.path(), fs::Permissions::from_mode(0o755)).unwrap();
     saved.unwrap();
@@ -525,7 +528,7 @@ fn a_save_stays_when_the_index_fails_and_the_next_start_reads_the_file_again() {
         .unwrap();
     fs::set_permissions(cache.path(), fs::Permissions::from_mode(0o555)).unwrap();
 
-    let saved = core.save(&note_path("a.md"), "new\n");
+    let saved = core.save(&note_path("a.md"), "new\n", None);
     let preview = |core: &Core| {
         core.snapshot()
             .note(&note_path("a.md"))

@@ -111,7 +111,8 @@ fn check_after(name: &str, prepare: impl FnOnce(&Folder), write: impl FnOnce(&Co
 #[test]
 fn each_write_names_every_note_and_folder_it_changed() {
     check("save", |core| {
-        core.save(&note_path("Ideas.md"), "# More ideas\n").unwrap();
+        core.save(&note_path("Ideas.md"), "# More ideas\n", None)
+            .unwrap();
     });
     let deleted = Folder::with_feed(FILES)
         .core

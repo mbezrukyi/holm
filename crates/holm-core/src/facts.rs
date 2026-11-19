@@ -10,14 +10,23 @@ use crate::reconcile::Settled;
 use crate::snapshot::Snapshot;
 use crate::store::Stamp;
 
-/// The snapshot, and the stamp and link source of each of its notes. Each note of the snapshot
-/// has both.
+/// The snapshot, and the file facts of each of its notes. Each note of the snapshot has them.
 ///
 /// It is cheap to clone.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Facts {
     snapshot: Snapshot,
-    files: imbl::HashMap<NotePath, (Stamp, LinkSource)>,
+    files: imbl::HashMap<NotePath, File>,
+}
+
+/// What the facts know of one note file.
+#[derive(Clone, Copy, Debug)]
+struct File {
+    stamp: Stamp,
+    source: LinkSource,
+    /// The revision of the last outside change that gave the file a new stamp, or 0. A move
+    /// keeps it, and so does a write of Holm.
+    outside: u64,
 }
 
 /// The facts of one note: what the snapshot shows, its links, its stamp and its link source.
@@ -43,15 +52,15 @@ impl Facts {
         let mut stamps = HashMap::new();
         for node in nodes {
             match node {
-                Node::Note(path) => stamps.extend(self.files.get_key_value(path).map(copied)),
+                Node::Note(path) => stamps.extend(self.files.get_key_value(path).map(stamp)),
                 Node::Folder(folder) if folder.is_root() => {
-                    stamps.extend(self.files.iter().map(copied));
+                    stamps.extend(self.files.iter().map(stamp));
                 }
                 Node::Folder(folder) => stamps.extend(
                     self.files
                         .iter()
                         .filter(|(path, _)| path.is_below(folder))
-                        .map(copied),
+                        .map(stamp),
                 ),
             }
         }
@@ -60,34 +69,76 @@ impl Facts {
 
     /// The link source of the note at `path`.
     pub(crate) fn link_source(&self, path: &NotePath) -> Option<LinkSource> {
-        self.files.get(path).map(|(_, source)| *source)
+        self.files.get(path).map(|file| file.source)
     }
 
-    /// Puts in what `settled` changes, and returns the notes that were read.
+    /// The stamp of the note at `path`.
+    pub(crate) fn stamp(&self, path: &NotePath) -> Option<Stamp> {
+        self.files.get(path).map(|file| file.stamp)
+    }
+
+    /// Whether an outside change after revision `seen` gave the file of the note at `path` a
+    /// new stamp.
+    pub(crate) fn changed_after(&self, path: &NotePath, seen: u64) -> bool {
+        self.files.get(path).is_some_and(|file| file.outside > seen)
+    }
+
+    /// The revision of the last outside change that gave the file of the note at `path` a new
+    /// stamp, or 0.
+    pub(crate) fn outside(&self, path: &NotePath) -> u64 {
+        self.files.get(path).map_or(0, |file| file.outside)
+    }
+
+    /// Records that an outside change of `revision` gave each file at `paths` a new stamp. A
+    /// newer revision that a file has stays.
+    pub(crate) fn mark_outside<'p>(
+        &mut self,
+        paths: impl IntoIterator<Item = &'p NotePath>,
+        revision: u64,
+    ) {
+        for path in paths {
+            if let Some(file) = self.files.get_mut(path) {
+                file.outside = file.outside.max(revision);
+            }
+        }
+    }
+
+    /// Puts in what `settled` changes, and returns the notes that were read. A moved note keeps
+    /// the outside revision of its old path.
     pub(crate) fn apply(&mut self, settled: Settled) -> Vec<Note> {
         let mut removed = settled.removed;
         let mut put = Vec::with_capacity(settled.put.len() + settled.moved.len());
         let mut notes = Vec::with_capacity(settled.put.len());
+        let mut carried = Vec::with_capacity(settled.moved.len());
         for read in settled.put {
             put.push((read.note.info.clone(), read.links, read.stamp, read.source));
             notes.push(read.note);
         }
         for moved in settled.moved {
+            carried.push((moved.info.path.clone(), self.outside(&moved.from)));
             removed.push(moved.from);
             put.push((moved.info, moved.links, moved.stamp, moved.source));
         }
         self.remove_and_put(removed, put);
+        for (path, outside) in carried {
+            self.mark_outside([&path], outside);
+        }
         notes
     }
 
     /// Takes out the notes at `removed` first, so a note can move to a path and keep its id.
-    /// Then it puts in `put`.
+    /// Then it puts in `put`. A note keeps the outside revision of its path.
     fn remove_and_put(&mut self, removed: Vec<NotePath>, put: Vec<NoteFacts>) {
         for path in &removed {
             self.files.remove(path);
         }
         for (info, _, stamp, source) in &put {
-            self.files.insert(info.path.clone(), (*stamp, *source));
+            let file = File {
+                stamp: *stamp,
+                source: *source,
+                outside: self.outside(&info.path),
+            };
+            self.files.insert(info.path.clone(), file);
         }
         self.snapshot.swap(
             removed,
@@ -107,6 +158,6 @@ impl Facts {
     }
 }
 
-fn copied((path, (stamp, _)): (&NotePath, &(Stamp, LinkSource))) -> (NotePath, Stamp) {
-    (path.clone(), *stamp)
+fn stamp((path, file): (&NotePath, &File)) -> (NotePath, Stamp) {
+    (path.clone(), file.stamp)
 }

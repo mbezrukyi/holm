@@ -176,7 +176,7 @@ fn apply(folder: &mut Folder, edit: &Edit, copies: &mut usize) {
         } => {
             if let Some(path) = pick(folder, *note) {
                 let body = body(folder, words, *link);
-                folder.core.save(&path, &body).unwrap();
+                folder.core.save(&path, &body, None).unwrap();
                 for tag in tags(picks) {
                     let tag = TagName::typed(&tag).unwrap();
                     let has = folder.core.read(&path).unwrap().info.tags.contains(&tag);

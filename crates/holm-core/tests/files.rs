@@ -117,7 +117,7 @@ fn a_save_never_renames_the_note() {
 
     folder
         .core
-        .save(&note_path("Plans.md"), "# Spring plans\n\nText\n")
+        .save(&note_path("Plans.md"), "# Spring plans\n\nText\n", None)
         .unwrap();
 
     assert_eq!(folder.files(), ["Plans.md"]);

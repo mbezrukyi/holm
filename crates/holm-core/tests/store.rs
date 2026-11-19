@@ -174,7 +174,7 @@ fn save_adds_an_id_on_the_first_write_and_keeps_it() {
 
     let saved = folder
         .core
-        .save(&note_path("a.md"), "# A\n\nMore.\n")
+        .save(&note_path("a.md"), "# A\n\nMore.\n", None)
         .unwrap();
 
     let id = saved.info.id.clone().unwrap();
@@ -186,7 +186,7 @@ fn save_adds_an_id_on_the_first_write_and_keeps_it() {
     assert_eq!(
         folder
             .core
-            .save(&note_path("a.md"), "# A\n")
+            .save(&note_path("a.md"), "# A\n", None)
             .unwrap()
             .info
             .id,
@@ -206,7 +206,10 @@ fn save_writes_the_body_and_keeps_the_frontmatter_of_the_file() {
         "---\nauthor: me\nid: X1\ntags: [work, home]\npinned: true\n# a comment\n---\nBody\n",
     );
 
-    let saved = folder.core.save(&note_path("a.md"), "New body\n").unwrap();
+    let saved = folder
+        .core
+        .save(&note_path("a.md"), "New body\n", None)
+        .unwrap();
 
     assert_eq!(
         folder.text("a.md"),
@@ -221,7 +224,10 @@ fn save_keeps_the_old_time_when_it_only_adds_the_id() {
     let folder = Folder::new(&[("a.md", "Body\n")]);
     let time = folder.set_time("a.md", 1_000_000);
 
-    let saved = folder.core.save(&note_path("a.md"), "Body\n").unwrap();
+    let saved = folder
+        .core
+        .save(&note_path("a.md"), "Body\n", None)
+        .unwrap();
 
     assert!(saved.info.id.is_some());
     assert_eq!(saved.info.modified, time);
@@ -232,7 +238,10 @@ fn save_gives_a_new_time_when_the_body_changes() {
     let folder = Folder::new(&[("a.md", "---\nid: X1\n---\nBody\n")]);
     let time = folder.set_time("a.md", 1_000_000);
 
-    let saved = folder.core.save(&note_path("a.md"), "New body\n").unwrap();
+    let saved = folder
+        .core
+        .save(&note_path("a.md"), "New body\n", None)
+        .unwrap();
 
     assert!(saved.info.modified > time);
 }
@@ -243,7 +252,10 @@ fn save_with_no_change_does_not_write() {
     let folder = Folder::new(&[("a.md", text)]);
     let time = folder.set_time("a.md", 1_000_000);
 
-    folder.core.save(&note_path("a.md"), "Body\n").unwrap();
+    folder
+        .core
+        .save(&note_path("a.md"), "Body\n", None)
+        .unwrap();
 
     assert_eq!(folder.text("a.md"), text, "the flow list stays");
     assert_eq!(
@@ -258,7 +270,7 @@ fn save_adds_a_final_line_break_with_the_line_ending_of_the_file() {
 
     folder
         .core
-        .save(&note_path("a.md"), "Body\r\nMore")
+        .save(&note_path("a.md"), "Body\r\nMore", None)
         .unwrap();
 
     assert_eq!(
@@ -275,7 +287,7 @@ fn save_keeps_the_permissions_and_leaves_no_temp_file() {
     let path = folder.dir.path().join("a.md");
     fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
 
-    folder.core.save(&note_path("a.md"), "New\n").unwrap();
+    folder.core.save(&note_path("a.md"), "New\n", None).unwrap();
 
     let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o640);
@@ -288,7 +300,7 @@ fn save_fails_on_a_missing_note() {
     fs::remove_file(folder.dir.path().join("a.md")).unwrap();
 
     assert!(matches!(
-        folder.core.save(&note_path("a.md"), "New\n"),
+        folder.core.save(&note_path("a.md"), "New\n", None),
         Err(Error::Read { .. })
     ));
     assert_eq!(folder.files(), Vec::<String>::new());

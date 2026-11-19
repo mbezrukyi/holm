@@ -108,7 +108,7 @@ fn save(bencher: divan::Bencher<'_, '_>, size: usize) {
     let mut body = core.read(path).unwrap().body;
     bencher.bench_local(|| {
         body.push_str("word ");
-        core.save(path, &body).unwrap()
+        core.save(path, &body, None).unwrap()
     });
 }
 

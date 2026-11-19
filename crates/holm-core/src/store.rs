@@ -279,9 +279,19 @@ impl Store {
     ///
     /// It adds an id when the file has none. When the body stays the same,
     /// the file keeps its old modification time.
-    pub(crate) fn save(&self, rel: &NotePath, body: &str) -> Result<(Note, Stamp)> {
+    ///
+    /// With `base`, it fails with [`Error::Changed`] when the file has another stamp.
+    pub(crate) fn save(
+        &self,
+        rel: &NotePath,
+        body: &str,
+        base: Option<Stamp>,
+    ) -> Result<(Note, Stamp)> {
         let path = self.root.join(rel);
         let (old, stamp) = read_text(&path)?;
+        if base.is_some_and(|base| base != stamp) {
+            return Err(Error::Changed { path });
+        }
         let mut text = NoteFile::parse(&old);
         let mut body = body.to_owned();
         if !body.is_empty() && !body.ends_with('\n') {
@@ -319,7 +329,7 @@ impl Store {
             Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => {}
             Err(e) => return Err(write_error(&path, e.error)),
         }
-        self.save(&note.info.path, &note.body)
+        self.save(&note.info.path, &note.body, None)
     }
 
     /// Creates an empty note with a new id at `rel`.

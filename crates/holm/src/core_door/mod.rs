@@ -17,6 +17,9 @@
 //! the editor text. When the editor takes text of another note, the old text goes in the line at
 //! once. The draft keeps each text until a write of it succeeds, and each write of it ends in at
 //! most one [`SaveEvent`]. While a disk question of a note is open, no job writes its text.
+//! Each write of the draft carries the revision of the snapshot when it goes in the line. The
+//! core refuses it after an outside change that this revision does not hold, and the draft then
+//! holds the text as a disk question does.
 //!
 //! A change list from outside Holm wakes it when no job runs, and it sends one event. During a
 //! job, the lists wait for the event of the job. When its window closes or the app quits, it runs
@@ -110,6 +113,9 @@ pub(crate) enum SaveEvent {
     Saved,
     /// The write failed. The draft keeps the text, and the next job writes it again.
     Failed,
+    /// The core refused the write of the open note after an outside change. The draft holds
+    /// the text, as a disk question does.
+    Changed,
 }
 
 /// The editor text is not on disk after the writes: the last write of the draft failed, or a
@@ -634,10 +640,13 @@ impl CoreDoor {
         }
     }
 
+    /// Puts `save` in the write line. It carries the revision of the snapshot now, so the core
+    /// refuses it after an outside change that the door has not taken yet.
     fn push_save(&mut self, save: DraftSave) {
         let (send, mut receive) = oneshot::channel();
+        let seen = self.snapshot.revision();
         let work: Work = Box::new(move |core: &Core| {
-            let failure = save.text.write(core).err().map(AppError::from);
+            let failure = save.text.write(core, Some(seen)).err().map(AppError::from);
             let chain = failure.as_ref().map(|error| crate::chain(error));
             send.send(failure).ok();
             chain
@@ -647,6 +656,13 @@ impl CoreDoor {
             let Ok(Some(failure)) = receive.try_recv() else {
                 return;
             };
+            if failure.as_ref().is_some_and(AppError::is_outside_change) {
+                tracing::info!("a save found an outside change");
+                if door.draft.refused(id, version) == Written::Changed {
+                    cx.emit(SaveEvent::Changed);
+                }
+                return;
+            }
             let reason = failure.as_ref().map(AppError::message);
             match (door.draft.written(id, version, reason), failure) {
                 (Written::Saved, _) => cx.emit(SaveEvent::Saved),
@@ -737,7 +753,7 @@ impl CoreDoor {
         let draft: Work = Box::new(move |core: &Core| {
             let failures: Vec<String> = texts
                 .into_iter()
-                .filter_map(|text| text.write(core).err())
+                .filter_map(|text| text.write(core, None).err())
                 .map(|error| crate::chain(&error))
                 .collect();
             (!failures.is_empty()).then(|| failures.join("; "))
@@ -877,18 +893,25 @@ mod tests {
     use crate::test_paths::{folder_path, note_path, tag_name};
 
     fn core_door(cx: &mut TestAppContext) -> (TempDir, Entity<CoreDoor>) {
+        let (dir, core_door, _) = fed_core_door(cx);
+        (dir, core_door)
+    }
+
+    /// A door to a notes folder with `A.md`, and the feed that tells its core about outside
+    /// changes.
+    fn fed_core_door(cx: &mut TestAppContext) -> (TempDir, Entity<CoreDoor>, holm_core::Feed) {
         let dir = tempfile::tempdir().unwrap();
         let notes = dir.path().join("notes");
         fs::create_dir(&notes).unwrap();
         fs::write(notes.join("A.md"), "# A\n").unwrap();
-        let (core, _) = Core::open_with_feed(&notes, dir.path().join("index")).unwrap();
+        let (core, feed) = Core::open_with_feed(&notes, dir.path().join("index")).unwrap();
         let window = cx.add_window(|_, _| gpui_kit::Empty);
         let core_door = window
             .update(cx, |_, window, cx| {
                 cx.new(|cx| CoreDoor::new(core, notes, Duration::ZERO, window, cx))
             })
             .unwrap();
-        (dir, core_door)
+        (dir, core_door, feed)
     }
 
     #[gpui_kit::test]
@@ -1063,6 +1086,7 @@ mod tests {
                 let end = match event {
                     SaveEvent::Saved => "saved",
                     SaveEvent::Failed => "failed",
+                    SaveEvent::Changed => "changed",
                 };
                 steps.borrow_mut().push(end.to_owned());
             })
@@ -1115,9 +1139,11 @@ mod tests {
 
     #[gpui_kit::test]
     fn a_save_keeps_a_tag_from_another_tool(cx: &mut TestAppContext) {
-        let (dir, core_door) = core_door(cx);
+        let (dir, core_door, feed) = fed_core_door(cx);
         let file = dir.path().join("notes/A.md");
         fs::write(&file, "---\ntags: [theirs]\n---\n# A\n").unwrap();
+        feed.changed(["A.md"]).unwrap();
+        cx.run_until_parked();
 
         core_door.update(cx, |core_door, cx| {
             core_door.set_text(note_path("A.md"), "# A\n\nmine\n".into(), cx);

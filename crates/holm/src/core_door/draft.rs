@@ -6,7 +6,8 @@
 //! follows the moves of its note, and an outside delete makes it a restore of the note.
 //!
 //! A disk question holds the text of its note: the draft gives no write of it until
-//! [`Draft::release`] or [`Draft::drop_text`].
+//! [`Draft::release`] or [`Draft::drop_text`]. A write that the core refused after an outside
+//! change holds its text in the same way: [`Draft::refused`].
 //!
 //! A read of a note file can replace its text: [`Draft::drop_for_read`]. The text gives no
 //! write while the read runs, and it comes back when the read fails.
@@ -44,10 +45,11 @@ impl NoteText {
         }
     }
 
-    /// Saves the body. A save keeps the other facts that the core has for the note.
-    pub(super) fn write(self, core: &Core) -> holm_core::Result<()> {
+    /// Saves the body. A save keeps the other facts that the core has for the note. With
+    /// `seen`, the core refuses a save over an outside change after that revision.
+    pub(super) fn write(self, core: &Core, seen: Option<u64>) -> holm_core::Result<()> {
         match self {
-            Self::Save { path, body } => core.save(&path, &body).map(drop),
+            Self::Save { path, body } => core.save(&path, &body, seen).map(drop),
             Self::Restore { info, body } => core.restore(&Note { info, body }).map(drop),
         }
     }
@@ -68,6 +70,9 @@ pub(super) enum Written {
     /// The write failed, and the draft keeps the text. It is `first` when no other text of the
     /// draft had a failed write.
     Failed { first: bool },
+    /// The core refused the write of the open text after an outside change. The draft holds
+    /// the text, as a disk question does.
+    Changed,
     /// The end tells the user nothing. The draft dropped the text, or the open text gives
     /// its own end.
     Stale,
@@ -314,6 +319,29 @@ impl Draft {
         }
     }
 
+    /// Takes the end of the write of `version` of the text `id`, which the core refused after
+    /// an outside change. The text stays, and the draft holds it until [`Self::release`].
+    pub(super) fn refused(&mut self, id: u64, version: u64) -> Written {
+        let is_open = self.open.as_ref().is_some_and(|open| open.id == id);
+        let text = self
+            .left
+            .iter_mut()
+            .chain(&mut self.open)
+            .find(|text| text.id == id);
+        let Some(text) = text else {
+            return Written::Stale;
+        };
+        if text.writing == Some(version) {
+            text.writing = None;
+        }
+        text.held = true;
+        if is_open {
+            Written::Changed
+        } else {
+            Written::Stale
+        }
+    }
+
     /// Follows `change` from `source`. `before` is the snapshot before it.
     pub(super) fn follow(&mut self, source: Source, change: &Change, before: &Snapshot) {
         let texts = self.left.iter_mut().chain(&mut self.open);
@@ -365,6 +393,32 @@ mod tests {
         let mut writes = draft.writes();
         assert_eq!(writes.len(), 1);
         writes.pop().unwrap()
+    }
+
+    #[test]
+    fn a_refused_write_holds_the_text_until_its_release() {
+        let mut draft = Draft::default();
+        set(&mut draft, "A.md", "one");
+        let write = one_write(&mut draft);
+
+        assert_eq!(draft.refused(write.id, write.version), Written::Changed);
+        assert!(draft.unsaved());
+        assert!(draft.kept_back());
+        assert!(draft.writes().is_empty());
+
+        draft.release(&note_path("A.md"));
+        assert_eq!(one_write(&mut draft).text, save("A.md", "one"));
+    }
+
+    #[test]
+    fn a_refused_write_of_a_left_text_tells_nothing() {
+        let mut draft = Draft::default();
+        set(&mut draft, "A.md", "one");
+        let old = draft.set(note_path("B.md"), "two".into()).unwrap();
+
+        assert_eq!(draft.refused(old.id, old.version), Written::Stale);
+        assert!(draft.kept_back());
+        assert_eq!(one_write(&mut draft).text, save("B.md", "two"));
     }
 
     #[test]

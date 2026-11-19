@@ -307,6 +307,37 @@ fn typing_saves_the_note_with_its_line_breaks(cx: &mut TestAppContext) {
     assert_eq!(read(&note), "---\nid: 01A\n---\r\nzero one\r\ntwo\r\n");
 }
 
+/// A save that waits behind a late job does not write over a change that another tool made
+/// meanwhile. It asks the disk question instead.
+#[gpui_kit::test]
+fn a_save_behind_a_late_job_keeps_an_outside_change(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    let note = fixture.notes().join("Note.md");
+    fs::write(&note, "old\n").unwrap();
+    let startup = Startup {
+        write_budget: Duration::ZERO,
+        ..fixture.startup(None)
+    };
+    let handle = open(cx, startup);
+
+    press(cx, handle, "ctrl-shift-p");
+    press(cx, handle, "x");
+    press(cx, handle, "ctrl-shift-p");
+    fs::write(&note, "theirs\n").unwrap();
+    let feed = fixture.feed.lock().unwrap();
+    feed.as_ref().unwrap().changed(["Note.md"]).unwrap();
+    drop(feed);
+    cx.run_until_parked();
+
+    assert!(read(&note).ends_with("\n---\ntheirs\n"), "{}", read(&note));
+    assert_eq!(state(cx, handle).as_deref(), Some(text::CHANGED_ON_DISK));
+    assert_eq!(editor_text(cx, handle), "xold\n");
+
+    keys(cx, handle, "ctrl-shift-d enter");
+    assert_eq!(state(cx, handle), None);
+    assert!(read(&note).ends_with("\n---\nxold\n"), "{}", read(&note));
+}
+
 #[gpui_kit::test]
 fn a_late_pin_of_the_open_note_asks_nothing_about_the_disk(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
@@ -443,6 +474,8 @@ fn a_failed_reload_keeps_the_text_and_the_question(cx: &mut TestAppContext) {
     assert_eq!(editor_text(cx, handle), "mine old\n");
     assert_eq!(state(cx, handle).as_deref(), Some(text::CHANGED_ON_DISK));
     fs::set_permissions(&note, fs::Permissions::from_mode(0o644)).unwrap();
+    // The watcher sees the new permissions, so the core knows the new stamp.
+    fixture.tell(cx, "Note.md");
     autosave(cx);
     assert_eq!(read(&note), "theirs\n", "the question still holds the text");
 

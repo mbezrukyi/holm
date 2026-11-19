@@ -30,6 +30,7 @@ impl AppError {
                 holm_core::Error::BadPath { .. } => text::BAD_PATH,
                 holm_core::Error::BadTag { .. } => text::BAD_TAG,
                 holm_core::Error::NameTaken { .. } => text::NAME_TAKEN,
+                holm_core::Error::Changed { .. } => text::CHANGED_ON_DISK,
                 holm_core::Error::BadName { problem, .. } => match problem {
                     NameProblem::Empty => text::NAME_EMPTY,
                     NameProblem::Slash => text::NAME_SLASH,
@@ -45,6 +46,11 @@ impl AppError {
             Self::NoHome => text::NO_HOME,
             Self::Window(_) => text::WINDOW,
         }
+    }
+
+    /// Whether the core refused a save after a change from another tool.
+    pub(crate) fn is_outside_change(&self) -> bool {
+        matches!(self, Self::Core(holm_core::Error::Changed { .. }))
     }
 
     /// Whether the core refused a typed name: it is taken, or not a valid name.

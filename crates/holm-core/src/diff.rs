@@ -15,6 +15,8 @@ use crate::snapshot::Snapshot;
 pub(crate) struct Touched {
     /// In no order, maybe with repeats.
     notes: Vec<NotePath>,
+    /// The notes that were read, in no order.
+    read: Vec<NotePath>,
     folders: Vec<FolderPath>,
     moves: Vec<Change>,
 }
@@ -27,8 +29,10 @@ impl Touched {
             self.notes.push(moved.from.clone());
             self.notes.push(moved.info.path.clone());
         }
-        self.notes
-            .extend(settled.put.iter().map(|put| put.note.info.path.clone()));
+        for put in &settled.put {
+            self.notes.push(put.note.info.path.clone());
+            self.read.push(put.note.info.path.clone());
+        }
     }
 
     /// Adds the folders at `folder` or below it.
@@ -44,23 +48,33 @@ impl Touched {
 
     /// The facts after the write, and its change list from `source`. With a change, the
     /// facts get the next revision, and the list carries its snapshot. With no change, there is
-    /// no list, and the facts keep their revision.
+    /// no list, and the facts keep their revision. From outside, each note that was read gets
+    /// the revision of the facts after the write as its outside revision.
     ///
     /// The list holds the moves of the write first, then the note changes in path order,
     /// then [`Change::Folders`] and [`Change::Tags`]. A note that a move of the write
     /// explains gives no other change. A gone note and a new note with the same id are one
     /// [`Change::Moved`].
     pub(crate) fn list(
-        self,
+        mut self,
         source: Source,
         before: &Facts,
         after: Facts,
     ) -> (Facts, Option<ChangeList>) {
+        let read = std::mem::take(&mut self.read);
         let changes = self.changes(before.snapshot(), after.snapshot());
+        let mut after = if changes.is_empty() {
+            after
+        } else {
+            after.next_revision()
+        };
+        if source == Source::Outside {
+            let revision = after.snapshot().revision();
+            after.mark_outside(&read, revision);
+        }
         if changes.is_empty() {
             return (after, None);
         }
-        let after = after.next_revision();
         let list = ChangeList {
             source,
             snapshot: after.snapshot().clone(),
@@ -233,6 +247,7 @@ mod tests {
     ) -> Vec<Change> {
         let touched = Touched {
             notes: notes.iter().map(|at| path(at)).collect(),
+            read: Vec::new(),
             folders: folders.iter().map(|at| folder(at)).collect(),
             moves,
         };
@@ -245,6 +260,7 @@ mod tests {
         let before = facts(&[info("a.md", None, &[])], &["work"]);
         let touched = Touched {
             notes: vec![path("a.md")],
+            read: Vec::new(),
             folders: vec![folder("work")],
             moves: Vec::new(),
         };
