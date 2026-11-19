@@ -672,6 +672,30 @@ impl CoreDoor {
     /// Runs the jobs of the write line. With `until`, it waits on this thread up to the budget,
     /// until the job `until` ends. A job that does not end in time ends later, in its own update.
     fn run(&mut self, until: Option<u64>, cx: &mut Context<Self>) {
+        let writing = self.writing();
+        self.run_line(until, cx);
+        self.tell_writing(writing, cx);
+    }
+
+    /// Ends the running job, whose work ended after the call that started it, and runs the
+    /// jobs that wait.
+    fn job_woke(&mut self, ran: bool, cx: &mut Context<Self>) {
+        let writing = self.writing();
+        self.end_job(ran, cx);
+        self.run_line(None, cx);
+        self.tell_writing(writing, cx);
+    }
+
+    /// Notifies the observers when [`Self::writing`] changed since `before`. It comes after the
+    /// ends of the jobs, so the observers run after the deferred steps of the ends. A step can
+    /// ask for a new late job, and the observers never see the short state between the jobs.
+    fn tell_writing(&self, before: bool, cx: &mut Context<Self>) {
+        if self.writing() != before {
+            cx.notify();
+        }
+    }
+
+    fn run_line(&mut self, until: Option<u64>, cx: &mut Context<Self>) {
         let deadline = Instant::now() + self.budget;
         loop {
             if !self.write_line.is_running() && !self.write_line.start(cx) {
@@ -691,7 +715,7 @@ impl CoreDoor {
     /// Ends the running job. When its work `ran` on its thread, it takes every list that waits
     /// and sends one event. Then the watch starts again.
     fn end_job(&mut self, ran: bool, cx: &mut Context<Self>) {
-        let Some(end) = self.write_line.end(cx) else {
+        let Some(end) = self.write_line.end() else {
             return;
         };
         if ran {

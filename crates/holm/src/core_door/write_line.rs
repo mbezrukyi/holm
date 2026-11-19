@@ -118,8 +118,7 @@ impl WriteLine {
                     .running
                     .as_mut()
                     .is_some_and(|job| matches!(job.done.try_recv(), Ok(Some(()))));
-                door.end_job(ran, cx);
-                door.run(None, cx);
+                door.job_woke(ran, cx);
             })
             .ok();
         });
@@ -149,18 +148,16 @@ impl WriteLine {
         };
         if done.is_none() && self.late < Some(until) {
             self.late = Some(until);
-            cx.notify();
         }
         done.map(|done| done.is_ok())
     }
 
     /// Ends the running job, and gives its end. A late job is no longer late once it ends.
-    pub(super) fn end(&mut self, cx: &mut Context<CoreDoor>) -> Option<End> {
+    pub(super) fn end(&mut self) -> Option<End> {
         let job = self.running.take()?;
         self.ended = job.number;
         if self.late.is_some_and(|late| late <= self.ended) {
             self.late = None;
-            cx.notify();
         }
         Some(job.end)
     }
