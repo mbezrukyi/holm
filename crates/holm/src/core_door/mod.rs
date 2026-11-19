@@ -28,23 +28,21 @@
 //! [`JobFailed`]. The other reads log their error and give an empty value.
 
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
 use std::task::{self, Poll};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use futures_channel::oneshot;
-use futures_core::Stream;
 use gpui_kit::{App, AppContext as _, Context, EventEmitter, Subscription, Task, Window};
 use holm_core::model::{
     Change, ChangeList, DeleteCount, LinkTarget, Note, NoteSet, Order, SearchResults, Source,
 };
-use holm_core::{ChangeLists, Core, FolderPath, NotePath, Snapshot, TagName};
+use holm_core::{Core, FolderPath, NotePath, Snapshot, TagName};
 use holm_editor::PastedFile;
 
 use crate::error::AppError;
 use crate::tags::TagChange;
 use draft::{Draft, DraftSave, Written};
-use write_line::{End, Work, WriteLine};
+use write_line::{Ended, Work, WriteLine};
 
 mod draft;
 mod write_line;
@@ -137,15 +135,20 @@ pub(crate) enum SaveEvent {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct NotSaved;
 
+/// The end of one job, on the UI thread after its work and its event: it gives the result to
+/// the caller.
+type End = Box<dyn FnOnce(&mut CoreDoor, &mut Context<CoreDoor>)>;
+
 pub(crate) struct CoreDoor {
     core: Core,
     root: PathBuf,
     snapshot: Snapshot,
-    changes: ChangeLists,
     /// How long a call waits for its job.
     budget: Duration,
-    write_line: WriteLine,
+    write_line: WriteLine<End>,
     draft: Draft,
+    /// It ends the late job, when its work ends.
+    wake: Option<Task<()>>,
     watch: Task<()>,
     _ends: [Subscription; 2],
 }
@@ -178,13 +181,13 @@ impl CoreDoor {
         ];
         let (snapshot, changes) = core.follow();
         Self {
-            changes,
             snapshot,
-            write_line: WriteLine::new(core.clone()),
+            write_line: WriteLine::new(core.clone(), changes),
             core,
             root,
             budget,
             draft: Draft::default(),
+            wake: None,
             watch: Self::watch(cx),
             _ends: ends,
         }
@@ -714,16 +717,19 @@ impl CoreDoor {
     /// until the job `until` ends. A job that does not end in time ends later, in its own update.
     fn run(&mut self, until: Option<u64>, cx: &mut Context<Self>) {
         let writing = self.writing();
-        self.run_line(until, cx);
-        self.tell_writing(writing, cx);
-    }
-
-    /// Ends the running job, whose work ended after the call that started it, and runs the
-    /// jobs that wait.
-    fn job_woke(&mut self, ran: bool, cx: &mut Context<Self>) {
-        let writing = self.writing();
-        self.end_job(ran, cx);
-        self.run_line(None, cx);
+        let run = self.write_line.run(until, self.budget, cx);
+        if let Some(wake) = run.wake {
+            self.wake = Some(cx.spawn(async move |door, cx| {
+                wake.await;
+                door.update(cx, |door, cx| door.run(None, cx)).ok();
+            }));
+        }
+        if !run.ended.is_empty() {
+            for job in run.ended {
+                self.end_job(job, cx);
+            }
+            self.watch = Self::watch(cx);
+        }
         self.tell_writing(writing, cx);
     }
 
@@ -736,36 +742,11 @@ impl CoreDoor {
         }
     }
 
-    fn run_line(&mut self, until: Option<u64>, cx: &mut Context<Self>) {
-        let deadline = Instant::now() + self.budget;
-        loop {
-            if !self.write_line.is_running() && !self.write_line.start(cx) {
-                return;
-            }
-            let Some(until) = until.filter(|until| !self.write_line.has_ended(*until)) else {
-                return;
-            };
-            let left = deadline.saturating_duration_since(Instant::now());
-            let Some(ran) = self.write_line.wait(until, left, cx) else {
-                return;
-            };
-            self.end_job(ran, cx);
-        }
-    }
-
-    /// Ends the running job. When its work `ran` on its thread, it takes every list that waits
-    /// and sends one event. Then the watch starts again.
-    fn end_job(&mut self, ran: bool, cx: &mut Context<Self>) {
-        let Some(end) = self.write_line.end() else {
-            return;
-        };
-        if ran {
-            let lists: Vec<ChangeList> = std::iter::from_fn(|| self.changes.try_next()).collect();
-            let event = self.keep(lists);
-            cx.emit(event);
-            end(self, cx);
-        }
-        self.watch = Self::watch(cx);
+    /// Sends one event with the lists of the job, and then gives the job its end.
+    fn end_job(&mut self, Ended { end, lists }: Ended<End>, cx: &mut Context<Self>) {
+        let event = self.keep(lists);
+        cx.emit(event);
+        end(self, cx);
     }
 
     /// Runs every job that waits, and then writes the draft. Later jobs do not run.
@@ -782,8 +763,8 @@ impl CoreDoor {
         self.write_line.drain(draft);
     }
 
-    /// Wakes on each change list while no job runs. A job ends it, and [`Self::end_job`]
-    /// starts a new one.
+    /// Wakes on each change list while no job runs. A job ends it, and [`Self::run`] starts a
+    /// new one after the jobs that ended.
     fn watch(cx: &mut Context<Self>) -> Task<()> {
         cx.spawn(async move |door, cx| {
             std::future::poll_fn(|waker| {
@@ -796,13 +777,9 @@ impl CoreDoor {
 
     /// Takes every list that waits and sends one event. During a job, it takes nothing.
     fn wake(&mut self, waker: &mut task::Context<'_>, cx: &mut Context<Self>) -> Poll<()> {
-        if self.write_line.is_running() {
+        let Some(lists) = self.write_line.outside(waker) else {
             return Poll::Ready(());
-        }
-        let mut lists = Vec::new();
-        while let Poll::Ready(Some(list)) = Pin::new(&mut self.changes).poll_next(waker) {
-            lists.push(list);
-        }
+        };
         if !lists.is_empty() {
             let event = self.keep(lists);
             cx.emit(event);
