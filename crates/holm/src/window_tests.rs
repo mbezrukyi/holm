@@ -3839,7 +3839,7 @@ fn ctrl_question_mark_opens_the_shortcut_list_and_esc_gives_the_focus_back(
         "New folder: Ctrl+Shift+N",
         "Shortcuts: Ctrl+?",
         "App menu: F10",
-        "Close the shortcut list: Esc",
+        "Close: Esc",
     ] {
         assert!(rows.iter().any(|shown| shown == row), "{row} is missing");
     }
@@ -3848,6 +3848,54 @@ fn ctrl_question_mark_opens_the_shortcut_list_and_esc_gives_the_focus_back(
     assert_eq!(question(cx, handle), None);
     assert_eq!(focus(cx, handle), "editor");
     assert_eq!(editor_text(cx, handle), "a\n");
+}
+
+#[gpui_kit::test]
+fn the_shortcut_list_names_each_place_once_and_no_label_runs_into_its_keys(
+    cx: &mut TestAppContext,
+) {
+    let fixture = Fixture::new().with_folder();
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-?");
+
+    let mut headings = labels(cx, handle, "shortcuts", Role::Heading);
+    headings.sort();
+    let mut want = [
+        text::IN_SIDEBAR,
+        text::IN_TREE,
+        text::IN_NOTE_LIST,
+        text::IN_TAG_ROW,
+        text::IN_QUESTION,
+        text::IN_POPUP_LIST,
+        text::IN_NAME_FIELD,
+        text::IN_SETTINGS,
+        text::IN_SHORTCUT_LIST,
+        text::IN_FIND,
+        text::IN_COLOR_WINDOW,
+    ];
+    want.sort_unstable();
+    assert_eq!(headings, want);
+
+    let count = crate::shortcuts::list().len();
+    let crowded: Vec<String> = screen(cx, handle, |window| {
+        (0..count)
+            .filter_map(|at| {
+                let item = window.try_find(("shortcut", at))?;
+                let (edge, name) = (
+                    item.bounds().right(),
+                    item.label().unwrap_or_default().to_owned(),
+                );
+                let row = window.within(("shortcut", at));
+                let label = row.try_find("label")?.bounds();
+                let keys = row.try_find("keys")?.bounds();
+                (label.right() >= keys.left() || keys.right() > edge).then_some(name)
+            })
+            .collect()
+    });
+    assert!(
+        crowded.is_empty(),
+        "labels run into their keys: {crowded:?}"
+    );
 }
 
 #[gpui_kit::test]

@@ -228,7 +228,7 @@ pub(crate) const KEY_LINK_FOLDERS: &str = "Link folders";
 pub(crate) const KEY_MOVE: &str = "Move to a folder";
 pub(crate) const KEY_SHOW_NOTES: &str = "Show the notes";
 pub(crate) const KEY_FOCUS_EDITOR: &str = "Go to the note";
-pub(crate) const KEY_BACK: &str = "Clear the search, or go back to the tree";
+pub(crate) const KEY_BACK: &str = "Clear the search or go back";
 pub(crate) const KEY_RENAME_ITEM: &str = "Rename the folder or tag";
 pub(crate) const KEY_DELETE_ITEM: &str = "Delete the folder or tag";
 pub(crate) const KEY_RENAME_NOTE: &str = "Rename the note";
@@ -237,22 +237,31 @@ pub(crate) const KEY_RENAME_TAG: &str = "Rename the tag";
 pub(crate) const KEY_YES: &str = "Yes";
 pub(crate) const KEY_NO: &str = "No";
 pub(crate) const KEY_SWITCH_ASK: &str = "Switch “Do not show again”";
-pub(crate) const KEY_PICK: &str = "Pick";
+pub(crate) const KEY_PICK: &str = "Pick the row";
 pub(crate) const KEY_CLOSE: &str = "Close";
-pub(crate) const KEY_CONFIRM: &str = "Confirm";
-pub(crate) const KEY_CANCEL: &str = "Cancel";
+pub(crate) const KEY_CONFIRM: &str = "Keep the text";
+pub(crate) const KEY_CANCEL: &str = "Drop the text";
 pub(crate) const KEY_NEXT_SETTING: &str = "Next setting";
 pub(crate) const KEY_PREVIOUS_SETTING: &str = "Previous setting";
-pub(crate) const KEY_SWITCH_SETTING: &str = "Switch the setting, or change the notes folder";
+pub(crate) const KEY_SWITCH_SETTING: &str = "Switch a setting";
 pub(crate) const KEY_CHANGE_FOLDER: &str = "Change the notes folder";
-pub(crate) const KEY_CLOSE_SETTINGS: &str = "Close the settings";
-pub(crate) const KEY_CLOSE_SHORTCUT_LIST: &str = "Close the shortcut list";
 
 pub(crate) const SHORTCUT_LIST: &str = "Shortcuts";
 pub(crate) const GROUP_TEXT: &str = "TEXT";
 pub(crate) const GROUP_NOTE: &str = "NOTE";
 pub(crate) const GROUP_SIDEBAR: &str = "SIDEBAR";
 pub(crate) const GROUP_WINDOW: &str = "WINDOW";
+pub(crate) const IN_SIDEBAR: &str = "In the sidebar";
+pub(crate) const IN_TREE: &str = "In the tree";
+pub(crate) const IN_NOTE_LIST: &str = "In the note list";
+pub(crate) const IN_TAG_ROW: &str = "In the tag row";
+pub(crate) const IN_QUESTION: &str = "In a question";
+pub(crate) const IN_POPUP_LIST: &str = "In a popup list";
+pub(crate) const IN_NAME_FIELD: &str = "In a name field";
+pub(crate) const IN_SETTINGS: &str = "In the settings";
+pub(crate) const IN_SHORTCUT_LIST: &str = "In this list";
+pub(crate) const IN_FIND: &str = "In find";
+pub(crate) const IN_COLOR_WINDOW: &str = "In the color window";
 
 #[cfg(test)]
 mod tests {

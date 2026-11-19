@@ -403,14 +403,14 @@ const ROWS: &[Row] = &[
         Keys::plain("escape"),
         C::Close,
         G::Window,
-        text::KEY_CLOSE_SETTINGS,
+        text::KEY_CLOSE,
     ),
     row(
         P::ShortcutList,
         Keys::plain("escape"),
         C::Close,
         G::Window,
-        text::KEY_CLOSE_SHORTCUT_LIST,
+        text::KEY_CLOSE,
     ),
 ];
 

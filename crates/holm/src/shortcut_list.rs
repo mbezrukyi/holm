@@ -1,6 +1,9 @@
 //! The shortcut list over the notes view. Its rows come from [`shortcuts::list`], so it shows
 //! each key of the app and the editor tables, and no other key.
 //!
+//! Each group first shows the rows that work everywhere in it. Then the rows of each other place
+//! follow under a heading, like "In a question", so their labels can stay short.
+//!
 //! `Up` and `Down` scroll the list. `Esc` closes it.
 
 use gpui_kit::component::kbd::Kbd;
@@ -12,6 +15,8 @@ use gpui_kit::{
     StatefulInteractiveElement as _, Styled, TestSupportExt as _, Window, div, point, px,
     transparent_black,
 };
+
+use holm_editor::shortcuts as editor;
 
 use crate::shortcuts::{self, Command, Group, Place, Shortcut};
 use crate::{popup, text};
@@ -41,6 +46,45 @@ fn title(group: Group) -> &'static str {
         Group::Sidebar => text::GROUP_SIDEBAR,
         Group::Window => text::GROUP_WINDOW,
     }
+}
+
+/// The heading over the rows of `place`. The rows of the whole view, of the note, and of each
+/// text input have none.
+fn heading(place: Place) -> Option<&'static str> {
+    match place {
+        Place::Window
+        | Place::Note
+        | Place::Editor(editor::Place::Text | editor::Place::Editor) => None,
+        Place::Sidebar => Some(text::IN_SIDEBAR),
+        Place::Tree => Some(text::IN_TREE),
+        Place::NoteList => Some(text::IN_NOTE_LIST),
+        Place::Tags => Some(text::IN_TAG_ROW),
+        Place::Dialog => Some(text::IN_QUESTION),
+        Place::ListPopup => Some(text::IN_POPUP_LIST),
+        Place::TextField => Some(text::IN_NAME_FIELD),
+        Place::Settings => Some(text::IN_SETTINGS),
+        Place::ShortcutList => Some(text::IN_SHORTCUT_LIST),
+        Place::Editor(editor::Place::Find) => Some(text::IN_FIND),
+        Place::Editor(editor::Place::ColorWindow) => Some(text::IN_COLOR_WINDOW),
+    }
+}
+
+/// The rows of `group` as places in `shortcuts`, in sections. The section with no heading
+/// comes first. Then each heading follows in the order of its first row.
+fn sections(shortcuts: &[Shortcut], group: Group) -> Vec<(Option<&'static str>, Vec<usize>)> {
+    let mut sections: Vec<(Option<&'static str>, Vec<usize>)> = vec![(None, Vec::new())];
+    for (at, shortcut) in shortcuts.iter().enumerate() {
+        if shortcut.group != group {
+            continue;
+        }
+        let heading = heading(shortcut.place);
+        match sections.iter_mut().find(|(other, _)| *other == heading) {
+            Some((_, rows)) => rows.push(at),
+            None => sections.push((heading, vec![at])),
+        }
+    }
+    sections.retain(|(_, rows)| !rows.is_empty());
+    sections
 }
 
 pub(crate) struct ShortcutList {
@@ -88,41 +132,65 @@ impl ShortcutList {
 
     fn group(&self, group: Group, cx: &App) -> impl IntoElement + use<> {
         let theme = cx.theme();
-        let rows = self
-            .shortcuts
-            .iter()
-            .enumerate()
-            .filter(|(_, shortcut)| shortcut.group == group)
-            .map(|(at, shortcut)| {
-                let keystroke = shortcuts::keystroke(shortcut.keys);
-                h_flex()
-                    .id(("shortcut", at))
-                    .role(Role::ListItem)
-                    .aria_label(format!("{}: {}", shortcut.label, Kbd::format(&keystroke)))
-                    .test_support()
-                    .justify_between()
-                    .gap_3()
-                    .py(px(2.))
-                    .child(div().min_w_0().truncate().child(shortcut.label))
-                    .child(
-                        Kbd::new(keystroke)
-                            .outline()
-                            .text_size(KEY_SIZE)
-                            .px(px(5.))
-                            .py(px(2.)),
-                    )
-            });
-        v_flex()
+        let muted = theme.muted_foreground;
+        let mut column = v_flex().child(
+            div()
+                .pt_2()
+                .pb_1()
+                .text_xs()
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(muted)
+                .child(title(group)),
+        );
+        for (heading, rows) in sections(&self.shortcuts, group) {
+            if let Some(heading) = heading {
+                column = column.child(
+                    div()
+                        .id(heading)
+                        .role(Role::Heading)
+                        .aria_label(heading)
+                        .test_support()
+                        .pt_2()
+                        .text_sm()
+                        .text_color(muted)
+                        .child(heading),
+                );
+            }
+            column = column.children(rows.into_iter().map(|at| self.row(at)));
+        }
+        column
+    }
+
+    /// The row of the shortcut at `at`. The label never shrinks, so a test can find a label
+    /// that runs into its keys.
+    fn row(&self, at: usize) -> impl IntoElement + use<> {
+        let shortcut = self.shortcuts[at];
+        let keystroke = shortcuts::keystroke(shortcut.keys);
+        h_flex()
+            .id(("shortcut", at))
+            .role(Role::ListItem)
+            .aria_label(format!("{}: {}", shortcut.label, Kbd::format(&keystroke)))
+            .test_support()
+            .justify_between()
+            .gap_3()
+            .py(px(2.))
             .child(
                 div()
-                    .pt_2()
-                    .pb_1()
-                    .text_xs()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme.muted_foreground)
-                    .child(title(group)),
+                    .id("label")
+                    .test_support()
+                    .flex_none()
+                    .whitespace_nowrap()
+                    .child(shortcut.label),
             )
-            .children(rows)
+            .child(
+                div().id("keys").test_support().flex_none().child(
+                    Kbd::new(keystroke)
+                        .outline()
+                        .text_size(KEY_SIZE)
+                        .px(px(5.))
+                        .py(px(2.)),
+                ),
+            )
     }
 }
 
@@ -182,5 +250,32 @@ impl Render for ShortcutList {
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key_down))
             .child(panel)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_group_shows_each_of_its_rows_once_and_the_plain_rows_first() {
+        let list = shortcuts::list();
+        let mut shown = Vec::new();
+        for group in [Group::Text, Group::Note, Group::Sidebar, Group::Window] {
+            let sections = sections(&list, group);
+            let mut headings: Vec<_> = sections.iter().map(|(heading, _)| *heading).collect();
+            assert!(headings.iter().skip(1).all(Option::is_some), "{group:?}");
+            headings.dedup();
+            assert_eq!(headings.len(), sections.len(), "one section per heading");
+            for (heading, rows) in sections {
+                for at in rows {
+                    assert_eq!(list[at].group, group);
+                    assert_eq!(super::heading(list[at].place), heading);
+                    shown.push(at);
+                }
+            }
+        }
+        shown.sort_unstable();
+        assert_eq!(shown, (0..list.len()).collect::<Vec<_>>());
     }
 }
