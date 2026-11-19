@@ -5,7 +5,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use gpui_kit::component::input::{Enter, Escape, Input, InputEvent, InputState, MoveDown, MoveUp};
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -20,6 +20,7 @@ use holm_core::NotePath;
 use holm_core::model::NoteInfo;
 
 use crate::icons::Icon;
+use crate::shortcuts::{Command, Place, Run};
 use crate::text;
 
 /// A layer over the whole window that centers its child. The parts under it get no mouse
@@ -142,7 +143,7 @@ pub(crate) enum PickEvent {
 
 /// A search field over a list of rows, for the panel of a small window.
 ///
-/// `↑` and `↓` select a row. A row under the mouse gets selected too. A list that is too long
+/// Its keys are the rows of [`Place::Picker`]. `↑` and `↓` select a row. A row under the mouse gets selected too. A list that is too long
 /// for the panel scrolls, and its scrollbar takes a lane on the right of the rows.
 pub(crate) struct PickList {
     field: Entity<InputState>,
@@ -215,6 +216,20 @@ impl PickList {
         cx.notify();
     }
 
+    fn run(&mut self, Run(command): &Run, _: &mut Window, cx: &mut Context<Self>) {
+        match command {
+            Command::Previous => self.step(false, cx),
+            Command::Next => self.step(true, cx),
+            Command::Pick => {
+                if let Some(at) = self.selected() {
+                    cx.emit(PickEvent::Pick(at));
+                }
+            }
+            Command::Close => cx.emit(PickEvent::Close),
+            _ => cx.propagate(),
+        }
+    }
+
     fn list(&self, cx: &Context<Self>) -> Stateful<Div> {
         let count = self.rows.len();
         #[allow(clippy::cast_precision_loss, reason = "far fewer rows than 2^24")]
@@ -276,24 +291,8 @@ impl Render for PickList {
         let theme = cx.theme();
         v_flex()
             .w_full()
-            .capture_action(cx.listener(|list, _: &MoveUp, _, cx| {
-                list.step(false, cx);
-                cx.stop_propagation();
-            }))
-            .capture_action(cx.listener(|list, _: &MoveDown, _, cx| {
-                list.step(true, cx);
-                cx.stop_propagation();
-            }))
-            .capture_action(cx.listener(|list, _: &Enter, _, cx| {
-                if let Some(at) = list.selected() {
-                    cx.emit(PickEvent::Pick(at));
-                }
-                cx.stop_propagation();
-            }))
-            .capture_action(cx.listener(|_, _: &Escape, _, cx| {
-                cx.emit(PickEvent::Close);
-                cx.stop_propagation();
-            }))
+            .key_context(Place::Picker.key_context())
+            .on_action(cx.listener(Self::run))
             .child(
                 div()
                     .flex_none()

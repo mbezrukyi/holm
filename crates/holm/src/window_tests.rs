@@ -3989,6 +3989,9 @@ fn ctrl_question_mark_opens_the_shortcut_list_and_esc_gives_the_focus_back(
         "Shortcuts: Ctrl+?",
         "App menu: F10",
         "Close: Esc",
+        "Add or remove the tag: Tab",
+        "Go to the results: Enter",
+        "Fill in the title and add #: Tab",
     ] {
         assert!(rows.iter().any(|shown| shown == row), "{row} is missing");
     }
@@ -4014,7 +4017,10 @@ fn the_shortcut_list_names_each_place_once_and_no_label_runs_into_its_keys(
         text::IN_SIDEBAR,
         text::IN_TREE,
         text::IN_NOTE_LIST,
-        text::IN_TAG_ROW,
+        text::IN_TAG_POPUP,
+        text::IN_SEARCH_FIELD,
+        text::IN_PICKER,
+        text::IN_LINK_PICKER,
         text::IN_QUESTION,
         text::IN_POPUP_LIST,
         text::IN_NAME_FIELD,

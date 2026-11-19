@@ -17,7 +17,7 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::time::SystemTime;
 
-use gpui_kit::component::input::{Enter, Escape, Input, InputEvent, InputState, MoveDown, MoveUp};
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -799,6 +799,15 @@ impl Sidebar {
         true
     }
 
+    /// A key of [`Place::SearchField`].
+    fn search_command(&mut self, Run(command): &Run, window: &mut Window, cx: &mut Context<Self>) {
+        match command {
+            Command::ShowResults => self.enter_results(window, cx),
+            Command::Back => self.clear_search(window, cx),
+            _ => cx.propagate(),
+        }
+    }
+
     fn search_field(&self, window: &Window, cx: &Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let button = self.menu_button.clone();
@@ -812,19 +821,8 @@ impl Sidebar {
                     button.set(*bounds);
                 }
             })
-            .capture_action(cx.listener(|sidebar, _: &Escape, window, cx| {
-                sidebar.clear_search(window, cx);
-                cx.stop_propagation();
-            }))
-            .capture_action(cx.listener(|sidebar, _: &Enter, window, cx| {
-                sidebar.enter_results(window, cx);
-                cx.stop_propagation();
-            }))
-            .capture_action(cx.listener(|sidebar, _: &MoveDown, window, cx| {
-                sidebar.enter_results(window, cx);
-                cx.stop_propagation();
-            }))
-            .capture_action(cx.listener(|_, _: &MoveUp, _, cx| cx.stop_propagation()))
+            .key_context(Place::SearchField.key_context())
+            .on_action(cx.listener(Self::search_command))
             .child(
                 div().flex_1().min_w_0().child(
                     Input::new(&self.search)

@@ -6,7 +6,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use gpui_kit::component::input::IndentInline;
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _, IntoElement,
     ParentElement, Render, Role, StatefulInteractiveElement as _, Subscription,
@@ -20,6 +19,7 @@ use crate::core_door::CoreDoor;
 use crate::link_rows::{self, LinkRow, Query};
 use crate::pick_notes::PickNotes;
 use crate::popup::{self, PickEvent, PickList, PickRow};
+use crate::shortcuts::{Command, Place, Run};
 use crate::text;
 
 /// What the link picker starts with.
@@ -188,7 +188,6 @@ impl LinkPicker {
 
     /// Tab fills in the title of the selected note and adds `#`.
     fn fill_title(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        cx.stop_propagation();
         let selected = self.list.read(cx).selected();
         let Some(LinkRow::Note(at)) = selected.and_then(|at| self.rows.get(at)) else {
             return;
@@ -232,8 +231,13 @@ impl Render for LinkPicker {
             .role(Role::Dialog)
             .aria_label(text::LINK_TO_NOTE)
             .test_support()
-            .capture_action(cx.listener(|this, _: &IndentInline, window, cx| {
-                this.fill_title(window, cx);
+            .key_context(Place::LinkPicker.key_context())
+            .on_action(cx.listener(|this, Run(command): &Run, window, cx| {
+                if *command == Command::FillTitle {
+                    this.fill_title(window, cx);
+                } else {
+                    cx.propagate();
+                }
             }))
             .child(
                 popup::panel(px(480.), cx)

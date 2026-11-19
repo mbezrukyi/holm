@@ -27,9 +27,7 @@
 
 use std::ops::Range;
 
-use gpui_kit::component::input::{
-    Enter, Escape, IndentInline, Input, InputEvent, InputState, MoveDown, MoveUp,
-};
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -268,11 +266,26 @@ impl TagRow {
         cx.notify();
     }
 
-    /// `F2`: dispatches [`RenameTag`] for the tag line under the cursor.
+    /// A key of [`Place::TagPopup`].
     fn run(&mut self, Run(command): &Run, window: &mut Window, cx: &mut Context<Self>) {
-        if *command != Command::Rename {
-            return cx.propagate();
+        match command {
+            Command::Pick => self.choose(window, cx),
+            Command::Close => self.close(window, cx),
+            Command::Previous => {
+                self.move_cursor(false, cx);
+            }
+            Command::Next => {
+                if !self.move_cursor(true, cx) {
+                    self.close(window, cx);
+                }
+            }
+            Command::Rename => self.rename(window, cx),
+            _ => cx.propagate(),
         }
+    }
+
+    /// `F2`: dispatches [`RenameTag`] for the tag line under the cursor.
+    fn rename(&self, window: &mut Window, cx: &mut Context<Self>) {
         let line = self.cursor.and_then(|at| self.lines().get(at).cloned());
         if let Some(Line::Tag { name, .. }) = line {
             window.dispatch_action(Box::new(RenameTag(name)), cx);
@@ -412,30 +425,8 @@ impl TagRow {
         self.dropdown
             .panel(POPUP_WIDTH, window, cx)
             .left_0()
-            .key_context(Place::Tags.key_context())
+            .key_context(Place::TagPopup.key_context())
             .on_action(cx.listener(Self::run))
-            .capture_action(cx.listener(|row, _: &Enter, window, cx| {
-                row.choose(window, cx);
-                cx.stop_propagation();
-            }))
-            .capture_action(cx.listener(|row, _: &IndentInline, window, cx| {
-                row.choose(window, cx);
-                cx.stop_propagation();
-            }))
-            .capture_action(cx.listener(|row, _: &Escape, window, cx| {
-                row.close(window, cx);
-                cx.stop_propagation();
-            }))
-            .capture_action(cx.listener(|row, _: &MoveDown, window, cx| {
-                if !row.move_cursor(true, cx) {
-                    row.close(window, cx);
-                }
-                cx.stop_propagation();
-            }))
-            .capture_action(cx.listener(|row, _: &MoveUp, _, cx| {
-                row.move_cursor(false, cx);
-                cx.stop_propagation();
-            }))
             .child(
                 div().p_1().child(
                     Input::new(&self.input)

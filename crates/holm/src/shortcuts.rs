@@ -2,8 +2,8 @@
 //! reaches its view as a [`Run`] action. [`list`] joins it with the editor table for the
 //! shortcut list.
 //!
-//! Plain cursor keys, Backspace, Delete in a text field, and typing are not shortcuts, so they
-//! are not in the table.
+//! Typing, Backspace and Delete in a text field, and the plain cursor keys outside the pickers
+//! and the tag popup are not shortcuts, so they are not in the table.
 
 use gpui_kit::{Action, App, KeyBinding, Keystroke, NoAction};
 use holm_editor::shortcuts::{self as editor, Keys, Shift};
@@ -25,8 +25,14 @@ pub(crate) enum Place {
     Tree,
     /// The note list of the sidebar.
     NoteList,
-    /// The tag row.
-    Tags,
+    /// The tag popup under the tag row.
+    TagPopup,
+    /// The search field of the sidebar.
+    SearchField,
+    /// A list with a search field: quick open, the link picker and the folder picker.
+    Picker,
+    /// The link picker, around its [`Place::Picker`].
+    LinkPicker,
     /// A dialog that asks a question.
     Dialog,
     /// A popup with a list: the problem list, the backlinks, the state menu and the app menu.
@@ -52,7 +58,10 @@ impl Place {
             Self::Sidebar => "Sidebar",
             Self::Tree => "Tree",
             Self::NoteList => "NoteList",
-            Self::Tags => "Tags",
+            Self::TagPopup => "TagPopup",
+            Self::SearchField => "SearchField",
+            Self::Picker => "Picker",
+            Self::LinkPicker => "LinkPicker",
             Self::Dialog => "Dialog",
             Self::ListPopup => "ListPopup",
             Self::TextField => "TextField",
@@ -113,6 +122,14 @@ pub(crate) enum Command {
     FocusEditor,
     /// Clears the search, or goes back to the tree.
     Back,
+    /// Goes from the search field to the results.
+    ShowResults,
+    /// Moves to the row above.
+    Previous,
+    /// Moves to the row below.
+    Next,
+    /// Fills in the title of the selected note in the link picker.
+    FillTitle,
     Rename,
     Delete,
     Yes,
@@ -347,11 +364,74 @@ const ROWS: &[Row] = &[
         text::KEY_DELETE_NOTE,
     ),
     row(
-        P::Tags,
+        P::TagPopup,
         Keys::plain("f2"),
         C::Rename,
         G::Note,
         text::KEY_RENAME_TAG,
+    ),
+    row(
+        P::TagPopup,
+        Keys::plain("enter"),
+        C::Pick,
+        G::Note,
+        text::KEY_SWITCH_TAG,
+    ),
+    row(
+        P::TagPopup,
+        Keys::plain("tab"),
+        C::Pick,
+        G::Note,
+        text::KEY_SWITCH_TAG,
+    ),
+    row(
+        P::TagPopup,
+        Keys::plain("up"),
+        C::Previous,
+        G::Note,
+        text::KEY_PREVIOUS_TAG,
+    ),
+    row(
+        P::TagPopup,
+        Keys::plain("down"),
+        C::Next,
+        G::Note,
+        text::KEY_NEXT_TAG,
+    ),
+    row(
+        P::TagPopup,
+        Keys::plain("escape"),
+        C::Close,
+        G::Note,
+        text::KEY_CLOSE,
+    ),
+    row(
+        P::LinkPicker,
+        Keys::plain("tab"),
+        C::FillTitle,
+        G::Note,
+        text::KEY_FILL_TITLE,
+    ),
+    row(
+        P::SearchField,
+        Keys::plain("enter"),
+        C::ShowResults,
+        G::Sidebar,
+        text::KEY_SHOW_RESULTS,
+    ),
+    row(
+        P::SearchField,
+        Keys::plain("down"),
+        C::ShowResults,
+        G::Sidebar,
+        text::KEY_SHOW_RESULTS,
+    ),
+    row(
+        P::SearchField,
+        Keys::plain("escape"),
+        C::Back,
+        G::Sidebar,
+        text::KEY_CLEAR_SEARCH,
     ),
     row(
         P::Dialog,
@@ -383,6 +463,34 @@ const ROWS: &[Row] = &[
     ),
     row(
         P::ListPopup,
+        Keys::plain("escape"),
+        C::Close,
+        G::Window,
+        text::KEY_CLOSE,
+    ),
+    row(
+        P::Picker,
+        Keys::plain("up"),
+        C::Previous,
+        G::Window,
+        text::KEY_PREVIOUS_ROW,
+    ),
+    row(
+        P::Picker,
+        Keys::plain("down"),
+        C::Next,
+        G::Window,
+        text::KEY_NEXT_ROW,
+    ),
+    row(
+        P::Picker,
+        Keys::plain("enter"),
+        C::Pick,
+        G::Window,
+        text::KEY_PICK,
+    ),
+    row(
+        P::Picker,
         Keys::plain("escape"),
         C::Close,
         G::Window,
@@ -578,6 +686,7 @@ mod tests {
                 (a, b),
                 (Place::Anywhere | Place::Window, _)
                     | (Place::Sidebar, Place::Tree | Place::NoteList)
+                    | (Place::LinkPicker, Place::Picker)
                     | (Place::Note, Place::Editor(_))
                     | (
                         Place::Editor(E::Text),
