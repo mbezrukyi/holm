@@ -1,15 +1,15 @@
 //! The color window: it sets the text color or the highlight color of the selection.
 
 use gpui_kit::{
-    AnyElement, Hsla, InteractiveElement, IntoElement, Keystroke, MouseButton, ParentElement,
-    Pixels, Point, Styled, anchored, deferred, div, px, rems,
+    AnyElement, Hsla, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point,
+    Styled, anchored, deferred, div, px, rems,
 };
 use holm_markdown::Color;
 
 use crate::element::Theme;
 use crate::model::Format;
 use crate::palette;
-use crate::shortcuts::{self, Command, Place};
+use crate::shortcuts::{Command, Place};
 
 /// How many custom colors the window keeps.
 pub(crate) const CUSTOM_COUNT: usize = 3;
@@ -59,8 +59,6 @@ pub(crate) enum KeyResult {
     Close,
     /// The window sets the color, or removes it with `None`, and closes.
     Apply(Option<Color>),
-    /// The key goes on to the text input, which adds a typed char to the hex field.
-    Type,
 }
 
 /// An open color window.
@@ -75,38 +73,49 @@ impl ColorWindow {
         Self { paint, hex: None }
     }
 
-    /// A key with no Ctrl. `custom` are the last custom colors, the newest first.
+    /// The place of the window in the key table.
+    pub(crate) fn place(&self) -> Place {
+        if self.hex.is_some() {
+            Place::HexField
+        } else {
+            Place::ColorWindow
+        }
+    }
+
+    /// What `command` of the window's place does. `custom` are the last custom colors, the
+    /// newest first.
     ///
     /// Keys 1 to 6 pick a palette color, 7 to 9 a custom color, and 0 removes the color. `+`
     /// opens the hex field. In the field, Enter takes a `rgb` or `rrggbb` value. Esc closes.
-    pub(crate) fn key(&mut self, keystroke: &Keystroke, custom: &[Color]) -> KeyResult {
-        let command = shortcuts::command(Place::ColorWindow, keystroke);
-        if command == Some(Command::CloseColor) {
+    pub(crate) fn command(&mut self, command: Command, custom: &[Color]) -> KeyResult {
+        if command == Command::CloseColor {
             return KeyResult::Close;
         }
-        if let Some(hex) = &mut self.hex {
+        if let Some(hex) = &self.hex {
             return match command {
-                Some(Command::TakeHex) => Color::from_hex(&format!("#{hex}"))
+                Command::TakeHex => Color::from_hex(&format!("#{hex}"))
                     .map_or(KeyResult::Stay, |color| KeyResult::Apply(Some(color))),
-                _ if keystroke.key == "backspace" => {
-                    hex.pop();
-                    KeyResult::Stay
-                }
-                _ if keystroke.key_char.is_some() => KeyResult::Type,
                 _ => KeyResult::Stay,
             };
         }
         let picked = match command {
-            Some(Command::HexField) => {
+            Command::HexField => {
                 self.hex = Some(String::new());
                 return KeyResult::Stay;
             }
-            Some(Command::RemoveColor) => return KeyResult::Apply(None),
-            Some(Command::PaletteColor(number)) => self.paint.palette().get(nth(number)),
-            Some(Command::CustomColor(number)) => custom.get(nth(number)),
+            Command::RemoveColor => return KeyResult::Apply(None),
+            Command::PaletteColor(number) => self.paint.palette().get(nth(number)),
+            Command::CustomColor(number) => custom.get(nth(number)),
             _ => None,
         };
         picked.map_or(KeyResult::Stay, |color| KeyResult::Apply(Some(*color)))
+    }
+
+    /// Removes the last char of the hex field.
+    pub(crate) fn pop(&mut self) {
+        if let Some(hex) = &mut self.hex {
+            hex.pop();
+        }
     }
 
     /// Adds typed or pasted text to the hex field. It keeps only hex digits.

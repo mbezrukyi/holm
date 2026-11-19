@@ -6,10 +6,9 @@ use std::collections::HashSet;
 
 use gpui_kit::{
     AnyView, App, Bounds, ClipboardEntry, ClipboardItem, Context, CursorStyle, EntityInputHandler,
-    EventEmitter, ExternalPaths, FocusHandle, Focusable, Global, InteractiveElement, IntoElement,
-    KeyBinding, KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, ParentElement, Pixels, Point, Render, ScrollEvent, Styled, TestSupportExt as _,
-    UTF16Selection, Window, actions, div, px,
+    EventEmitter, ExternalPaths, FocusHandle, Focusable, InteractiveElement, IntoElement,
+    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
+    Point, Render, ScrollEvent, Styled, TestSupportExt as _, UTF16Selection, Window, div, px,
 };
 use holm_markdown::{Color, Target};
 
@@ -20,19 +19,10 @@ use crate::find::Find;
 use crate::highlight::{self, Highlighter};
 use crate::ink;
 use crate::model::{Caret, Format, GoalRow, LinkForm, Model};
-use crate::shortcuts::{self, Command, Place};
+use crate::shortcuts::{Command, Place, Run};
 
 /// Spaces that Tab types outside a list.
 const TAB: &str = "    ";
-
-const KEY_CONTEXT: &str = "Editor";
-
-actions!(editor, [Tab, ShiftTab]);
-
-/// Marks that the app has the bindings of [`Tab`] and [`ShiftTab`].
-struct TabKeys;
-
-impl Global for TabKeys {}
 
 /// How far the mouse moves with the button down before a click becomes a drag.
 const DRAG_START: Pixels = px(4.);
@@ -49,7 +39,7 @@ const DRAG_START: Pixels = px(4.);
 /// It draws its own background and centers a text column of a fixed width. The app sets light
 /// or dark mode with [`Editor::set_appearance`].
 ///
-/// The editor handles its keys itself, so the app binds none of them:
+/// The editor gets its shortcuts from [`crate::shortcuts`], once the app calls [`crate::init`]:
 ///
 /// - Arrows move by char, and with Ctrl by word. Home and End go to the row ends, and with
 ///   Ctrl to the note ends. Page Up and Page Down move by one view. Shift selects.
@@ -225,15 +215,6 @@ pub struct CursorLink {
 impl Editor {
     /// An empty editor in light mode.
     pub fn new(cx: &mut Context<Self>) -> Self {
-        // A key binding runs before the key handlers. So the editor needs bindings for Tab
-        // and Shift+Tab, or the focus bindings of the window root take them.
-        if !cx.has_global::<TabKeys>() {
-            cx.set_global(TabKeys);
-            cx.bind_keys([
-                KeyBinding::new("tab", Tab, Some(KEY_CONTEXT)),
-                KeyBinding::new("shift-tab", ShiftTab, Some(KEY_CONTEXT)),
-            ]);
-        }
         cx.background_executor()
             .spawn(async {
                 highlight::warm_up();
@@ -444,6 +425,15 @@ impl Editor {
         }
     }
 
+    /// The place of the editor in the key table.
+    fn place(&self) -> Place {
+        match (&self.color, &self.find) {
+            (Some(window), _) => window.place(),
+            (None, Some(_)) => Place::Find,
+            (None, None) => Place::Editor,
+        }
+    }
+
     /// The last layout, when it still shows the current text.
     fn current_layout(&self) -> Option<&Layout> {
         self.layout
@@ -469,28 +459,22 @@ impl Editor {
         }
     }
 
-    /// Tab or Shift+Tab from the key binding. A key that the editor does not take goes on to
-    /// the next binding.
-    fn tab(&mut self, shift: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let event = KeyDownEvent {
-            keystroke: Keystroke {
-                key: "tab".into(),
-                key_char: None,
-                modifiers: if shift {
-                    Modifiers::shift()
-                } else {
-                    Modifiers::none()
-                },
-            },
-            is_held: false,
-            prefer_character_input: false,
-        };
-        if !self.key(&event, window, cx) {
+    /// A shortcut from the key table. A command that the editor does not take goes on to the
+    /// next binding.
+    fn run(&mut self, run: &Run, window: &mut Window, cx: &mut Context<Self>) {
+        // A key in the start view, which lies inside the editor.
+        let taken = self.focus.is_focused(window)
+            && match self.place() {
+                Place::ColorWindow | Place::HexField => self.color_command(run.command, cx),
+                Place::Find => self.find_command(run.command, cx),
+                Place::Text | Place::Editor => self.command(run.command, run.shift, cx),
+            };
+        if !taken {
             cx.propagate();
         }
     }
 
-    /// A key down. It returns whether the key stops here.
+    /// A key that is no shortcut. It returns whether the key stops here.
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) -> bool {
         // A key in the start view, which lies inside the editor.
         if !self.focus.is_focused(window) {
@@ -501,16 +485,34 @@ impl Editor {
         if modifiers.alt || modifiers.platform || modifiers.function {
             return false;
         }
-        if self.color.is_some() {
-            return self.color_key(event, cx);
+        let key = keystroke.key.as_str();
+        let control = modifiers.control;
+        if let Some(find) = &mut self.find
+            && key == "backspace"
+        {
+            find.pop(control);
+            find.refresh(&mut self.model);
+            self.moved(cx);
+            return true;
+        }
+        if control {
+            return false;
+        }
+        if let Some(window) = &mut self.color {
+            // A typed char goes on to the text input, which adds it to the hex field.
+            if key == "backspace" {
+                window.pop();
+                cx.notify();
+            } else if window.place() == Place::HexField && keystroke.key_char.is_some() {
+                return false;
+            }
+            return true;
         }
         if self.find.is_some() {
-            return self.find_key(event, cx);
+            // A typed char goes on to the text input, which adds it to the query.
+            return key.chars().count() > 1 && key != "space";
         }
-        if let Some(command) = editor_command(keystroke) {
-            return self.command(command, modifiers.shift, cx);
-        }
-        !modifiers.control && self.plain_key(keystroke.key.as_str(), modifiers.shift, cx)
+        self.plain_key(key, modifiers.shift, cx)
     }
 
     /// A shortcut of the editor. Shift extends the selection of a cursor move. Ctrl+Shift with a
@@ -595,24 +597,19 @@ impl Editor {
         true
     }
 
-    /// A key while the color window is open. It returns whether the key stops here. Ctrl+V
-    /// pastes into the hex field. Other keys with Ctrl do nothing.
-    fn color_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
+    /// A shortcut while the color window is open. It returns whether the key stops here.
+    fn color_command(&mut self, command: Command, cx: &mut Context<Self>) -> bool {
         let Some(window) = &mut self.color else {
             return false;
         };
-        let keystroke = &event.keystroke;
-        if keystroke.modifiers.control {
-            if shortcuts::command(Place::Text, keystroke) == Some(Command::Paste)
-                && let Some(text) = cx.read_from_clipboard().and_then(|item| item.text())
-            {
+        if command == Command::Paste {
+            if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
                 window.push(&text);
                 cx.notify();
             }
             return true;
         }
-        match window.key(keystroke, &self.custom_colors) {
-            KeyResult::Type => return false,
+        match window.command(command, &self.custom_colors) {
             KeyResult::Stay => {}
             KeyResult::Close => self.color = None,
             KeyResult::Apply(color) => {
@@ -660,35 +657,23 @@ impl Editor {
         self.finish(changed, cx);
     }
 
-    /// A key while find is open. It returns whether the key stops here.
-    /// Typed chars go on to the text input, which adds them to the query.
-    /// Other keys with Ctrl go on to the app. Other named keys do nothing.
-    fn find_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
+    /// A shortcut while find is open. It returns whether the key stops here. Ctrl+V pastes into
+    /// the query. Other keys of each text input go on to the app.
+    fn find_command(&mut self, command: Command, cx: &mut Context<Self>) -> bool {
         let Some(find) = &mut self.find else {
             return false;
         };
-        let keystroke = &event.keystroke;
-        let key = keystroke.key.as_str();
-        let control = keystroke.modifiers.control;
-        match shortcuts::command(Place::Find, keystroke) {
-            Some(Command::CloseFind) => self.find = None,
-            Some(Command::NextMatch) => find.step(false, &mut self.model),
-            Some(Command::PreviousMatch) => find.step(true, &mut self.model),
-            _ if key == "backspace" => {
-                find.pop(control);
-                find.refresh(&mut self.model);
-            }
-            _ if !control => return key.chars().count() > 1 && key != "space",
-            _ => match editor_command(keystroke) {
-                Some(Command::Find) => {}
-                Some(Command::Paste) => {
-                    if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-                        find.push(&text);
-                        find.refresh(&mut self.model);
-                    }
+        match command {
+            Command::CloseFind => self.find = None,
+            Command::NextMatch => find.step(false, &mut self.model),
+            Command::PreviousMatch => find.step(true, &mut self.model),
+            Command::Paste => {
+                if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+                    find.push(&text);
+                    find.refresh(&mut self.model);
                 }
-                _ => return false,
-            },
+            }
+            _ => return false,
         }
         self.moved(cx);
         true
@@ -975,13 +960,12 @@ impl Render for Editor {
         };
         editor
             .test_support()
-            .key_context(KEY_CONTEXT)
+            .key_context(self.place().key_context())
             .track_focus(&self.focus)
             .size_full()
             .cursor(CursorStyle::IBeam)
             .on_key_down(cx.listener(Self::key_down))
-            .on_action(cx.listener(|editor, _: &Tab, window, cx| editor.tab(false, window, cx)))
-            .on_action(cx.listener(|editor, _: &ShiftTab, window, cx| editor.tab(true, window, cx)))
+            .on_action(cx.listener(Self::run))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::mouse_up))
@@ -1109,13 +1093,6 @@ impl EntityInputHandler for Editor {
     }
 }
 
-/// The files or the image on the clipboard. Files come first. It is empty for text.
-/// The command of `keystroke` in the editor, also for a key of each text input.
-fn editor_command(keystroke: &Keystroke) -> Option<Command> {
-    shortcuts::command(Place::Text, keystroke)
-        .or_else(|| shortcuts::command(Place::Editor, keystroke))
-}
-
 /// The inline format of a format key.
 fn format_of(command: Command) -> Option<Format> {
     Some(match command {
@@ -1129,6 +1106,7 @@ fn format_of(command: Command) -> Option<Format> {
     })
 }
 
+/// The files or the image on the clipboard. Files come first. It is empty for text.
 fn pasted_files(item: &ClipboardItem) -> Vec<PastedFile> {
     let paths: Vec<PastedFile> = item
         .entries()

@@ -19,6 +19,11 @@ pub use editor::{
 };
 pub use element::text_column;
 
+/// Binds the keys of [`shortcuts`]. The app calls it once, before it opens an editor.
+pub fn init(cx: &mut gpui_kit::App) {
+    shortcuts::bind(cx);
+}
+
 /// An error from `holm-editor`.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]

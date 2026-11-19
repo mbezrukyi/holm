@@ -484,7 +484,10 @@ mod tests {
                 (Place::Window, _)
                     | (Place::Sidebar, Place::Tree | Place::NoteList)
                     | (Place::Note, Place::Editor(_))
-                    | (Place::Editor(E::Text), Place::Editor(_) | Place::TextField)
+                    | (
+                        Place::Editor(E::Text),
+                        Place::Editor(E::Editor | E::Find) | Place::TextField
+                    )
             )
         };
         one == other || one_way(one, other) || one_way(other, one)

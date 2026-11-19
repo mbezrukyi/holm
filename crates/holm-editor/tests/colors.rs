@@ -139,6 +139,17 @@ fn plus_opens_the_hex_field_and_enter_takes_the_value() {
 }
 
 #[test]
+fn a_digit_key_in_the_hex_field_types_the_digit() {
+    let mut app = app();
+    let (editor, cx) = word(&mut app);
+    cx.simulate_keystrokes("ctrl-t + 1 2 3 enter");
+    assert_eq!(
+        text(&editor, cx),
+        "a <span style=\"color: #112233\">word</span>"
+    );
+}
+
+#[test]
 fn the_hex_field_takes_three_digits_and_a_paste() {
     let mut app = app();
     let (editor, cx) = word(&mut app);

@@ -43,7 +43,9 @@ pub fn app() -> TestAppContext {
             "../fonts/FiraMono-Medium.ttf"
         ))])
         .expect("the repo font loads");
-    TestAppContext::build_with_text_system(TestDispatcher::new(0), None, text_system)
+    let cx = TestAppContext::build_with_text_system(TestDispatcher::new(0), None, text_system);
+    cx.update(holm_editor::init);
+    cx
 }
 
 /// A focused editor with `text` in a window of `width` by `height`.

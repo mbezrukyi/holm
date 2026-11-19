@@ -1,10 +1,12 @@
-//! The shortcuts of the editor. Its key handlers match only on a [`Command`] from this table,
-//! and the app shows the same table in the shortcut list.
+//! The shortcuts of the editor. [`crate::init`] turns this table into the GPUI bindings, so each
+//! key reaches the editor as a `Run` action. The app shows the same table in the shortcut list.
 //!
 //! Plain cursor keys, Backspace, Delete, Enter for a new line, and typing are not shortcuts, so
 //! they are not in the table.
 
-use gpui_kit::Keystroke;
+use std::rc::Rc;
+
+use gpui_kit::{Action, App, KeyBinding, KeyBindingContextPredicate, Keystroke};
 
 /// A key with its modifiers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,6 +83,33 @@ impl Keys {
         shift && (keystroke.key == self.key || keystroke.key_char.as_deref() == Some(self.key))
     }
 
+    /// The GPUI bindings of these keys in `context`, a key context predicate. `action` makes the
+    /// action of each binding from whether its keystroke has Shift, so [`Shift::Either`] makes
+    /// two bindings. A keystroke that GPUI cannot parse makes none.
+    pub fn bindings<A: Action>(
+        self,
+        context: &str,
+        action: impl Fn(bool) -> A,
+        cx: &App,
+    ) -> Vec<KeyBinding> {
+        let predicate = KeyBindingContextPredicate::parse(context).ok().map(Rc::new);
+        let shifts: &[bool] = match self.shift {
+            Shift::Up => &[false],
+            Shift::Down => &[true],
+            Shift::Either => &[false, true],
+        };
+        shifts
+            .iter()
+            .filter_map(|&shift| {
+                let ctrl = if self.ctrl { "ctrl-" } else { "" };
+                let shift_down = if shift { "shift-" } else { "" };
+                let keystroke = format!("{ctrl}{shift_down}{}", self.key);
+                let action = Box::new(action(shift));
+                KeyBinding::load(&keystroke, action, predicate.clone(), false, None, cx).ok()
+            })
+            .collect()
+    }
+
     /// Whether one keystroke can press both.
     pub fn overlaps(&self, other: &Keys) -> bool {
         self.key == other.key
@@ -94,14 +123,49 @@ impl Keys {
 /// Where a shortcut works.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Place {
-    /// Each text input: the editor, find, the color window and the text fields of the app.
+    /// Each text input: the editor, find and the text fields of the app.
     Text,
     /// The editor, while find and the color window are closed.
     Editor,
     /// Find in the note.
     Find,
-    /// The color window.
+    /// The color window, while its hex field is closed.
     ColorWindow,
+    /// The hex field of the color window.
+    HexField,
+}
+
+impl Place {
+    /// The key context of the editor element while it is in this place. [`Place::Text`] is no
+    /// state of the editor, so it has the context of [`Place::Editor`].
+    pub(crate) fn key_context(self) -> &'static str {
+        match self {
+            Self::Text | Self::Editor => "Editor",
+            Self::Find => "Editor Find",
+            Self::ColorWindow => "Editor ColorWindow",
+            Self::HexField => "Editor HexField",
+        }
+    }
+
+    /// The key context predicate of the bindings of this place.
+    fn binding_context(self) -> &'static str {
+        match self {
+            Self::Text => "Editor && !ColorWindow && !HexField",
+            Self::Editor => "Editor && !Find && !ColorWindow && !HexField",
+            Self::Find => "Find",
+            Self::ColorWindow => "ColorWindow",
+            Self::HexField => "HexField",
+        }
+    }
+}
+
+/// A shortcut of the table, from its GPUI binding.
+#[derive(Clone, Debug, PartialEq, Eq, Action)]
+#[action(namespace = holm_editor, no_json)]
+pub(crate) struct Run {
+    pub(crate) command: Command,
+    /// Whether the keystroke has Shift. With a cursor move, Shift extends the selection.
+    pub(crate) shift: bool,
 }
 
 /// The group of a shortcut in the shortcut list.
@@ -519,19 +583,48 @@ const SHORTCUTS: &[Shortcut] = &[
     ),
     row(
         P::ColorWindow,
+        Keys::plain("escape").shift(Shift::Either),
+        C::CloseColor,
+        G::Text,
+        "Close the color window",
+    ),
+    row(
+        P::HexField,
         Keys::plain("enter").shift(Shift::Either),
         C::TakeHex,
         G::Text,
         "Apply the hex color",
     ),
     row(
-        P::ColorWindow,
+        P::HexField,
+        Keys::ctrl("v"),
+        C::Paste,
+        G::Text,
+        "Paste a hex color",
+    ),
+    row(
+        P::HexField,
         Keys::plain("escape").shift(Shift::Either),
         C::CloseColor,
         G::Text,
         "Close the color window",
     ),
 ];
+
+/// Binds the keys of each shortcut to [`Run`].
+pub(crate) fn bind(cx: &mut App) {
+    let bindings: Vec<KeyBinding> = SHORTCUTS
+        .iter()
+        .flat_map(|shortcut| {
+            let command = shortcut.command;
+            let context = shortcut.place.binding_context();
+            shortcut
+                .keys
+                .bindings(context, |shift| Run { command, shift }, cx)
+        })
+        .collect();
+    cx.bind_keys(bindings);
+}
 
 /// Every shortcut of the editor.
 pub fn shortcuts() -> &'static [Shortcut] {
@@ -544,4 +637,36 @@ pub fn command(place: Place, keystroke: &Keystroke) -> Option<Command> {
         .iter()
         .find(|shortcut| shortcut.place == place && shortcut.keys.matches(keystroke))
         .map(|shortcut| shortcut.command)
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui_kit::{TestAppContext, TestDispatcher};
+
+    use super::*;
+
+    #[test]
+    fn each_row_binds_its_keys_in_its_place() {
+        let cx = TestAppContext::build(TestDispatcher::new(0), None);
+        cx.update(|cx| {
+            for shortcut in SHORTCUTS {
+                let command = shortcut.command;
+                let bindings = shortcut.keys.bindings(
+                    shortcut.place.binding_context(),
+                    |shift| Run { command, shift },
+                    cx,
+                );
+                let count = if shortcut.keys.shift == Shift::Either {
+                    2
+                } else {
+                    1
+                };
+                assert_eq!(bindings.len(), count, "{shortcut:?}");
+                assert!(
+                    bindings.iter().all(|binding| binding.predicate().is_some()),
+                    "{shortcut:?}"
+                );
+            }
+        });
+    }
 }

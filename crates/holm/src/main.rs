@@ -61,6 +61,7 @@ fn main() -> ExitCode {
         let failed = failed.clone();
         move |cx| {
             gpui_kit::init(cx);
+            holm_editor::init(cx);
             theme::init(cx);
             if let Err(error) = window::open(startup, cx) {
                 fail(&error);

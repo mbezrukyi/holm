@@ -78,3 +78,24 @@ fn a_query_with_no_match_keeps_the_selection() {
     cx.simulate_input("X");
     assert_eq!(text(&editor, cx), "aXbc");
 }
+
+#[test]
+fn a_format_key_in_find_changes_nothing() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "one two", WIDTH, HEIGHT);
+    cx.simulate_keystrokes("ctrl-f");
+    cx.simulate_input("two");
+    cx.simulate_keystrokes("ctrl-b escape");
+    assert_eq!(text(&editor, cx), "one two");
+}
+
+#[test]
+fn ctrl_backspace_in_find_clears_the_query() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "one two", WIDTH, HEIGHT);
+    cx.simulate_keystrokes("ctrl-f");
+    cx.simulate_input("two");
+    cx.simulate_keystrokes("ctrl-backspace");
+    cx.simulate_input("one");
+    assert_eq!(selected(&editor, cx), "one");
+}

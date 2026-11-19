@@ -103,6 +103,7 @@ fn open(cx: &mut TestAppContext, startup: Startup) -> AnyWindowHandle {
     cx.executor().set_block_on_ticks(usize::MAX..=usize::MAX);
     let opened = cx.update(|cx| {
         gpui_kit::init(cx);
+        holm_editor::init(cx);
         theme::init(cx);
         gpui_kit::open_window(gpui_kit::WindowOptions::default(), cx, |window, cx| {
             cx.new(|cx| HolmWindow::new(startup, window, cx))
@@ -3872,6 +3873,7 @@ fn the_shortcut_list_names_each_place_once_and_no_label_runs_into_its_keys(
         text::IN_SHORTCUT_LIST,
         text::IN_FIND,
         text::IN_COLOR_WINDOW,
+        text::IN_HEX_FIELD,
     ];
     want.sort_unstable();
     assert_eq!(headings, want);

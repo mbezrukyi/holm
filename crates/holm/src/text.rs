@@ -268,6 +268,7 @@ pub(crate) const IN_SETTINGS: &str = "In the settings";
 pub(crate) const IN_SHORTCUT_LIST: &str = "In this list";
 pub(crate) const IN_FIND: &str = "In find";
 pub(crate) const IN_COLOR_WINDOW: &str = "In the color window";
+pub(crate) const IN_HEX_FIELD: &str = "In the hex field";
 
 #[cfg(test)]
 mod tests {
