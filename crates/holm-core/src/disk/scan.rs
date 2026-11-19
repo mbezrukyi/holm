@@ -16,7 +16,7 @@ use crate::store::{Stamp, Store};
 /// # Errors
 ///
 /// [`Error::Read`](crate::Error::Read) when the notes folder can't be read.
-pub(crate) fn files(store: &Store, facts: &Facts, nodes: &Nodes) -> Result<Settled> {
+pub(super) fn files(store: &Store, facts: &Facts, nodes: &Nodes) -> Result<Settled> {
     let mut found = Vec::new();
     for node in nodes {
         found.extend(store.files(node)?);
@@ -37,7 +37,7 @@ pub(crate) fn files(store: &Store, facts: &Facts, nodes: &Nodes) -> Result<Settl
 }
 
 /// Settles notes that Holm just wrote, with their stamps, against `facts`.
-pub(crate) fn wrote(store: &Store, facts: &Facts, notes: Vec<(Note, Stamp)>) -> Settled {
+pub(super) fn wrote(store: &Store, facts: &Facts, notes: Vec<(Note, Stamp)>) -> Settled {
     let plan = reconcile::written(facts, notes.iter().map(|(note, _)| note.info.path.clone()));
     let reads = notes
         .into_iter()

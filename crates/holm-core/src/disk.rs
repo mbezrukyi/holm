@@ -1,5 +1,7 @@
 //! The note files and the index rows, kept in step.
 
+mod outside;
+mod scan;
 pub(crate) mod write;
 
 use std::path::{Path, PathBuf};
@@ -11,7 +13,6 @@ use crate::model::{DeleteCount, Note};
 use crate::nodes::{Node, Nodes};
 use crate::paths::{FolderPath, NotePath};
 use crate::reconcile::Settled;
-use crate::scan;
 use crate::snapshot::Snapshot;
 use crate::store::Store;
 

@@ -1,7 +1,7 @@
 //! The steps of one write. Each step changes the disk, puts what it finds in the next facts,
 //! and records what it touched. So the change list of a write misses nothing.
 
-use super::Disk;
+use super::{Disk, outside, scan};
 use crate::diff::Touched;
 use crate::facts::Facts;
 use std::path::{Path, PathBuf};
@@ -14,7 +14,7 @@ use crate::retag::TagEdit;
 use crate::store::{Stamp, Store};
 use crate::tag::TagName;
 use crate::watch::Batch;
-use crate::{Error, Result, scan};
+use crate::{Error, Result};
 
 /// The next facts while one write runs, and what the write touched.
 pub(crate) struct Write<'a> {
@@ -250,7 +250,7 @@ impl Write<'_> {
 
     /// Checks the disk at each path of `batch` after a change from another tool.
     pub(crate) fn outside(&mut self, batch: Batch) -> Result<()> {
-        let nodes = Nodes::outside(&self.disk.store, self.next.snapshot(), batch);
+        let nodes = outside::nodes(&self.disk.store, self.next.snapshot(), batch);
         if nodes.is_empty() {
             return Ok(());
         }

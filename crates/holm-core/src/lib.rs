@@ -16,7 +16,6 @@ mod relink;
 mod retag;
 #[cfg(feature = "test-support")]
 pub mod sample;
-mod scan;
 mod snapshot;
 mod store;
 mod tag;

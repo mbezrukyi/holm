@@ -1,10 +1,6 @@
 //! The notes and folders that the core brings up to date with the disk.
 
-use std::path::{Path, PathBuf};
-
 use crate::paths::{FolderPath, NotePath};
-use crate::snapshot::Snapshot;
-use crate::store::{Entry, Store};
 
 /// A note or a folder that the core brings up to date with the disk. A folder node holds
 /// everything at its path and below it.
@@ -53,20 +49,6 @@ impl Nodes {
         Self(vec![Node::Folder(FolderPath::root())])
     }
 
-    /// The nodes for outside changes at the raw paths `paths`: what is there now, and what was
-    /// there in `before`.
-    pub(crate) fn outside(
-        store: &Store,
-        before: &Snapshot,
-        paths: impl IntoIterator<Item = PathBuf>,
-    ) -> Self {
-        Self::new(
-            paths
-                .into_iter()
-                .flat_map(|path| outside(store, before, &path)),
-        )
-    }
-
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -79,40 +61,6 @@ impl<'a> IntoIterator for &'a Nodes {
     fn into_iter(self) -> Self::IntoIter {
         self.0.iter()
     }
-}
-
-/// The nodes for an outside change at the raw path `path`. The empty path is the whole notes
-/// folder.
-///
-/// A path that is gone, and that `before` knows as no note, may have been a folder that
-/// `before` does not list, like the attachment folder. So it gives a folder node.
-fn outside(store: &Store, before: &Snapshot, path: &Path) -> Vec<Node> {
-    if path.as_os_str().is_empty() {
-        return vec![Node::Folder(FolderPath::root())];
-    }
-    let Some((folder, name)) = FolderPath::split_raw(path) else {
-        return Vec::new();
-    };
-    let mut nodes = Vec::new();
-    let now = match store.entry(&folder, &name) {
-        Entry::Note(note, _) => Some(Node::Note(note)),
-        Entry::Folder(folder) => Some(Node::Folder(folder)),
-        Entry::Other | Entry::Missing => None,
-    };
-    let note = folder
-        .note_file(&name)
-        .filter(|note| before.note(note).is_some());
-    let child = folder.child(&name);
-    match (&now, note) {
-        (_, Some(note)) => nodes.push(Node::Note(note)),
-        (Some(Node::Note(_)), None) if before.has_folder(&child) => {
-            nodes.push(Node::Folder(child));
-        }
-        (Some(_), None) => {}
-        (None, None) => nodes.push(Node::Folder(child)),
-    }
-    nodes.extend(now);
-    nodes
 }
 
 #[cfg(test)]
