@@ -26,6 +26,7 @@ mod picker;
 mod popup;
 mod problem_list;
 mod quick_open;
+mod scale;
 mod settings;
 mod shortcut_list;
 mod shortcuts;

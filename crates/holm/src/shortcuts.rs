@@ -109,6 +109,10 @@ pub(crate) enum Command {
     ShortcutList,
     Quit,
     AppMenu,
+    /// One step of the scale up.
+    ScaleUp,
+    /// One step of the scale down.
+    ScaleDown,
     EditTitle,
     LinkNote,
     LinkFiles,
@@ -245,6 +249,20 @@ const ROWS: &[Row] = &[
         C::AppMenu,
         G::Window,
         text::KEY_APP_MENU,
+    ),
+    row(
+        P::Window,
+        Keys::ctrl("+"),
+        C::ScaleUp,
+        G::Window,
+        text::KEY_SCALE_UP,
+    ),
+    row(
+        P::Window,
+        Keys::ctrl("-"),
+        C::ScaleDown,
+        G::Window,
+        text::KEY_SCALE_DOWN,
     ),
     row(
         P::Anywhere,
@@ -598,6 +616,22 @@ const ROWS: &[Row] = &[
     ),
 ];
 
+/// Second keys of a row. They work in the place of the first row of their command, and the
+/// shortcut list does not show them. A key with Shift gives `+` and `_` on one layout and `=`
+/// and `-` on another, so Ctrl and the `+` key or the `-` key work on each layout.
+const SECOND_KEYS: [(Keys, Command); 2] = [
+    (Keys::ctrl("="), Command::ScaleUp),
+    (Keys::ctrl("_"), Command::ScaleDown),
+];
+
+/// The keys of the second keys, each with the place of its command.
+fn second_keys() -> impl Iterator<Item = (Place, Keys, Command)> {
+    SECOND_KEYS.iter().filter_map(|&(keys, command)| {
+        let row = ROWS.iter().find(|row| row.command == command)?;
+        Some((row.place, keys, command))
+    })
+}
+
 /// The keys of `command` in the whole window: a [`Place::Anywhere`] or [`Place::Window`] row.
 pub(crate) fn window_keys(command: Command) -> Option<Keys> {
     ROWS.iter()
@@ -628,6 +662,9 @@ pub(crate) fn bind(cx: &mut App) {
                 .bindings(row.place.key_context(), |_| Run(command), cx)
         })
         .collect();
+    for (place, keys, command) in second_keys() {
+        bindings.extend(keys.bindings(place.key_context(), |_| Run(command), cx));
+    }
     for shortcut in text_keys() {
         let command = Command::Text(shortcut.command);
         bindings.extend(shortcut.keys.bindings(text_field, |_| Run(command), cx));
@@ -757,21 +794,39 @@ mod tests {
     }
 
     #[test]
+    fn the_shortcut_list_shows_the_scale_keys_as_ctrl_plus_and_ctrl_minus() {
+        let shown = |command| {
+            let keys = window_keys(command).unwrap();
+            gpui_kit::component::kbd::Kbd::format(&keystroke(keys))
+        };
+        assert_eq!(shown(Command::ScaleUp), "Ctrl++");
+        assert_eq!(shown(Command::ScaleDown), "Ctrl+-");
+    }
+
+    #[test]
+    fn each_second_key_has_the_place_of_its_command() {
+        let second: Vec<_> = second_keys().collect();
+        assert_eq!(second.len(), SECOND_KEYS.len());
+        for (place, keys, _) in second {
+            assert_eq!(place, Place::Window, "{keys:?}");
+        }
+    }
+
+    #[test]
     fn no_key_with_no_case_carries_shift() {
         // GPUI on Linux drops Shift for a key whose char has no case, so a binding with Shift
         // never matches it.
-        for row in ROWS {
-            let mut chars = row.keys.key.chars();
+        let keys = ROWS
+            .iter()
+            .map(|row| (row.place, row.keys))
+            .chain(second_keys().map(|(place, keys, _)| (place, keys)));
+        for (place, keys) in keys {
+            let mut chars = keys.key.chars();
             let no_case = matches!(
                 (chars.next(), chars.next()),
                 (Some(char), None) if !char.is_lowercase() && !char.is_uppercase()
             );
-            assert!(
-                !no_case || row.keys.shift == Shift::Up,
-                "{:?} {:?}",
-                row.place,
-                row.keys
-            );
+            assert!(!no_case || keys.shift == Shift::Up, "{place:?} {keys:?}");
         }
     }
 
@@ -800,7 +855,13 @@ mod tests {
 
     #[test]
     fn no_two_shortcuts_share_a_keystroke_in_one_place() {
-        let list = list();
+        let mut list = list();
+        list.extend(second_keys().map(|(place, keys, _)| Shortcut {
+            place,
+            keys,
+            group: Group::Window,
+            label: "second keys",
+        }));
         for (at, one) in list.iter().enumerate() {
             for other in &list[at + 1..] {
                 assert!(

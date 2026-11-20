@@ -24,6 +24,7 @@ use holm_editor::shortcuts::{self as editor, Keys};
 use crate::config::{AppearanceSetting, Config, Settings};
 use crate::icons::Icon;
 use crate::list_cursor;
+use crate::scale::Scale;
 use crate::shortcuts::{self, Command, Place, Run};
 use crate::{popup, text, window};
 
@@ -34,15 +35,17 @@ pub(crate) struct Close;
 enum Row {
     Folder,
     Theme,
+    Scale,
     Order,
     FormatKeys,
     ContinueLists,
     IndentLists,
 }
 
-const ROWS: [Row; 6] = [
+const ROWS: [Row; 7] = [
     Row::Folder,
     Row::Theme,
+    Row::Scale,
     Row::Order,
     Row::FormatKeys,
     Row::ContinueLists,
@@ -71,6 +74,7 @@ impl Row {
         match self {
             Self::Folder => text::SETTING_FOLDER,
             Self::Theme => text::SETTING_THEME,
+            Self::Scale => text::SETTING_SCALE,
             Self::Order => text::SETTING_ORDER,
             Self::FormatKeys => text::SETTING_FORMAT_KEYS,
             Self::ContinueLists => text::SETTING_CONTINUE_LISTS,
@@ -84,7 +88,7 @@ impl Row {
             Self::FormatKeys => Some(&mut help.format_keys),
             Self::ContinueLists => Some(&mut help.continue_lists),
             Self::IndentLists => Some(&mut help.indent_lists),
-            Self::Folder | Self::Theme | Self::Order => None,
+            Self::Folder | Self::Theme | Self::Scale | Self::Order => None,
         }
     }
 }
@@ -151,11 +155,17 @@ impl SettingsDialog {
         }
     }
 
-    /// Picks the next or the previous option of the row.
+    /// Picks the next or the previous option of the row. The options wrap.
     fn pick_option(&self, forward: bool, cx: &mut App) {
         match self.row() {
             Row::Theme => self.change(
                 |settings| settings.theme = next_option(&THEMES, settings.theme, forward),
+                cx,
+            ),
+            Row::Scale => self.change(
+                |settings| {
+                    settings.scale = next_option(Scale::options(), settings.scale, forward);
+                },
                 cx,
             ),
             Row::Order => self.change(
@@ -184,7 +194,7 @@ impl SettingsDialog {
             Command::Previous => self.move_cursor(false, cx),
             Command::Switch => match row {
                 Row::Folder => self.pick_folder(cx),
-                Row::Theme | Row::Order => self.pick_option(true, cx),
+                Row::Theme | Row::Scale | Row::Order => self.pick_option(true, cx),
                 Row::FormatKeys | Row::ContinueLists | Row::IndentLists => self.toggle(row, cx),
             },
             Command::SwitchBack => self.pick_option(false, cx),
@@ -229,6 +239,10 @@ impl SettingsDialog {
             }
             Row::Theme => options(&THEMES, settings.theme, cx, |settings, theme| {
                 settings.theme = theme;
+            })
+            .into_any_element(),
+            Row::Scale => options(Scale::options(), settings.scale, cx, |settings, scale| {
+                settings.scale = scale;
             })
             .into_any_element(),
             Row::Order => options(&ORDERS, settings.note_order, cx, |settings, order| {

@@ -115,6 +115,7 @@ impl HolmWindow {
             write_budget,
         } = startup;
         theme::set_mode(config.settings().theme, window, cx);
+        window.set_zoom(config.settings().scale.factor(), cx);
         let appearance = cx.observe_window_appearance(window, |this, window, cx| {
             if this.config.read(cx).settings().theme == AppearanceSetting::System {
                 theme::update_mode(AppearanceSetting::System, window, cx);
@@ -162,12 +163,18 @@ impl HolmWindow {
         this
     }
 
-    /// Applies the settings to the window: the problems, the theme, and the notes folder.
+    /// Applies the settings to the window: the problems, the theme, the scale, and the notes
+    /// folder.
     fn config_changed(&mut self, _: Entity<Config>, window: &mut Window, cx: &mut Context<Self>) {
         self.show_problems(cx);
         let settings = self.config.read(cx).settings();
-        let (mode, folder) = (settings.theme, settings.notes_folder.clone());
+        let (mode, scale, folder) = (
+            settings.theme,
+            settings.scale,
+            settings.notes_folder.clone(),
+        );
         theme::update_mode(mode, window, cx);
+        window.set_zoom(scale.factor(), cx);
         if let Some(folder) = folder
             && self.folder.as_ref() != Some(&folder)
         {

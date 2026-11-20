@@ -30,6 +30,13 @@ const COLUMNS: [&[Group]; 2] = [
 /// The most height of the rows. A longer list scrolls.
 const LIST_HEIGHT: Pixels = px(560.);
 
+/// The height around the rows: the title and the padding of the panel, and a margin to the
+/// edges of the window. In a low window, like at a big scale, the rows take the rest.
+const AROUND_LIST: Pixels = px(100.);
+
+/// The least height of the rows in a very low window.
+const MIN_LIST_HEIGHT: Pixels = px(100.);
+
 /// How far `Tab` and `Shift+Tab` scroll: about three rows.
 const SCROLL_STEP: Pixels = px(66.);
 
@@ -198,7 +205,7 @@ impl Focusable for ShortcutList {
 }
 
 impl Render for ShortcutList {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let columns = COLUMNS.map(|groups| {
             v_flex()
                 .flex_1()
@@ -207,6 +214,7 @@ impl Render for ShortcutList {
         });
         let rows = div()
             .id("shortcut-rows")
+            .test_support()
             .size_full()
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
@@ -214,7 +222,9 @@ impl Render for ShortcutList {
             .child(h_flex().items_start().gap_6().children(columns));
         let list = div()
             .relative()
-            .h(LIST_HEIGHT)
+            .h(LIST_HEIGHT
+                .min(window.viewport_size().height - AROUND_LIST)
+                .max(MIN_LIST_HEIGHT))
             .child(rows)
             // The scrollbar fills its parent and draws its track at the right edge, which is
             // the lane of the right padding.

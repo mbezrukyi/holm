@@ -37,6 +37,7 @@ use crate::shortcut_list::{self, ShortcutList};
 use crate::shortcuts::{Command, Place, Run};
 use crate::sidebar::{Item, Sidebar, SidebarEvent, TagRename, Target};
 use crate::tags::RenameTag;
+use crate::text;
 use crate::window_step::window_step;
 
 const MIN_WIDTH: f32 = 160.;
@@ -711,9 +712,25 @@ impl NotesView {
             Command::Settings => self.open_settings(window, cx),
             Command::ShortcutList => self.open_shortcut_list(window, cx),
             Command::AppMenu => self.toggle_app_menu(window, cx),
+            Command::ScaleUp => self.step_scale(true, cx),
+            Command::ScaleDown => self.step_scale(false, cx),
             _ => return false,
         }
         true
+    }
+
+    /// Moves the scale one step up or down, and shows the new scale in the message line. At an
+    /// end the scale stays.
+    fn step_scale(&mut self, bigger: bool, cx: &mut Context<Self>) {
+        let scale = self.config.read(cx).settings().scale;
+        let next = scale.step(bigger).unwrap_or(scale);
+        if next != scale {
+            self.config.update(cx, |config, cx| {
+                config.change(|settings| settings.scale = next, cx);
+            });
+        }
+        self.message_line
+            .update(cx, |line, cx| line.show(text::scale_answer(next), cx));
     }
 
     fn mouse_move(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {

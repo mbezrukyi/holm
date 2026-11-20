@@ -3953,6 +3953,7 @@ fn ctrl_shift_s_opens_the_settings_and_esc_gives_the_focus_back(cx: &mut TestApp
         [
             "Notes folder*",
             "Theme",
+            "Scale",
             "Note order",
             "Format keys",
             "Continue lists on Enter",
@@ -3999,6 +4000,20 @@ fn each_setting_changes_by_keys_only(cx: &mut TestAppContext) {
     );
 
     keys(cx, handle, "tab space");
+    assert_eq!(setting_rows(cx, handle)[2], "Scale*");
+    assert_eq!(settings(&fixture).scale.percent(), 110);
+    assert_eq!(zoom(cx, handle), 1.1);
+    keys(cx, handle, "shift-space shift-space shift-space");
+    assert_eq!(settings(&fixture).scale.percent(), 80);
+    assert_eq!(zoom(cx, handle), 0.8);
+    keys(cx, handle, "shift-space");
+    assert_eq!(settings(&fixture).scale.percent(), 200, "Shift+Space wraps");
+    keys(cx, handle, "space");
+    assert_eq!(settings(&fixture).scale.percent(), 80, "Space wraps");
+    keys(cx, handle, "space space");
+    assert_eq!(settings(&fixture).scale.percent(), 100);
+
+    keys(cx, handle, "tab space");
     assert_eq!(settings(&fixture).note_order, Order::Title);
     keys(cx, handle, "shift-space");
     assert_eq!(settings(&fixture).note_order, Order::LastChange);
@@ -4021,11 +4036,132 @@ fn each_setting_changes_by_keys_only(cx: &mut TestAppContext) {
     assert_eq!(setting_rows(cx, handle)[0], "Notes folder*", "Tab wraps");
     keys(cx, handle, "shift-tab");
     assert_eq!(
-        setting_rows(cx, handle)[5],
+        setting_rows(cx, handle)[6],
         "Indent lists with Tab*",
         "Shift+Tab wraps"
     );
     assert_eq!(question(cx, handle).as_deref(), Some(text::SETTINGS));
+}
+
+/// The zoom of the window: the scale of Holm as a factor.
+fn zoom(cx: &mut TestAppContext, handle: AnyWindowHandle) -> f32 {
+    cx.update_window(handle, |_, window, _| window.zoom())
+        .unwrap()
+}
+
+#[gpui_kit::test]
+fn space_on_the_scale_row_wraps_from_the_largest(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    fixture.write_config(&format!(
+        "version = 1\nnotes_folder = {:?}\nscale = 200\n",
+        fixture.notes().to_str().unwrap()
+    ));
+    let handle = open(cx, fixture.startup(None));
+    assert_eq!(zoom(cx, handle), 2.);
+
+    keys(cx, handle, "ctrl-shift-s tab tab space");
+    assert_eq!(setting_rows(cx, handle)[2], "Scale*");
+    assert_eq!(
+        Config::load(fixture.config()).settings().scale.percent(),
+        80
+    );
+    assert_eq!(zoom(cx, handle), 0.8);
+}
+
+#[gpui_kit::test]
+fn ctrl_plus_and_ctrl_minus_step_the_scale_and_answer(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    fs::write(fixture.notes().join("Note.md"), "a\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+    let percent = || Config::load(fixture.config()).settings().scale.percent();
+    assert_eq!(zoom(cx, handle), 1.);
+
+    keys(cx, handle, "ctrl-+");
+    assert_eq!(message(cx, handle).as_deref(), Some("Scale 110 %"));
+    assert_eq!(percent(), 110);
+    assert_eq!(zoom(cx, handle), 1.1);
+
+    keys(cx, handle, "ctrl-= ctrl-= ctrl-= ctrl-=");
+    assert_eq!(
+        message(cx, handle).as_deref(),
+        Some("Scale 200 %, the largest")
+    );
+    keys(cx, handle, "ctrl-+");
+    assert_eq!(
+        message(cx, handle).as_deref(),
+        Some("Scale 200 %, the largest")
+    );
+    assert_eq!(percent(), 200);
+    assert_eq!(zoom(cx, handle), 2.);
+
+    keys(cx, handle, "ctrl--");
+    assert_eq!(message(cx, handle).as_deref(), Some("Scale 175 %"));
+    keys(
+        cx,
+        handle,
+        "ctrl-_ ctrl-_ ctrl-_ ctrl-_ ctrl-_ ctrl-_ ctrl-_",
+    );
+    assert_eq!(
+        message(cx, handle).as_deref(),
+        Some("Scale 80 %, the smallest")
+    );
+    assert_eq!(percent(), 80);
+    assert_eq!(zoom(cx, handle), 0.8);
+    assert_eq!(editor_text(cx, handle), "a\n", "the keys type nothing");
+}
+
+#[gpui_kit::test]
+fn the_shortcut_list_fits_a_low_window_at_a_big_scale(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    fixture.write_config(&format!(
+        "version = 1\nnotes_folder = {:?}\nscale = 200\n",
+        fixture.notes().to_str().unwrap()
+    ));
+    let handle = open(cx, fixture.startup(None));
+    let height = cx
+        .update_window(handle, |_, window, _| window.viewport_size().height)
+        .unwrap();
+    assert!(height < gpui_kit::px(620.), "the window is low: {height:?}");
+
+    keys(cx, handle, "ctrl-?");
+    let rows = bounds_of(cx, handle, "shortcut-rows").unwrap();
+    assert!(rows.top() > gpui_kit::px(0.), "{rows:?}");
+    assert!(rows.bottom() < height, "{rows:?}");
+}
+
+#[gpui_kit::test]
+fn a_click_at_a_zoom_of_1_5_hits_the_option_under_it(cx: &mut TestAppContext) {
+    use gpui_kit::MouseButton;
+    use gpui_kit::test::TestEventExt as _;
+
+    let fixture = Fixture::new().with_folder();
+    fixture.write_config(&format!(
+        "version = 1\nnotes_folder = {:?}\nscale = 150\n",
+        fixture.notes().to_str().unwrap()
+    ));
+    let handle = open(cx, fixture.startup(None));
+    let (viewport, screen_size) = cx
+        .update_window(handle, |_, window, _| {
+            (window.viewport_size(), window.bounds().size)
+        })
+        .unwrap();
+    assert_eq!(viewport.width * 1.5, screen_size.width);
+
+    keys(cx, handle, "ctrl-shift-s");
+    let dark = bounds_of(cx, handle, "Dark").unwrap();
+    // The platform gives positions in the pixels of the screen.
+    let at = dark.center().map(|c| c * 1.5);
+    cx.update_window(handle, |_, window, cx| {
+        window.pointer_down(at, MouseButton::Left, cx);
+        window.pointer_up(at, MouseButton::Left, cx);
+    })
+    .unwrap();
+    settle(cx);
+
+    assert_eq!(
+        Config::load(fixture.config()).settings().theme,
+        AppearanceSetting::Dark
+    );
 }
 
 #[gpui_kit::test]

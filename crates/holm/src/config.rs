@@ -16,6 +16,7 @@ use holm_editor::WritingHelp;
 use holm_markdown::Color;
 use toml_edit::{Array, DocumentMut, Item, Table, Value};
 
+use crate::scale::Scale;
 use crate::text;
 
 const VERSION: i64 = 1;
@@ -41,6 +42,8 @@ pub(crate) struct Settings {
     /// `None` until the user picks a folder.
     pub(crate) notes_folder: Option<PathBuf>,
     pub(crate) theme: AppearanceSetting,
+    /// The scale of the app on top of the desktop scale, in the file as a percent.
+    pub(crate) scale: Scale,
     pub(crate) note_order: Order,
     pub(crate) writing_help: WritingHelp,
     /// The last custom colors, the newest first.
@@ -95,6 +98,7 @@ impl Default for Settings {
         Self {
             notes_folder: None,
             theme: AppearanceSetting::default(),
+            scale: Scale::default(),
             note_order: Order::default(),
             writing_help: WritingHelp::default(),
             custom_colors: Vec::new(),
@@ -256,6 +260,11 @@ fn read(document: &DocumentMut) -> Settings {
                     settings.theme = theme;
                 }
             }
+            "scale" => {
+                if let Some(percent) = get(key, item, Item::as_integer) {
+                    settings.scale = Scale::from_percent(percent);
+                }
+            }
             "note_order" => {
                 if let Some(order) = get(key, item, |item| match item.as_str()? {
                     "last_change" => Some(Order::LastChange),
@@ -406,6 +415,11 @@ fn write(document: &mut DocumentMut, settings: &Settings) {
         AppearanceSetting::Dark => "dark",
     };
     set(document, "theme", Value::from(theme));
+    set(
+        document,
+        "scale",
+        Value::from(i64::from(settings.scale.percent())),
+    );
     let order = match settings.note_order {
         Order::LastChange => "last_change",
         Order::Title => "title",
@@ -500,6 +514,7 @@ mod tests {
         let settings = Settings {
             notes_folder: Some(PathBuf::from("/home/me/Notes")),
             theme: AppearanceSetting::Dark,
+            scale: Scale::from_percent(125),
             note_order: Order::Title,
             writing_help: WritingHelp {
                 indent_lists: false,
@@ -588,6 +603,22 @@ mod tests {
         assert_eq!(config.settings().theme, AppearanceSetting::System);
         assert_eq!(config.settings().note_order, Order::Title);
         assert_eq!(config.problem(), None);
+    }
+
+    #[test]
+    fn the_scale_is_a_percent_and_a_value_that_is_not_a_step_reads_as_100() {
+        let (_dir, mut config) = load("version = 1\nscale = 150\n");
+        assert_eq!(config.settings().scale.percent(), 150);
+
+        let mut settings = config.settings().clone();
+        settings.scale = Scale::from_percent(80);
+        config.save(settings);
+        assert!(file(&config).contains("scale = 80\n"), "{}", file(&config));
+
+        for bad in ["scale = 120", "scale = 0", "scale = \"big\"", "scale = 1.5"] {
+            let (_dir, config) = load(&format!("version = 1\n{bad}\n"));
+            assert_eq!(config.settings().scale.percent(), 100, "{bad}");
+        }
     }
 
     #[test]
