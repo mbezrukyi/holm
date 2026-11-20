@@ -8,6 +8,9 @@
 
 use std::ops::Range;
 
+use icu_segmenter::LineSegmenter;
+use icu_segmenter::options::LineBreakOptions;
+
 use gpui_kit::{
     App, Bounds, Font, IndentAdjustment, LineFragment, LineWrapper, Pixels, Point, ShapedLine,
     SharedString, Size, TextAlign, TextRun, Window, point, px, size,
@@ -190,6 +193,90 @@ impl FlowLine {
         wrap_width: Pixels,
         window: &Window,
     ) -> Self {
+        let (mut flow, segs) = Self::unwrapped(text, runs, chips, font, font_size, window);
+        flow.wrap_into_rows(&segs, font, wrap_width, window);
+        flow
+    }
+
+    /// The narrowest and the widest width of the line, as [`Self::new`] takes it.
+    ///
+    /// The narrowest width is that of the widest piece no row breaks inside: rows of that width
+    /// break only at the places the wrapper picks for a break, like a space or after a hyphen.
+    /// The widest width is that of the line on one row.
+    pub(crate) fn widths(
+        text: SharedString,
+        runs: &[TextRun],
+        chips: Vec<ChipBox>,
+        font: &Font,
+        font_size: Pixels,
+        window: &Window,
+    ) -> (Pixels, Pixels) {
+        let (mut flow, segs) = Self::unwrapped(text, runs, chips, font, font_size, window);
+        let fragments = flow.fragments(&segs);
+        // The text the wrapper sees, with a letter for each byte of an element, as it does.
+        let mut seen = String::new();
+        for fragment in &fragments {
+            match fragment {
+                LineFragment::Text { text } => seen.push_str(text),
+                LineFragment::Element { len_utf8, .. } => {
+                    seen.extend(std::iter::repeat_n('a', *len_utf8));
+                }
+            }
+        }
+        // The wrapper adds the width of each char of its own font, which can be wider than the
+        // shaped text. A piece needs room for both, or the wrapper breaks inside it.
+        let text_system = window.text_system();
+        let font_id = text_system.resolve_font(font);
+        let mut summed = vec![px(0.); seen.len() + 1];
+        let mut at = 0;
+        let mut sum = px(0.);
+        for fragment in &fragments {
+            match fragment {
+                LineFragment::Text { text } => {
+                    for c in text.chars() {
+                        summed[at] = sum;
+                        sum += text_system.layout_width(font_id, font_size, c);
+                        at += c.len_utf8();
+                    }
+                }
+                LineFragment::Element { width, len_utf8 } => {
+                    summed[at] = sum;
+                    sum += *width;
+                    at += len_utf8;
+                }
+            }
+        }
+        summed[at] = sum;
+        // The wrapper takes no break before the first char that is not a space.
+        let lead = seen.len() - seen.trim_start_matches(' ').len();
+        let mut narrowest = px(0.);
+        let mut start = 0;
+        let breaks = LineSegmenter::new_for_non_complex_scripts(LineBreakOptions::default())
+            .segment_str(&seen)
+            .filter(|&at| at > lead || at == seen.len());
+        for end in breaks {
+            if end <= start {
+                continue;
+            }
+            let piece = flow
+                .measure(&segs, start..end)
+                .max(summed[end] - summed[start]);
+            narrowest = narrowest.max(piece);
+            start = end;
+        }
+        flow.wrap_into_rows(&segs, font, Pixels::MAX, window);
+        (narrowest, flow.width().max(narrowest))
+    }
+
+    /// The line with its shaped parts and no rows yet.
+    fn unwrapped(
+        text: SharedString,
+        runs: &[TextRun],
+        chips: Vec<ChipBox>,
+        font: &Font,
+        font_size: Pixels,
+        window: &Window,
+    ) -> (Self, Vec<Seg>) {
         let text_system = window.text_system();
         let shape = |range: Range<usize>| {
             text_system.shape_line(
@@ -232,7 +319,7 @@ impl FlowLine {
             |(ascent, descent), line| (ascent.max(line.ascent), descent.max(line.descent)),
         );
 
-        let mut flow = Self {
+        let flow = Self {
             text,
             chips,
             rows: Vec::new(),
@@ -240,14 +327,20 @@ impl FlowLine {
             ascent,
             descent,
         };
-        let mut wrapper = text_system.line_wrapper(font.clone(), font_size);
-        let cuts = flow.wrap(&segs, &mut wrapper, wrap_width);
+        (flow, segs)
+    }
+
+    /// Wraps the line into rows of `wrap_width`.
+    fn wrap_into_rows(&mut self, segs: &[Seg], font: &Font, wrap_width: Pixels, window: &Window) {
+        let mut wrapper = window
+            .text_system()
+            .line_wrapper(font.clone(), self.font_size);
+        let cuts = self.wrap(segs, &mut wrapper, wrap_width);
         let mut cutter = Cutter::new(segs.len());
-        flow.rows = cuts
+        self.rows = cuts
             .windows(2)
-            .map(|cut| flow.row(&segs, cut[0]..cut[1], &mut cutter))
+            .map(|cut| self.row(segs, cut[0]..cut[1], &mut cutter))
             .collect();
-        flow
     }
 
     fn lead_width(&self, first: bool) -> Pixels {
@@ -276,21 +369,26 @@ impl FlowLine {
         }
     }
 
-    /// The offsets in the wrapper text where rows start, and its length at the end.
-    ///
-    /// The wrapper adds the width of each char and does not see kerning or other fonts, so each
-    /// row is checked against its shaped width, as gpui-base does it.
-    fn wrap(&self, segs: &[Seg], wrapper: &mut LineWrapper, wrap_width: Pixels) -> Vec<usize> {
-        let total: usize = segs.iter().map(|seg| self.seg_len(seg)).sum();
-        let fragments: Vec<LineFragment<'_>> = segs
-            .iter()
+    /// The parts of the line for the wrapper. It sees the parts of a chip around its name as
+    /// elements of a fixed width.
+    fn fragments<'a>(&'a self, segs: &'a [Seg]) -> Vec<LineFragment<'a>> {
+        segs.iter()
             .map(|seg| match seg {
                 Seg::Text { display, .. } => LineFragment::text(&self.text[display.clone()]),
                 Seg::Lead(_) => LineFragment::element(self.lead_width(true), 1),
                 Seg::Name(chip) => LineFragment::text(&self.chips[*chip].name.text),
                 Seg::Tail(chip) => LineFragment::element(self.tail_width(*chip, true), 1),
             })
-            .collect();
+            .collect()
+    }
+
+    /// The offsets in the wrapper text where rows start, and its length at the end.
+    ///
+    /// The wrapper adds the width of each char and does not see kerning or other fonts, so each
+    /// row is checked against its shaped width, as gpui-base does it.
+    fn wrap(&self, segs: &[Seg], wrapper: &mut LineWrapper, wrap_width: Pixels) -> Vec<usize> {
+        let total: usize = segs.iter().map(|seg| self.seg_len(seg)).sum();
+        let fragments = self.fragments(segs);
         let width = |range: Range<usize>| self.measure(segs, range);
         let mut cuts = vec![0];
         let mut start = 0;
@@ -977,6 +1075,91 @@ mod tests {
             // A click anywhere on the chip gives its start.
             assert_eq!(click(after - px(1.)), Ok(chip.start));
             assert_eq!(click(x(&line, chip.start) + px(1.)), Ok(chip.start));
+        });
+    }
+
+    /// A line laid out at its narrowest width breaks only between pieces: after a space, after
+    /// a hyphen, or at a space in the name of a chip.
+    #[test]
+    fn a_line_at_its_narrowest_width_breaks_no_word() {
+        in_window(|window| {
+            let widths = |text: &str, runs: &[TextRun], base: &Font| {
+                FlowLine::widths(text.into(), runs, Vec::new(), base, SIZE, window)
+            };
+            let fira = font("Fira Mono");
+            let inter = font("Inter");
+            let code = |len: usize| run(len);
+            let text = |len: usize| TextRun {
+                len,
+                font: inter.clone(),
+                ..run(0)
+            };
+            let cases: [(&str, Vec<TextRun>, &Font); 5] = [
+                ("Axis", vec![run(4)], &fira),
+                ("Property one long word", vec![run(22)], &fira),
+                // Code in a wider font than the base font of the wrapper.
+                (
+                    "see justify-content now",
+                    vec![text(4), code(15), text(4)],
+                    &inter,
+                ),
+                ("flex-direction", vec![code(14)], &inter),
+                // Text in a narrower font than the base font of the wrapper.
+                ("Distributes leftover space", vec![text(26)], &fira),
+            ];
+            for (line_text, runs, base) in &cases {
+                let (min, max) = widths(line_text, runs, base);
+                assert!(min <= max, "{line_text}");
+                let line = FlowLine::new(
+                    (*line_text).into(),
+                    runs,
+                    Vec::new(),
+                    base,
+                    SIZE,
+                    min,
+                    window,
+                );
+                for row in &line.rows {
+                    let end = row.range.end;
+                    assert!(
+                        end == line_text.len() || matches!(&line_text[end - 1..end], " " | "-"),
+                        "a row of {min:?} ends in {:?}",
+                        &line_text[row.range.clone()]
+                    );
+                }
+            }
+            let (min, _) = widths("Axis", &[run(4)], &fira);
+            assert!(close(min, shape("Axis", SIZE, window).width()));
+
+            let detail = Some("2 KB");
+            let (whole, _) = flow(("", "my report.pdf", detail, ""), px(600.), window);
+            let text = "\u{fffc}";
+            let look = run(0);
+            let chip = ChipBox::new(
+                0..text.len(),
+                Icon::File,
+                ("my report.pdf", &look),
+                detail.map(|detail| (detail.to_owned(), &look)),
+                SIZE,
+                window,
+            );
+            let (min, max) = FlowLine::widths(
+                text.into(),
+                &[run(text.len())],
+                vec![chip],
+                &fira,
+                SIZE,
+                window,
+            );
+            assert!(close(max, whole.width()));
+            assert!(min < max);
+            let (line, _) = flow(("", "my report.pdf", detail, ""), min, window);
+            let names: Vec<&str> = line
+                .chip_paints(LINE)
+                .iter()
+                .map(|paint| paint.name.0.text.as_ref())
+                .collect();
+            assert_eq!(names, ["my ", "report.pdf"]);
         });
     }
 

@@ -4,15 +4,20 @@
 mod common;
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 
 use common::{FONT_SIZE, LINE_HEIGHT, MARGIN, advance, app, column_x, open};
-use gpui_kit::{Entity, Modifiers, Pixels, VisualTestContext, point, px};
+use gpui_kit::{
+    Entity, EntityInputHandler as _, Modifiers, Pixels, Point, VisualTestContext, point, px,
+};
 use holm_editor::{Editor, OpenFile};
 
 const WIDTH: Pixels = px(600.);
 const HEIGHT: Pixels = px(400.);
+/// A window that shows all of `FLEX_TABLE`.
+const TALL: Pixels = px(900.);
 
 fn text(editor: &Entity<Editor>, cx: &VisualTestContext) -> String {
     cx.read(|cx| editor.read(cx).text().to_owned())
@@ -67,6 +72,99 @@ fn a_table_shows_its_source_while_the_cursor_is_inside() {
     click(cx, 0.2, LINE_HEIGHT * 3.5);
     cx.simulate_input("Z");
     assert_eq!(text(&editor, cx), "a\n\n| x | y |\nZ|---|---|\n| X1 | 2 |");
+}
+
+/// The table of the flexbox note, whose words broke into letters.
+const FLEX_TABLE: &str = "a\n\n\
+| Property | Axis | Common values | What it does |
+|---|---|---|---|
+| `flex-direction` | — | `row`, `column`, `row-reverse` | Picks the main axis |
+| `flex-wrap` | main | `nowrap` (default), `wrap` | Allows items to break onto new lines |
+| `justify-content` | main | `start`, `center`, `space-between`, `end` | Distributes leftover main-axis space |
+| `align-items` | cross | `stretch` (default), `start`, `center`, `baseline` | Aligns items inside their line |
+| `gap` | both | `1rem`, `1rem 2rem` | Space between items. Replaces margin hacks |";
+
+/// Where each char offset shows in a window of `width` by `height`, by a sweep of points 2 px
+/// apart over the rows. A click past the end of a row gives the start of the next row, so each
+/// offset keeps the first point on its lowest row.
+fn char_places(
+    editor: &Entity<Editor>,
+    cx: &mut VisualTestContext,
+    (width, height): (Pixels, Pixels),
+) -> HashMap<usize, Point<Pixels>> {
+    let mut places = HashMap::new();
+    cx.update(|window, cx| {
+        editor.update(cx, |editor, cx| {
+            let mut y = LINE_HEIGHT / 2.;
+            while y < height {
+                let mut x = px(0.);
+                while x < width {
+                    let at = point(x, y);
+                    if let Some(offset) = editor.character_index_for_point(at, window, cx) {
+                        let place = places.entry(offset).or_insert(at);
+                        if at.y > place.y {
+                            *place = at;
+                        }
+                    }
+                    x += px(2.);
+                }
+                y += LINE_HEIGHT / 2.;
+            }
+        });
+    });
+    places
+}
+
+/// Whether `word` in `FLEX_TABLE` shows on one row, by the places of its first and last char.
+/// `None` when it is not in the table or does not show.
+fn on_one_row(places: &HashMap<usize, Point<Pixels>>, word: &str) -> Option<bool> {
+    let start = FLEX_TABLE.find(word)?;
+    let utf16 = |end: usize| FLEX_TABLE[..end].encode_utf16().count();
+    let first = places.get(&utf16(start))?;
+    let last = places.get(&utf16(start + word.len() - 1))?;
+    Some((first.y - last.y).abs() < LINE_HEIGHT)
+}
+
+#[test]
+fn a_too_wide_table_wraps_its_long_text_and_keeps_short_words_whole() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, FLEX_TABLE, WIDTH, TALL);
+    let places = char_places(&editor, cx, (WIDTH, TALL));
+    for word in [
+        "Property",
+        "Axis",
+        "cross",
+        "justify-",
+        "space-",
+        "Distributes",
+    ] {
+        assert_eq!(on_one_row(&places, word), Some(true), "{word} breaks");
+    }
+    assert_eq!(
+        on_one_row(&places, "Distributes leftover main-axis space"),
+        Some(false)
+    );
+    // The table stays inside the text column.
+    let end = FLEX_TABLE.find("margin hacks").expect("in the table") + "margin hacks".len();
+    let last = places
+        .get(&FLEX_TABLE[..end - 1].encode_utf16().count())
+        .expect("the last char shows");
+    assert!(last.x < WIDTH - MARGIN, "{last:?}");
+}
+
+#[test]
+fn a_table_that_fits_keeps_each_cell_on_one_row() {
+    let mut app = app();
+    let wide = px(1400.);
+    let (editor, cx) = open(&mut app, FLEX_TABLE, wide, TALL);
+    let places = char_places(&editor, cx, (wide, TALL));
+    for cell in [
+        "Distributes leftover main-axis space",
+        "Space between items. Replaces margin hacks",
+        "justify-content",
+    ] {
+        assert_eq!(on_one_row(&places, cell), Some(true), "{cell} wraps");
+    }
 }
 
 /// The middle of the task box on the line that starts at `top`.

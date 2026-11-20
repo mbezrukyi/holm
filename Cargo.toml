@@ -17,6 +17,8 @@ holm-editor = { path = "crates/holm-editor" }
 
 gpui-kit = { version = "=0.9.0", default-features = false }
 fontdb = "0.23"
+# The same version and features as in gpui-pre, so table columns find the breaks its line wrapper takes.
+icu_segmenter = { version = "2.3", default-features = false, features = ["compiled_data"] }
 futures-channel = "0.3"
 futures-core = "0.3"
 foldhash = { version = "0.2", default-features = false }

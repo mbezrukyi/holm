@@ -3453,6 +3453,7 @@ dependencies = [
  "fontdb",
  "gpui-kit",
  "holm-markdown",
+ "icu_segmenter",
  "imagesize 0.14.0",
  "proptest",
  "ropey",
