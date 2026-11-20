@@ -1,3 +1,13 @@
+// HOLM PATCH: a window zoom for the scale of Holm. The rest of this crate is gpui-pre 0.3.11.
+//
+// The zoom multiplies the scale factor of the platform and divides the content size, so the
+// whole window grows or shrinks and stays sharp. Each input position from the platform is
+// divided by it, and each position in window pixels that goes back to the platform (the IME
+// position, the window menu, the input region and the client inset) is multiplied by it. The
+// window keeps its size on the screen. See `Window::set_zoom` and the lines marked "Holm zoom".
+//
+// Remove the copy when gpui-pre has a zoom of its own.
+
 #[cfg(feature = "profiler")]
 use crate::DebugFrameOverlayMode;
 #[cfg(any(feature = "inspector", debug_assertions))]
@@ -1264,6 +1274,8 @@ pub struct Window {
     modifiers: Modifiers,
     capslock: Capslock,
     scale_factor: f32,
+    // Holm zoom: multiplies the scale factor of the platform.
+    zoom: f32,
     pub(crate) bounds_observers: SingleSubscriberSet<AnyObserver>,
     appearance: WindowAppearance,
     pub(crate) appearance_observers: SingleSubscriberSet<AnyObserver>,
@@ -2387,6 +2399,7 @@ impl Window {
             modifiers,
             capslock,
             scale_factor,
+            zoom: 1.,
             bounds_observers: SingleSubscriberSet::new(),
             appearance,
             appearance_observers: SingleSubscriberSet::new(),
@@ -2728,7 +2741,10 @@ impl Window {
     /// - `Some(&[])` is an empty region, so the window receives no pointer or touch input.
     /// - `None` resets the region to the default, so the whole window receives input again.
     pub fn set_input_region(&self, region: Option<&[Bounds<Pixels>]>) {
-        self.platform_window.set_input_region(region);
+        // Holm zoom.
+        let region: Option<Vec<_>> =
+            region.map(|region| region.iter().map(|bounds| self.to_platform(*bounds)).collect());
+        self.platform_window.set_input_region(region.as_deref());
     }
 
     /// Return the `WindowBounds` to indicate that how a window should be opened
@@ -2998,9 +3014,11 @@ impl Window {
     /// the platform window, then notifies observers. Normally called automatically
     /// by the platform's resize callback, but exposed publicly for test infrastructure.
     pub fn bounds_changed(&mut self, cx: &mut App) {
-        self.scale_factor = self.platform_window.scale_factor();
-        self.viewport_size = self.platform_window.content_size();
-        self.mouse_position = self.platform_window.mouse_position();
+        // Holm zoom.
+        let zoom = self.zoom;
+        self.scale_factor = self.platform_window.scale_factor() * zoom;
+        self.viewport_size = self.platform_window.content_size().map(|side| side / zoom);
+        self.mouse_position = self.platform_window.mouse_position().map(|c| c / zoom);
 
         self.refresh();
 
@@ -3217,7 +3235,9 @@ impl Window {
 
     /// Opens the native title bar context menu, useful when implementing client side decorations (Wayland and X11)
     pub fn show_window_menu(&self, position: Point<Pixels>) {
-        self.platform_window.show_window_menu(position)
+        // Holm zoom.
+        self.platform_window
+            .show_window_menu(position.map(|c| c * self.zoom));
     }
 
     /// Handle window movement for Linux and macOS.
@@ -3231,7 +3251,8 @@ impl Window {
     /// When using client side decorations, set this to the width of the invisible decorations (Wayland and X11)
     pub fn set_client_inset(&mut self, inset: Pixels) {
         self.client_inset = Some(inset);
-        self.platform_window.set_client_inset(inset);
+        // Holm zoom.
+        self.platform_window.set_client_inset(inset * self.zoom);
     }
 
     /// Sets the client-drawn corner radii so platform effects can match the window's shape.
@@ -3316,6 +3337,27 @@ impl Window {
     /// be rendered as two pixels on screen.
     pub fn scale_factor(&self) -> f32 {
         self.scale_factor
+    }
+
+    /// Holm zoom: the factor on the scale factor of the platform. It starts at 1.
+    pub fn zoom(&self) -> f32 {
+        self.zoom
+    }
+
+    /// Holm zoom: sets the factor on the scale factor of the platform. The window applies it at
+    /// once, like a change of its bounds, and keeps its size on the screen. A zoom that is not
+    /// above 0 or not finite is ignored.
+    pub fn set_zoom(&mut self, zoom: f32, cx: &mut App) {
+        if zoom == self.zoom || !zoom.is_finite() || zoom <= 0. {
+            return;
+        }
+        self.zoom = zoom;
+        self.bounds_changed(cx);
+    }
+
+    /// Holm zoom: window pixels as the platform reads them.
+    pub(crate) fn to_platform(&self, bounds: Bounds<Pixels>) -> Bounds<Pixels> {
+        bounds.map(|value| value * self.zoom)
     }
 
     /// Overrides the display scale factor for tests.
@@ -5862,6 +5904,8 @@ impl Window {
         // Handlers may set this to true by calling `prevent_default`.
         self.default_prevented = false;
 
+        // Holm zoom.
+        let event = zoom_input(event, self.zoom);
         let event = match event {
             // Track the mouse position with our own state, since accessing the platform
             // API for the mouse position can only occur on the main thread.
@@ -6921,6 +6965,8 @@ impl Window {
         self.on_next_frame(|window, cx| {
             if let Some(mut input_handler) = window.platform_window.take_input_handler() {
                 if let Some(bounds) = input_handler.selected_bounds(window, cx) {
+                    // Holm zoom.
+                    let bounds = window.to_platform(bounds);
                     window.platform_window.update_ime_position(bounds);
                 }
                 window.platform_window.set_input_handler(input_handler);
@@ -10569,5 +10615,81 @@ mod inspector_tests {
             }
         })
         .expect("closed inspector has no bookkeeping and no style overrides");
+    }
+}
+
+/// Holm zoom: `event` with its positions and pixel deltas in window pixels at `zoom`.
+fn zoom_input(event: PlatformInput, zoom: f32) -> PlatformInput {
+    if zoom == 1. {
+        return event;
+    }
+    let at = |position: Point<Pixels>| position.map(|c| c / zoom);
+    match event {
+        PlatformInput::KeyDown(_) | PlatformInput::KeyUp(_) | PlatformInput::ModifiersChanged(_) => {
+            event
+        }
+        PlatformInput::MouseDown(mut down) => {
+            down.position = at(down.position);
+            PlatformInput::MouseDown(down)
+        }
+        PlatformInput::MouseUp(mut up) => {
+            up.position = at(up.position);
+            PlatformInput::MouseUp(up)
+        }
+        PlatformInput::MousePressure(mut pressure) => {
+            pressure.position = at(pressure.position);
+            PlatformInput::MousePressure(pressure)
+        }
+        PlatformInput::MouseMove(mut moved) => {
+            moved.position = at(moved.position);
+            PlatformInput::MouseMove(moved)
+        }
+        PlatformInput::MouseExited(mut exited) => {
+            exited.position = at(exited.position);
+            PlatformInput::MouseExited(exited)
+        }
+        PlatformInput::Scroll(mut scroll) => {
+            scroll.position = at(scroll.position);
+            if let crate::ScrollDelta::Pixels(delta) = scroll.delta {
+                scroll.delta = crate::ScrollDelta::Pixels(at(delta));
+            }
+            PlatformInput::Scroll(scroll)
+        }
+        PlatformInput::Pinch(mut pinch) => {
+            pinch.position = at(pinch.position);
+            PlatformInput::Pinch(pinch)
+        }
+        PlatformInput::LongPress(mut press) => {
+            press.start_position = at(press.start_position);
+            press.position = at(press.position);
+            PlatformInput::LongPress(press)
+        }
+        PlatformInput::TouchDrag(mut drag) => {
+            drag.start_position = at(drag.start_position);
+            drag.position = at(drag.position);
+            PlatformInput::TouchDrag(drag)
+        }
+        PlatformInput::BackGesture(mut back) => {
+            back.start_position = at(back.start_position);
+            PlatformInput::BackGesture(back)
+        }
+        PlatformInput::FileDrop(drop) => PlatformInput::FileDrop(match drop {
+            FileDropEvent::Entered { position, paths } => FileDropEvent::Entered {
+                position: at(position),
+                paths,
+            },
+            FileDropEvent::Pending { position } => FileDropEvent::Pending {
+                position: at(position),
+            },
+            FileDropEvent::Submit { position } => FileDropEvent::Submit {
+                position: at(position),
+            },
+            drop @ (FileDropEvent::Exited | FileDropEvent::Ended) => drop,
+        }),
+        PlatformInput::Touch(mut touch) => {
+            touch.position = at(touch.position);
+            touch.predicted_position = touch.predicted_position.map(at);
+            PlatformInput::Touch(touch)
+        }
     }
 }

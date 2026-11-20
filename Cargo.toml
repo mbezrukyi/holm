@@ -60,7 +60,10 @@ todo = "warn"
 module_name_repetitions = "allow"
 must_use_candidate = "allow"
 
+[patch.crates-io]
 # A copy of gpui-pre-linux 0.3.11 with one fix: X11 file drop positions are divided by the
 # screen scale, like other pointer positions. Remove it when a release has the fix.
-[patch.crates-io]
 gpui-pre-linux = { path = "vendor/gpui-pre-linux" }
+# A copy of gpui-pre 0.3.11 with a window zoom for the scale of Holm. See the note at the top of
+# its `src/window.rs`.
+gpui-pre = { path = "vendor/gpui-pre" }
