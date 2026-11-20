@@ -15,7 +15,7 @@ use std::collections::HashSet;
 use std::ops::Range;
 use std::time::Instant;
 
-use holm_markdown::{BlockKind, Body, Target};
+use holm_markdown::{Body, Target};
 use ropey::{LineType, Rope};
 
 pub(crate) use caret::{Caret, GoalRow};
@@ -533,11 +533,6 @@ impl Model {
         } else {
             self.rope.ceil_char_boundary(offset + 1)
         }
-    }
-
-    /// The kinds of the blocks at `offset`, from the top level block inward.
-    fn blocks_at(&self, offset: usize) -> Vec<&BlockKind> {
-        self.chain_at(offset).into_iter().map(|b| &b.kind).collect()
     }
 
     /// The number of source lines. An empty text has one line.

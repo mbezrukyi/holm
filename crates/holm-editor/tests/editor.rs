@@ -440,6 +440,23 @@ fn enter_continues_a_list_and_tab_indents_it() {
 }
 
 #[test]
+fn list_keys_count_a_numbered_list_per_level() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "1. Milk", WIDTH, HEIGHT);
+    cx.simulate_keystrokes("end enter");
+    cx.simulate_input("Eggs");
+    cx.simulate_keystrokes("enter");
+    cx.simulate_input("Bread");
+    assert_eq!(text(&editor, cx), "1. Milk\n2. Eggs\n3. Bread");
+    cx.simulate_keystrokes("tab");
+    assert_eq!(text(&editor, cx), "1. Milk\n2. Eggs\n   1. Bread");
+    cx.simulate_keystrokes("shift-tab");
+    assert_eq!(text(&editor, cx), "1. Milk\n2. Eggs\n3. Bread");
+    cx.simulate_keystrokes("up end enter");
+    assert_eq!(text(&editor, cx), "1. Milk\n2. Eggs\n3. \n4. Bread");
+}
+
+#[test]
 fn enter_twice_ends_the_list() {
     let mut app = app();
     let (editor, cx) = open(&mut app, "- a", WIDTH, HEIGHT);

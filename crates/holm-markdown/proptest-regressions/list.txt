@@ -1,0 +1,14 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 4a39646bca82e3e3eee99b77085efa4e7f732111669a5117cbce6bba45a8dad2 # shrinks to lines = [(0, 0, 0, 0, true, 0), (0, 0, 2, 2, false, 0), (1, 2, 0, 0, false, 0), (2, 0, 3, 0, false, 0), (1, 0, 0, 0, false, 2)], start = 1, quote = false, ends = (20, 20), key = 1
+cc d49ded246941591a735b2bc8f799166dfd17e37b74d38f1c3687fd10bf0afbd5 # shrinks to lines = [(0, 0, 0, 0, true, 1), (1, 2, 3, 0, false, 0), (1, 2, 1, 0, false, 0), (1, 2, 2, 0, true, 0), (2, 0, 0, 0, false, 1)], start = 1, quote = true, ends = (34, 7), key = 0
+cc 9f529d1524677a69cb2f62969494810cc75f89bc329584424dd926ca7a545276 # shrinks to lines = [(0, 0, 0, 0, false, 1), (1, 0, 3, 0, false, 0), (0, 0, 2, 3, true, 2), (1, 0, 0, 0, false, 0)], start = 1, quote = false, ends = (16, 0), key = 0
+cc cfef81d26544a81a9b33008ec918229c72887d16c342a612f324289c94050e26 # shrinks to lines = [(0, 0, 2, 1, false, 0), (1, 0, 2, 0, false, 0), (1, 0, 4, 3, false, 0), (2, 2, 0, 3, true, 0), (3, 0, 2, 2, false, 0), (0, 0, 0, 3, false, 0)], start = 1, quote = true, ends = (64, 64), key = 2
+cc 3407bb4f5bf431dd4362fd72350e963ff7abad986fd3d12ba11b18958a3402eb # shrinks to lines = [(0, 0, 2, 0, true, 0), (1, 2, 0, 0, false, 0), (2, 0, 3, 0, false, 0), (1, 0, 0, 0, false, 2), (0, 0, 0, 3, false, 0)], start = 1, quote = false, ends = (35, 35), key = 2
+cc 5d511e9642f6d2693d071cfff8716873766b9340402bc7891e67af19b113a2bc # shrinks to lines = [(0, 2, 3, 0, true, 0), (1, 0, 0, 0, true, 0), (0, 0, 1, 3, true, 0), (1, 0, 3, 2, false, 0)], start = 10, quote = false, ends = (34, 35), key = 2
+cc 362f35b719efd73698c06cc0947f2729f20eeaa9b70bd409289f29be6ea0cb47 # shrinks to lines = [(0, 0, 4, 0, false, 0), (1, 0, 3, 0, false, 0)], start = 1, quote = false, ends = (3, 2), key = 2
+cc 43267f381af1f87e6b2f518215e966f10a37bb2c9d4b5a647e86690b158b27e6 # shrinks to lines = [(0, 0, 2, 1, true, 0), (0, 2, 4, 3, false, 0), (1, 2, 0, 0, false, 0)], start = 9, quote = true, ends = (24, 22), key = 2

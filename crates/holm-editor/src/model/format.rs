@@ -3,7 +3,8 @@
 use std::ops::Range;
 
 pub(crate) use holm_markdown::inline::Format;
-use holm_markdown::inline::restyle;
+use holm_markdown::inline::{Edit as MarkdownEdit, restyle};
+use holm_markdown::list::{Move, relist};
 use holm_markdown::{Block, BlockKind};
 
 use super::{Edit, Group, Model, map_offset};
@@ -15,6 +16,11 @@ impl Model {
         let Some(edit) = restyle(&self.text, &self.body, self.selection(), format) else {
             return false;
         };
+        self.apply(edit)
+    }
+
+    /// Applies `edit` as one undo step. The selection keeps its direction.
+    fn apply(&mut self, edit: MarkdownEdit) -> bool {
         let ends = if self.is_reversed() {
             (edit.selection.end, edit.selection.start)
         } else {
@@ -22,89 +28,6 @@ impl Model {
         };
         self.edit(vec![(edit.range, edit.text)], ends, Group::Alone, None)
     }
-}
-
-/// The start of a list item line.
-#[derive(Debug, PartialEq, Eq)]
-struct ListLine {
-    /// The quote markers before the indent, like `> `.
-    quote: Range<usize>,
-    /// The spaces before the marker.
-    indent: Range<usize>,
-    marker: Marker,
-    /// Where the item text starts: after the marker, its spaces and the task box.
-    content: usize,
-    task: bool,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum Marker {
-    Bullet(char),
-    Number(u64, char),
-}
-
-/// The list item syntax at the start of `line`.
-fn list_line(line: &str, start: usize) -> Option<ListLine> {
-    let bytes = line.as_bytes();
-    let mut at = 0;
-    while bytes.get(at) == Some(&b'>') {
-        at += 1;
-        if bytes.get(at) == Some(&b' ') {
-            at += 1;
-        }
-    }
-    let quote = start..start + at;
-    let indent_start = at;
-    while bytes.get(at) == Some(&b' ') {
-        at += 1;
-    }
-    let indent = start + indent_start..start + at;
-    let marker = match bytes.get(at)? {
-        b @ (b'-' | b'*' | b'+') => {
-            at += 1;
-            Marker::Bullet(char::from(*b))
-        }
-        b'0'..=b'9' => {
-            let digits = bytes[at..]
-                .iter()
-                .take_while(|b| b.is_ascii_digit())
-                .count();
-            if digits > 9 {
-                return None;
-            }
-            let number = line[at..at + digits].parse().ok()?;
-            at += digits;
-            let delimiter = match bytes.get(at)? {
-                b @ (b'.' | b')') => char::from(*b),
-                _ => return None,
-            };
-            at += 1;
-            Marker::Number(number, delimiter)
-        }
-        _ => return None,
-    };
-    match bytes.get(at) {
-        None => {}
-        Some(b' ') => {
-            while bytes.get(at) == Some(&b' ') {
-                at += 1;
-            }
-        }
-        Some(_) => return None,
-    }
-    let task = ["[ ] ", "[x] ", "[X] "]
-        .iter()
-        .any(|task| line[at..].starts_with(task));
-    if task {
-        at += 4;
-    }
-    Some(ListLine {
-        quote,
-        indent,
-        marker,
-        content: start + at,
-        task,
-    })
 }
 
 /// The ATX heading level of `line`, and the length of its `#`s and the spaces after them.
@@ -157,109 +80,25 @@ impl Model {
         self.edit(edits, (anchor, cursor), Group::Alone, None)
     }
 
-    /// The list item at the start of `line`, when the parse puts the line in a list item.
-    fn list_item(&self, line: usize) -> Option<ListLine> {
-        let range = self.line_range(line);
-        let item = list_line(&self.text[range.clone()], range.start)?;
-        let kinds = self.blocks_at(item.indent.end);
-        let in_item = kinds.iter().any(|k| matches!(k, BlockKind::Item { .. }));
-        let in_code = kinds
-            .iter()
-            .any(|k| matches!(k, BlockKind::Code { .. } | BlockKind::Html));
-        (in_item && !in_code).then_some(item)
-    }
-
-    /// Enter: in a list item it starts the next item, and on an empty item it ends the list.
-    /// Elsewhere it types a line break. Returns whether the text changed.
+    /// Enter: in a list item it starts the next item and counts the list again, and on an empty
+    /// item it ends the list. Elsewhere it types a line break. Returns whether the text changed.
     pub(crate) fn newline(&mut self, continue_lists: bool, now: std::time::Instant) -> bool {
-        let selection = self.selection();
-        let line = self.line_of(selection.start);
-        let item = continue_lists
-            .then(|| self.list_item(line))
-            .flatten()
-            .filter(|item| selection.start >= item.content);
-        let Some(item) = item else {
-            return self.type_text("\n", now);
-        };
-        let range = self.line_range(line);
-        if item.content == range.end && selection.end == range.end {
-            // A blank line ends the list. Without it, typed text joins the item above.
-            let quote = &self.text[item.quote.clone()];
-            let lines = format!("{}\n{quote}", quote.trim_end());
-            let cursor = range.start + lines.len();
-            return self.edit(
-                vec![(range.start..range.end, lines)],
-                (cursor, cursor),
-                Group::Alone,
-                None,
-            );
+        let edit = continue_lists
+            .then(|| relist(&self.text, &self.body, self.selection(), Move::Next))
+            .flatten();
+        match edit {
+            Some(edit) => self.apply(edit),
+            None => self.type_text("\n", now),
         }
-        let marker = match item.marker {
-            Marker::Bullet(bullet) => bullet.to_string(),
-            Marker::Number(number, delimiter) => format!("{}{delimiter}", number + 1),
-        };
-        let next = format!(
-            "\n{}{}{marker} {}",
-            &self.text[item.quote.clone()],
-            &self.text[item.indent.clone()],
-            if item.task { "[ ] " } else { "" },
-        );
-        let cursor = selection.start + next.len();
-        self.edit(
-            vec![(selection, next)],
-            (cursor, cursor),
-            Group::Alone,
-            None,
-        )
     }
 
-    /// Tab and Shift+Tab: moves each list item that the selection touches one level in or out.
+    /// Tab and Shift+Tab: moves each list item that the selection touches one level in or out,
+    /// with its children, and counts the lists it changes again.
     /// Returns `None` when the selection touches no list item.
     pub(crate) fn indent(&mut self, out: bool) -> Option<bool> {
-        let selection = self.selection();
-        let first = self.line_of(selection.start);
-        let last = self.line_of(selection.end);
-        let mut edits: Vec<Edit> = Vec::new();
-        for line in first..=last {
-            let Some(item) = self.list_item(line) else {
-                continue;
-            };
-            let width = item.indent.len();
-            let new_width = if out {
-                self.parent_indent(line, width)
-            } else {
-                self.child_indent(line, &item)
-            };
-            edits.push((item.indent.clone(), " ".repeat(new_width)));
-        }
-        if edits.is_empty() {
-            return None;
-        }
-        let anchor = map_offset(&edits, self.anchor);
-        let cursor = map_offset(&edits, self.cursor());
-        Some(self.edit(edits, (anchor, cursor), Group::Alone, None))
-    }
-
-    /// The earlier list items in the same top level block as `line`, nearest first.
-    fn items_before(&self, line: usize) -> impl Iterator<Item = ListLine> + '_ {
-        let start = self.line_range(line).start;
-        let blocks = self.body.blocks();
-        let top = blocks[..blocks.partition_point(|b| b.range.start <= start)]
-            .last()
-            .map_or(start, |b| b.range.start);
-        let top = self.line_of(top);
-        (top..line).rev().filter_map(|line| self.list_item(line))
-    }
-
-    /// The indent that makes the item on `line` a child of the item above it.
-    fn child_indent(&self, line: usize, item: &ListLine) -> usize {
-        let width = item.indent.len();
-        self.items_before(line)
-            .find(|above| above.indent.len() <= width)
-            .filter(|above| above.indent.len() == width)
-            .map_or(width + (item.content - item.indent.end), |above| {
-                above.content - above.indent.start
-            })
+        let key = if out { Move::Out } else { Move::In };
+        let edit = relist(&self.text, &self.body, self.selection(), key)?;
+        Some(self.apply(edit))
     }
 
     /// Checks or clears the task box with the `[ ]` source at `range`, as one undo step.
@@ -292,13 +131,6 @@ impl Model {
             })
             .collect();
         self.edit(edits, self.ends(), Group::Alone, None)
-    }
-
-    /// The indent of the parent of the item on `line`, or 0 at the top level.
-    fn parent_indent(&self, line: usize, width: usize) -> usize {
-        self.items_before(line)
-            .find(|above| above.indent.len() < width)
-            .map_or(0, |above| above.indent.len())
     }
 }
 
@@ -438,7 +270,7 @@ mod tests {
         assert_eq!(indented("- a\n- b", 6..6, false), Some("- a\n  - b".into()));
         assert_eq!(
             indented("10. a\n11. b", 8..8, false),
-            Some("10. a\n    11. b".into())
+            Some("10. a\n    1. b".into())
         );
         assert_eq!(
             indented("- a\n  - b\n- c", 12..12, false),
@@ -461,25 +293,59 @@ mod tests {
     }
 
     #[test]
-    fn tab_outside_a_list_is_not_an_indent() {
-        assert_eq!(indented("text", 0..0, false), None);
+    fn tab_and_shift_tab_count_each_level() {
+        let mut model = model_with("1. Milk\n2. Eggs\n3. Bread", 13..13);
+        model.indent(false);
+        assert_eq!(model.text(), "1. Milk\n   1. Eggs\n2. Bread");
+        assert_eq!(model.cursor(), 16);
+        model.indent(true);
+        assert_eq!(model.text(), "1. Milk\n2. Eggs\n3. Bread");
+        assert_eq!(model.cursor(), 13);
     }
 
     #[test]
-    fn list_lines_are_parsed() {
+    fn enter_counts_the_list_again() {
         assert_eq!(
-            list_line("  1) [ ] x", 10),
-            Some(ListLine {
-                quote: 10..10,
-                indent: 10..12,
-                marker: Marker::Number(1, ')'),
-                content: 19,
-                task: true,
-            })
+            enter("1. a\n2. b\n3. c", 9),
+            ("1. a\n2. b\n3. \n4. c".into(), 13)
         );
-        assert_eq!(list_line("-x", 0), None);
-        assert_eq!(list_line("text", 0), None);
-        assert!(list_line("-", 0).is_some());
+    }
+
+    #[test]
+    fn a_list_key_is_one_undo_step() {
+        let text = "1. a\n2. b\n3. c\n4. d";
+        let mut model = model_with(text, 9..9);
+        model.indent(false);
+        assert_eq!(model.text(), "1. a\n   1. b\n2. c\n3. d");
+        model.undo();
+        assert_eq!((model.text(), model.cursor()), (text, 9));
+        model.newline(true, Instant::now());
+        assert_eq!(model.text(), "1. a\n2. b\n3. \n4. c\n5. d");
+        model.undo();
+        assert_eq!((model.text(), model.cursor()), (text, 9));
+    }
+
+    #[test]
+    fn the_cursor_stays_on_its_item_when_the_number_grows() {
+        let mut model = model_with("9. a\n   1. bc", 12..12);
+        model.indent(true);
+        assert_eq!((model.text(), model.cursor()), ("9. a\n10. bc", 10));
+    }
+
+    #[test]
+    fn typing_deleting_and_pasting_do_not_count_a_list_again() {
+        let mut model = model_with("1. a\n2. b\n3. c", 4..9);
+        model.backspace(false, Instant::now());
+        assert_eq!(model.text(), "1. a\n3. c");
+        model.insert("\n7. x");
+        assert_eq!(model.text(), "1. a\n7. x\n3. c");
+        model.type_text("\n2. y", Instant::now());
+        assert_eq!(model.text(), "1. a\n7. x\n2. y\n3. c");
+    }
+
+    #[test]
+    fn tab_outside_a_list_is_not_an_indent() {
+        assert_eq!(indented("text", 0..0, false), None);
     }
 
     const STYLES: [Format; 5] = [
