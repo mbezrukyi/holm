@@ -506,77 +506,77 @@ const SHORTCUTS: &[Shortcut] = &[
     ),
     row(
         P::ColorWindow,
-        Keys::plain("1").shift(Shift::Either),
+        Keys::plain("1"),
         C::PaletteColor(1),
         G::Text,
         "Palette color 1",
     ),
     row(
         P::ColorWindow,
-        Keys::plain("2").shift(Shift::Either),
+        Keys::plain("2"),
         C::PaletteColor(2),
         G::Text,
         "Palette color 2",
     ),
     row(
         P::ColorWindow,
-        Keys::plain("3").shift(Shift::Either),
+        Keys::plain("3"),
         C::PaletteColor(3),
         G::Text,
         "Palette color 3",
     ),
     row(
         P::ColorWindow,
-        Keys::plain("4").shift(Shift::Either),
+        Keys::plain("4"),
         C::PaletteColor(4),
         G::Text,
         "Palette color 4",
     ),
     row(
         P::ColorWindow,
-        Keys::plain("5").shift(Shift::Either),
+        Keys::plain("5"),
         C::PaletteColor(5),
         G::Text,
         "Palette color 5",
     ),
     row(
         P::ColorWindow,
-        Keys::plain("6").shift(Shift::Either),
+        Keys::plain("6"),
         C::PaletteColor(6),
         G::Text,
         "Palette color 6",
     ),
     row(
         P::ColorWindow,
-        Keys::plain("7").shift(Shift::Either),
+        Keys::plain("7"),
         C::CustomColor(1),
         G::Text,
         "Custom color 1",
     ),
     row(
         P::ColorWindow,
-        Keys::plain("8").shift(Shift::Either),
+        Keys::plain("8"),
         C::CustomColor(2),
         G::Text,
         "Custom color 2",
     ),
     row(
         P::ColorWindow,
-        Keys::plain("9").shift(Shift::Either),
+        Keys::plain("9"),
         C::CustomColor(3),
         G::Text,
         "Custom color 3",
     ),
     row(
         P::ColorWindow,
-        Keys::plain("0").shift(Shift::Either),
+        Keys::plain("0"),
         C::RemoveColor,
         G::Text,
         "Remove the color",
     ),
     row(
         P::ColorWindow,
-        Keys::plain("+").shift(Shift::Either),
+        Keys::plain("+"),
         C::HexField,
         G::Text,
         "Type a hex color",
@@ -636,6 +636,20 @@ mod tests {
     use gpui_kit::{TestAppContext, TestDispatcher};
 
     use super::*;
+
+    #[test]
+    fn no_key_with_no_case_carries_shift() {
+        // GPUI on Linux drops Shift for a key whose char has no case, so a binding with Shift
+        // never matches it.
+        for shortcut in SHORTCUTS {
+            let mut chars = shortcut.keys.key.chars();
+            let no_case = matches!(
+                (chars.next(), chars.next()),
+                (Some(char), None) if !char.is_lowercase() && !char.is_uppercase()
+            );
+            assert!(!no_case || shortcut.keys.shift == Shift::Up, "{shortcut:?}");
+        }
+    }
 
     #[test]
     fn each_row_binds_its_keys_in_its_place() {

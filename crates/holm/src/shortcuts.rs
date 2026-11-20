@@ -232,10 +232,9 @@ const ROWS: &[Row] = &[
         G::Window,
         text::KEY_SETTINGS,
     ),
-    // GPUI drops Shift for a key whose char has no case.
     row(
         P::Window,
-        Keys::ctrl("?").shift(Shift::Either),
+        Keys::ctrl("?"),
         C::ShortcutList,
         G::Window,
         text::KEY_SHORTCUT_LIST,
@@ -681,8 +680,7 @@ fn kept_by_text_fields() -> Vec<Keys> {
         .collect()
 }
 
-/// The keystroke the shortcut list shows for `keys`. With [`Shift::Either`] it has no Shift,
-/// so Ctrl+? shows as "Ctrl+?".
+/// The keystroke the shortcut list shows for `keys`. With [`Shift::Either`] it has no Shift.
 pub(crate) fn keystroke(keys: Keys) -> Keystroke {
     let mut keystroke = Keystroke {
         key: keys.key.to_owned(),
@@ -756,6 +754,25 @@ mod tests {
                 assert_eq!(bindings.len(), count, "{:?} {:?}", row.place, row.keys);
             }
         });
+    }
+
+    #[test]
+    fn no_key_with_no_case_carries_shift() {
+        // GPUI on Linux drops Shift for a key whose char has no case, so a binding with Shift
+        // never matches it.
+        for row in ROWS {
+            let mut chars = row.keys.key.chars();
+            let no_case = matches!(
+                (chars.next(), chars.next()),
+                (Some(char), None) if !char.is_lowercase() && !char.is_uppercase()
+            );
+            assert!(
+                !no_case || row.keys.shift == Shift::Up,
+                "{:?} {:?}",
+                row.place,
+                row.keys
+            );
+        }
     }
 
     #[test]
