@@ -3,7 +3,7 @@
 //! A quiet count button at the right end of the tag row: "← 1 note" or "← N notes". A click
 //! on it, or Ctrl+Shift+B, opens a list under it, the last changed note first.
 //!
-//! - `↑` and `↓` move the cursor. `Enter` or a click opens the note under it.
+//! - `Tab` and `Shift+Tab` move the cursor and wrap. `Enter` or a click opens the note under it.
 //! - `Esc`, or a click outside the list, closes it. See [`Dropdown`] for the focus.
 //!
 //! With no backlinks, the tag row leaves the button out.
@@ -12,12 +12,13 @@ use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Context, CursorStyle, ElementId, EventEmitter, FocusHandle, InteractiveElement as _,
-    IntoElement, KeyDownEvent, MouseButton, ParentElement, Pixels, Render, Role, ScrollHandle,
+    IntoElement, MouseButton, ParentElement, Pixels, Render, Role, ScrollHandle,
     StatefulInteractiveElement as _, Styled, TestSupportExt as _, Window, div, px,
 };
 use holm_core::NotePath;
 use holm_core::model::NoteInfo;
 
+use crate::list_cursor;
 use crate::popup::{self, Dropdown};
 use crate::shortcuts::{Command, Place, Run};
 use crate::text;
@@ -103,24 +104,17 @@ impl Backlinks {
         match command {
             Command::Pick => self.pick(self.cursor, cx),
             Command::Close => self.close(cx),
+            Command::Next | Command::Previous => {
+                let forward = *command == Command::Next;
+                let len = self.notes.len();
+                if let Some(at) = list_cursor::step(Some(self.cursor), len, forward, |_| true) {
+                    self.cursor = at;
+                    self.scroll.scroll_to_item(at);
+                }
+            }
             _ => return cx.propagate(),
         }
         cx.notify();
-    }
-
-    fn key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        let keystroke = &event.keystroke;
-        if keystroke.modifiers.modified() {
-            return;
-        }
-        match keystroke.key.as_str() {
-            "up" => self.cursor = self.cursor.saturating_sub(1),
-            "down" => self.cursor = (self.cursor + 1).min(self.notes.len().saturating_sub(1)),
-            _ => return,
-        }
-        self.scroll.scroll_to_item(self.cursor);
-        cx.notify();
-        cx.stop_propagation();
     }
 
     fn button(&self, cx: &Context<Self>) -> impl IntoElement {
@@ -176,7 +170,6 @@ impl Backlinks {
             .panel(LIST_WIDTH, window, cx)
             .right_0()
             .key_context(Place::ListPopup.key_context())
-            .on_key_down(cx.listener(Self::key_down))
             .on_action(cx.listener(Self::run))
             .id("backlinks")
             .role(Role::Dialog)

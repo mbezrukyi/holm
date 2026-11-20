@@ -2,8 +2,8 @@
 //!
 //! - It opens under the ☰ button of the sidebar head, or at the top-left corner of the window
 //!   while the sidebar is hidden.
-//! - It opens with the cursor on the first item. `↑` and `↓` move the cursor past an item
-//!   that is off. `Enter` or a click picks the item under it.
+//! - It opens with the cursor on the first item. `Tab` and `Shift+Tab` move the cursor past an
+//!   item that is off, and wrap. `Enter` or a click picks the item under it.
 //! - `Esc`, a pick, or a second open closes it and gives the focus back to the part that had
 //!   it before. A click outside the menu and the button closes it too. See [`Dropdown`] for
 //!   the focus.
@@ -15,11 +15,11 @@ use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Anchor, Bounds, Context, ElementId, EventEmitter, FocusHandle, InteractiveElement as _,
-    IntoElement, KeyDownEvent, MouseButton, ParentElement, Pixels, Render, Role,
-    StatefulInteractiveElement as _, Styled, TestSupportExt as _, Window, anchored, deferred, div,
-    point, px,
+    IntoElement, MouseButton, ParentElement, Pixels, Render, Role, StatefulInteractiveElement as _,
+    Styled, TestSupportExt as _, Window, anchored, deferred, div, point, px,
 };
 
+use crate::list_cursor;
 use crate::popup::{self, Dropdown};
 use crate::shortcuts::{self, Command, Place, Run};
 use crate::{shortcut_list, text};
@@ -143,47 +143,21 @@ impl AppMenu {
         cx.emit(Picked(ITEMS[at]));
     }
 
-    /// Moves the cursor to the next item that works, up or down. It stays at the last one.
-    fn step(&mut self, down: bool) {
-        let mut at = self.cursor;
-        loop {
-            let next = if down {
-                at.checked_add(1)
-            } else {
-                at.checked_sub(1)
-            };
-            match next.filter(|next| *next < ITEMS.len()) {
-                Some(next) if self.works(next) => {
-                    self.cursor = next;
-                    return;
-                }
-                Some(next) => at = next,
-                None => return,
-            }
-        }
-    }
-
     fn run(&mut self, Run(command): &Run, window: &mut Window, cx: &mut Context<Self>) {
         match command {
             Command::Pick => self.pick(self.cursor, window, cx),
             Command::Close => self.leave(window, cx),
+            Command::Next | Command::Previous => {
+                let forward = *command == Command::Next;
+                let works = |at| self.works(at);
+                if let Some(at) = list_cursor::step(Some(self.cursor), ITEMS.len(), forward, works)
+                {
+                    self.cursor = at;
+                }
+            }
             _ => return cx.propagate(),
         }
         cx.notify();
-    }
-
-    fn key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        let keystroke = &event.keystroke;
-        if keystroke.modifiers.modified() {
-            return;
-        }
-        match keystroke.key.as_str() {
-            "up" => self.step(false),
-            "down" => self.step(true),
-            _ => return,
-        }
-        cx.notify();
-        cx.stop_propagation();
     }
 }
 
@@ -245,7 +219,6 @@ impl Render for AppMenu {
             .dropdown
             .frame(WIDTH, window, cx)
             .key_context(Place::ListPopup.key_context())
-            .on_key_down(cx.listener(Self::key_down))
             .on_action(cx.listener(Self::run))
             .id("app-menu")
             .role(Role::ListBox)

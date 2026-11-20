@@ -438,7 +438,13 @@ fn an_outside_change_with_unsaved_text_asks_to_reload_or_keep_mine(cx: &mut Test
     fixture.write_outside(cx, "Note.md", "theirs again\n");
     click(cx, handle, "message-state");
     assert_eq!(state_menu(cx, handle), ["Keep mine*", "Reload"]);
-    keys(cx, handle, "down enter");
+    keys(cx, handle, "down shift-tab");
+    assert_eq!(
+        state_menu(cx, handle),
+        ["Keep mine", "Reload*"],
+        "an arrow does nothing, and Shift+Tab wraps"
+    );
+    keys(cx, handle, "enter");
     assert_eq!(editor_text(cx, handle), "theirs again\n");
     assert_eq!(state(cx, handle), None);
 }
@@ -484,7 +490,7 @@ fn a_failed_reload_keeps_the_text_and_the_question(cx: &mut TestAppContext) {
     fixture.write_outside(cx, "Note.md", "theirs\n");
     fs::set_permissions(&note, fs::Permissions::from_mode(0o000)).unwrap();
 
-    keys(cx, handle, "ctrl-shift-d down enter");
+    keys(cx, handle, "ctrl-shift-d tab enter");
     assert_eq!(editor_text(cx, handle), "mine old\n");
     assert_eq!(state(cx, handle).as_deref(), Some(text::CHANGED_ON_DISK));
     fs::set_permissions(&note, fs::Permissions::from_mode(0o644)).unwrap();
@@ -542,7 +548,13 @@ fn a_broken_config_is_a_problem_in_the_message_line(cx: &mut TestAppContext) {
         problem_list(cx, handle),
         [format!("{}*", text::CONFIG_WRITE)]
     );
-    keys(cx, handle, "down up");
+    keys(cx, handle, "tab");
+    assert_eq!(
+        problem_list(cx, handle),
+        [format!("{}*", text::CONFIG_WRITE)],
+        "the one problem wraps to itself"
+    );
+    keys(cx, handle, "down shift-tab");
     assert_eq!(problem_list(cx, handle).len(), 1);
     keys(cx, handle, "escape");
     assert_eq!(problem_list(cx, handle), Vec::<String>::new());
@@ -2955,8 +2967,12 @@ fn ctrl_shift_b_opens_the_backlinks_of_the_note(cx: &mut TestAppContext) {
     assert_eq!(backlinks(cx, handle), Vec::<String>::new());
     assert_eq!(focus(cx, handle), "editor");
 
-    // `↓` and Enter open the second note.
-    keys(cx, handle, "ctrl-shift-b down");
+    // Tab wraps, an arrow does nothing, and Enter opens the note.
+    keys(cx, handle, "ctrl-shift-b shift-tab");
+    assert_eq!(backlinks(cx, handle), ["New", "Old*"]);
+    keys(cx, handle, "tab");
+    assert_eq!(backlinks(cx, handle), ["New*", "Old"]);
+    keys(cx, handle, "down tab");
     assert_eq!(backlinks(cx, handle), ["New", "Old*"]);
     keys(cx, handle, "enter");
     assert_eq!(editor_text(cx, handle), "# Old\n[t](holm:01T)\n");
@@ -3183,7 +3199,7 @@ fn an_outside_delete_with_unsaved_text_asks_to_keep_or_close(cx: &mut TestAppCon
     cx.simulate_input(handle, "!");
     fixture.delete_outside(cx, "Plan.md");
     assert_eq!(state(cx, handle).as_deref(), Some(text::DELETED_ON_DISK));
-    keys(cx, handle, "ctrl-shift-d down enter");
+    keys(cx, handle, "ctrl-shift-d tab enter");
     assert_eq!(editor_text(cx, handle), "# Goals\nread more\n");
     assert!(!notes_dir.join("Plan.md").exists());
     assert_eq!(state(cx, handle), None);
@@ -3258,7 +3274,7 @@ fn close_after_an_outside_delete_writes_no_file(cx: &mut TestAppContext) {
     let before = times();
 
     fixture.delete_outside(cx, "Plan.md");
-    keys(cx, handle, "ctrl-shift-d down enter");
+    keys(cx, handle, "ctrl-shift-d tab enter");
     autosave(cx);
     assert_eq!(editor_text(cx, handle), "# Goals\nread more\n");
     assert_eq!(files(&notes_dir), ["Goals.md", "Top.md"]);
@@ -4139,7 +4155,7 @@ fn f10_and_the_menu_button_open_the_app_menu_under_the_button(cx: &mut TestAppCo
     let button = bounds_of(cx, handle, "app-menu-button").unwrap();
     assert_eq!(menu.left(), button.left());
     assert!(menu.top() >= button.bottom());
-    keys(cx, handle, "down down down");
+    keys(cx, handle, "tab tab tab");
     assert_eq!(
         app_menu(cx, handle),
         ["Settings", "Shortcuts", "Pin note", "Quit*"]
@@ -4182,7 +4198,7 @@ fn each_app_menu_item_runs_its_action_by_keys_and_by_click(cx: &mut TestAppConte
     assert_eq!(question(cx, handle).as_deref(), Some(text::SETTINGS));
     keys(cx, handle, "escape");
 
-    keys(cx, handle, "f10 down enter");
+    keys(cx, handle, "f10 tab enter");
     assert_eq!(question(cx, handle).as_deref(), Some(text::SHORTCUT_LIST));
     keys(cx, handle, "escape");
     keys(cx, handle, "f10");
@@ -4191,7 +4207,7 @@ fn each_app_menu_item_runs_its_action_by_keys_and_by_click(cx: &mut TestAppConte
     keys(cx, handle, "escape");
     assert_eq!(focus(cx, handle), "editor");
 
-    keys(cx, handle, "f10 down down enter");
+    keys(cx, handle, "f10 tab tab enter");
     assert!(read(&note).contains("pinned: true"));
     keys(cx, handle, "f10");
     click_menu_item(cx, handle, 2);
@@ -4209,13 +4225,25 @@ fn quit_in_the_app_menu_closes_the_window_by_keys(cx: &mut TestAppContext) {
     fs::write(fixture.notes().join("Note.md"), "a\n").unwrap();
     let handle = open(cx, fixture.startup(None));
 
-    keys(cx, handle, "f10 up");
+    keys(cx, handle, "f10 up down");
     assert_eq!(
         app_menu(cx, handle),
         ["Settings*", "Shortcuts", "Pin note", "Quit"],
-        "up stays on the first item"
+        "an arrow does nothing"
     );
-    keys(cx, handle, "down down down enter");
+    keys(cx, handle, "shift-tab");
+    assert_eq!(
+        app_menu(cx, handle),
+        ["Settings", "Shortcuts", "Pin note", "Quit*"],
+        "Shift+Tab wraps to the last item"
+    );
+    keys(cx, handle, "tab");
+    assert_eq!(
+        app_menu(cx, handle),
+        ["Settings*", "Shortcuts", "Pin note", "Quit"],
+        "Tab wraps to the first item"
+    );
+    keys(cx, handle, "shift-tab enter");
     assert!(!window_open(cx, handle));
 }
 
@@ -4225,12 +4253,12 @@ fn pin_note_is_off_with_no_note_open(cx: &mut TestAppContext) {
     let handle = open(cx, fixture.startup(None));
     assert!(empty_pane(cx, handle));
 
-    keys(cx, handle, "f10 down down");
+    keys(cx, handle, "f10 tab tab");
     assert_eq!(
         app_menu(cx, handle),
         ["Settings", "Shortcuts", "Pin note", "Quit*"]
     );
-    keys(cx, handle, "up");
+    keys(cx, handle, "shift-tab");
     assert_eq!(
         app_menu(cx, handle),
         ["Settings", "Shortcuts*", "Pin note", "Quit"]

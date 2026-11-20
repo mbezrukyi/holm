@@ -25,6 +25,7 @@ tracing-subscriber.workspace = true
 gpui-kit = { workspace = true, features = ["component", "test-support"] }
 holm-core = { workspace = true, features = ["test-support"] }
 holm-editor = { workspace = true, features = ["test-support"] }
+proptest.workspace = true
 
 [lints]
 workspace = true

@@ -3,7 +3,7 @@
 //!
 //! - It opens with the cursor on the first choice. A state with no choices shows only its
 //!   reason.
-//! - `↑` and `↓` move the cursor. `Enter` or a click picks the choice under it.
+//! - `Tab` and `Shift+Tab` move the cursor and wrap. `Enter` or a click picks the choice under it.
 //! - `Esc`, or a click outside the menu and the state, closes it. See [`Dropdown`] for the
 //!   focus.
 //! - A new state closes the menu.
@@ -14,11 +14,12 @@ use std::rc::Rc;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::{
     Anchor, Bounds, Context, ElementId, EventEmitter, FocusHandle, InteractiveElement as _,
-    IntoElement, KeyDownEvent, MouseButton, ParentElement, Pixels, Render, Role, SharedString,
+    IntoElement, MouseButton, ParentElement, Pixels, Render, Role, SharedString,
     StatefulInteractiveElement as _, Styled, TestSupportExt as _, Window, anchored, deferred, div,
     point, px,
 };
 
+use crate::list_cursor;
 use crate::popup::{self, Dropdown};
 use crate::shortcuts::{Command, Place, Run};
 
@@ -114,23 +115,16 @@ impl StateMenu {
         match command {
             Command::Pick => self.pick(self.cursor, window, cx),
             Command::Close => self.close(window, cx),
+            Command::Next | Command::Previous => {
+                let forward = *command == Command::Next;
+                let len = self.choices();
+                if let Some(at) = list_cursor::step(Some(self.cursor), len, forward, |_| true) {
+                    self.cursor = at;
+                }
+            }
             _ => return cx.propagate(),
         }
         cx.notify();
-    }
-
-    fn key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        if event.keystroke.modifiers.modified() {
-            return;
-        }
-        let last = self.choices().saturating_sub(1);
-        match event.keystroke.key.as_str() {
-            "up" => self.cursor = self.cursor.saturating_sub(1),
-            "down" => self.cursor = (self.cursor + 1).min(last),
-            _ => return,
-        }
-        cx.notify();
-        cx.stop_propagation();
     }
 }
 
@@ -178,7 +172,6 @@ impl Render for StateMenu {
         let panel = dropdown
             .frame(px(WIDTH), window, cx)
             .key_context(Place::ListPopup.key_context())
-            .on_key_down(cx.listener(Self::key_down))
             .on_action(cx.listener(Self::run))
             .id("state-menu")
             .role(Role::ListBox)

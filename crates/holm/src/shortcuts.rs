@@ -456,6 +456,20 @@ const ROWS: &[Row] = &[
     ),
     row(
         P::ListPopup,
+        Keys::plain("tab"),
+        C::Next,
+        G::Window,
+        text::KEY_NEXT_ROW,
+    ),
+    row(
+        P::ListPopup,
+        Keys::plain("tab").shift(Shift::Down),
+        C::Previous,
+        G::Window,
+        text::KEY_PREVIOUS_ROW,
+    ),
+    row(
+        P::ListPopup,
         Keys::plain("enter"),
         C::Pick,
         G::Window,

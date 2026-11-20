@@ -1,7 +1,7 @@
 //! The problem list: the problems of Holm, right above the problem mark in the message line.
 //!
 //! - It opens with the cursor on the first problem.
-//! - `↑` and `↓` move the cursor. A click moves it too.
+//! - `Tab` and `Shift+Tab` move the cursor and wrap. A click moves it too.
 //! - `Esc`, or a click outside the list and the mark, closes it. See [`Dropdown`] for the focus.
 
 use std::cell::Cell;
@@ -9,11 +9,12 @@ use std::rc::Rc;
 
 use gpui_kit::{
     Anchor, Bounds, Context, ElementId, FocusHandle, InteractiveElement as _, IntoElement,
-    KeyDownEvent, MouseButton, ParentElement, Pixels, Render, Role, SharedString,
+    MouseButton, ParentElement, Pixels, Render, Role, SharedString,
     StatefulInteractiveElement as _, TestSupportExt as _, Window, anchored, deferred, div, point,
     px,
 };
 
+use crate::list_cursor;
 use crate::popup::{self, Dropdown};
 use crate::shortcuts::{Command, Place, Run};
 
@@ -84,23 +85,16 @@ impl ProblemList {
     fn run(&mut self, Run(command): &Run, window: &mut Window, cx: &mut Context<Self>) {
         match command {
             Command::Close => self.close(window, cx),
+            Command::Next | Command::Previous => {
+                let forward = *command == Command::Next;
+                let len = self.problems.len();
+                if let Some(at) = list_cursor::step(Some(self.cursor), len, forward, |_| true) {
+                    self.cursor = at;
+                }
+            }
             _ => return cx.propagate(),
         }
         cx.notify();
-    }
-
-    fn key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        if event.keystroke.modifiers.modified() {
-            return;
-        }
-        let last = self.problems.len().saturating_sub(1);
-        match event.keystroke.key.as_str() {
-            "up" => self.cursor = self.cursor.saturating_sub(1),
-            "down" => self.cursor = (self.cursor + 1).min(last),
-            _ => return,
-        }
-        cx.notify();
-        cx.stop_propagation();
     }
 }
 
@@ -130,7 +124,6 @@ impl Render for ProblemList {
         let panel = dropdown
             .frame(px(WIDTH), window, cx)
             .key_context(Place::ListPopup.key_context())
-            .on_key_down(cx.listener(Self::key_down))
             .on_action(cx.listener(Self::run))
             .id("problem-list")
             .role(Role::ListBox)

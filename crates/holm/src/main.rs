@@ -13,6 +13,7 @@ mod fold;
 mod icons;
 mod link_picker;
 mod link_rows;
+mod list_cursor;
 mod log;
 mod lowercase;
 mod message_line;
