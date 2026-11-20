@@ -308,7 +308,10 @@ impl FlowLine {
                     continue;
                 }
                 if width(start..end) > wrap_width {
-                    start = self.shrink(segs, &rest, wrapper, (start, end), total, wrap_width);
+                    // A new wrap of this row: the boundaries of `rest` count from the start of
+                    // the pass, which is an earlier row.
+                    let row = fragments_from(&fragments, start);
+                    start = self.shrink(segs, &row, wrapper, (start, end), total, wrap_width);
                     cuts.push(start);
                     continue 'pass;
                 }
@@ -781,9 +784,11 @@ mod tests {
     fn in_window(test: impl FnOnce(&mut Window)) {
         let text_system = gpui_kit::platform::current_platform(true).text_system();
         text_system
-            .add_fonts(vec![Cow::Borrowed(include_bytes!(
-                "../../tests/fonts/FiraMono-Medium.ttf"
-            ))])
+            .add_fonts(vec![
+                Cow::Borrowed(include_bytes!("../../tests/fonts/FiraMono-Medium.ttf")),
+                // A narrower font than Fira Mono, from the app.
+                Cow::Borrowed(include_bytes!("../../../holm/fonts/Inter-Regular.ttf")),
+            ])
             .expect("the repo font loads");
         let mut app =
             TestAppContext::build_with_text_system(TestDispatcher::new(0), None, text_system);
@@ -972,6 +977,49 @@ mod tests {
             // A click anywhere on the chip gives its start.
             assert_eq!(click(after - px(1.)), Ok(chip.start));
             assert_eq!(click(x(&line, chip.start) + px(1.)), Ok(chip.start));
+        });
+    }
+
+    /// Code in a wider font than the text makes rows wider than the wrapper thinks. A row
+    /// after the first one of a wrap pass that is too wide still breaks between words.
+    #[test]
+    fn a_too_wide_row_with_code_breaks_between_words() {
+        in_window(|window| {
+            let text = "items scale with width or height. It uses modern CSS: gap, logical \
+                        properties, clamp(), aspect-ratio, dynamic viewport units, and queries.";
+            let inter = font("Inter");
+            let mut runs = Vec::new();
+            let mut at = 0;
+            for code in ["gap", "clamp()", "aspect-ratio"] {
+                let start = text.find(code).expect("the code is in the text");
+                runs.push(TextRun {
+                    len: start - at,
+                    font: inter.clone(),
+                    ..run(0)
+                });
+                runs.push(run(code.len()));
+                at = start + code.len();
+            }
+            runs.push(TextRun {
+                len: text.len() - at,
+                font: inter.clone(),
+                ..run(0)
+            });
+            let word = text.find("aspect-ratio").expect("the word is in the text");
+            let after_hyphen = word + "aspect-".len();
+            for half in 300_u16..1400 {
+                let wrap = px(f32::from(half) / 2.);
+                let line =
+                    FlowLine::new(text.into(), &runs, Vec::new(), &inter, SIZE, wrap, window);
+                for row in &line.rows {
+                    let end = row.range.end;
+                    assert!(
+                        end <= word || end >= word + "aspect-ratio".len() || end == after_hyphen,
+                        "a row of {wrap:?} ends in {:?}",
+                        &text[word..end]
+                    );
+                }
+            }
         });
     }
 }
