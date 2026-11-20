@@ -121,9 +121,9 @@ pub(crate) enum Command {
     Back,
     /// Goes from the search field to the results.
     ShowResults,
-    /// Moves to the row above.
+    /// Moves the list cursor to the previous item, or scrolls up.
     Previous,
-    /// Moves to the row below.
+    /// Moves the list cursor to the next item, or scrolls down.
     Next,
     Rename,
     Delete,
@@ -134,10 +134,11 @@ pub(crate) enum Command {
     Close,
     Confirm,
     Cancel,
-    NextSetting,
-    PreviousSetting,
-    /// Switches the switch of the row, or opens the folder picker on the notes folder row.
-    SwitchSetting,
+    /// Switches the item under the cursor: opens or closes a tree item, picks the next option of
+    /// a choice row, switches a switch, or opens the folder picker on the notes folder row.
+    Switch,
+    /// Picks the previous option of a choice row.
+    SwitchBack,
     /// Opens the folder picker on the notes folder row.
     ChangeFolder,
     /// A key of the editor table that works in each text input.
@@ -304,6 +305,27 @@ const ROWS: &[Row] = &[
     ),
     row(
         P::Tree,
+        Keys::plain("tab"),
+        C::Next,
+        G::Sidebar,
+        text::KEY_NEXT_ITEM,
+    ),
+    row(
+        P::Tree,
+        Keys::plain("tab").shift(Shift::Down),
+        C::Previous,
+        G::Sidebar,
+        text::KEY_PREVIOUS_ITEM,
+    ),
+    row(
+        P::Tree,
+        Keys::plain("space"),
+        C::Switch,
+        G::Sidebar,
+        text::KEY_OPEN_CLOSE_ITEM,
+    ),
+    row(
+        P::Tree,
         Keys::plain("enter"),
         C::ShowNotes,
         G::Sidebar,
@@ -329,6 +351,20 @@ const ROWS: &[Row] = &[
         C::Delete,
         G::Sidebar,
         text::KEY_DELETE_ITEM,
+    ),
+    row(
+        P::NoteList,
+        Keys::plain("tab"),
+        C::Next,
+        G::Sidebar,
+        text::KEY_NEXT_NOTE,
+    ),
+    row(
+        P::NoteList,
+        Keys::plain("tab").shift(Shift::Down),
+        C::Previous,
+        G::Sidebar,
+        text::KEY_PREVIOUS_NOTE,
     ),
     row(
         P::NoteList,
@@ -501,23 +537,30 @@ const ROWS: &[Row] = &[
     row(
         P::Settings,
         Keys::plain("tab"),
-        C::NextSetting,
+        C::Next,
         G::Window,
         text::KEY_NEXT_SETTING,
     ),
     row(
         P::Settings,
         Keys::plain("tab").shift(Shift::Down),
-        C::PreviousSetting,
+        C::Previous,
         G::Window,
         text::KEY_PREVIOUS_SETTING,
     ),
     row(
         P::Settings,
         Keys::plain("space"),
-        C::SwitchSetting,
+        C::Switch,
         G::Window,
         text::KEY_SWITCH_SETTING,
+    ),
+    row(
+        P::Settings,
+        Keys::plain("space").shift(Shift::Down),
+        C::SwitchBack,
+        G::Window,
+        text::KEY_PREVIOUS_OPTION,
     ),
     row(
         P::Settings,
@@ -532,6 +575,20 @@ const ROWS: &[Row] = &[
         C::Close,
         G::Window,
         text::KEY_CLOSE,
+    ),
+    row(
+        P::ShortcutList,
+        Keys::plain("tab"),
+        C::Next,
+        G::Window,
+        text::KEY_SCROLL_DOWN,
+    ),
+    row(
+        P::ShortcutList,
+        Keys::plain("tab").shift(Shift::Down),
+        C::Previous,
+        G::Window,
+        text::KEY_SCROLL_UP,
     ),
     row(
         P::ShortcutList,

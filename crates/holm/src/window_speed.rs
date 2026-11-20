@@ -118,8 +118,8 @@ fn window_speed(cx: &mut TestAppContext) {
     // Quick open gives the focus back to the note list, after the search.
     keys(cx, handle, "escape");
     assert!(sidebar(cx, handle).starts_with("tree "));
-    time("tree step down", || {
-        cx.simulate_keystrokes(handle, "down");
+    time("tree step", || {
+        cx.simulate_keystrokes(handle, "tab");
         settle(cx);
         frame(cx);
     });
@@ -214,7 +214,7 @@ fn window_speed_during_a_tag_rename(cx: &mut TestAppContext) {
 
     // The tree: All notes, the folders, then the tag `area`. Each note has a tag under it.
     keys(cx, handle, "ctrl-shift-l escape");
-    keys(cx, handle, &["down"; FOLDERS + 1].join(" "));
+    keys(cx, handle, &["tab"; FOLDERS + 1].join(" "));
     assert_eq!(sidebar(cx, handle), "tree #area");
     type_new_name(cx, handle, "zone");
     keys(cx, handle, "enter");

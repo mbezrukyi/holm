@@ -1,9 +1,10 @@
 //! The settings dialog over the notes view. Each change goes to [`Config::change`], which
 //! applies it at once.
 //!
-//! `Tab` and `Shift+Tab` move the cursor between rows and wrap at the ends. `Left` and
-//! `Right` pick an option. `Space` switches a switch. `Space` or `Enter` on the notes folder
-//! opens the folder picker. `Esc` closes the dialog.
+//! `Tab` and `Shift+Tab` move the cursor between rows and wrap at the ends. On a choice row,
+//! `Space` picks the next option and `Shift+Space` the previous one, and the options wrap.
+//! `Space` switches a switch. `Space` or `Enter` on the notes folder opens the folder picker.
+//! `Esc` closes the dialog.
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::kbd::Kbd;
@@ -12,7 +13,7 @@ use gpui_kit::component::{ActiveTheme as _, Selectable as _, Sizable as _, h_fle
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
-    InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement, Pixels, Render, Role,
+    InteractiveElement as _, IntoElement, ParentElement, Pixels, Render, Role,
     StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _, Window, div, px,
     transparent_black,
 };
@@ -22,6 +23,7 @@ use holm_editor::shortcuts::{self as editor, Keys};
 
 use crate::config::{AppearanceSetting, Config, Settings};
 use crate::icons::Icon;
+use crate::list_cursor;
 use crate::shortcuts::{self, Command, Place, Run};
 use crate::{popup, text, window};
 
@@ -87,17 +89,10 @@ impl Row {
     }
 }
 
-/// The option after or before `current` in `options`. It stops at the ends.
-fn step<T: Copy + PartialEq>(options: &[(T, &str)], current: T, forward: bool) -> T {
-    let at = options
-        .iter()
-        .position(|(option, _)| *option == current)
-        .unwrap_or(0);
-    let at = if forward {
-        (at + 1).min(options.len() - 1)
-    } else {
-        at.saturating_sub(1)
-    };
+/// The option after or before `current` in `options`. It wraps at the ends.
+fn next_option<T: Copy + PartialEq>(options: &[(T, &str)], current: T, forward: bool) -> T {
+    let at = options.iter().position(|(option, _)| *option == current);
+    let at = list_cursor::step(at, options.len(), forward, |_| true).unwrap_or(0);
     options[at].0
 }
 
@@ -150,23 +145,21 @@ impl SettingsDialog {
     }
 
     fn move_cursor(&mut self, forward: bool, cx: &mut Context<Self>) {
-        self.cursor = if forward {
-            (self.cursor + 1) % ROWS.len()
-        } else {
-            (self.cursor + ROWS.len() - 1) % ROWS.len()
-        };
-        cx.notify();
+        if let Some(at) = list_cursor::step(Some(self.cursor), ROWS.len(), forward, |_| true) {
+            self.cursor = at;
+            cx.notify();
+        }
     }
 
     /// Picks the next or the previous option of the row.
     fn pick_option(&self, forward: bool, cx: &mut App) {
         match self.row() {
             Row::Theme => self.change(
-                |settings| settings.theme = step(&THEMES, settings.theme, forward),
+                |settings| settings.theme = next_option(&THEMES, settings.theme, forward),
                 cx,
             ),
             Row::Order => self.change(
-                |settings| settings.note_order = step(&ORDERS, settings.note_order, forward),
+                |settings| settings.note_order = next_option(&ORDERS, settings.note_order, forward),
                 cx,
             ),
             _ => {}
@@ -187,10 +180,14 @@ impl SettingsDialog {
     fn run(&mut self, Run(command): &Run, _window: &mut Window, cx: &mut Context<Self>) {
         let row = self.row();
         match command {
-            Command::NextSetting => self.move_cursor(true, cx),
-            Command::PreviousSetting => self.move_cursor(false, cx),
-            Command::SwitchSetting if row == Row::Folder => self.pick_folder(cx),
-            Command::SwitchSetting => self.toggle(row, cx),
+            Command::Next => self.move_cursor(true, cx),
+            Command::Previous => self.move_cursor(false, cx),
+            Command::Switch => match row {
+                Row::Folder => self.pick_folder(cx),
+                Row::Theme | Row::Order => self.pick_option(true, cx),
+                Row::FormatKeys | Row::ContinueLists | Row::IndentLists => self.toggle(row, cx),
+            },
+            Command::SwitchBack => self.pick_option(false, cx),
             Command::ChangeFolder => {
                 if row == Row::Folder {
                     self.pick_folder(cx);
@@ -199,20 +196,6 @@ impl SettingsDialog {
             Command::Close => cx.emit(Close),
             _ => cx.propagate(),
         }
-    }
-
-    /// `Left` and `Right` pick an option.
-    fn key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        let keystroke = &event.keystroke;
-        if keystroke.modifiers.modified() {
-            return;
-        }
-        match keystroke.key.as_str() {
-            "left" => self.pick_option(false, cx),
-            "right" => self.pick_option(true, cx),
-            _ => return,
-        }
-        cx.stop_propagation();
     }
 
     fn control(row: Row, settings: &Settings, cx: &mut Context<Self>) -> impl IntoElement {
@@ -455,7 +438,6 @@ impl Render for SettingsDialog {
             .test_support()
             .key_context(Place::Settings.key_context())
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(Self::key_down))
             .on_action(cx.listener(Self::run))
             .child(panel)
     }

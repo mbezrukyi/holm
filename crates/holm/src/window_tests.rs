@@ -515,7 +515,7 @@ fn a_disk_question_keeps_the_pane_on_its_note(cx: &mut TestAppContext) {
     cx.simulate_input(handle, "mine ");
     fixture.write_outside(cx, "Plan.md", "theirs\n");
 
-    keys(cx, handle, "ctrl-shift-l down down");
+    keys(cx, handle, "ctrl-shift-l tab tab");
     assert_eq!(editor_text(cx, handle), "mine # Plan\nbuy milk\n");
     assert_eq!(state(cx, handle).as_deref(), Some(text::CHANGED_ON_DISK));
     assert_eq!(read(&plan), "theirs\n");
@@ -758,7 +758,7 @@ fn each_sidebar_action_sees_the_typed_text(cx: &mut TestAppContext) {
     keys_now(cx, handle, "ctrl-end");
 
     type_unsaved(cx, handle, "one");
-    keys_now(cx, handle, "ctrl-shift-l escape down");
+    keys_now(cx, handle, "ctrl-shift-l escape tab");
     assert_eq!(tree(cx, handle), ["All notes", "work*", "#old"]);
     keys_now(cx, handle, "f2 ctrl-a");
     cx.simulate_input(handle, "area");
@@ -775,7 +775,7 @@ fn each_sidebar_action_sees_the_typed_text(cx: &mut TestAppContext) {
 
     keys_now(cx, handle, "escape");
     type_unsaved(cx, handle, " three");
-    keys_now(cx, handle, "ctrl-shift-l down");
+    keys_now(cx, handle, "ctrl-shift-l tab");
     assert_eq!(tree(cx, handle), ["All notes", "area", "new", "#old*"]);
     keys_now(cx, handle, "f2 ctrl-a");
     cx.simulate_input(handle, "job");
@@ -789,7 +789,7 @@ fn each_sidebar_action_sees_the_typed_text(cx: &mut TestAppContext) {
 
     keys_now(cx, handle, "escape");
     type_unsaved(cx, handle, " ![](../attachments/x.png)");
-    keys_now(cx, handle, "ctrl-shift-l up up enter");
+    keys_now(cx, handle, "ctrl-shift-l shift-tab shift-tab enter");
     assert_eq!(sidebar(cx, handle), "list area");
     keys_now(cx, handle, "delete");
     assert_eq!(
@@ -807,7 +807,7 @@ fn each_sidebar_action_sees_the_typed_text(cx: &mut TestAppContext) {
 
     keys_now(cx, handle, "enter");
     type_unsaved(cx, handle, " five");
-    keys_now(cx, handle, "ctrl-shift-l escape down down down");
+    keys_now(cx, handle, "ctrl-shift-l escape tab tab");
     assert_eq!(sidebar(cx, handle), "tree #job");
     keys_now(cx, handle, "delete");
     assert!(
@@ -1113,10 +1113,10 @@ fn the_keyboard_moves_through_tree_list_and_editor(cx: &mut TestAppContext) {
     keys(cx, handle, "ctrl-shift-l");
     assert_eq!(focus(cx, handle), "sidebar");
 
-    keys(cx, handle, "escape down enter");
+    keys(cx, handle, "escape tab enter");
     assert_eq!(sidebar(cx, handle), "list work");
 
-    keys(cx, handle, "down");
+    keys(cx, handle, "tab");
     assert_eq!(editor_text(cx, handle), "# Plan\n");
     keys(cx, handle, "f2");
     assert_eq!(focus(cx, handle), "title field");
@@ -1129,7 +1129,7 @@ fn the_keyboard_moves_through_tree_list_and_editor(cx: &mut TestAppContext) {
     keys(cx, handle, "escape");
     assert_eq!(sidebar(cx, handle), "tree work");
     // The rename keeps the time of the note, so it stays below "Top".
-    keys(cx, handle, "up enter up");
+    keys(cx, handle, "shift-tab enter shift-tab");
     assert_eq!(editor_text(cx, handle), "# Top\n");
     assert_eq!(read(&notes_dir.join("work/Goals.md")), "# Plan\n");
     assert!(!notes_dir.join("work/Plan.md").exists());
@@ -1201,10 +1201,10 @@ fn keys_make_rename_and_move_notes_and_folders(cx: &mut TestAppContext) {
     assert!(notes_dir.join("work/Plans.md").is_file());
     assert_eq!(focus(cx, handle), "editor");
 
-    keys(cx, handle, "ctrl-shift-l escape up enter down");
+    keys(cx, handle, "ctrl-shift-l escape shift-tab enter tab");
     assert_eq!(editor_text(cx, handle), "# Top\n");
     keys(cx, handle, "ctrl-shift-m");
-    keys(cx, handle, "down enter");
+    keys(cx, handle, "tab enter");
     assert!(notes_dir.join("work/Top.md").is_file());
     assert!(!notes_dir.join("Top.md").exists());
 
@@ -1222,7 +1222,7 @@ fn open_on_work(cx: &mut TestAppContext) -> AnyWindowHandle {
     fs::create_dir(fixture.notes().join("work")).unwrap();
     fs::write(fixture.notes().join("Top.md"), "# Top\n").unwrap();
     let handle = open(cx, fixture.startup(None));
-    keys(cx, handle, "ctrl-shift-l escape down");
+    keys(cx, handle, "ctrl-shift-l escape tab");
     assert_eq!(sidebar(cx, handle), "tree work");
     handle
 }
@@ -1282,12 +1282,87 @@ fn tab_in_the_rename_field_leaves_the_tree_cursor(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn tab_where_no_place_names_it_leaves_the_focus(cx: &mut TestAppContext) {
     let handle = open_on_work(cx);
-    assert_eq!(focus(cx, handle), "sidebar");
+    keys(cx, handle, "ctrl-shift-f");
+    assert_eq!(focus(cx, handle), "search");
     keys(cx, handle, "tab");
-    assert_eq!(focus(cx, handle), "sidebar");
+    assert_eq!(focus(cx, handle), "search");
     keys(cx, handle, "shift-tab");
-    assert_eq!(focus(cx, handle), "sidebar");
+    assert_eq!(focus(cx, handle), "search");
     assert_eq!(sidebar(cx, handle), "tree work");
+}
+
+#[gpui_kit::test]
+fn tab_moves_through_the_tree_and_wraps_and_space_opens_a_folder(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    fs::create_dir_all(fixture.notes().join("area/work")).unwrap();
+    fs::write(
+        fixture.notes().join("A.md"),
+        "# A
+",
+    )
+    .unwrap();
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-shift-l escape");
+    assert_eq!(tree(cx, handle), ["All notes*", "area"]);
+
+    keys(cx, handle, "shift-tab");
+    assert_eq!(tree(cx, handle), ["All notes", "area*"], "Shift+Tab wraps");
+    keys(cx, handle, "tab");
+    assert_eq!(tree(cx, handle), ["All notes*", "area"], "Tab wraps");
+    keys(cx, handle, "down right");
+    assert_eq!(
+        tree(cx, handle),
+        ["All notes*", "area"],
+        "an arrow does nothing"
+    );
+
+    keys(cx, handle, "tab space");
+    assert_eq!(tree(cx, handle), ["All notes", "area*", "area/work"]);
+    assert_eq!(expanded(cx, handle, "area"), Some(true));
+    keys(cx, handle, "tab");
+    assert_eq!(tree(cx, handle), ["All notes", "area", "area/work*"]);
+    keys(cx, handle, "left");
+    assert_eq!(
+        sidebar(cx, handle),
+        "tree area/work",
+        "Left no longer selects the parent"
+    );
+    keys(cx, handle, "shift-tab space");
+    assert_eq!(tree(cx, handle), ["All notes", "area*"]);
+    assert_eq!(expanded(cx, handle, "area"), Some(false));
+}
+
+#[gpui_kit::test]
+fn tab_in_the_note_list_opens_each_note_and_wraps(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    three_notes(&fixture.notes());
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-shift-l");
+    assert_eq!(notes_list(cx, handle), ["Plan*", "Goals", "Top"]);
+
+    keys(cx, handle, "tab");
+    assert_eq!(notes_list(cx, handle), ["Plan", "Goals*", "Top"]);
+    assert_eq!(editor_text(cx, handle), "# Goals\nread more\n");
+    keys(cx, handle, "tab tab");
+    assert_eq!(
+        notes_list(cx, handle),
+        ["Plan*", "Goals", "Top"],
+        "Tab wraps"
+    );
+    keys(cx, handle, "shift-tab");
+    assert_eq!(
+        notes_list(cx, handle),
+        ["Plan", "Goals", "Top*"],
+        "Shift+Tab wraps"
+    );
+    assert_eq!(editor_text(cx, handle), "# Top\n");
+    keys(cx, handle, "up down");
+    assert_eq!(
+        notes_list(cx, handle),
+        ["Plan", "Goals", "Top*"],
+        "an arrow does nothing"
+    );
+    assert_eq!(focus(cx, handle), "sidebar");
 }
 
 #[gpui_kit::test]
@@ -1692,7 +1767,7 @@ fn tags_rename_and_delete_in_all_notes_after_the_dialog(cx: &mut TestAppContext)
     assert_eq!(chips(cx, handle), ["work"]);
 
     // The tree: All notes, then the tags home and work.
-    keys(cx, handle, "ctrl-shift-l escape down down");
+    keys(cx, handle, "ctrl-shift-l escape tab tab");
     assert_eq!(sidebar(cx, handle), "tree #work");
     keys(cx, handle, "f2");
     keys(cx, handle, "ctrl-a");
@@ -1738,7 +1813,7 @@ fn tags_rename_and_delete_in_all_notes_after_the_dialog(cx: &mut TestAppContext)
 
     // A gone top tag leaves the tree with All notes. The tree has All notes, then the tag home.
     assert_eq!(sidebar(cx, handle), "tree All notes");
-    keys(cx, handle, "down");
+    keys(cx, handle, "tab");
     assert_eq!(sidebar(cx, handle), "tree #home");
     keys(cx, handle, "delete");
     assert_eq!(
@@ -1811,7 +1886,7 @@ fn a_late_folder_rename_keeps_the_field_and_shows_writing(cx: &mut TestAppContex
     };
     let handle = open(cx, startup);
 
-    keys(cx, handle, "ctrl-shift-l escape down right");
+    keys(cx, handle, "ctrl-shift-l escape tab space");
     type_new_name(cx, handle, "job");
     press(cx, handle, "enter");
     assert_eq!(tree_field(cx, handle).as_deref(), Some("job"));
@@ -1820,7 +1895,7 @@ fn a_late_folder_rename_keeps_the_field_and_shows_writing(cx: &mut TestAppContex
 
     // The field takes no keys until the write ends.
     press(cx, handle, "escape");
-    press(cx, handle, "up");
+    press(cx, handle, "shift-tab");
     press(cx, handle, "backspace");
     assert_eq!(tree_field(cx, handle).as_deref(), Some("job"));
     assert_eq!(tree(cx, handle), ["All notes", "work*", "work/sub"]);
@@ -1841,7 +1916,7 @@ fn a_folder_rename_to_a_taken_name_keeps_the_field_and_shows_the_answer(cx: &mut
     fs::write(notes_dir.join("Top.md"), "# Top\n").unwrap();
     let handle = open(cx, fixture.startup(None));
 
-    keys(cx, handle, "ctrl-shift-l escape down down");
+    keys(cx, handle, "ctrl-shift-l escape tab tab");
     assert_eq!(tree(cx, handle), ["All notes", "job", "work*"]);
     type_new_name(cx, handle, "Job");
     keys(cx, handle, "enter");
@@ -1867,7 +1942,7 @@ fn a_failed_folder_rename_shows_the_old_name_and_the_error(cx: &mut TestAppConte
     fs::write(notes_dir.join("Top.md"), "# Top\n").unwrap();
     let handle = open(cx, fixture.startup(None));
 
-    keys(cx, handle, "ctrl-shift-l escape down");
+    keys(cx, handle, "ctrl-shift-l escape tab");
     fs::remove_dir(notes_dir.join("work")).unwrap();
     type_new_name(cx, handle, "job");
     keys_now(cx, handle, "enter");
@@ -1888,7 +1963,7 @@ fn a_tag_rename_shows_the_new_name_after_the_confirm(cx: &mut TestAppContext) {
     fs::write(notes_dir.join("A.md"), "---\ntags:\n  - old\n---\n# A\n").unwrap();
     let handle = open(cx, fixture.startup(None));
 
-    keys(cx, handle, "ctrl-shift-l escape down");
+    keys(cx, handle, "ctrl-shift-l escape tab");
     assert_eq!(tree(cx, handle), ["All notes", "#old*"]);
     type_new_name(cx, handle, "new");
     keys(cx, handle, "enter");
@@ -1919,7 +1994,7 @@ fn a_tag_rename_onto_a_tag_merges_into_its_row(cx: &mut TestAppContext) {
     fs::write(notes_dir.join("B.md"), "---\ntags:\n  - new\n---\n# B\n").unwrap();
     let handle = open(cx, fixture.startup(None));
 
-    keys(cx, handle, "ctrl-shift-l escape down down");
+    keys(cx, handle, "ctrl-shift-l escape tab tab");
     assert_eq!(tree(cx, handle), ["All notes", "#new", "#old*"]);
     type_new_name(cx, handle, "new");
     keys(cx, handle, "enter");
@@ -1964,7 +2039,7 @@ fn a_folder_rename_keeps_the_row_selected_in_every_frame(cx: &mut TestAppContext
     nested_folders(&fixture);
     let handle = open(cx, fixture.startup(None));
 
-    keys(cx, handle, "ctrl-shift-l escape down right down down right");
+    keys(cx, handle, "ctrl-shift-l escape tab space tab tab space");
     let before = [
         "All notes",
         "area",
@@ -2003,7 +2078,7 @@ fn a_folder_rename_scrolls_to_the_new_place_of_the_row(cx: &mut TestAppContext) 
     fs::write(fixture.notes().join("Top.md"), "# Top\n").unwrap();
     let handle = open(cx, fixture.startup(None));
 
-    keys(cx, handle, "ctrl-shift-l escape down");
+    keys(cx, handle, "ctrl-shift-l escape tab");
     assert_eq!(sidebar(cx, handle), "tree f00");
     rename_steps(cx, handle, "zz");
     assert_eq!(sidebar(cx, handle), "tree zz");
@@ -2015,7 +2090,7 @@ fn a_folder_rename_to_a_taken_name_keeps_the_row_selected_in_every_frame(cx: &mu
     nested_folders(&fixture);
     let handle = open(cx, fixture.startup(None));
 
-    keys(cx, handle, "ctrl-shift-l escape down right down down right");
+    keys(cx, handle, "ctrl-shift-l escape tab space tab tab space");
     assert_eq!(
         rename_steps(cx, handle, "bebra"),
         [vec![
@@ -2036,7 +2111,7 @@ fn a_new_folder_with_a_taken_name_keeps_the_field_and_esc_leaves_nothing(cx: &mu
     let notes_dir = fixture.notes();
     let handle = open(cx, fixture.startup(None));
 
-    keys(cx, handle, "ctrl-shift-l escape down");
+    keys(cx, handle, "ctrl-shift-l escape tab");
     assert_eq!(sidebar(cx, handle), "tree area");
     keys(cx, handle, "ctrl-shift-n");
     assert_eq!(
@@ -2083,7 +2158,7 @@ fn a_move_into_a_clash_shows_the_answer_and_moves_nothing(cx: &mut TestAppContex
     assert_eq!(editor_text(cx, handle), "# Top\n");
     keys(cx, handle, "ctrl-shift-l");
     keys(cx, handle, "ctrl-shift-m");
-    keys(cx, handle, "down enter");
+    keys(cx, handle, "tab enter");
     assert_eq!(message(cx, handle).as_deref(), Some(text::NAME_TAKEN));
     assert_eq!(read(&notes_dir.join("Top.md")), "# Top\n");
     assert_eq!(read(&notes_dir.join("work/top.md")), "# Other\n");
@@ -2121,7 +2196,7 @@ fn a_folder_move_takes_the_open_note_with_it(cx: &mut TestAppContext) {
     let handle = open(cx, fixture.startup(None));
 
     // The picker lists the root folder first, then `area`.
-    keys(cx, handle, "ctrl-shift-l escape down right down down");
+    keys(cx, handle, "ctrl-shift-l escape tab space tab tab");
     assert_eq!(sidebar(cx, handle), "tree area/work");
     keys(cx, handle, "ctrl-shift-m");
     keys(cx, handle, "enter");
@@ -2147,7 +2222,7 @@ fn a_tag_rename_keeps_the_row_selected_in_every_frame(cx: &mut TestAppContext) {
     .unwrap();
     let handle = open(cx, fixture.startup(None));
 
-    keys(cx, handle, "ctrl-shift-l escape down right down down right");
+    keys(cx, handle, "ctrl-shift-l escape tab space tab tab space");
     assert_eq!(
         tree(cx, handle),
         [
@@ -2197,7 +2272,7 @@ fn an_outside_folder_rename_selects_the_parent(cx: &mut TestAppContext) {
     nested_folders(&fixture);
     let handle = open(cx, fixture.startup(None));
 
-    keys(cx, handle, "ctrl-shift-l escape down right down down right");
+    keys(cx, handle, "ctrl-shift-l escape tab space tab tab space");
     assert_eq!(sidebar(cx, handle), "tree area/work");
     let notes_dir = fixture.notes();
     fs::rename(notes_dir.join("area/work"), notes_dir.join("area/job")).unwrap();
@@ -2429,7 +2504,7 @@ fn a_folder_delete_selects_the_parent_folder(cx: &mut TestAppContext) {
     fs::write(notes_dir.join("work/plans/Plan.md"), "# Plan\n").unwrap();
     let handle = open(cx, fixture.startup(None));
 
-    keys(cx, handle, "ctrl-shift-l escape down right down");
+    keys(cx, handle, "ctrl-shift-l escape tab space tab");
     assert_eq!(sidebar(cx, handle), "tree work/plans");
     keys(cx, handle, "delete");
     assert!(question(cx, handle).is_some());
@@ -2468,9 +2543,9 @@ fn delete_the_last_child_folder(cx: &mut TestAppContext, fixture: &Fixture) -> A
     fs::create_dir_all(fixture.notes().join("area/work/plans")).unwrap();
     fs::write(fixture.notes().join("A.md"), "# A\n").unwrap();
     let handle = open(cx, fixture.startup(None));
-    keys(cx, handle, "ctrl-shift-l escape down right down right");
+    keys(cx, handle, "ctrl-shift-l escape tab space tab space");
     assert_eq!(expanded(cx, handle, "area/work"), Some(true));
-    keys(cx, handle, "down delete enter");
+    keys(cx, handle, "tab delete enter");
     assert_eq!(sidebar(cx, handle), "tree area/work");
     handle
 }
@@ -2482,9 +2557,10 @@ fn a_folder_shows_closed_after_its_last_child_folder_is_deleted(cx: &mut TestApp
 
     assert_eq!(tree(cx, handle), ["All notes", "area", "area/work*"]);
     assert_eq!(expanded(cx, handle, "area/work"), None);
-    // `←` on a closed folder selects its parent.
-    keys(cx, handle, "left");
-    assert_eq!(sidebar(cx, handle), "tree area");
+    // Space on a folder with no children does nothing.
+    keys(cx, handle, "space");
+    assert_eq!(sidebar(cx, handle), "tree area/work");
+    assert_eq!(expanded(cx, handle, "area/work"), None);
 }
 
 #[gpui_kit::test]
@@ -2508,7 +2584,7 @@ fn esc_on_a_new_folder_in_a_folder_without_children_shows_it_closed(cx: &mut Tes
     fs::write(fixture.notes().join("A.md"), "# A\n").unwrap();
     let handle = open(cx, fixture.startup(None));
 
-    keys(cx, handle, "ctrl-shift-l escape down");
+    keys(cx, handle, "ctrl-shift-l escape tab");
     assert_eq!(expanded(cx, handle, "home"), None);
     keys(cx, handle, "ctrl-shift-n");
     assert_eq!(tree(cx, handle), ["All notes", "home*", text::NEW_FOLDER]);
@@ -2530,7 +2606,7 @@ fn a_child_tag_delete_selects_the_parent_tag_while_it_exists(cx: &mut TestAppCon
     let handle = open(cx, fixture.startup(None));
 
     // The tree: All notes, then the tags home and work.
-    keys(cx, handle, "ctrl-shift-l escape down down right down");
+    keys(cx, handle, "ctrl-shift-l escape tab tab space tab");
     assert_eq!(sidebar(cx, handle), "tree #work/holm");
     keys(cx, handle, "delete");
     keys(cx, handle, "enter");
@@ -2538,7 +2614,7 @@ fn a_child_tag_delete_selects_the_parent_tag_while_it_exists(cx: &mut TestAppCon
     assert_eq!(sidebar(cx, handle), "tree #work");
 
     // No note keeps the tag home, so it goes with its child.
-    keys(cx, handle, "up right down");
+    keys(cx, handle, "shift-tab space tab");
     assert_eq!(sidebar(cx, handle), "tree #home/garden");
     keys(cx, handle, "delete");
     keys(cx, handle, "enter");
@@ -3304,11 +3380,11 @@ fn an_outside_delete_after_a_view_change_opens_the_first_note(cx: &mut TestAppCo
     let fixture = Fixture::new().with_folder();
     three_notes(&fixture.notes());
     let handle = open(cx, fixture.startup(None));
-    keys(cx, handle, "ctrl-shift-l down down");
+    keys(cx, handle, "ctrl-shift-l tab tab");
     assert_eq!(editor_text(cx, handle), "# Top\n");
 
     // The tag work holds only Goals.
-    keys(cx, handle, "escape down");
+    keys(cx, handle, "escape tab");
     assert_eq!(sidebar(cx, handle), "tree #work");
 
     fixture.delete_outside(cx, "Top.md");
@@ -3320,7 +3396,7 @@ fn a_delete_of_the_open_note_opens_its_neighbor(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     three_notes(&fixture.notes());
     let handle = open(cx, fixture.startup(None));
-    keys(cx, handle, "ctrl-shift-l down");
+    keys(cx, handle, "ctrl-shift-l tab");
     assert_eq!(editor_text(cx, handle), "# Goals\nread more\n");
 
     keys(cx, handle, "delete");
@@ -3578,7 +3654,7 @@ fn ctrl_n_in_a_tag_view_gives_the_note_that_tag(cx: &mut TestAppContext) {
     let notes = fixture.notes();
     fs::write(notes.join("A.md"), "---\ntags: [work]\n---\n").unwrap();
     let handle = open(cx, fixture.startup(None));
-    keys(cx, handle, "ctrl-shift-l escape down down down enter");
+    keys(cx, handle, "ctrl-shift-l escape tab tab tab enter");
     assert_eq!(sidebar(cx, handle), "list #work");
 
     keys(cx, handle, "ctrl-n");
@@ -3897,22 +3973,34 @@ fn each_setting_changes_by_keys_only(cx: &mut TestAppContext) {
     let settings = |fixture: &Fixture| Config::load(fixture.config()).settings().clone();
     keys(cx, handle, "ctrl-shift-s");
 
-    keys(cx, handle, "tab right right");
+    keys(cx, handle, "tab space space");
     assert_eq!(setting_rows(cx, handle)[1], "Theme*");
     assert!(dark(cx));
-    keys(cx, handle, "right");
+    keys(cx, handle, "space");
+    assert_eq!(
+        settings(&fixture).theme,
+        AppearanceSetting::System,
+        "Space wraps"
+    );
+    keys(cx, handle, "shift-space");
     assert_eq!(
         settings(&fixture).theme,
         AppearanceSetting::Dark,
-        "Right stops at the end"
+        "Shift+Space wraps"
     );
-    keys(cx, handle, "left");
+    keys(cx, handle, "shift-space");
     assert_eq!(settings(&fixture).theme, AppearanceSetting::Light);
     assert!(!dark(cx));
+    keys(cx, handle, "left right");
+    assert_eq!(
+        settings(&fixture).theme,
+        AppearanceSetting::Light,
+        "an arrow does nothing"
+    );
 
-    keys(cx, handle, "tab right");
+    keys(cx, handle, "tab space");
     assert_eq!(settings(&fixture).note_order, Order::Title);
-    keys(cx, handle, "left");
+    keys(cx, handle, "shift-space");
     assert_eq!(settings(&fixture).note_order, Order::LastChange);
 
     keys(cx, handle, "tab space");
@@ -3923,6 +4011,11 @@ fn each_setting_changes_by_keys_only(cx: &mut TestAppContext) {
     assert!(!settings(&fixture).writing_help.indent_lists);
     keys(cx, handle, "space");
     assert!(settings(&fixture).writing_help.indent_lists);
+    keys(cx, handle, "shift-space");
+    assert!(
+        settings(&fixture).writing_help.indent_lists,
+        "Shift+Space does nothing on a switch"
+    );
 
     keys(cx, handle, "tab");
     assert_eq!(setting_rows(cx, handle)[0], "Notes folder*", "Tab wraps");
@@ -3947,9 +4040,9 @@ fn the_theme_options_keep_their_place_when_the_choice_moves(cx: &mut TestAppCont
     };
 
     let first = places(cx);
-    keys(cx, handle, "right");
+    keys(cx, handle, "space");
     assert_eq!(places(cx), first);
-    keys(cx, handle, "right");
+    keys(cx, handle, "space");
     assert_eq!(places(cx), first);
 }
 
@@ -4159,20 +4252,26 @@ fn a_popup_over_the_tag_field_gives_the_focus_home_when_it_closes(cx: &mut TestA
 }
 
 #[gpui_kit::test]
-fn up_and_down_scroll_the_shortcut_list(cx: &mut TestAppContext) {
+fn tab_and_shift_tab_scroll_the_shortcut_list(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     let handle = open(cx, fixture.startup(None));
     keys(cx, handle, "ctrl-?");
     let top = first_shortcut_top(cx, handle);
 
-    keys(cx, handle, "up");
-    assert_eq!(first_shortcut_top(cx, handle), top, "Up stops at the top");
+    keys(cx, handle, "shift-tab");
+    assert_eq!(
+        first_shortcut_top(cx, handle),
+        top,
+        "Shift+Tab stops at the top"
+    );
     keys(cx, handle, "down");
+    assert_eq!(first_shortcut_top(cx, handle), top, "an arrow does nothing");
+    keys(cx, handle, "tab");
     let down = first_shortcut_top(cx, handle);
-    assert!(down < top, "Down scrolls the list");
-    keys(cx, handle, "down");
+    assert!(down < top, "Tab scrolls the list");
+    keys(cx, handle, "tab");
     assert!(first_shortcut_top(cx, handle) < down);
-    keys(cx, handle, "up up");
+    keys(cx, handle, "shift-tab shift-tab");
     assert_eq!(first_shortcut_top(cx, handle), top);
     assert_eq!(question(cx, handle).as_deref(), Some(text::SHORTCUT_LIST));
 }

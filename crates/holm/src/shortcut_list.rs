@@ -4,14 +4,14 @@
 //! Each group first shows the rows that work everywhere in it. Then the rows of each other place
 //! follow under a heading, like "In a question", so their labels can stay short.
 //!
-//! `Up` and `Down` scroll the list. `Esc` closes it.
+//! `Tab` and `Shift+Tab` scroll the list. `Esc` closes it.
 
 use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::{
     App, Context, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement as _,
-    IntoElement, KeyDownEvent, ParentElement, Pixels, Render, Role, ScrollHandle,
+    IntoElement, ParentElement, Pixels, Render, Role, ScrollHandle,
     StatefulInteractiveElement as _, Styled, TestSupportExt as _, Window, div, point, px,
     transparent_black,
 };
@@ -30,7 +30,7 @@ const COLUMNS: [&[Group]; 2] = [
 /// The most height of the rows. A longer list scrolls.
 const LIST_HEIGHT: Pixels = px(560.);
 
-/// How far `Up` and `Down` scroll: about three rows.
+/// How far `Tab` and `Shift+Tab` scroll: about three rows.
 const SCROLL_STEP: Pixels = px(66.);
 
 /// The text size of a key chip: a little bigger than the `Kbd` default.
@@ -118,18 +118,6 @@ impl ShortcutList {
         cx.notify();
     }
 
-    fn key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        let keystroke = &event.keystroke;
-        if keystroke.modifiers.modified() {
-            return;
-        }
-        match keystroke.key.as_str() {
-            "up" => self.scroll_by(false, cx),
-            "down" => self.scroll_by(true, cx),
-            _ => return,
-        }
-        cx.stop_propagation();
-    }
     fn group(&self, group: Group, cx: &App) -> impl IntoElement + use<> {
         let theme = cx.theme();
         let muted = theme.muted_foreground;
@@ -256,11 +244,14 @@ impl Render for ShortcutList {
             .test_support()
             .key_context(Place::ShortcutList.key_context())
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(Self::key_down))
-            .on_action(cx.listener(|_, Run(command): &Run, _, cx| match command {
-                Command::Close => cx.emit(Close),
-                _ => cx.propagate(),
-            }))
+            .on_action(
+                cx.listener(|list, Run(command): &Run, _, cx| match command {
+                    Command::Close => cx.emit(Close),
+                    Command::Next => list.scroll_by(true, cx),
+                    Command::Previous => list.scroll_by(false, cx),
+                    _ => cx.propagate(),
+                }),
+            )
             .child(panel)
     }
 }

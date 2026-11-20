@@ -1,7 +1,8 @@
 //! The sidebar: one panel that shows the tree or the note list of one tree item.
 //!
-//! The tree has "All notes", then the folders, then the tags. In a list, `↑` and `↓` open each
-//! note at once. A name field of a folder writes its name through the core door. The name
+//! The tree has "All notes", then the folders, then the tags. `Tab` and `Shift+Tab` move
+//! through the tree or the list and wrap. In a list, they open each note at once. `Space` opens
+//! or closes a tree item. A name field of a folder writes its name through the core door. The name
 //! field of a tag writes through its owner. For other changes, the sidebar sends a
 //! [`SidebarEvent`].
 //!
@@ -23,8 +24,8 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, CursorStyle, Div, ElementId,
     Entity, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement as _, IntoElement,
-    KeyContext, KeyDownEvent, MouseButton, ParentElement, Pixels, Render, Role, ScrollStrategy,
-    SharedString, StatefulInteractiveElement as _, Styled, Subscription, Task, TestSupportExt as _,
+    KeyContext, MouseButton, ParentElement, Pixels, Render, Role, ScrollStrategy, SharedString,
+    StatefulInteractiveElement as _, Styled, Subscription, Task, TestSupportExt as _,
     UniformListScrollHandle, Window, div, px, uniform_list,
 };
 use holm_core::model::{Change, NoteInfo, Order};
@@ -34,6 +35,7 @@ use crate::config::{Config, SavedSidebarView};
 use crate::core_door::{CoreDoor, Done, DoorEvent, Then};
 use crate::error::AppError;
 use crate::icons::Icon;
+use crate::list_cursor;
 use crate::name_field::{NameEvent, NameField, NameWrite, Wording};
 use crate::pane::{NotePane, PaneEvent};
 use crate::shortcuts::{Command, Place, Run};
@@ -326,7 +328,7 @@ impl Sidebar {
         self.scroll_to_selection(cx);
     }
 
-    /// `Enter` or `↓` in the search field: the first result opens, and the list gets the focus.
+    /// `Enter` in the search field: the first result opens, and the list gets the focus.
     fn enter_results(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
         if let Some(path) = self.list.path(0) {
@@ -649,26 +651,6 @@ impl Sidebar {
         }
     }
 
-    /// Up, Down, Left and Right in the tree or the note list.
-    fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let keystroke = &event.keystroke;
-        if self.field.is_some()
-            || keystroke.modifiers.modified()
-            || self.search.focus_handle(cx).is_focused(window)
-        {
-            return;
-        }
-        let key = keystroke.key.as_str();
-        let handled = if self.shows_list() {
-            self.list_move(key, cx)
-        } else {
-            self.tree_move(key, cx)
-        };
-        if handled {
-            cx.stop_propagation();
-        }
-    }
-
     /// The note or folder that `Delete` and Ctrl+Shift+M act on.
     fn target(&self, cx: &App) -> Option<Target> {
         match &self.view {
@@ -693,6 +675,27 @@ impl Sidebar {
         };
         let item = item.clone();
         match command {
+            Command::Next | Command::Previous => {
+                let at = self.tree.row_of(&item);
+                let len = self.tree.rows.len();
+                let forward = command == Command::Next;
+                if let Some(next) = list_cursor::step(at, len, forward, |_| true) {
+                    let item = self.tree.rows[next].item.clone();
+                    self.set_view(SidebarView::Tree(item), cx);
+                }
+            }
+            Command::Switch => {
+                let row = self.tree.row_of(&item).map(|at| &self.tree.rows[at]);
+                let (open, has_children) =
+                    row.map_or((false, false), |row| (row.open, row.has_children));
+                if open {
+                    self.open.remove(&item);
+                } else if has_children {
+                    self.open.insert(item);
+                }
+                self.rebuild(cx);
+                cx.notify();
+            }
             Command::ShowNotes => self.set_view(SidebarView::List(item), cx),
             Command::FocusEditor => cx.emit(SidebarEvent::FocusEditor),
             Command::Rename => match item {
@@ -710,47 +713,6 @@ impl Sidebar {
         true
     }
 
-    /// Up, Down, Left or Right in the tree.
-    fn tree_move(&mut self, key: &str, cx: &mut Context<Self>) -> bool {
-        let SidebarView::Tree(item) = &self.view else {
-            return false;
-        };
-        let item = item.clone();
-        let rows = &self.tree.rows;
-        let at = self.tree.row_of(&item);
-        match key {
-            "up" | "down" => {
-                let next = match (at, key) {
-                    (Some(at), "up") => at.saturating_sub(1),
-                    (Some(at), _) => (at + 1).min(rows.len().saturating_sub(1)),
-                    (None, _) => 0,
-                };
-                if let Some(row) = rows.get(next) {
-                    let item = row.item.clone();
-                    self.set_view(SidebarView::Tree(item), cx);
-                }
-            }
-            "right" => {
-                if at.is_some_and(|at| rows[at].has_children) {
-                    self.open.insert(item);
-                    self.rebuild(cx);
-                    cx.notify();
-                }
-            }
-            "left" => {
-                if at.is_some_and(|at| rows[at].open) {
-                    self.open.remove(&item);
-                    self.rebuild(cx);
-                    cx.notify();
-                } else if let Some(parent) = item.parent() {
-                    self.set_view(SidebarView::Tree(parent), cx);
-                }
-            }
-            _ => return false,
-        }
-        true
-    }
-
     /// A shortcut of the note list.
     fn list_command(
         &mut self,
@@ -759,6 +721,15 @@ impl Sidebar {
         cx: &mut Context<Self>,
     ) -> bool {
         match command {
+            Command::Next | Command::Previous => {
+                let forward = command == Command::Next;
+                let next =
+                    list_cursor::step(self.selected_note(cx), self.list.len(), forward, |_| true);
+                if let Some(path) = next.and_then(|next| self.list.path(next)) {
+                    let path = path.to_owned();
+                    cx.emit(SidebarEvent::Open(path));
+                }
+            }
             Command::FocusEditor => cx.emit(SidebarEvent::FocusEditor),
             Command::Back if self.searching() => self.clear_search(window, cx),
             Command::Back => {
@@ -773,25 +744,6 @@ impl Sidebar {
             Command::Delete => {
                 if let Some(target) = self.target(cx) {
                     cx.emit(SidebarEvent::Delete(target));
-                }
-            }
-            _ => return false,
-        }
-        true
-    }
-
-    /// Up or Down in the note list opens the note above or below.
-    fn list_move(&mut self, key: &str, cx: &mut Context<Self>) -> bool {
-        match key {
-            "up" | "down" => {
-                let next = match (self.selected_note(cx), key) {
-                    (Some(at), "up") => at.checked_sub(1),
-                    (Some(at), _) => Some(at + 1),
-                    (None, _) => Some(0),
-                };
-                if let Some(path) = next.and_then(|next| self.list.path(next)) {
-                    let path = path.to_owned();
-                    cx.emit(SidebarEvent::Open(path));
                 }
             }
             _ => return false,
@@ -1196,7 +1148,6 @@ impl Render for Sidebar {
                 sidebar.key_context(self.key_context())
             })
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(Self::key_down))
             .on_action(cx.listener(Self::run))
             .size_full()
             .bg(theme.sidebar)

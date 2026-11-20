@@ -1,6 +1,6 @@
 //! The folder picker for a move. It shows the folders whose path holds the typed text, with no
 //! regard to capital letters.
-//! `↑` and `↓` pick a folder, `Enter` moves there, `Esc` cancels.
+//! `Tab` and `Shift+Tab` pick a folder, `Enter` moves there, `Esc` cancels.
 
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _, IntoElement,

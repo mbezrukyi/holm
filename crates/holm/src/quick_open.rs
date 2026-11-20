@@ -2,7 +2,7 @@
 //!
 //! It matches every title that holds the typed text, and shows the first [`MAX_ROWS`] of them.
 //! Each row shows the folder of its note on the right.
-//! `↑` and `↓` pick a note, `Enter` opens it, and `Esc` closes the window.
+//! `Tab` and `Shift+Tab` pick a note, `Enter` opens it, and `Esc` closes the window.
 
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _, IntoElement,
