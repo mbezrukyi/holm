@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use common::{LINE_HEIGHT, app, column_x, data_folder, open};
+use common::{LINE_HEIGHT, app, column_x, cursor_y, data_folder, open};
 use gpui_kit::{
     ClipboardEntry, ClipboardItem, Entity, ExternalPaths, FileDropEvent, Image, ImageFormat,
     Modifiers, Pixels, VisualTestContext, point, px,
@@ -256,4 +256,55 @@ fn an_embedded_image_gets_a_line_of_its_own_and_a_file_stays_in_the_line() {
         text(&editor, cx),
         "a ![x](x.pdf) ![y](../data)\n![cat](cat.png)\n[z](z.pdf) b"
     );
+}
+
+/// Where the heading of `note` shows at the top of a view of `height`, through `show_heading`.
+fn heading_at_top(note: &str, height: Pixels) -> Pixels {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, note, WIDTH, height);
+    cx.update(|_, cx| editor.update(cx, |editor, cx| editor.show_heading("Target", cx)));
+    cx.run_until_parked();
+    cx.simulate_keystrokes("end home");
+    cursor_y(&editor, cx)
+}
+
+/// `count` plain lines.
+fn filler(count: usize) -> String {
+    (0..count).fold(String::new(), |lines, n| lines + &format!("line {n}\n"))
+}
+
+const SHORT: Pixels = px(200.);
+
+#[test]
+fn a_jump_to_a_heading_below_the_view_puts_it_on_the_top_line() {
+    let note = format!("[go](#Target)\n{}# Target\n{}", filler(40), filler(40));
+    let top = heading_at_top(&note, SHORT);
+    let mut app = app();
+    let (editor, cx) = open(&mut app, &note, WIDTH, SHORT);
+    cx.simulate_keystrokes("right ctrl-enter");
+    assert_eq!(cursor_y(&editor, cx), top);
+    assert!(top < LINE_HEIGHT * 2.);
+}
+
+#[test]
+fn a_jump_to_a_heading_above_the_view_puts_it_on_the_top_line() {
+    let note = format!("{}# Target\n{}[go](#Target)", filler(10), filler(40));
+    let top = heading_at_top(&note, SHORT);
+    let mut app = app();
+    let (editor, cx) = open(&mut app, &note, WIDTH, SHORT);
+    cx.simulate_keystrokes("ctrl-end left ctrl-enter");
+    assert_eq!(cursor_y(&editor, cx), top);
+}
+
+#[test]
+fn a_jump_to_a_heading_in_view_moves_nothing() {
+    let note = format!("[go](#Target)\n{}# Target\n{}", filler(3), filler(40));
+    let top = heading_at_top(&note, SHORT);
+    let mut app = app();
+    let (editor, cx) = open(&mut app, &note, WIDTH, SHORT);
+    cx.simulate_keystrokes("right ctrl-enter");
+    let y = cursor_y(&editor, cx);
+    assert!(y > top + LINE_HEIGHT * 3., "{y:?} moved to the top {top:?}");
+    cx.simulate_input("X");
+    assert!(text(&editor, cx).contains("\nX# Target\n"));
 }

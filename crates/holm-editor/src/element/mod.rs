@@ -14,7 +14,7 @@ use gpui_kit::{
     Resource, Style, Styled as _, TextAlign, Window, div, fill, outline, point, px, relative, size,
 };
 
-pub(crate) use layout::{Layout, Scroll};
+pub(crate) use layout::{Layout, Reveal, Scroll};
 use theme::Place;
 pub(crate) use theme::Theme;
 
@@ -233,13 +233,12 @@ impl gpui_kit::Element for EditorElement {
             let lines = lay_out(
                 &editor.model,
                 &mut editor.scroll,
-                editor.autoscroll,
+                editor.reveal.take(),
                 &mut shaper,
                 column,
                 start_height,
                 window,
             );
-            editor.autoscroll = false;
             let shows_start = editor.scroll.line == 0;
             // Out of sight, the start view still gets drawn, far above the view and clipped. So
             // it keeps the focus and its keys. Its popups stay out of the view too.

@@ -8,8 +8,9 @@ use std::borrow::Cow;
 use std::path::PathBuf;
 
 use gpui_kit::{
-    AppContext, Context, Entity, Focusable, IntoElement, ParentElement, Pixels, Render, Styled,
-    TestAppContext, TestDispatcher, VisualTestContext, Window, div, font, px, size,
+    AppContext, Bounds, Context, Entity, EntityInputHandler as _, Focusable, IntoElement,
+    ParentElement, Pixels, Render, Styled, TestAppContext, TestDispatcher, VisualTestContext,
+    Window, div, font, px, size,
 };
 use holm_editor::Editor;
 
@@ -69,6 +70,17 @@ pub fn open<'a>(
     cx.update(|window, cx| window.focus(&editor.focus_handle(cx), cx));
     cx.run_until_parked();
     (editor, cx)
+}
+
+/// The middle height of the cursor in the window. It fails when the cursor line is not laid out.
+pub fn cursor_y(editor: &Entity<Editor>, cx: &mut VisualTestContext) -> Pixels {
+    cx.update(|window, cx| {
+        editor.update(cx, |editor, cx| {
+            editor.bounds_for_range(0..0, Bounds::default(), window, cx)
+        })
+    })
+    .map(|bounds| bounds.center().y)
+    .expect("the cursor line is in the layout")
 }
 
 /// The width of one char of the repo font.

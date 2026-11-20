@@ -13,7 +13,7 @@ use gpui_kit::{
 use holm_markdown::{Color, Target};
 
 use crate::color::{self, ColorWindow, KeyResult, Paint};
-use crate::element::{EditorElement, Layout, Scroll, Theme};
+use crate::element::{EditorElement, Layout, Reveal, Scroll, Theme};
 use crate::files::{FileKind, LinkedFiles};
 use crate::find::Find;
 use crate::highlight::{self, Highlighter};
@@ -52,7 +52,7 @@ const DRAG_START: Pixels = px(4.);
 /// - Ctrl+L checks or clears the task boxes on the selected lines. A click on a task box does too.
 /// - A click places the cursor, also on a link. Ctrl+click opens the link under the mouse, and
 ///   Ctrl+Enter the link at the cursor. A link to a heading in this note moves the cursor
-///   there. Other links send [`OpenLink`] or [`OpenFile`].
+///   there, and a heading out of view goes to the top line. Other links send [`OpenLink`] or [`OpenFile`].
 /// - Ctrl+V with files or an image on the clipboard sends [`PasteFiles`], and so does a drop of
 ///   files.
 /// - Ctrl+T opens the color window for the text color, and Ctrl+M for the highlight color.
@@ -61,15 +61,16 @@ const DRAG_START: Pixels = px(4.);
 ///   custom color sends [`CustomColors`].
 /// - Up with the cursor at the very start of the text sends [`UpFromStart`].
 /// - Ctrl+F opens find. Typed text goes into its query. Enter and Shift+Enter select the next
-///   and the match before. Esc or a click in the text closes it.
+///   and the match before. A match out of view goes to the middle of the view. Esc or a click
+///   in the text closes it.
 ///
 /// [`WritingHelp`] turns off the format keys, the color window and the list keys.
 pub struct Editor {
     pub(crate) model: Model,
     pub(crate) focus: FocusHandle,
     pub(crate) scroll: Scroll,
-    /// Whether the next layout moves the view to the cursor.
-    pub(crate) autoscroll: bool,
+    /// How the next layout brings the cursor into view, if it does.
+    pub(crate) reveal: Option<Reveal>,
     /// The count of text changes, to know when [`Self::layout`] is out of date.
     pub(crate) version: u64,
     pub(crate) layout: Option<Rc<Layout>>,
@@ -238,7 +239,7 @@ impl Editor {
             model: Model::new(""),
             focus: cx.focus_handle(),
             scroll: Scroll::default(),
-            autoscroll: false,
+            reveal: None,
             version: 0,
             layout: None,
             files: LinkedFiles::default(),
@@ -415,9 +416,9 @@ impl Editor {
         self.start_focused = in_start;
         if in_start {
             self.scroll = Scroll::default();
-            self.autoscroll = false;
+            self.reveal = None;
         } else if focused {
-            self.autoscroll = true;
+            self.reveal = Some(Reveal::Edge);
         }
     }
 
@@ -427,7 +428,7 @@ impl Editor {
             Target::Heading(name) => {
                 if let Some(start) = self.model.heading_start(&name) {
                     self.model.set_cursor(start, false);
-                    self.moved(cx);
+                    self.jumped(Reveal::Top, cx);
                 }
             }
             Target::File(path) => {
@@ -471,13 +472,18 @@ impl Editor {
 
     fn edited(&mut self, cx: &mut Context<Self>) {
         self.version += 1;
-        self.autoscroll = true;
+        self.reveal = Some(Reveal::Edge);
         cx.emit(Changed);
         cx.notify();
     }
 
     fn moved(&mut self, cx: &mut Context<Self>) {
-        self.autoscroll = true;
+        self.jumped(Reveal::Edge, cx);
+    }
+
+    /// The cursor moved to a place that the next layout brings into view by `reveal`.
+    fn jumped(&mut self, reveal: Reveal, cx: &mut Context<Self>) {
+        self.reveal = Some(reveal);
         cx.notify();
     }
 
@@ -520,7 +526,7 @@ impl Editor {
         {
             find.pop(control);
             find.refresh(&mut self.model);
-            self.moved(cx);
+            self.jumped(Reveal::Middle, cx);
             return true;
         }
         if control {
@@ -669,7 +675,7 @@ impl Editor {
         let mut find = Find::new(query, self.model.selection().start);
         find.refresh(&mut self.model);
         self.find = Some(find);
-        self.moved(cx);
+        self.jumped(Reveal::Middle, cx);
     }
 
     /// Pastes text, or sends [`PasteFiles`] for files or an image.
@@ -692,7 +698,11 @@ impl Editor {
             return false;
         };
         match command {
-            Command::CloseFind => self.find = None,
+            Command::CloseFind => {
+                self.find = None;
+                self.moved(cx);
+                return true;
+            }
             Command::NextMatch => find.step(false, &mut self.model),
             Command::PreviousMatch => find.step(true, &mut self.model),
             Command::Paste => {
@@ -703,7 +713,7 @@ impl Editor {
             }
             _ => return false,
         }
-        self.moved(cx);
+        self.jumped(Reveal::Middle, cx);
         true
     }
 
@@ -1060,7 +1070,7 @@ impl EntityInputHandler for Editor {
         if let Some(find) = &mut self.find {
             find.push(text);
             find.refresh(&mut self.model);
-            self.moved(cx);
+            self.jumped(Reveal::Middle, cx);
             return;
         }
         let range = range.map_or_else(|| self.model.selection(), |r| self.range_from_utf16(&r));

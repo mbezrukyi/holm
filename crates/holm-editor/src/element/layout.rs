@@ -717,60 +717,126 @@ fn cell_place(head: bool) -> Place {
     }
 }
 
+/// How a layout brings the cursor into view. Each acts only when the cursor is out of view.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Reveal {
+    /// A cursor move: the cursor line goes to the top edge, or its text to the bottom edge.
+    Edge,
+    /// A find match: the row with the cursor goes to the middle of the view.
+    Middle,
+    /// A heading jump: the cursor line starts on the top line.
+    Top,
+}
+
 /// Lays out the lines that fill `bounds`, from `scroll` on.
 ///
 /// `start` is the height of the view before the first line. The scroll counts it as a part of
 /// line 0, so `scroll.offset` on line 0 starts at the top of that view.
 ///
-/// It first moves `scroll` to a line start. With `autoscroll`, it then moves it so the cursor is
-/// in view.
+/// It first moves `scroll` to a line start. With a `reveal`, it then moves it so the cursor is
+/// in view. Line 0 never moves below the top of the view.
 pub(crate) fn lay_out(
     model: &Model,
     scroll: &mut Scroll,
-    autoscroll: bool,
+    reveal: Option<Reveal>,
     shaper: &mut Shaper<'_>,
     bounds: Bounds<Pixels>,
     start: Pixels,
     window: &Window,
 ) -> Vec<LaidLine> {
     let view = bounds.size.height;
-    let start_of = |line: usize| if line == 0 { start } else { px(0.) };
-    let height =
-        |shaper: &mut Shaper<'_>, line| shaper.line(model, line, window).height + start_of(line);
     let lines = fill_view(model, scroll, shaper, view, start, window);
-    if !autoscroll {
+    let Some(reveal) = reveal else {
         return lines;
-    }
+    };
+    let target = match reveal {
+        Reveal::Edge => to_edge(model, scroll, &lines, shaper, view, start, window),
+        Reveal::Middle | Reveal::Top => {
+            to_place(model, reveal, &lines, shaper, view, start, window)
+        }
+    };
+    let Some(target) = target else {
+        return lines;
+    };
+    *scroll = target;
+    fill_view(model, scroll, shaper, view, start, window)
+}
+
+/// The scroll that puts the cursor line at the nearest edge of the view, or none when the
+/// cursor shows.
+fn to_edge(
+    model: &Model,
+    scroll: &Scroll,
+    lines: &[LaidLine],
+    shaper: &mut Shaper<'_>,
+    view: Pixels,
+    start: Pixels,
+    window: &Window,
+) -> Option<Scroll> {
+    let start_of = |line: usize| if line == 0 { start } else { px(0.) };
     let cursor = model.line_of(model.cursor());
     // On line 0 the start view can be cut off while the text still shows. Then nothing moves.
     let text_cut_off = lines.first().is_some_and(|line| line.text_top() < px(0.));
     if cursor < scroll.line || (cursor == scroll.line && text_cut_off) {
-        *scroll = Scroll {
+        return Some(Scroll {
             line: cursor,
             offset: px(0.),
-        };
-    } else {
-        let visible = lines
-            .iter()
-            .find(|line| contains(&line.display.source(), model.cursor()));
-        match visible {
-            Some(line) if line.top + line.pad + line.text_height <= view => return lines,
-            _ => {}
-        }
-        // Put the text of the cursor line at the bottom of the view.
-        let laid = shaper.line(model, cursor, window);
-        let mut top = view - laid.pad - laid.text_height - start_of(cursor);
-        let mut line = cursor;
-        while line > 0 && top > px(0.) {
-            line -= 1;
-            top -= height(shaper, line);
-        }
-        *scroll = Scroll {
-            line,
-            offset: (-top).max(px(0.)),
-        };
+        });
     }
-    fill_view(model, scroll, shaper, view, start, window)
+    let visible = lines
+        .iter()
+        .find(|line| contains(&line.display.source(), model.cursor()));
+    if visible.is_some_and(|line| line.top + line.pad + line.text_height <= view) {
+        return None;
+    }
+    // Put the text of the cursor line at the bottom of the view.
+    let laid = shaper.line(model, cursor, window);
+    let mut top = view - laid.pad - laid.text_height - start_of(cursor);
+    let mut line = cursor;
+    while line > 0 && top > px(0.) {
+        line -= 1;
+        top -= shaper.line(model, line, window).height + start_of(line);
+    }
+    Some(Scroll {
+        line,
+        offset: (-top).max(px(0.)),
+    })
+}
+
+/// The scroll that puts the cursor in the middle or at the top of the view, or none when the
+/// row with the cursor shows whole.
+fn to_place(
+    model: &Model,
+    reveal: Reveal,
+    lines: &[LaidLine],
+    shaper: &mut Shaper<'_>,
+    view: Pixels,
+    start: Pixels,
+    window: &Window,
+) -> Option<Scroll> {
+    let cursor = model.cursor();
+    let row_start = model.caret().row_start();
+    let shows = lines
+        .iter()
+        .find(|line| contains(&line.display.source(), cursor))
+        .is_some_and(|line| {
+            let (top, height) = line.row_of(cursor, row_start);
+            line.top + top >= px(0.) && line.top + top + height <= view
+        });
+    if shows {
+        return None;
+    }
+    let line = model.line_of(cursor);
+    let start = if line == 0 { start } else { px(0.) };
+    let offset = match reveal {
+        Reveal::Middle => {
+            let (top, height) = shaper.line(model, line, window).row_of(cursor, row_start);
+            start + top + (height - view) / 2.
+        }
+        Reveal::Edge | Reveal::Top => start,
+    };
+    // A scroll above line 0 stops at its top, in `fill_view`.
+    Some(Scroll { line, offset })
 }
 
 /// The lines that fill a view of height `view`, after a start view of height `start`.
@@ -831,6 +897,15 @@ impl LaidLine {
         match &self.content {
             Content::Text(text) => Some(text),
             _ => None,
+        }
+    }
+
+    /// The top and the height of the row that shows `offset`, from the top of the line. A line
+    /// with no text row gives its whole text. `row_start` is as in [`Self::caret`].
+    fn row_of(&self, offset: usize, row_start: bool) -> (Pixels, Pixels) {
+        match self.caret(offset, row_start) {
+            Some(at) => (self.pad + at.y, self.line_height),
+            None => (self.pad, self.text_height),
         }
     }
 
