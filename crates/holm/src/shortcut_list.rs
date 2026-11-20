@@ -62,7 +62,6 @@ fn heading(place: Place) -> Option<&'static str> {
         Place::TagPopup => Some(text::IN_TAG_POPUP),
         Place::SearchField => Some(text::IN_SEARCH_FIELD),
         Place::Picker => Some(text::IN_PICKER),
-        Place::LinkPicker => Some(text::IN_LINK_PICKER),
         Place::Dialog => Some(text::IN_QUESTION),
         Place::ListPopup => Some(text::IN_POPUP_LIST),
         Place::TextField => Some(text::IN_NAME_FIELD),

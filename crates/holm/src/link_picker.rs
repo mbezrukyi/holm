@@ -1,8 +1,9 @@
 //! The link picker: a small window that finds the target of a note link.
 //!
-//! It matches titles with fuzzy matching, and lists the headings of a note after `#`. Tab fills
-//! in the title of the selected row and adds `#`. When no title is the typed text, the last row
-//! creates a note. `Enter` picks a row, and `Esc` closes the window.
+//! It matches titles with fuzzy matching, and lists the headings of a note after `#`. A `#`
+//! typed into a field with no `#` yet fills in the title of the note under the cursor. When no
+//! title is the typed text, the last row creates a note. `Enter` picks a row, and `Esc` closes
+//! the window.
 
 use std::collections::{HashMap, HashSet};
 
@@ -19,7 +20,6 @@ use crate::core_door::CoreDoor;
 use crate::link_rows::{self, LinkRow, Query};
 use crate::pick_notes::PickNotes;
 use crate::popup::{self, PickEvent, PickList, PickRow};
-use crate::shortcuts::{Command, Place, Run};
 use crate::text;
 
 /// What the link picker starts with.
@@ -84,6 +84,8 @@ pub(crate) struct LinkPicker {
     /// The headings of each note that the field named.
     headings: HashMap<NotePath, Vec<String>>,
     loading: HashSet<NotePath>,
+    /// The text of the field that the rows come from.
+    text: String,
     _list: Subscription,
 }
 
@@ -100,11 +102,15 @@ impl LinkPicker {
             list.set_query(start.query, window, cx);
             list
         });
-        let subscription = cx.subscribe(&list, |this, _, event: &PickEvent, cx| match event {
-            PickEvent::Query => this.query_changed(cx),
-            PickEvent::Pick(at) => this.pick(*at, cx),
-            PickEvent::Close => cx.emit(LinkPickerEvent::Close),
-        });
+        let subscription = cx.subscribe_in(
+            &list,
+            window,
+            |this, _, event: &PickEvent, window, cx| match event {
+                PickEvent::Query => this.typed(window, cx),
+                PickEvent::Pick(at) => this.pick(*at, cx),
+                PickEvent::Close => cx.emit(LinkPickerEvent::Close),
+            },
+        );
         let mut this = Self {
             core_door,
             notes: PickNotes::new(start.notes),
@@ -114,6 +120,7 @@ impl LinkPicker {
             heading_note: None,
             headings: HashMap::new(),
             loading: HashSet::new(),
+            text: String::new(),
             _list: subscription,
         };
         this.query_changed(cx);
@@ -154,8 +161,8 @@ impl LinkPicker {
 
     /// Finds the rows for the new text. It loads the headings of a note the first time.
     fn query_changed(&mut self, cx: &mut Context<Self>) {
-        let text = self.list.read(cx).query(cx).to_string();
-        let query = Query::parse(&text, &self.notes);
+        self.text = self.list.read(cx).query(cx).to_string();
+        let query = Query::parse(&self.text, &self.notes);
         let headings = match query {
             Query::Titles(_) => None,
             Query::Headings { note, .. } => {
@@ -186,15 +193,19 @@ impl LinkPicker {
         self.query_changed(cx);
     }
 
-    /// Tab fills in the title of the selected note and adds `#`.
-    fn fill_title(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let selected = self.list.read(cx).selected();
-        let Some(LinkRow::Note(at)) = selected.and_then(|at| self.rows.get(at)) else {
-            return;
-        };
-        let query = Query::text(Some(&self.notes[*at].title), Some(""));
-        self.list
-            .update(cx, |list, cx| list.set_query(query, window, cx));
+    /// The user changed the text. A `#` typed into a text with no `#` yet fills in the title
+    /// of the note under the cursor.
+    fn typed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.list.read(cx).query(cx).to_string();
+        let one_hash = text.matches('#').count() == 1 && !self.text.contains('#');
+        if one_hash && text.replacen('#', "", 1) == self.text {
+            let cursor = self.list.read(cx).cursor();
+            if let Some(LinkRow::Note(at)) = cursor.and_then(|at| self.rows.get(at)) {
+                let query = Query::text(Some(&self.notes[*at].title), Some(""));
+                self.list
+                    .update(cx, |list, cx| list.set_query(query, window, cx));
+            }
+        }
         self.query_changed(cx);
     }
 
@@ -231,14 +242,6 @@ impl Render for LinkPicker {
             .role(Role::Dialog)
             .aria_label(text::LINK_TO_NOTE)
             .test_support()
-            .key_context(Place::LinkPicker.key_context())
-            .on_action(cx.listener(|this, Run(command): &Run, window, cx| {
-                if *command == Command::FillTitle {
-                    this.fill_title(window, cx);
-                } else {
-                    cx.propagate();
-                }
-            }))
             .child(
                 popup::panel(px(480.), cx)
                     .on_mouse_down_out(cx.listener(|_, _, _, cx| cx.emit(LinkPickerEvent::Close)))

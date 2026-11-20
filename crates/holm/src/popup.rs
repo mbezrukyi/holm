@@ -20,6 +20,7 @@ use holm_core::NotePath;
 use holm_core::model::NoteInfo;
 
 use crate::icons::Icon;
+use crate::list_cursor;
 use crate::shortcuts::{Command, Place, Run};
 use crate::text;
 
@@ -86,13 +87,13 @@ impl PickRow {
         self
     }
 
-    fn view(&self, at: usize, selected: bool, cx: &App) -> Stateful<Div> {
+    fn view(&self, at: usize, current: bool, cx: &App) -> Stateful<Div> {
         let theme = cx.theme();
         h_flex()
             .id(ElementId::NamedInteger("row".into(), at as u64))
             .role(Role::ListBoxOption)
             .aria_label(self.label.clone())
-            .aria_selected(selected)
+            .aria_selected(current)
             .h(ROW_HEIGHT)
             .w_full()
             .px_2()
@@ -100,7 +101,7 @@ impl PickRow {
             .text_sm()
             .rounded(theme.radius)
             .cursor_default()
-            .when(selected, |row| {
+            .when(current, |row| {
                 row.bg(theme.accent).text_color(theme.accent_foreground)
             })
             .children(
@@ -143,12 +144,13 @@ pub(crate) enum PickEvent {
 
 /// A search field over a list of rows, for the panel of a small window.
 ///
-/// Its keys are the rows of [`Place::Picker`]. `↑` and `↓` select a row. A row under the mouse gets selected too. A list that is too long
-/// for the panel scrolls, and its scrollbar takes a lane on the right of the rows.
+/// Its keys are the rows of [`Place::Picker`]. `Tab` and `Shift+Tab` move the cursor and wrap.
+/// A row under the mouse gets the cursor too. A list that is too long for the panel scrolls,
+/// and its scrollbar takes a lane on the right of the rows.
 pub(crate) struct PickList {
     field: Entity<InputState>,
     rows: Rc<[PickRow]>,
-    selected: usize,
+    cursor: usize,
     empty: &'static str,
     scroll: UniformListScrollHandle,
     _field: Subscription,
@@ -173,7 +175,7 @@ impl PickList {
         Self {
             field,
             rows: Rc::from([]),
-            selected: 0,
+            cursor: 0,
             empty,
             scroll: UniformListScrollHandle::new(),
             _field: subscription,
@@ -191,29 +193,25 @@ impl PickList {
             .update(cx, |field, cx| field.set_value(query, window, cx));
     }
 
-    /// Shows `rows`, with the first one selected.
+    /// Shows `rows`, with the cursor on the first one.
     pub(crate) fn set_rows(&mut self, rows: Vec<PickRow>, cx: &mut Context<Self>) {
         self.rows = rows.into();
-        self.selected = 0;
+        self.cursor = 0;
         self.scroll.scroll_to_item(0, ScrollStrategy::Top);
         cx.notify();
     }
 
-    /// The place of the selected row, or `None` when the list has no rows.
-    pub(crate) fn selected(&self) -> Option<usize> {
-        (self.selected < self.rows.len()).then_some(self.selected)
+    /// The place of the row under the cursor, or `None` when the list has no rows.
+    pub(crate) fn cursor(&self) -> Option<usize> {
+        (self.cursor < self.rows.len()).then_some(self.cursor)
     }
 
-    fn step(&mut self, down: bool, cx: &mut Context<Self>) {
-        let last = self.rows.len().saturating_sub(1);
-        self.selected = if down {
-            (self.selected + 1).min(last)
-        } else {
-            self.selected.saturating_sub(1)
-        };
-        self.scroll
-            .scroll_to_item(self.selected, ScrollStrategy::Nearest);
-        cx.notify();
+    fn step(&mut self, forward: bool, cx: &mut Context<Self>) {
+        if let Some(at) = list_cursor::step(self.cursor(), self.rows.len(), forward, |_| true) {
+            self.cursor = at;
+            self.scroll.scroll_to_item(at, ScrollStrategy::Nearest);
+            cx.notify();
+        }
     }
 
     fn run(&mut self, Run(command): &Run, _: &mut Window, cx: &mut Context<Self>) {
@@ -221,7 +219,7 @@ impl PickList {
             Command::Previous => self.step(false, cx),
             Command::Next => self.step(true, cx),
             Command::Pick => {
-                if let Some(at) = self.selected() {
+                if let Some(at) = self.cursor() {
                     cx.emit(PickEvent::Pick(at));
                 }
             }
@@ -242,10 +240,10 @@ impl PickList {
                 range
                     .filter_map(|at| list.rows.get(at).map(|row| (at, row)))
                     .map(|(at, row)| {
-                        row.view(at, at == list.selected, cx)
+                        row.view(at, at == list.cursor, cx)
                             .on_hover(cx.listener(move |list, hovered: &bool, _, cx| {
-                                if *hovered && list.selected != at {
-                                    list.selected = at;
+                                if *hovered && list.cursor != at {
+                                    list.cursor = at;
                                     cx.notify();
                                 }
                             }))

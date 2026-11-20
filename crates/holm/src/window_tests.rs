@@ -1318,14 +1318,14 @@ fn the_tag_popup_adds_and_removes_tags_and_pins(cx: &mut TestAppContext) {
         options(cx, handle),
         ["#home ✓", "#holiday", "#project/holm", "Add #ho"]
     );
-    keys(cx, handle, "down down enter");
+    keys(cx, handle, "tab tab enter");
     assert_eq!(chips(cx, handle), ["work", "home", "holiday"]);
     cx.simulate_input(handle, "big plans");
     keys(cx, handle, "enter");
     assert_eq!(chips(cx, handle), ["work", "home", "holiday", "big-plans"]);
     assert_eq!(fields(&a).0, ["work", "home", "holiday", "big-plans"]);
 
-    keys(cx, handle, "down down enter");
+    keys(cx, handle, "tab tab enter");
     assert_eq!(
         options(cx, handle),
         ["#work ✓", "#holiday ✓*", "#big-plans ✓"]
@@ -1375,6 +1375,48 @@ fn the_tag_popup_adds_and_removes_tags_and_pins(cx: &mut TestAppContext) {
     keys(cx, handle, "escape");
     assert_eq!(focus(cx, handle), "editor");
     assert_eq!(editor_text(cx, handle), "# A\n");
+}
+
+#[gpui_kit::test]
+fn tab_moves_through_the_tag_lines_and_wraps(cx: &mut TestAppContext) {
+    let fixture = Fixture::new().with_folder();
+    two_tagged_notes(&fixture);
+    let handle = open(cx, fixture.startup(None));
+
+    keys(cx, handle, "ctrl-shift-t shift-tab");
+    assert_eq!(
+        options(cx, handle),
+        ["#home ✓", "#work/holm ✓*"],
+        "no cursor: to the last"
+    );
+    keys(cx, handle, "tab");
+    assert_eq!(options(cx, handle), ["#home ✓*", "#work/holm ✓"]);
+    keys(cx, handle, "shift-tab");
+    assert_eq!(options(cx, handle), ["#home ✓", "#work/holm ✓*"]);
+    keys(cx, handle, "down up");
+    assert_eq!(
+        options(cx, handle),
+        ["#home ✓", "#work/holm ✓*"],
+        "an arrow does nothing"
+    );
+
+    cx.simulate_input(handle, "x");
+    settle(cx);
+    assert_eq!(options(cx, handle), ["Add #x"], "typing clears the cursor");
+    keys(cx, handle, "tab tab");
+    assert_eq!(options(cx, handle), ["Add #x*"]);
+
+    keys(cx, handle, "ctrl-a backspace");
+    assert_eq!(options(cx, handle), ["#home ✓", "#work/holm ✓"]);
+    cx.simulate_input(handle, "zz");
+    settle(cx);
+    keys(cx, handle, "ctrl-a backspace tab");
+    assert_eq!(
+        options(cx, handle),
+        ["#home ✓*", "#work/holm ✓"],
+        "no cursor: to the first"
+    );
+    assert!(popup_open(cx, handle), "only Esc closes the popup");
 }
 
 /// Whether the tag row is on the screen, with its top inside the window.
@@ -2207,6 +2249,18 @@ fn name_field(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String
     })
 }
 
+/// The text of the field in the link picker.
+fn picker_text(cx: &mut TestAppContext, handle: AnyWindowHandle) -> String {
+    screen(cx, handle, |window| {
+        window
+            .within("link-picker")
+            .find_all_by_role(Role::TextInput)
+            .first()
+            .and_then(|field| field.value().map(str::to_owned))
+            .unwrap_or_default()
+    })
+}
+
 /// A has the tags `home` and `work/holm`, B has `work/holm`. A is open.
 fn two_tagged_notes(fixture: &Fixture) -> (PathBuf, PathBuf) {
     let notes_dir = fixture.notes();
@@ -2226,7 +2280,7 @@ fn f2_in_the_tag_popup_renames_the_tag_in_the_sidebar(cx: &mut TestAppContext) {
     let handle = open(cx, fixture.startup(None));
     assert_eq!(chips(cx, handle), ["home", "work/holm"]);
 
-    keys(cx, handle, "ctrl-shift-t down down f2");
+    keys(cx, handle, "ctrl-shift-t tab tab f2");
     assert!(!popup_open(cx, handle));
     assert_eq!(sidebar(cx, handle), "tree #work/holm");
     assert_eq!(name_field(cx, handle).as_deref(), Some("work/holm"));
@@ -2255,7 +2309,7 @@ fn a_new_tag_renames_in_all_notes_with_no_wait(cx: &mut TestAppContext) {
     cx.simulate_input(handle, "fresh");
     // F2 comes before the write of the new tag ends.
     press(cx, handle, "enter");
-    press(cx, handle, "down");
+    press(cx, handle, "tab");
     press(cx, handle, "f2");
     cx.run_until_parked();
     assert_eq!(name_field(cx, handle).as_deref(), Some("fresh"));
@@ -2323,7 +2377,7 @@ fn a_popup_closes_in_the_frame_of_the_focus_move(cx: &mut TestAppContext) {
     assert!(!drawn(cx, handle, "backlinks"));
 
     // F2 moves the focus in an event after the key, so `first_frame_has` cannot see it.
-    keys(cx, handle, "escape ctrl-shift-t down f2");
+    keys(cx, handle, "escape ctrl-shift-t tab f2");
     assert!(!drawn(cx, handle, "tag-popup"));
     assert_eq!(name_field(cx, handle).as_deref(), Some("work"));
 }
@@ -2336,7 +2390,7 @@ fn f2_in_the_tag_popup_shows_a_hidden_sidebar(cx: &mut TestAppContext) {
     keys(cx, handle, "ctrl-shift-l ctrl-shift-l");
     assert_eq!(sidebar(cx, handle), "hidden");
 
-    keys(cx, handle, "ctrl-shift-t down f2");
+    keys(cx, handle, "ctrl-shift-t tab f2");
     assert!(!popup_open(cx, handle));
     assert_eq!(sidebar(cx, handle), "tree #home");
     assert_eq!(name_field(cx, handle).as_deref(), Some("home"));
@@ -2358,7 +2412,7 @@ fn f2_in_the_tag_popup_needs_a_tag_line(cx: &mut TestAppContext) {
     cx.simulate_input(handle, "new");
     settle(cx);
     assert_eq!(options(cx, handle), ["Add #new"]);
-    keys(cx, handle, "down f2");
+    keys(cx, handle, "tab f2");
     assert!(popup_open(cx, handle));
     assert_eq!(options(cx, handle), ["Add #new*"]);
     assert_eq!(focus(cx, handle), "tag field");
@@ -2526,6 +2580,8 @@ fn search_lists_the_notes_that_match_and_esc_returns(cx: &mut TestAppContext) {
     assert_eq!(notes_list(cx, handle), ["Goals"]);
 
     keys(cx, handle, "down");
+    assert_eq!(focus(cx, handle), "search", "Down stays in the field");
+    keys(cx, handle, "enter");
     assert_eq!(focus(cx, handle), "sidebar");
     assert_eq!(editor_text(cx, handle), "# Goals\nread more\n");
     assert_eq!(notes_list(cx, handle), ["Goals*"]);
@@ -2568,7 +2624,7 @@ fn search_lists_the_notes_that_match_and_esc_returns(cx: &mut TestAppContext) {
     assert!(!settings.sidebar.hidden);
 
     // The find bar of the editor lets Ctrl+Shift+F through.
-    keys(cx, handle, "down enter");
+    keys(cx, handle, "enter enter");
     keys(cx, handle, "ctrl-f");
     assert_eq!(focus(cx, handle), "editor");
     keys(cx, handle, "ctrl-shift-f");
@@ -2637,7 +2693,13 @@ fn quick_open_opens_a_note_by_its_title(cx: &mut TestAppContext) {
     cx.simulate_input(handle, "o");
     settle(cx);
     assert_eq!(options(cx), ["Goals*", "Top"]);
-    keys(cx, handle, "down enter");
+    keys(cx, handle, "down");
+    assert_eq!(options(cx), ["Goals*", "Top"], "an arrow does nothing");
+    keys(cx, handle, "shift-tab");
+    assert_eq!(options(cx), ["Goals", "Top*"], "Shift+Tab wraps");
+    keys(cx, handle, "tab");
+    assert_eq!(options(cx), ["Goals*", "Top"], "Tab wraps");
+    keys(cx, handle, "tab enter");
     assert_eq!(question(cx, handle), None);
     assert_eq!(editor_text(cx, handle), "# Top\n");
     assert_eq!(focus(cx, handle), "editor");
@@ -2822,12 +2884,17 @@ fn the_link_picker_links_notes_headings_and_new_notes(cx: &mut TestAppContext) {
         format!("# Alpha\n[Beta](holm:{beta})")
     );
 
-    // A heading link. Tab fills in the title and switches to its headings.
+    // A heading link. A typed `#` fills in the title and switches to its headings.
     cx.simulate_input(handle, " ");
     keys(cx, handle, "ctrl-k");
     cx.simulate_input(handle, "be");
-    keys(cx, handle, "tab");
+    settle(cx);
+    keys(cx, handle, "tab tab");
+    assert_eq!(options(cx), ["Beta*", "Create “be”"], "Tab wraps");
+    cx.simulate_input(handle, "#");
+    settle(cx);
     assert_eq!(options(cx), ["Beta*", "Bug list", "Ideas"]);
+    assert_eq!(picker_text(cx, handle), "Beta#");
     cx.simulate_input(handle, "bug");
     settle(cx);
     keys(cx, handle, "enter");
@@ -4005,9 +4072,11 @@ fn ctrl_question_mark_opens_the_shortcut_list_and_esc_gives_the_focus_back(
         "Shortcuts: Ctrl+?",
         "App menu: F10",
         "Close: Esc",
-        "Add or remove the tag: Tab",
+        "Next tag: Tab",
+        "Previous tag: Shift+Tab",
+        "Next row: Tab",
+        "Previous row: Shift+Tab",
         "Go to the results: Enter",
-        "Fill in the title and add #: Tab",
     ] {
         assert!(rows.iter().any(|shown| shown == row), "{row} is missing");
     }
@@ -4036,7 +4105,6 @@ fn the_shortcut_list_names_each_place_once_and_no_label_runs_into_its_keys(
         text::IN_TAG_POPUP,
         text::IN_SEARCH_FIELD,
         text::IN_PICKER,
-        text::IN_LINK_PICKER,
         text::IN_QUESTION,
         text::IN_POPUP_LIST,
         text::IN_NAME_FIELD,

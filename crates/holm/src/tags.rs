@@ -7,11 +7,11 @@
 //! A typed name that no line has shows as an "Add" line. The popup changes no files itself.
 //! It sends each added or removed tag as a [`TagChange`].
 //!
-//! - The field keeps the focus. `↑` and `↓` move a cursor through the list.
-//! - `Enter` or `Tab` adds or removes the tag under the cursor. With no cursor, it adds the
-//!   typed tag. A click on a line does the same as `Enter` on it.
-//! - `Esc`, a click outside the popup, or `↓` with an empty list closes the popup. See
-//!   [`Dropdown`] for the focus.
+//! - The field keeps the focus. `Tab` and `Shift+Tab` move a cursor through the list and
+//!   wrap. With no cursor, `Tab` goes to the first line and `Shift+Tab` to the last.
+//! - `Enter` adds or removes the tag under the cursor. With no cursor, it adds the typed tag.
+//!   A click on a line does the same as `Enter` on it.
+//! - `Esc`, or a click outside the popup, closes it. See [`Dropdown`] for the focus.
 //! - `F2` on a tag line dispatches [`RenameTag`]. The app starts the rename of the tag in the
 //!   sidebar, for all notes. The focus moves to the sidebar, so the popup closes.
 //! - A click on the row opens the popup. A click on a chip also puts the cursor on its tag.
@@ -42,6 +42,7 @@ use holm_core::{NotePath, TagName};
 use crate::backlinks::{self, Backlinks};
 use crate::core_door::CoreDoor;
 use crate::fold::Fold;
+use crate::list_cursor;
 use crate::lowercase::Lowercase;
 use crate::popup::{self, Dropdown};
 use crate::shortcuts::{Command, Place, Run};
@@ -225,20 +226,11 @@ impl TagRow {
         lines
     }
 
-    /// Moves the cursor. It returns whether the list has lines.
-    fn move_cursor(&mut self, down: bool, cx: &mut Context<Self>) -> bool {
-        let count = self.lines().len();
-        if count == 0 {
-            return false;
+    fn move_cursor(&mut self, forward: bool, cx: &mut Context<Self>) {
+        if let Some(at) = list_cursor::step(self.cursor, self.lines().len(), forward, |_| true) {
+            self.cursor = Some(at);
+            cx.notify();
         }
-        self.cursor = match (self.cursor, down) {
-            (None, true) => Some(0),
-            (Some(at), true) => Some((at + 1).min(count - 1)),
-            (Some(at), false) => at.checked_sub(1),
-            (None, false) => None,
-        };
-        cx.notify();
-        true
     }
 
     /// Keeps the cursor on a line after the list got shorter.
@@ -271,14 +263,8 @@ impl TagRow {
         match command {
             Command::Pick => self.choose(window, cx),
             Command::Close => self.close(window, cx),
-            Command::Previous => {
-                self.move_cursor(false, cx);
-            }
-            Command::Next => {
-                if !self.move_cursor(true, cx) {
-                    self.close(window, cx);
-                }
-            }
+            Command::Previous => self.move_cursor(false, cx),
+            Command::Next => self.move_cursor(true, cx),
             Command::Rename => self.rename(window, cx),
             _ => cx.propagate(),
         }
