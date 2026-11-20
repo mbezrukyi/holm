@@ -6,21 +6,21 @@
 //! `Space` switches a switch. `Space` or `Enter` on the notes folder opens the folder picker.
 //! `Esc` closes the dialog.
 //!
-//! With a limited text width, the width field shows after its options, and `Tab` puts the
-//! cursor and the focus in it. The field takes digits only. A width in the range applies at
-//! once. When the field loses the focus, it shows the width of the settings again.
+//! With a limited text width, the width shows after the options of its row, with a caret while
+//! the cursor is on the row. Digits and `Backspace` there change the width; the first digit
+//! after the cursor comes to the row takes the place of the whole width. A width in the range
+//! applies at once. When the cursor leaves the row, it shows the width of the settings again.
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme as _, Selectable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
-    InteractiveElement as _, IntoElement, ParentElement, Pixels, Render, Role,
-    StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _, Window, div, px,
-    transparent_black,
+    App, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
+    InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement, Pixels, Render, Role,
+    SharedString, StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _,
+    Window, div, px, rems, transparent_black,
 };
 use holm_core::model::Order;
 use holm_editor::WritingHelp;
@@ -31,7 +31,7 @@ use crate::icons::Icon;
 use crate::list_cursor;
 use crate::scale::Scale;
 use crate::shortcuts::{self, Command, Place, Run};
-use crate::{popup, text, window};
+use crate::{popup, text, text_field, window};
 
 /// The dialog asks its owner to close it.
 pub(crate) struct Close;
@@ -42,8 +42,6 @@ enum Row {
     Theme,
     Scale,
     TextWidth,
-    /// The width field in the text width row. The cursor reaches it only with a limited width.
-    TextChars,
     Order,
     FormatKeys,
     ContinueLists,
@@ -51,12 +49,11 @@ enum Row {
 }
 
 /// The places of the cursor, in order.
-const ROWS: [Row; 9] = [
+const ROWS: [Row; 8] = [
     Row::Folder,
     Row::Theme,
     Row::Scale,
     Row::TextWidth,
-    Row::TextChars,
     Row::Order,
     Row::FormatKeys,
     Row::ContinueLists,
@@ -78,8 +75,15 @@ const PATH_SIZE: Pixels = px(12.5);
 /// Whether the text width is limited.
 const WIDTHS: [(bool, &str); 2] = [(false, text::WIDTH_FULL), (true, text::WIDTH_LIMITED)];
 
-/// The width of the width field, for 3 digits.
-const CHARS_FIELD_WIDTH: Pixels = px(52.);
+/// The most digits of a width.
+const CHARS_DIGITS: usize = 3;
+
+/// The space between the border of the width box and its text.
+const CHARS_BOX_PAD: Pixels = px(5.);
+
+/// The height of a row of options with its frame. The text width row keeps it with or without
+/// the width box, so the dialog does not change its height at any scale.
+const CONTROL_HEIGHT: Pixels = px(24.);
 
 const ORDERS: [(Order, &str); 2] = [
     (Order::LastChange, text::ORDER_LAST_CHANGE),
@@ -93,7 +97,6 @@ impl Row {
             Self::Theme => text::SETTING_THEME,
             Self::Scale => text::SETTING_SCALE,
             Self::TextWidth => text::SETTING_TEXT_WIDTH,
-            Self::TextChars => text::TEXT_WIDTH_CHARS,
             Self::Order => text::SETTING_ORDER,
             Self::FormatKeys => text::SETTING_FORMAT_KEYS,
             Self::ContinueLists => text::SETTING_CONTINUE_LISTS,
@@ -107,12 +110,7 @@ impl Row {
             Self::FormatKeys => Some(&mut help.format_keys),
             Self::ContinueLists => Some(&mut help.continue_lists),
             Self::IndentLists => Some(&mut help.indent_lists),
-            Self::Folder
-            | Self::Theme
-            | Self::Scale
-            | Self::TextWidth
-            | Self::TextChars
-            | Self::Order => None,
+            Self::Folder | Self::Theme | Self::Scale | Self::TextWidth | Self::Order => None,
         }
     }
 }
@@ -124,14 +122,54 @@ fn next_option<T: Copy + PartialEq>(options: &[(T, &str)], current: T, forward: 
     options[at].0
 }
 
+/// The width as the user types it on the text width row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CharsDraft {
+    text: String,
+    /// The next digit takes the place of the whole text.
+    fresh: bool,
+}
+
+impl CharsDraft {
+    /// The width `chars`, which the next digit replaces.
+    fn new(chars: u16) -> Self {
+        Self {
+            text: chars.to_string(),
+            fresh: true,
+        }
+    }
+
+    /// Puts `digit` after the text, or in its place when it is fresh. A text with all its
+    /// digits takes no more.
+    fn type_digit(&mut self, digit: char) {
+        if self.fresh {
+            self.text.clear();
+            self.fresh = false;
+        }
+        if self.text.len() < CHARS_DIGITS {
+            self.text.push(digit);
+        }
+    }
+
+    fn backspace(&mut self) {
+        self.fresh = false;
+        self.text.pop();
+    }
+
+    /// The width, when the text is a number.
+    fn chars(&self) -> Option<i64> {
+        self.text.parse().ok()
+    }
+}
+
 pub(crate) struct SettingsDialog {
     config: Entity<Config>,
     /// The place of the cursor in [`ROWS`].
     cursor: usize,
     focus: FocusHandle,
-    /// The width field of the text width row.
-    chars: Entity<InputState>,
-    _subscriptions: [Subscription; 2],
+    /// The width on the text width row.
+    chars: CharsDraft,
+    _config: Subscription,
 }
 
 impl SettingsDialog {
@@ -139,82 +177,46 @@ impl SettingsDialog {
     pub(crate) fn new(config: Entity<Config>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
-        let chars = config.read(cx).settings().text_width.chars().to_string();
-        let chars = cx.new(|cx| {
-            InputState::new(window, cx)
-                .validate(|text, _| {
-                    text.len() <= 3 && text.bytes().all(|byte| byte.is_ascii_digit())
-                })
-                .default_value(chars)
-        });
-        let subscriptions = [
-            cx.observe_in(&config, window, |dialog, _, window, cx| {
-                dialog.leave_hidden_field(window, cx);
-                cx.notify();
-            }),
-            cx.subscribe_in(&chars, window, Self::chars_event),
-        ];
+        let chars = CharsDraft::new(config.read(cx).settings().text_width.chars());
+        let subscription = cx.observe(&config, |_, _, cx| cx.notify());
         Self {
             config,
             cursor: 0,
             focus,
             chars,
-            _subscriptions: subscriptions,
+            _config: subscription,
         }
     }
 
-    fn limited(&self, cx: &App) -> bool {
-        self.config.read(cx).settings().text_width.limited
+    /// The width of the settings again, as a fresh draft.
+    fn reset_chars(&mut self, cx: &App) {
+        self.chars = CharsDraft::new(self.config.read(cx).settings().text_width.chars());
     }
 
-    /// Whether the cursor can be on `row`.
-    fn reaches(&self, row: Row, cx: &App) -> bool {
-        row != Row::TextChars || self.limited(cx)
-    }
-
-    /// A typed width applies when it is in the range. When the field loses the focus, it shows
-    /// the width of the settings again.
-    fn chars_event(
-        &mut self,
-        field: &Entity<InputState>,
-        event: &InputEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        match event {
-            InputEvent::Change => {
-                if let Ok(chars) = field.read(cx).value().parse::<i64>() {
-                    self.change(|settings| _ = settings.text_width.set_chars(chars), cx);
-                }
-            }
-            InputEvent::Focus => {
-                if let Some(at) = ROWS.iter().position(|row| *row == Row::TextChars) {
-                    self.cursor = at;
-                    cx.notify();
-                }
-            }
-            InputEvent::Blur => {
-                let chars = self
-                    .config
-                    .read(cx)
-                    .settings()
-                    .text_width
-                    .chars()
-                    .to_string();
-                if field.read(cx).value() != chars {
-                    field.update(cx, |field, cx| field.set_value(chars, window, cx));
-                }
-            }
-            InputEvent::PressEnter { .. } => {}
+    /// Digits and Backspace on the text width row with a limited width change the width. A
+    /// width in the range applies at once.
+    fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let keystroke = &event.keystroke;
+        let modifiers = keystroke.modifiers;
+        if self.row() != Row::TextWidth
+            || !self.config.read(cx).settings().text_width.limited
+            || modifiers.control
+            || modifiers.alt
+            || modifiers.platform
+        {
+            return;
         }
-    }
-
-    /// Moves the cursor off the width field when the field hides, like after a click on "Full".
-    fn leave_hidden_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.row() == Row::TextChars && !self.limited(cx) {
-            self.cursor -= 1;
-            window.focus(&self.focus, cx);
+        let mut chars = keystroke.key.chars();
+        match (chars.next(), chars.next()) {
+            (Some(digit), None) if digit.is_ascii_digit() => self.chars.type_digit(digit),
+            _ if keystroke.key == "backspace" => self.chars.backspace(),
+            _ => return,
         }
+        cx.stop_propagation();
+        if let Some(chars) = self.chars.chars() {
+            self.change(|settings| _ = settings.text_width.set_chars(chars), cx);
+        }
+        cx.notify();
     }
 
     fn change(&self, change: impl FnOnce(&mut Settings), cx: &mut App) {
@@ -243,28 +245,17 @@ impl SettingsDialog {
         ROWS[self.cursor]
     }
 
-    /// Moves the cursor to the next or the previous row it reaches. The focus goes into the
-    /// width field with the cursor, and all its text is selected, so typing replaces it.
-    fn move_cursor(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(at) = list_cursor::step(Some(self.cursor), ROWS.len(), forward, |at| {
-            self.reaches(ROWS[at], cx)
-        }) else {
-            return;
-        };
-        self.cursor = at;
-        if self.row() == Row::TextChars {
-            self.chars.update(cx, |field, cx| {
-                field.focus(window, cx);
-                field.select_all(window, cx);
-            });
-        } else {
-            window.focus(&self.focus, cx);
+    /// Moves the cursor to the next or the previous row. The width shows the settings again.
+    fn move_cursor(&mut self, forward: bool, cx: &mut Context<Self>) {
+        if let Some(at) = list_cursor::step(Some(self.cursor), ROWS.len(), forward, |_| true) {
+            self.cursor = at;
+            self.reset_chars(cx);
+            cx.notify();
         }
-        cx.notify();
     }
 
     /// Picks the next or the previous option of the row. The options wrap.
-    fn pick_option(&self, forward: bool, cx: &mut App) {
+    fn pick_option(&mut self, forward: bool, cx: &mut App) {
         match self.row() {
             Row::Theme => self.change(
                 |settings| settings.theme = next_option(&THEMES, settings.theme, forward),
@@ -276,13 +267,16 @@ impl SettingsDialog {
                 },
                 cx,
             ),
-            Row::TextWidth => self.change(
-                |settings| {
-                    let width = &mut settings.text_width;
-                    width.limited = next_option(&WIDTHS, width.limited, forward);
-                },
-                cx,
-            ),
+            Row::TextWidth => {
+                self.change(
+                    |settings| {
+                        let width = &mut settings.text_width;
+                        width.limited = next_option(&WIDTHS, width.limited, forward);
+                    },
+                    cx,
+                );
+                self.reset_chars(cx);
+            }
             Row::Order => self.change(
                 |settings| settings.note_order = next_option(&ORDERS, settings.note_order, forward),
                 cx,
@@ -302,17 +296,16 @@ impl SettingsDialog {
         );
     }
 
-    fn run(&mut self, Run(command): &Run, window: &mut Window, cx: &mut Context<Self>) {
+    fn run(&mut self, Run(command): &Run, _window: &mut Window, cx: &mut Context<Self>) {
         let row = self.row();
         match command {
-            Command::Next => self.move_cursor(true, window, cx),
-            Command::Previous => self.move_cursor(false, window, cx),
+            Command::Next => self.move_cursor(true, cx),
+            Command::Previous => self.move_cursor(false, cx),
             Command::Switch => match row {
                 Row::Folder => self.pick_folder(cx),
                 Row::Theme | Row::Scale | Row::TextWidth | Row::Order => {
                     self.pick_option(true, cx);
                 }
-                Row::TextChars => {}
                 Row::FormatKeys | Row::ContinueLists | Row::IndentLists => self.toggle(row, cx),
             },
             Command::SwitchBack => self.pick_option(false, cx),
@@ -326,7 +319,13 @@ impl SettingsDialog {
         }
     }
 
-    fn control(&self, row: Row, settings: &Settings, cx: &mut Context<Self>) -> impl IntoElement {
+    fn control(
+        &self,
+        row: Row,
+        settings: &Settings,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         match row {
             Row::Folder => {
                 let folder = settings
@@ -365,28 +364,49 @@ impl SettingsDialog {
             .into_any_element(),
             Row::TextWidth => {
                 let limited = settings.text_width.limited;
+                let editing = self.row() == Row::TextWidth;
+                let box_width = chars_box_width(window);
                 let theme = cx.theme();
-                let muted = theme.muted_foreground;
+                let (muted, border, caret, radius) = (
+                    theme.muted_foreground,
+                    theme.border,
+                    theme.caret,
+                    theme.radius,
+                );
+                // A plain frame and no focus ring: the dialog keeps the focus. Its width fits 3
+                // digits, so the options before it stay in place while the user types.
+                let width = h_flex()
+                    .id("text-width-chars")
+                    .role(Role::TextInput)
+                    .aria_label(text::TEXT_WIDTH_CHARS)
+                    .aria_value(SharedString::from(self.chars.text.clone()))
+                    .test_support()
+                    .flex_none()
+                    .h_full()
+                    .w(box_width)
+                    .px(CHARS_BOX_PAD)
+                    .justify_end()
+                    .border_1()
+                    .border_color(border)
+                    .rounded(radius)
+                    .text_sm()
+                    .child(text_field::label(self.chars.text.clone()))
+                    .when(editing, |field| {
+                        field.child(div().w(px(1.)).h(px(14.)).bg(caret))
+                    });
                 h_flex()
                     .flex_none()
+                    .h(CONTROL_HEIGHT)
                     .gap_2()
                     .child(options(&WIDTHS, limited, cx, |settings, limited| {
                         settings.text_width.limited = limited;
                     }))
                     .when(limited, |row| {
-                        row.child(
-                            Input::new(&self.chars)
-                                .id("text-width-chars")
-                                .aria_label(text::TEXT_WIDTH_CHARS)
-                                .small()
-                                .w(CHARS_FIELD_WIDTH),
-                        )
-                        .child(div().text_color(muted).child(text::CHARS_UNIT))
+                        row.child(width)
+                            .child(div().text_sm().text_color(muted).child(text::CHARS_UNIT))
                     })
                     .into_any_element()
             }
-            // The text width row shows the field.
-            Row::TextChars => div().into_any_element(),
             Row::Order => options(&ORDERS, settings.note_order, cx, |settings, order| {
                 settings.note_order = order;
             })
@@ -403,6 +423,21 @@ impl SettingsDialog {
             }
         }
     }
+}
+
+/// The width of the width box: 3 digits of the small text, the caret, the padding and the
+/// border.
+fn chars_box_width(window: &Window) -> Pixels {
+    let style = window.text_style();
+    let font_size = rems(0.875).to_pixels(window.rem_size());
+    let digits = "0".repeat(CHARS_DIGITS);
+    let run = style.to_run(digits.len());
+    let digits = window
+        .text_system()
+        .shape_line(digits.into(), font_size, &[run], None)
+        .width();
+    // The label keeps room for a caret, and the caret of the box comes after it.
+    (digits + px(2.) + CHARS_BOX_PAD * 2. + px(2.)).ceil()
 }
 
 /// The format keys the settings show, from the editor key table: Bold, Italic, and the
@@ -535,23 +570,17 @@ impl Focusable for SettingsDialog {
 }
 
 impl Render for SettingsDialog {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let settings = self.config.read(cx).settings().clone();
         let theme = cx.theme();
         // The cursor row has a bar on its left and no fill, so the outlines of its controls stay
         // visible.
         let (bar, radius) = (theme.primary, theme.radius);
-        // The cursor in the width field marks the text width row.
-        let cursor_row = match self.row() {
-            Row::TextChars => Row::TextWidth,
-            row => row,
-        };
         let rows: Vec<_> = ROWS
             .iter()
             .enumerate()
-            .filter(|(_, row)| **row != Row::TextChars)
             .map(|(at, &row)| {
-                let current = row == cursor_row;
+                let current = at == self.cursor;
                 let detail = (row == Row::FormatKeys).then(|| format_key_chips(cx));
                 h_flex()
                     .id(("setting", at))
@@ -578,7 +607,7 @@ impl Render for SettingsDialog {
                             )
                             .children(detail),
                     )
-                    .child(self.control(row, &settings, cx))
+                    .child(self.control(row, &settings, window, cx))
             })
             .collect();
         let panel = popup::panel(px(480.), cx)
@@ -600,7 +629,36 @@ impl Render for SettingsDialog {
             .test_support()
             .key_context(Place::Settings.key_context())
             .track_focus(&self.focus)
+            .on_key_down(cx.listener(Self::key_down))
             .on_action(cx.listener(Self::run))
             .child(panel)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_first_digit_replaces_the_width_and_the_next_ones_add_to_it() {
+        let mut draft = CharsDraft::new(80);
+        draft.type_digit('1');
+        assert_eq!(draft.chars(), Some(1));
+        for digit in ['2', '0', '5'] {
+            draft.type_digit(digit);
+        }
+        assert_eq!(draft.text, "120", "3 digits at most");
+        draft.backspace();
+        draft.backspace();
+        draft.backspace();
+        assert_eq!(draft.chars(), None);
+    }
+
+    #[test]
+    fn backspace_on_a_fresh_width_edits_it() {
+        let mut draft = CharsDraft::new(80);
+        draft.backspace();
+        draft.type_digit('5');
+        assert_eq!(draft.text, "85");
     }
 }

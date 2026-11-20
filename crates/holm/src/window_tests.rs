@@ -4140,57 +4140,100 @@ fn space_on_the_text_width_row_switches_the_mode_and_the_editor_follows(cx: &mut
 }
 
 #[gpui_kit::test]
-fn typing_a_width_in_the_field_changes_the_column_at_once(cx: &mut TestAppContext) {
+fn typing_a_width_on_the_row_changes_the_column_at_once(cx: &mut TestAppContext) {
     let (fixture, handle) = open_text_width(cx);
     keys(cx, handle, "space");
     let (_, eighty) = text_column(cx, handle);
-    keys(cx, handle, "tab");
-    assert_eq!(setting_rows(cx, handle)[3], "Text width*");
 
-    cx.simulate_input(handle, "45");
-    settle(cx);
-    assert_eq!(text_width(&fixture).chars(), 45);
+    keys(cx, handle, "4 5");
+    assert_eq!(
+        text_width(&fixture).chars(),
+        45,
+        "the first digit takes the place of 80"
+    );
+    assert_eq!(setting_rows(cx, handle)[3], "Text width*");
     let (_, width) = text_column(cx, handle);
     assert!(
         (width / eighty - 45. / 80.).abs() < 0.02,
         "{width} for 45, {eighty} for 80"
     );
+    keys(cx, handle, "backspace backspace 1 2 0");
+    assert_eq!(text_width(&fixture).chars(), 120);
+
+    let box_bounds = |cx: &mut TestAppContext| {
+        screen(cx, handle, |window| {
+            window.find("text-width-chars").bounds()
+        })
+    };
+    let wide = box_bounds(cx);
+    keys(cx, handle, "backspace backspace");
+    assert_eq!(box_bounds(cx), wide, "the box keeps its place and size");
     keys(cx, handle, "tab");
-    assert_eq!(setting_rows(cx, handle)[4], "Note order*");
-    assert_eq!(chars_field(cx, handle).as_deref(), Some("45"));
+    assert_eq!(
+        setting_rows(cx, handle)[4],
+        "Note order*",
+        "Tab goes to the next row"
+    );
+    assert_eq!(chars_field(cx, handle).as_deref(), Some("120"));
 }
 
 #[gpui_kit::test]
-fn a_width_out_of_the_range_shows_the_old_width_again_on_focus_loss(cx: &mut TestAppContext) {
+fn a_width_out_of_the_range_shows_the_old_width_again_when_the_cursor_leaves(
+    cx: &mut TestAppContext,
+) {
     let (fixture, handle) = open_text_width(cx);
-    keys(cx, handle, "space tab");
-    cx.simulate_input(handle, "20");
-    settle(cx);
+    keys(cx, handle, "space 2 0");
     assert_eq!(chars_field(cx, handle).as_deref(), Some("20"));
     assert_eq!(text_width(&fixture).chars(), 80);
 
-    cx.simulate_input(handle, "x 5");
-    settle(cx);
+    keys(cx, handle, "x 5 7");
     assert_eq!(
         chars_field(cx, handle).as_deref(),
         Some("205"),
-        "digits only"
+        "digits only, 3 at most"
     );
     assert_eq!(text_width(&fixture).chars(), 80);
 
-    keys(cx, handle, "shift-tab");
+    keys(cx, handle, "shift-tab tab");
     assert_eq!(setting_rows(cx, handle)[3], "Text width*");
     assert_eq!(chars_field(cx, handle).as_deref(), Some("80"));
     assert_eq!(question(cx, handle).as_deref(), Some(text::SETTINGS));
 }
 
 #[gpui_kit::test]
+fn the_text_width_row_keeps_its_height_with_full_and_limited(cx: &mut TestAppContext) {
+    let (_fixture, handle) = open_text_width(cx);
+    let row = |cx: &mut TestAppContext| {
+        screen(cx, handle, |window| {
+            let rows = window.within("settings").find_all_by_role(Role::ListItem);
+            let parts = ["text-width-chars"]
+                .iter()
+                .filter_map(|id| window.try_find(*id).map(|part| part.bounds().size.height))
+                .collect::<Vec<_>>();
+            (rows[3].bounds().size.height, parts)
+        })
+    };
+    let full = row(cx);
+    keys(cx, handle, "space");
+    let limited = row(cx);
+    assert_eq!(full.0, limited.0, "full {full:?}, limited {limited:?}");
+}
+
+#[gpui_kit::test]
+fn digits_on_a_full_text_width_do_nothing(cx: &mut TestAppContext) {
+    let (fixture, handle) = open_text_width(cx);
+    keys(cx, handle, "1 2 0");
+    assert_eq!(
+        text_width(&fixture),
+        crate::text_width::TextWidthSetting::default()
+    );
+    assert_eq!(chars_field(cx, handle), None);
+}
+
+#[gpui_kit::test]
 fn full_and_then_limited_again_shows_the_last_width(cx: &mut TestAppContext) {
     let (fixture, handle) = open_text_width(cx);
-    keys(cx, handle, "space tab");
-    cx.simulate_input(handle, "120");
-    settle(cx);
-    keys(cx, handle, "shift-tab space");
+    keys(cx, handle, "space 1 2 0 space");
     assert!(!text_width(&fixture).limited);
     assert_eq!(chars_field(cx, handle), None);
 
