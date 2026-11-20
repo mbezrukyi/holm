@@ -8,7 +8,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui_kit::{
-    AnyElement, App, AvailableSpace, BorderStyle, Bounds, ContentMask, Corners, Div, ElementId,
+    AnyElement, App, AvailableSpace, BorderStyle, Bounds, ContentMask, Corners, ElementId,
     ElementInputHandler, Entity, FontStyle, FontWeight, GlobalElementId, Hsla, ImgResourceLoader,
     InspectorElementId, IntoElement, LayoutId, ParentElement as _, PathBuilder, Pixels, Point,
     Resource, Style, Styled as _, TextAlign, Window, div, fill, outline, point, px, relative, size,
@@ -18,9 +18,9 @@ pub(crate) use layout::{Layout, Scroll};
 use theme::Place;
 pub(crate) use theme::Theme;
 
-use crate::Editor;
 use crate::ink;
 use crate::model::{LineKind, Mark, Quote, Run};
+use crate::{Editor, TextWidth};
 use flow::{ChipPaint, FlowLine, Icon};
 use layout::SIDE_MARGIN;
 use layout::{Content, LaidLine, Shaper, lay_out, run_font};
@@ -41,20 +41,127 @@ impl IntoElement for EditorElement {
     }
 }
 
-/// A view as wide as an editor, with `child` in its text column. So a view in the place of
-/// the editor lines up with the text.
-pub fn text_column(child: impl IntoElement) -> Div {
-    div()
-        .size_full()
-        .px(SIDE_MARGIN)
-        .child(div().w_full().child(child))
+/// A view as big as its parent, with `child` in a text column of `width`. So a view in the place
+/// of the editor lines up with the text, when it has the text style of the editor and the
+/// width from [`Editor::text_width`].
+pub fn text_column(width: TextWidth, child: impl IntoElement) -> TextColumn {
+    TextColumn {
+        width,
+        child: Some(child.into_any_element()),
+    }
 }
 
-/// The text column: `bounds` without [`SIDE_MARGIN`] on each side.
-fn column(bounds: Bounds<Pixels>) -> Bounds<Pixels> {
-    let width = (bounds.size.width - SIDE_MARGIN * 2.).max(px(0.));
+/// The element of [`text_column`].
+pub struct TextColumn {
+    width: TextWidth,
+    child: Option<AnyElement>,
+}
+
+impl IntoElement for TextColumn {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl gpui_kit::Element for TextColumn {
+    type RequestLayoutState = Option<AnyElement>;
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        // The char width needs the text style, which is known only now.
+        let mut column = div().w_full();
+        if let TextWidth::Limited(chars) = self.width {
+            column = column.max_w(limit(chars, window));
+        }
+        let mut view = div()
+            .size_full()
+            .px(SIDE_MARGIN)
+            .flex()
+            .justify_center()
+            .child(column.children(self.child.take()))
+            .into_any_element();
+        let child = view.request_layout(window, cx);
+        let mut style = Style::default();
+        style.size.width = relative(1.).into();
+        style.size.height = relative(1.).into();
+        (window.request_layout(style, [child], cx), Some(view))
+    }
+
+    fn prepaint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        _bounds: Bounds<Pixels>,
+        view: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        if let Some(view) = view {
+            view.prepaint(window, cx);
+        }
+    }
+
+    fn paint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        _bounds: Bounds<Pixels>,
+        view: &mut Self::RequestLayoutState,
+        (): &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        if let Some(view) = view {
+            view.paint(window, cx);
+        }
+    }
+}
+
+/// The width of one char in the current text style: the advance of `0`, like the CSS `ch`.
+fn char_width(window: &Window) -> Pixels {
+    let style = window.text_style();
+    let font_size = style.font_size.to_pixels(window.rem_size());
+    let text_system = window.text_system();
+    let font_id = text_system.resolve_font(&style.font());
+    text_system
+        .ch_advance(font_id, font_size)
+        .unwrap_or(font_size * 0.5)
+}
+
+/// The width of `chars` chars, as a whole pixel. It is a little wider than the chars, so a sum
+/// of char widths with a rounding error still fits.
+fn limit(chars: u16, window: &Window) -> Pixels {
+    (char_width(window) * f32::from(chars)).floor() + px(1.)
+}
+
+/// The text column in `bounds`: [`SIDE_MARGIN`] on each side, or less wide and centered for a
+/// limited `width`.
+fn column(bounds: Bounds<Pixels>, width: TextWidth, window: &Window) -> Bounds<Pixels> {
+    let room = (bounds.size.width - SIDE_MARGIN * 2.).max(px(0.));
+    let width = match width {
+        TextWidth::Full => room,
+        TextWidth::Limited(chars) => limit(chars, window).min(room),
+    };
+    // A whole pixel keeps the text sharp.
+    let left = ((bounds.size.width - width) / 2.).round();
     Bounds::new(
-        point(bounds.origin.x + SIDE_MARGIN, bounds.origin.y),
+        point(bounds.origin.x + left, bounds.origin.y),
         size(width, bounds.size.height),
     )
 }
@@ -100,7 +207,7 @@ impl gpui_kit::Element for EditorElement {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let style = window.text_style();
-        let column = column(bounds);
+        let column = column(bounds, self.editor.read(cx).text_width, window);
         let width = size(
             AvailableSpace::Definite(column.size.width),
             AvailableSpace::MinContent,

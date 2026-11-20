@@ -36,8 +36,9 @@ const DRAG_START: Pixels = px(4.);
 /// as file chips in their line.
 ///
 /// The editor takes its font, size and line height from the text style of its parent element.
-/// It draws its own background and centers a text column of a fixed width. The app sets light
-/// or dark mode with [`Editor::set_appearance`].
+/// It draws its own background and a text column with space on each side. The column fills the
+/// editor, or [`Editor::set_text_width`] limits it to a number of chars. The app sets light or
+/// dark mode with [`Editor::set_appearance`].
 ///
 /// The editor gets its shortcuts from [`crate::shortcuts`], once the app calls [`crate::init`]:
 ///
@@ -77,6 +78,7 @@ pub struct Editor {
     pub(crate) theme: Theme,
     drag: Option<Drag>,
     help: WritingHelp,
+    pub(crate) text_width: TextWidth,
     pub(crate) find: Option<Find>,
     color: Option<ColorWindow>,
     /// The last custom colors, the newest first.
@@ -125,6 +127,17 @@ impl Default for WritingHelp {
             indent_lists: true,
         }
     }
+}
+
+/// How wide the text column is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TextWidth {
+    /// The column fills the editor, minus the space on each side.
+    #[default]
+    Full,
+    /// The column is as wide as this many chars at the text size, and centered. In a narrower
+    /// editor it fills the editor, like [`TextWidth::Full`].
+    Limited(u16),
 }
 
 /// Light or dark mode.
@@ -233,6 +246,7 @@ impl Editor {
             theme: Theme::new(Appearance::Light),
             drag: None,
             help: WritingHelp::default(),
+            text_width: TextWidth::default(),
             find: None,
             color: None,
             custom_colors: Vec::new(),
@@ -274,6 +288,20 @@ impl Editor {
     /// Sets the writing helps, from the settings.
     pub fn set_writing_help(&mut self, help: WritingHelp) {
         self.help = help;
+    }
+
+    /// Sets the width of the text column, from the settings.
+    pub fn set_text_width(&mut self, width: TextWidth, cx: &mut Context<Self>) {
+        if self.text_width != width {
+            self.text_width = width;
+            cx.notify();
+        }
+    }
+
+    /// The width of the text column, for a view in the place of the editor. See
+    /// [`crate::text_column`].
+    pub fn text_width(&self) -> TextWidth {
+        self.text_width
     }
 
     /// Sets the last custom colors, the newest first, from the settings. The color window shows

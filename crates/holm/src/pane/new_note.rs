@@ -1,7 +1,7 @@
 //! The note after Ctrl+N, before it has a title and a file.
 //!
 //! It shows in the place of the editor: the tag row with the tag of the note and an empty
-//! title field, at the same place as in the editor. Nothing else takes a click or a key.
+//! title field. The pane puts it in the text column, so it is at the same place as in the editor. Nothing else takes a click or a key.
 //!
 //! - `Enter` writes `<title>.md`, and sends [`NewNoteEvent::Created`].
 //! - `Esc`, or a fail that is not about the title, sends [`NewNoteEvent::Cancelled`].
@@ -13,8 +13,8 @@ use std::rc::Rc;
 
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, FocusHandle, InteractiveElement as _,
-    IntoElement, MouseButton, Render, Role, StatefulInteractiveElement as _, Subscription,
-    TestSupportExt as _, Window,
+    IntoElement, MouseButton, ParentElement as _, Render, Role, StatefulInteractiveElement as _,
+    Styled as _, Subscription, TestSupportExt as _, Window, div,
 };
 use holm_core::model::Note;
 use holm_core::{FolderPath, TagName};
@@ -84,7 +84,9 @@ impl EventEmitter<NewNoteEvent> for NewNote {}
 impl Render for NewNote {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let row = tags::new_note_row(self.tag.as_ref(), self.title.clone().into_any_element(), cx);
-        holm_editor::text_column(row)
+        div()
+            .size_full()
+            .child(row)
             .id("new-note")
             .role(Role::Group)
             .aria_label(text::NEW_NOTE)

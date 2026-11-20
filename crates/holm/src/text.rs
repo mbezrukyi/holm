@@ -216,6 +216,12 @@ pub(crate) const THEME_SYSTEM: &str = "System";
 pub(crate) const THEME_LIGHT: &str = "Light";
 pub(crate) const THEME_DARK: &str = "Dark";
 pub(crate) const SETTING_SCALE: &str = "Scale";
+pub(crate) const SETTING_TEXT_WIDTH: &str = "Text width";
+pub(crate) const WIDTH_FULL: &str = "Full";
+pub(crate) const WIDTH_LIMITED: &str = "Limited";
+/// The accessible name of the width field.
+pub(crate) const TEXT_WIDTH_CHARS: &str = "Text width in chars";
+pub(crate) const CHARS_UNIT: &str = "chars";
 pub(crate) const SETTING_ORDER: &str = "Note order";
 pub(crate) const ORDER_LAST_CHANGE: &str = "Last change";
 pub(crate) const ORDER_TITLE: &str = "Title";

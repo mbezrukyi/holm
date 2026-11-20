@@ -37,6 +37,7 @@ mod tags;
 mod test_paths;
 mod text;
 mod text_field;
+mod text_width;
 mod theme;
 mod title;
 mod window;

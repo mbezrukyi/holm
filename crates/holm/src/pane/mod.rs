@@ -36,7 +36,7 @@ use std::time::Duration;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::{Theme as Ui, h_flex, v_flex};
 use gpui_kit::{
-    App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
+    App, AppContext as _, Context, Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
     InteractiveElement as _, IntoElement, ParentElement, Render, Role,
     StatefulInteractiveElement as _, Styled, Subscription, Task, TestSupportExt as _, Window, div,
     px,
@@ -269,7 +269,7 @@ impl NotePane {
                     pane.open(path.clone(), Leave::Keep, cx);
                 },
             ),
-            Self::take_writing_help(&editor, config, cx),
+            Self::take_settings(&editor, config, cx),
             cx.observe_global::<Ui>(|pane, cx| {
                 let appearance = theme::appearance(cx);
                 pane.editor
@@ -572,18 +572,27 @@ impl NotePane {
         false
     }
 
-    /// Gives the writing help of `config` to `editor`, now and after each change.
-    fn take_writing_help(
+    /// Gives the writing help and the text width of `config` to `editor`, now and after each
+    /// change.
+    fn take_settings(
         editor: &Entity<Editor>,
         config: &Entity<Config>,
         cx: &mut Context<Self>,
     ) -> Subscription {
-        let help = config.read(cx).settings().writing_help;
-        editor.update(cx, |editor, _| editor.set_writing_help(help));
-        cx.observe(config, |pane, config, cx| {
-            let help = config.read(cx).settings().writing_help;
-            pane.editor
-                .update(cx, |editor, _| editor.set_writing_help(help));
+        let give = |editor: &Entity<Editor>, config: &Entity<Config>, cx: &mut Context<Self>| {
+            let settings = config.read(cx).settings();
+            let (help, width) = (settings.writing_help, settings.text_width.text_width());
+            editor.update(cx, |editor, cx| {
+                editor.set_writing_help(help);
+                editor.set_text_width(width, cx);
+            });
+        };
+        give(editor, config, cx);
+        cx.observe(config, move |pane, config, cx| {
+            let editor = pane.editor.clone();
+            give(&editor, &config, cx);
+            // A new note lines up with the text column.
+            cx.notify();
         })
     }
 
@@ -890,19 +899,28 @@ impl Focusable for NotePane {
 impl Render for NotePane {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = match &self.content {
-            Content::New { note, .. } => note.clone().into_any_element(),
-            Content::Note(_) => div()
-                .flex_1()
-                .min_h_0()
-                .font_family(theme::NOTE_FONT)
-                .text_size(theme::NOTE_SIZE)
-                .line_height(theme::NOTE_LINE)
-                .child(self.editor.clone())
+            // In the text style of the editor, the text column has the same width.
+            Content::New { note, .. } => note_text()
+                .child(holm_editor::text_column(
+                    self.editor.read(cx).text_width(),
+                    note.clone(),
+                ))
                 .into_any_element(),
+            Content::Note(_) => note_text().child(self.editor.clone()).into_any_element(),
             Content::Empty => empty_pane(&self.editor.focus_handle(cx), cx).into_any_element(),
         };
         v_flex().size_full().bg(cx.theme().background).child(body)
     }
+}
+
+/// The place of the editor, with the text style of a note.
+fn note_text() -> Div {
+    div()
+        .flex_1()
+        .min_h_0()
+        .font_family(theme::NOTE_FONT)
+        .text_size(theme::NOTE_SIZE)
+        .line_height(theme::NOTE_LINE)
 }
 
 /// The pane with no open note: a line, and the keys that open one. It holds the focus of the

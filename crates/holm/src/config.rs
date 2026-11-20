@@ -18,6 +18,7 @@ use toml_edit::{Array, DocumentMut, Item, Table, Value};
 
 use crate::scale::Scale;
 use crate::text;
+use crate::text_width::TextWidthSetting;
 
 const VERSION: i64 = 1;
 
@@ -44,6 +45,7 @@ pub(crate) struct Settings {
     pub(crate) theme: AppearanceSetting,
     /// The scale of the app on top of the desktop scale, in the file as a percent.
     pub(crate) scale: Scale,
+    pub(crate) text_width: TextWidthSetting,
     pub(crate) note_order: Order,
     pub(crate) writing_help: WritingHelp,
     /// The last custom colors, the newest first.
@@ -99,6 +101,7 @@ impl Default for Settings {
             notes_folder: None,
             theme: AppearanceSetting::default(),
             scale: Scale::default(),
+            text_width: TextWidthSetting::default(),
             note_order: Order::default(),
             writing_help: WritingHelp::default(),
             custom_colors: Vec::new(),
@@ -294,6 +297,11 @@ fn read(document: &DocumentMut) -> Settings {
                     read_writing_help(table, &mut settings.writing_help);
                 }
             }
+            "text_width" => {
+                if let Some(table) = get(key, item, Item::as_table_like) {
+                    read_text_width(table, &mut settings.text_width);
+                }
+            }
             "last_note" => {
                 if let Some(path) = get(key, item, Item::as_str) {
                     settings.last_note = NotePath::new(path);
@@ -323,6 +331,33 @@ fn read_writing_help(table: &dyn toml_edit::TableLike, help: &mut WritingHelp) {
         };
         if let Some(on) = get(key, item, Item::as_bool) {
             *field = on;
+        }
+    }
+}
+
+fn read_text_width(table: &dyn toml_edit::TableLike, width: &mut TextWidthSetting) {
+    for (key, item) in table.iter() {
+        match key {
+            "mode" => {
+                if let Some(limited) = get(key, item, |item| match item.as_str()? {
+                    "full" => Some(false),
+                    "limited" => Some(true),
+                    _ => None,
+                }) {
+                    width.limited = limited;
+                }
+            }
+            "chars" => {
+                let mut read = *width;
+                if get(key, item, |item| {
+                    read.set_chars(item.as_integer()?).then_some(())
+                })
+                .is_some()
+                {
+                    *width = read;
+                }
+            }
+            _ => unknown(&format!("text_width.{key}")),
         }
     }
 }
@@ -460,6 +495,16 @@ fn write(document: &mut DocumentMut, settings: &Settings) {
         set(table, "indent_lists", Value::from(help.indent_lists));
     }
 
+    if !document.get("text_width").is_some_and(Item::is_table) {
+        document.insert("text_width", Item::Table(Table::new()));
+    }
+    if let Some(table) = document.get_mut("text_width").and_then(Item::as_table_mut) {
+        let width = settings.text_width;
+        let mode = if width.limited { "limited" } else { "full" };
+        set(table, "mode", Value::from(mode));
+        set(table, "chars", Value::from(i64::from(width.chars())));
+    }
+
     if !document.get("sidebar").is_some_and(Item::is_table) {
         document.insert("sidebar", Item::Table(Table::new()));
     }
@@ -515,6 +560,7 @@ mod tests {
             notes_folder: Some(PathBuf::from("/home/me/Notes")),
             theme: AppearanceSetting::Dark,
             scale: Scale::from_percent(125),
+            text_width: limited_width(120),
             note_order: Order::Title,
             writing_help: WritingHelp {
                 indent_lists: false,
@@ -619,6 +665,50 @@ mod tests {
             let (_dir, config) = load(&format!("version = 1\n{bad}\n"));
             assert_eq!(config.settings().scale.percent(), 100, "{bad}");
         }
+    }
+
+    fn limited_width(chars: i64) -> TextWidthSetting {
+        let mut width = TextWidthSetting::default();
+        assert!(width.set_chars(chars));
+        width.limited = true;
+        width
+    }
+
+    #[test]
+    fn the_text_width_keeps_its_mode_and_width_apart() {
+        let (_dir, mut config) =
+            load("version = 1\n[text_width]\nmode = \"limited\"\nchars = 120\n");
+        assert_eq!(config.settings().text_width, limited_width(120));
+
+        let mut settings = config.settings().clone();
+        settings.text_width.limited = false;
+        config.save(settings);
+        let text = file(&config);
+        assert!(
+            text.contains("[text_width]\nmode = \"full\"\nchars = 120\n"),
+            "{text}"
+        );
+        let width = Config::load(config.path.clone()).settings().text_width;
+        assert!(!width.limited);
+        assert_eq!(width.chars(), 120);
+    }
+
+    #[test]
+    fn a_text_width_out_of_the_range_reads_as_80() {
+        for bad in [
+            "chars = 20",
+            "chars = 201",
+            "chars = -80",
+            "chars = \"wide\"",
+            "chars = 99.5",
+        ] {
+            let (_dir, config) = load(&format!(
+                "version = 1\n[text_width]\nmode = \"limited\"\n{bad}\n"
+            ));
+            assert_eq!(config.settings().text_width, limited_width(80), "{bad}");
+        }
+        let (_dir, config) = load("version = 1\n[text_width]\nmode = \"wide\"\n");
+        assert_eq!(config.settings().text_width, TextWidthSetting::default());
     }
 
     #[test]

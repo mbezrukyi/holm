@@ -11,7 +11,7 @@ use gpui_kit::{
     Bounds, ClipboardItem, Entity, EntityInputHandler, Modifiers, MouseButton, MouseDownEvent,
     MouseUpEvent, Pixels, VisualTestContext, point, px,
 };
-use holm_editor::{Changed, Editor, UpFromStart, WritingHelp};
+use holm_editor::{Changed, Editor, TextWidth, UpFromStart, WritingHelp};
 
 const WIDTH: Pixels = px(600.);
 const HEIGHT: Pixels = px(400.);
@@ -48,6 +48,11 @@ fn multi_click(cx: &mut VisualTestContext, column: f32, y: Pixels, count: usize)
 
 fn clipboard(cx: &VisualTestContext) -> Option<String> {
     cx.read_from_clipboard().and_then(|item| item.text())
+}
+
+fn set_width(editor: &Entity<Editor>, cx: &mut VisualTestContext, width: TextWidth) {
+    cx.update(|_, cx| editor.update(cx, |editor, cx| editor.set_text_width(width, cx)));
+    cx.run_until_parked();
 }
 
 fn set_help(editor: &Entity<Editor>, cx: &mut VisualTestContext, help: WritingHelp) {
@@ -192,6 +197,71 @@ fn the_text_column_fills_a_wide_editor() {
         text(&editor, cx),
         format!("{}X{}", "a".repeat(140), "a".repeat(10))
     );
+}
+
+#[test]
+fn a_limited_column_is_centered_and_as_wide_as_its_chars() {
+    let mut app = app();
+    let line = "a".repeat(45);
+    let (editor, cx) = open(&mut app, &line, WIDTH, HEIGHT);
+    assert_eq!(cursor_x(&editor, cx), Some(MARGIN), "full by default");
+
+    set_width(&editor, cx, TextWidth::Limited(30));
+    let left = (WIDTH - advance(cx) * 30.) / 2.;
+    let x = cursor_x(&editor, cx).unwrap();
+    assert!((x - left).abs() <= px(1.), "{x:?} is not {left:?}");
+    // The first row holds 30 chars.
+    cx.simulate_keystrokes("down");
+    cx.simulate_input("X");
+    assert_eq!(
+        text(&editor, cx),
+        format!("{}X{}", "a".repeat(30), "a".repeat(15))
+    );
+
+    set_width(&editor, cx, TextWidth::Full);
+    assert_eq!(text(&editor, cx).find('X'), Some(30));
+    cx.simulate_keystrokes("ctrl-home");
+    assert_eq!(cursor_x(&editor, cx), Some(MARGIN));
+}
+
+#[test]
+fn a_limited_column_shrinks_to_a_narrow_editor() {
+    let mut app = app();
+    let width = {
+        let (_, cx) = open(&mut app, "", WIDTH, HEIGHT);
+        advance(cx) * 20.5 + MARGIN * 2.
+    };
+    let (editor, cx) = open(&mut app, &"a".repeat(30), width, HEIGHT);
+    set_width(&editor, cx, TextWidth::Limited(40));
+    assert_eq!(cursor_x(&editor, cx), Some(MARGIN));
+    cx.simulate_keystrokes("down");
+    cx.simulate_input("X");
+    assert_eq!(
+        text(&editor, cx),
+        format!("{}X{}", "a".repeat(20), "a".repeat(10))
+    );
+}
+
+/// The test image is 64 by 40 pixels, so in a column of 4 chars it gets smaller.
+#[test]
+fn an_image_is_never_wider_than_a_limited_column() {
+    let mut app = app();
+    let (editor, cx) = open(&mut app, "ab\n![cat](cat.png)\ncd", WIDTH, HEIGHT);
+    cx.update(|_, cx| {
+        editor.update(cx, |editor, cx| editor.set_folder(Some(data_folder()), cx));
+    });
+    set_width(&editor, cx, TextWidth::Limited(4));
+    let height = px(40.) * (advance(cx) * 4. / px(64.));
+    let after = LINE_HEIGHT + px(4.) + height + px(4.);
+    cx.simulate_click(
+        point(
+            ((WIDTH - advance(cx) * 4.) / 2.).round() + advance(cx) * 0.2,
+            after + LINE_HEIGHT * 0.5,
+        ),
+        Modifiers::none(),
+    );
+    cx.simulate_input("X");
+    assert_eq!(text(&editor, cx), "ab\n![cat](cat.png)\nXcd");
 }
 
 #[test]

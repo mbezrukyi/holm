@@ -5,14 +5,19 @@
 //! `Space` picks the next option and `Shift+Space` the previous one, and the options wrap.
 //! `Space` switches a switch. `Space` or `Enter` on the notes folder opens the folder picker.
 //! `Esc` closes the dialog.
+//!
+//! With a limited text width, the width field shows after its options, and `Tab` puts the
+//! cursor and the focus in it. The field takes digits only. A width in the range applies at
+//! once. When the field loses the focus, it shows the width of the settings again.
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme as _, Selectable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
+    App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
     InteractiveElement as _, IntoElement, ParentElement, Pixels, Render, Role,
     StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _, Window, div, px,
     transparent_black,
@@ -36,16 +41,22 @@ enum Row {
     Folder,
     Theme,
     Scale,
+    TextWidth,
+    /// The width field in the text width row. The cursor reaches it only with a limited width.
+    TextChars,
     Order,
     FormatKeys,
     ContinueLists,
     IndentLists,
 }
 
-const ROWS: [Row; 7] = [
+/// The places of the cursor, in order.
+const ROWS: [Row; 9] = [
     Row::Folder,
     Row::Theme,
     Row::Scale,
+    Row::TextWidth,
+    Row::TextChars,
     Row::Order,
     Row::FormatKeys,
     Row::ContinueLists,
@@ -64,6 +75,12 @@ const BUTTON_HEIGHT: Pixels = px(22.);
 /// The size of the path in the folder button: the size of a path chip.
 const PATH_SIZE: Pixels = px(12.5);
 
+/// Whether the text width is limited.
+const WIDTHS: [(bool, &str); 2] = [(false, text::WIDTH_FULL), (true, text::WIDTH_LIMITED)];
+
+/// The width of the width field, for 3 digits.
+const CHARS_FIELD_WIDTH: Pixels = px(52.);
+
 const ORDERS: [(Order, &str); 2] = [
     (Order::LastChange, text::ORDER_LAST_CHANGE),
     (Order::Title, text::ORDER_TITLE),
@@ -75,6 +92,8 @@ impl Row {
             Self::Folder => text::SETTING_FOLDER,
             Self::Theme => text::SETTING_THEME,
             Self::Scale => text::SETTING_SCALE,
+            Self::TextWidth => text::SETTING_TEXT_WIDTH,
+            Self::TextChars => text::TEXT_WIDTH_CHARS,
             Self::Order => text::SETTING_ORDER,
             Self::FormatKeys => text::SETTING_FORMAT_KEYS,
             Self::ContinueLists => text::SETTING_CONTINUE_LISTS,
@@ -88,7 +107,12 @@ impl Row {
             Self::FormatKeys => Some(&mut help.format_keys),
             Self::ContinueLists => Some(&mut help.continue_lists),
             Self::IndentLists => Some(&mut help.indent_lists),
-            Self::Folder | Self::Theme | Self::Scale | Self::Order => None,
+            Self::Folder
+            | Self::Theme
+            | Self::Scale
+            | Self::TextWidth
+            | Self::TextChars
+            | Self::Order => None,
         }
     }
 }
@@ -105,7 +129,9 @@ pub(crate) struct SettingsDialog {
     /// The place of the cursor in [`ROWS`].
     cursor: usize,
     focus: FocusHandle,
-    _config: Subscription,
+    /// The width field of the text width row.
+    chars: Entity<InputState>,
+    _subscriptions: [Subscription; 2],
 }
 
 impl SettingsDialog {
@@ -113,12 +139,81 @@ impl SettingsDialog {
     pub(crate) fn new(config: Entity<Config>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
-        let subscription = cx.observe(&config, |_, _, cx| cx.notify());
+        let chars = config.read(cx).settings().text_width.chars().to_string();
+        let chars = cx.new(|cx| {
+            InputState::new(window, cx)
+                .validate(|text, _| {
+                    text.len() <= 3 && text.bytes().all(|byte| byte.is_ascii_digit())
+                })
+                .default_value(chars)
+        });
+        let subscriptions = [
+            cx.observe_in(&config, window, |dialog, _, window, cx| {
+                dialog.leave_hidden_field(window, cx);
+                cx.notify();
+            }),
+            cx.subscribe_in(&chars, window, Self::chars_event),
+        ];
         Self {
             config,
             cursor: 0,
             focus,
-            _config: subscription,
+            chars,
+            _subscriptions: subscriptions,
+        }
+    }
+
+    fn limited(&self, cx: &App) -> bool {
+        self.config.read(cx).settings().text_width.limited
+    }
+
+    /// Whether the cursor can be on `row`.
+    fn reaches(&self, row: Row, cx: &App) -> bool {
+        row != Row::TextChars || self.limited(cx)
+    }
+
+    /// A typed width applies when it is in the range. When the field loses the focus, it shows
+    /// the width of the settings again.
+    fn chars_event(
+        &mut self,
+        field: &Entity<InputState>,
+        event: &InputEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            InputEvent::Change => {
+                if let Ok(chars) = field.read(cx).value().parse::<i64>() {
+                    self.change(|settings| _ = settings.text_width.set_chars(chars), cx);
+                }
+            }
+            InputEvent::Focus => {
+                if let Some(at) = ROWS.iter().position(|row| *row == Row::TextChars) {
+                    self.cursor = at;
+                    cx.notify();
+                }
+            }
+            InputEvent::Blur => {
+                let chars = self
+                    .config
+                    .read(cx)
+                    .settings()
+                    .text_width
+                    .chars()
+                    .to_string();
+                if field.read(cx).value() != chars {
+                    field.update(cx, |field, cx| field.set_value(chars, window, cx));
+                }
+            }
+            InputEvent::PressEnter { .. } => {}
+        }
+    }
+
+    /// Moves the cursor off the width field when the field hides, like after a click on "Full".
+    fn leave_hidden_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.row() == Row::TextChars && !self.limited(cx) {
+            self.cursor -= 1;
+            window.focus(&self.focus, cx);
         }
     }
 
@@ -148,11 +243,24 @@ impl SettingsDialog {
         ROWS[self.cursor]
     }
 
-    fn move_cursor(&mut self, forward: bool, cx: &mut Context<Self>) {
-        if let Some(at) = list_cursor::step(Some(self.cursor), ROWS.len(), forward, |_| true) {
-            self.cursor = at;
-            cx.notify();
+    /// Moves the cursor to the next or the previous row it reaches. The focus goes into the
+    /// width field with the cursor, and all its text is selected, so typing replaces it.
+    fn move_cursor(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(at) = list_cursor::step(Some(self.cursor), ROWS.len(), forward, |at| {
+            self.reaches(ROWS[at], cx)
+        }) else {
+            return;
+        };
+        self.cursor = at;
+        if self.row() == Row::TextChars {
+            self.chars.update(cx, |field, cx| {
+                field.focus(window, cx);
+                field.select_all(window, cx);
+            });
+        } else {
+            window.focus(&self.focus, cx);
         }
+        cx.notify();
     }
 
     /// Picks the next or the previous option of the row. The options wrap.
@@ -165,6 +273,13 @@ impl SettingsDialog {
             Row::Scale => self.change(
                 |settings| {
                     settings.scale = next_option(Scale::options(), settings.scale, forward);
+                },
+                cx,
+            ),
+            Row::TextWidth => self.change(
+                |settings| {
+                    let width = &mut settings.text_width;
+                    width.limited = next_option(&WIDTHS, width.limited, forward);
                 },
                 cx,
             ),
@@ -187,14 +302,17 @@ impl SettingsDialog {
         );
     }
 
-    fn run(&mut self, Run(command): &Run, _window: &mut Window, cx: &mut Context<Self>) {
+    fn run(&mut self, Run(command): &Run, window: &mut Window, cx: &mut Context<Self>) {
         let row = self.row();
         match command {
-            Command::Next => self.move_cursor(true, cx),
-            Command::Previous => self.move_cursor(false, cx),
+            Command::Next => self.move_cursor(true, window, cx),
+            Command::Previous => self.move_cursor(false, window, cx),
             Command::Switch => match row {
                 Row::Folder => self.pick_folder(cx),
-                Row::Theme | Row::Scale | Row::Order => self.pick_option(true, cx),
+                Row::Theme | Row::Scale | Row::TextWidth | Row::Order => {
+                    self.pick_option(true, cx);
+                }
+                Row::TextChars => {}
                 Row::FormatKeys | Row::ContinueLists | Row::IndentLists => self.toggle(row, cx),
             },
             Command::SwitchBack => self.pick_option(false, cx),
@@ -208,7 +326,7 @@ impl SettingsDialog {
         }
     }
 
-    fn control(row: Row, settings: &Settings, cx: &mut Context<Self>) -> impl IntoElement {
+    fn control(&self, row: Row, settings: &Settings, cx: &mut Context<Self>) -> impl IntoElement {
         match row {
             Row::Folder => {
                 let folder = settings
@@ -245,6 +363,30 @@ impl SettingsDialog {
                 settings.scale = scale;
             })
             .into_any_element(),
+            Row::TextWidth => {
+                let limited = settings.text_width.limited;
+                let theme = cx.theme();
+                let muted = theme.muted_foreground;
+                h_flex()
+                    .flex_none()
+                    .gap_2()
+                    .child(options(&WIDTHS, limited, cx, |settings, limited| {
+                        settings.text_width.limited = limited;
+                    }))
+                    .when(limited, |row| {
+                        row.child(
+                            Input::new(&self.chars)
+                                .id("text-width-chars")
+                                .aria_label(text::TEXT_WIDTH_CHARS)
+                                .small()
+                                .w(CHARS_FIELD_WIDTH),
+                        )
+                        .child(div().text_color(muted).child(text::CHARS_UNIT))
+                    })
+                    .into_any_element()
+            }
+            // The text width row shows the field.
+            Row::TextChars => div().into_any_element(),
             Row::Order => options(&ORDERS, settings.note_order, cx, |settings, order| {
                 settings.note_order = order;
             })
@@ -399,11 +541,17 @@ impl Render for SettingsDialog {
         // The cursor row has a bar on its left and no fill, so the outlines of its controls stay
         // visible.
         let (bar, radius) = (theme.primary, theme.radius);
+        // The cursor in the width field marks the text width row.
+        let cursor_row = match self.row() {
+            Row::TextChars => Row::TextWidth,
+            row => row,
+        };
         let rows: Vec<_> = ROWS
             .iter()
             .enumerate()
+            .filter(|(_, row)| **row != Row::TextChars)
             .map(|(at, &row)| {
-                let current = at == self.cursor;
+                let current = row == cursor_row;
                 let detail = (row == Row::FormatKeys).then(|| format_key_chips(cx));
                 h_flex()
                     .id(("setting", at))
@@ -430,7 +578,7 @@ impl Render for SettingsDialog {
                             )
                             .children(detail),
                     )
-                    .child(Self::control(row, &settings, cx))
+                    .child(self.control(row, &settings, cx))
             })
             .collect();
         let panel = popup::panel(px(480.), cx)

@@ -3954,6 +3954,7 @@ fn ctrl_shift_s_opens_the_settings_and_esc_gives_the_focus_back(cx: &mut TestApp
             "Notes folder*",
             "Theme",
             "Scale",
+            "Text width",
             "Note order",
             "Format keys",
             "Continue lists on Enter",
@@ -4014,6 +4015,12 @@ fn each_setting_changes_by_keys_only(cx: &mut TestAppContext) {
     assert_eq!(settings(&fixture).scale.percent(), 100);
 
     keys(cx, handle, "tab space");
+    assert_eq!(setting_rows(cx, handle)[3], "Text width*");
+    assert!(settings(&fixture).text_width.limited);
+    keys(cx, handle, "shift-space");
+    assert!(!settings(&fixture).text_width.limited);
+
+    keys(cx, handle, "tab space");
     assert_eq!(settings(&fixture).note_order, Order::Title);
     keys(cx, handle, "shift-space");
     assert_eq!(settings(&fixture).note_order, Order::LastChange);
@@ -4036,7 +4043,7 @@ fn each_setting_changes_by_keys_only(cx: &mut TestAppContext) {
     assert_eq!(setting_rows(cx, handle)[0], "Notes folder*", "Tab wraps");
     keys(cx, handle, "shift-tab");
     assert_eq!(
-        setting_rows(cx, handle)[6],
+        setting_rows(cx, handle)[7],
         "Indent lists with Tab*",
         "Shift+Tab wraps"
     );
@@ -4066,6 +4073,136 @@ fn space_on_the_scale_row_wraps_from_the_largest(cx: &mut TestAppContext) {
         80
     );
     assert_eq!(zoom(cx, handle), 0.8);
+}
+
+/// The left and the width of the text column, from the left of the editor. The tag row fills
+/// the column.
+fn text_column(cx: &mut TestAppContext, handle: AnyWindowHandle) -> (f32, f32) {
+    screen(cx, handle, |window| {
+        let editor = window.find("editor").bounds();
+        let row = window.find("tag-row").bounds();
+        (
+            f32::from(row.left() - editor.left()),
+            f32::from(row.size.width),
+        )
+    })
+}
+
+/// The editor width.
+fn editor_width(cx: &mut TestAppContext, handle: AnyWindowHandle) -> f32 {
+    screen(cx, handle, |window| {
+        f32::from(window.find("editor").bounds().size.width)
+    })
+}
+
+/// The text of the width field of the settings, or `None` when it does not show.
+fn chars_field(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
+    screen(cx, handle, |window| {
+        window
+            .try_find("text-width-chars")
+            .and_then(|field| field.value().map(str::to_owned))
+    })
+}
+
+fn text_width(fixture: &Fixture) -> crate::text_width::TextWidthSetting {
+    Config::load(fixture.config()).settings().text_width
+}
+
+/// A window with a note, and the settings open on the text width row.
+fn open_text_width(cx: &mut TestAppContext) -> (Fixture, AnyWindowHandle) {
+    let fixture = Fixture::new().with_folder();
+    fs::write(fixture.notes().join("Note.md"), "a\n").unwrap();
+    let handle = open(cx, fixture.startup(None));
+    keys(cx, handle, "ctrl-shift-s tab tab tab");
+    assert_eq!(setting_rows(cx, handle)[3], "Text width*");
+    (fixture, handle)
+}
+
+#[gpui_kit::test]
+fn space_on_the_text_width_row_switches_the_mode_and_the_editor_follows(cx: &mut TestAppContext) {
+    let (fixture, handle) = open_text_width(cx);
+    let full = text_column(cx, handle);
+    assert_eq!(full.0, 32.);
+    assert_eq!(chars_field(cx, handle), None);
+
+    keys(cx, handle, "space");
+    assert!(text_width(&fixture).limited);
+    assert_eq!(chars_field(cx, handle).as_deref(), Some("80"));
+    let (left, width) = text_column(cx, handle);
+    assert!(width < full.1, "{width} is not less than {}", full.1);
+    let right = editor_width(cx, handle) - left - width;
+    assert!((left - right).abs() <= 1., "{left} and {right} differ");
+
+    keys(cx, handle, "space");
+    assert!(!text_width(&fixture).limited);
+    assert_eq!(text_column(cx, handle), full);
+    assert_eq!(chars_field(cx, handle), None);
+}
+
+#[gpui_kit::test]
+fn typing_a_width_in_the_field_changes_the_column_at_once(cx: &mut TestAppContext) {
+    let (fixture, handle) = open_text_width(cx);
+    keys(cx, handle, "space");
+    let (_, eighty) = text_column(cx, handle);
+    keys(cx, handle, "tab");
+    assert_eq!(setting_rows(cx, handle)[3], "Text width*");
+
+    cx.simulate_input(handle, "45");
+    settle(cx);
+    assert_eq!(text_width(&fixture).chars(), 45);
+    let (_, width) = text_column(cx, handle);
+    assert!(
+        (width / eighty - 45. / 80.).abs() < 0.02,
+        "{width} for 45, {eighty} for 80"
+    );
+    keys(cx, handle, "tab");
+    assert_eq!(setting_rows(cx, handle)[4], "Note order*");
+    assert_eq!(chars_field(cx, handle).as_deref(), Some("45"));
+}
+
+#[gpui_kit::test]
+fn a_width_out_of_the_range_shows_the_old_width_again_on_focus_loss(cx: &mut TestAppContext) {
+    let (fixture, handle) = open_text_width(cx);
+    keys(cx, handle, "space tab");
+    cx.simulate_input(handle, "20");
+    settle(cx);
+    assert_eq!(chars_field(cx, handle).as_deref(), Some("20"));
+    assert_eq!(text_width(&fixture).chars(), 80);
+
+    cx.simulate_input(handle, "x 5");
+    settle(cx);
+    assert_eq!(
+        chars_field(cx, handle).as_deref(),
+        Some("205"),
+        "digits only"
+    );
+    assert_eq!(text_width(&fixture).chars(), 80);
+
+    keys(cx, handle, "shift-tab");
+    assert_eq!(setting_rows(cx, handle)[3], "Text width*");
+    assert_eq!(chars_field(cx, handle).as_deref(), Some("80"));
+    assert_eq!(question(cx, handle).as_deref(), Some(text::SETTINGS));
+}
+
+#[gpui_kit::test]
+fn full_and_then_limited_again_shows_the_last_width(cx: &mut TestAppContext) {
+    let (fixture, handle) = open_text_width(cx);
+    keys(cx, handle, "space tab");
+    cx.simulate_input(handle, "120");
+    settle(cx);
+    keys(cx, handle, "shift-tab space");
+    assert!(!text_width(&fixture).limited);
+    assert_eq!(chars_field(cx, handle), None);
+
+    keys(cx, handle, "space");
+    assert_eq!(chars_field(cx, handle).as_deref(), Some("120"));
+    assert_eq!(
+        text_width(&fixture).text_width(),
+        holm_editor::TextWidth::Limited(120)
+    );
+    keys(cx, handle, "escape");
+    assert_eq!(question(cx, handle), None);
+    assert_eq!(focus(cx, handle), "editor");
 }
 
 #[gpui_kit::test]
