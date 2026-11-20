@@ -410,17 +410,17 @@ const ROWS: &[Row] = &[
     ),
     row(
         P::TagPopup,
-        Keys::plain("tab").shift(Shift::Down),
-        C::Previous,
-        G::Note,
-        text::KEY_PREVIOUS_TAG,
-    ),
-    row(
-        P::TagPopup,
         Keys::plain("tab"),
         C::Next,
         G::Note,
         text::KEY_NEXT_TAG,
+    ),
+    row(
+        P::TagPopup,
+        Keys::plain("tab").shift(Shift::Down),
+        C::Previous,
+        G::Note,
+        text::KEY_PREVIOUS_TAG,
     ),
     row(
         P::TagPopup,
@@ -494,17 +494,17 @@ const ROWS: &[Row] = &[
     ),
     row(
         P::Picker,
-        Keys::plain("tab").shift(Shift::Down),
-        C::Previous,
-        G::Window,
-        text::KEY_PREVIOUS_ROW,
-    ),
-    row(
-        P::Picker,
         Keys::plain("tab"),
         C::Next,
         G::Window,
         text::KEY_NEXT_ROW,
+    ),
+    row(
+        P::Picker,
+        Keys::plain("tab").shift(Shift::Down),
+        C::Previous,
+        G::Window,
+        text::KEY_PREVIOUS_ROW,
     ),
     row(
         P::Picker,
