@@ -85,7 +85,8 @@ pub(crate) fn plain_chip(_target: &str) -> Embed {
 
 /// An embedded file link on a line that shows as a chip.
 struct ChipLink<'a> {
-    start: usize,
+    /// The source range of the link.
+    range: Range<usize>,
     target: &'a str,
     name: &'a str,
 }
@@ -187,11 +188,11 @@ impl Model {
         let source = self.line_range(line);
         let mut images = Vec::new();
         let mut chips = Vec::new();
-        for (start, target, name) in self.files_in(&source) {
+        for (range, target, name) in self.files_in(&source) {
             match embed(target) {
                 Embed::Image => images.push(target.to_owned()),
                 Embed::Chip => chips.push(ChipLink {
-                    start,
+                    range,
                     target,
                     name,
                 }),
@@ -503,9 +504,9 @@ impl Model {
         let chips: &[ChipLink<'_>] = if raw { &[] } else { chips };
         let mut chips = chips
             .iter()
-            .filter(|chip| range.contains(&chip.start))
+            .filter(|chip| range.contains(&chip.range.start))
             .peekable();
-        cuts.extend(chips.clone().map(|chip| chip.start));
+        cuts.extend(chips.clone().map(|chip| chip.range.start));
         cuts.retain(|cut| range.contains(cut) || *cut == range.end);
         cuts.sort_unstable();
         cuts.dedup();
@@ -516,8 +517,8 @@ impl Model {
         };
         for piece in cuts.windows(2) {
             let piece = piece[0]..piece[1];
-            while let Some(chip) = chips.next_if(|chip| chip.start <= piece.start) {
-                shown.push_chip(chip);
+            while let Some(chip) = chips.next_if(|chip| chip.range.start <= piece.start) {
+                shown.push_chip(chip, range.end);
             }
             let syntax = hidden
                 .iter()
@@ -545,9 +546,8 @@ impl Model {
         shown
     }
 
-    /// The start and the target of each embedded file on `line`.
-    /// The start, the target and the text of each embedded file link in `line`.
-    fn files_in(&self, line: &Range<usize>) -> Vec<(usize, &str, &str)> {
+    /// The range, the target and the text of each embedded file link in `line`.
+    fn files_in(&self, line: &Range<usize>) -> Vec<(Range<usize>, &str, &str)> {
         let links = self.body.links();
         links[links.partition_point(|l| l.range.start < line.start)
             ..links.partition_point(|l| l.range.start < line.end)]
@@ -555,7 +555,7 @@ impl Model {
             .filter(|link| link.embedded)
             .filter_map(|link| match &link.target {
                 Target::File(path) => Some((
-                    link.range.start,
+                    link.range.clone(),
                     path.as_str(),
                     &self.text[link.text.clone()],
                 )),
@@ -600,15 +600,21 @@ impl Shown {
         self.text.push_str(&source[piece]);
     }
 
-    /// Adds a chip, which maps to the start of its link.
-    fn push_chip(&mut self, chip: &ChipLink<'_>) {
+    /// Adds a chip. Its left edge maps to the start of its link, and its right edge to the end
+    /// of its link, cut at `end`.
+    fn push_chip(&mut self, chip: &ChipLink<'_>, end: usize) {
         let start = self.text.len();
         self.segments.push(Segment {
             display: start,
-            source: chip.start,
+            source: chip.range.start,
             len: 0,
         });
         self.text.push_str(CHIP_ATOM);
+        self.segments.push(Segment {
+            display: self.text.len(),
+            source: chip.range.end.min(end),
+            len: 0,
+        });
         self.runs.push(Run {
             len: CHIP_ATOM.len(),
             look: Look {

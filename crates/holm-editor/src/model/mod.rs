@@ -888,6 +888,24 @@ mod tests {
     }
 
     #[test]
+    fn the_right_edge_of_a_chip_at_the_end_of_a_line_maps_to_the_end_of_its_link() {
+        for text in ["![](a)\nb", "c ![](a\n)"] {
+            let model = model_at(text, text.len());
+            let line = model.display_line(0, &mut plain_chip);
+            let [chip] = line.shown.chips.as_slice() else {
+                panic!("one chip in {text:?}");
+            };
+            assert_eq!(chip.range.end, line.shown.text.len(), "{text:?}");
+            let end = line.source().end;
+            assert_eq!(line.to_source(chip.range.end), end, "{text:?}");
+            assert_eq!(line.to_display(end), chip.range.end, "{text:?}");
+            let bang = text.find('!').unwrap_or_default();
+            assert_eq!(line.to_source(chip.range.start), bang, "{text:?}");
+            assert_eq!(line.to_display(bang), chip.range.start, "{text:?}");
+        }
+    }
+
+    #[test]
     fn a_line_with_the_cursor_shows_the_chip_as_markdown() {
         let model = model_at("![f](report.pdf)\n", 3);
         let line = model.display_line(0, &mut plain_chip);
@@ -1060,10 +1078,11 @@ mod tests {
         }
 
         #[test]
-        fn screen_lines_map_back_into_their_source(start in text(), at in 0..60usize) {
+        fn screen_lines_map_back_into_their_source(start in text(), at in 0..60usize, image in any::<bool>()) {
             let model = model_at(&start, at);
+            let embed = if image { Embed::Image } else { Embed::Chip };
             for line in 0..model.line_count() {
-                let display = model.display_line(line, &mut plain_chip);
+                let display = model.display_line(line, &mut |_| embed);
                 let source = display.source();
                 prop_assert_eq!(display.shown.runs.iter().map(|r| r.len).sum::<usize>(), display.shown.text.len());
                 for offset in (0..=display.shown.text.len()).filter(|o| display.shown.text.is_char_boundary(*o)) {
