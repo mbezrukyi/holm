@@ -17,6 +17,8 @@ name = "holm"
 version_group = "holm"
 git_tag_enable = true
 git_release_enable = true
+# The release title is the tag, not the default `holm-vX.Y.Z`.
+git_release_name = "v{{ version }}"
 changelog_update = true
 changelog_path = "./CHANGELOG.md"
 changelog_include = ["holm-core", "holm-markdown", "holm-editor"]
