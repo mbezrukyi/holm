@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Holm
+Comment=Write Markdown notes from the keyboard
+Exec=holm
+Icon=io.github.mbezrukyi.Holm
+Terminal=false
+Categories=Office;
+Keywords=notes;markdown;
+StartupWMClass=io.github.mbezrukyi.Holm

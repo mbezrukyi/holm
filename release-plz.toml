@@ -1,0 +1,35 @@
+# Holm has one version for all crates and one release: the tag `vX.Y.Z` of the `holm` crate.
+
+[workspace]
+# Versions come from the git tags. No crate goes to crates.io.
+git_only = true
+# Release only when the merged commit comes from the release PR.
+release_always = false
+# Every crate finds its last version in the tag of the app, but only `holm` makes the tag.
+git_tag_name = "v{{ version }}"
+git_tag_enable = false
+git_release_enable = false
+changelog_update = false
+
+# The app. Its changelog also lists the commits of the other crates.
+[[package]]
+name = "holm"
+version_group = "holm"
+git_tag_enable = true
+git_release_enable = true
+changelog_update = true
+changelog_path = "./CHANGELOG.md"
+changelog_include = ["holm-core", "holm-markdown", "holm-editor"]
+
+# A commit to any crate bumps all of them to one version.
+[[package]]
+name = "holm-core"
+version_group = "holm"
+
+[[package]]
+name = "holm-markdown"
+version_group = "holm"
+
+[[package]]
+name = "holm-editor"
+version_group = "holm"
