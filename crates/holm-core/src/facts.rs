@@ -1,4 +1,5 @@
-//! The facts of the notes folder in memory: the snapshot, and the stamp of each note file.
+//! The facts of the notes folder in memory: the snapshot, and the stamp and content hash of
+//! each note file.
 
 use std::collections::HashMap;
 
@@ -8,7 +9,7 @@ use crate::nodes::{Node, Nodes};
 use crate::paths::{FolderPath, NotePath};
 use crate::reconcile::Settled;
 use crate::snapshot::Snapshot;
-use crate::store::Stamp;
+use crate::store::{ContentHash, Stamp};
 
 /// The snapshot, and the file facts of each of its notes. Each note of the snapshot has them.
 ///
@@ -23,14 +24,16 @@ pub(crate) struct Facts {
 #[derive(Clone, Copy, Debug)]
 struct File {
     stamp: Stamp,
+    hash: ContentHash,
     source: LinkSource,
-    /// The revision of the last outside change that gave the file a new stamp, or 0. A move
+    /// The revision of the last outside change that gave the file new content, or 0. A move
     /// keeps it, and so does a write of Holm.
     outside: u64,
 }
 
-/// The facts of one note: what the snapshot shows, its links, its stamp and its link source.
-pub(crate) type NoteFacts = (NoteInfo, Vec<Link>, Stamp, LinkSource);
+/// The facts of one note: what the snapshot shows, its links, its stamp, its content hash and
+/// its link source.
+pub(crate) type NoteFacts = (NoteInfo, Vec<Link>, Stamp, ContentHash, LinkSource);
 
 impl Facts {
     /// The facts of `notes` and `folders`, with revision 0.
@@ -72,24 +75,24 @@ impl Facts {
         self.files.get(path).map(|file| file.source)
     }
 
-    /// The stamp of the note at `path`.
-    pub(crate) fn stamp(&self, path: &NotePath) -> Option<Stamp> {
-        self.files.get(path).map(|file| file.stamp)
+    /// The content hash of the note at `path`.
+    pub(crate) fn hash(&self, path: &NotePath) -> Option<ContentHash> {
+        self.files.get(path).map(|file| file.hash)
     }
 
-    /// Whether an outside change after revision `seen` gave the file of the note at `path` a
-    /// new stamp.
+    /// Whether an outside change after revision `seen` gave the file of the note at `path` new
+    /// content.
     pub(crate) fn changed_after(&self, path: &NotePath, seen: u64) -> bool {
         self.files.get(path).is_some_and(|file| file.outside > seen)
     }
 
-    /// The revision of the last outside change that gave the file of the note at `path` a new
-    /// stamp, or 0.
+    /// The revision of the last outside change that gave the file of the note at `path` new
+    /// content, or 0.
     pub(crate) fn outside(&self, path: &NotePath) -> u64 {
         self.files.get(path).map_or(0, |file| file.outside)
     }
 
-    /// Records that an outside change of `revision` gave each file at `paths` a new stamp. A
+    /// Records that an outside change of `revision` gave each file at `paths` new content. A
     /// newer revision that a file has stays.
     pub(crate) fn mark_outside<'p>(
         &mut self,
@@ -111,13 +114,25 @@ impl Facts {
         let mut notes = Vec::with_capacity(settled.put.len());
         let mut carried = Vec::with_capacity(settled.moved.len());
         for read in settled.put {
-            put.push((read.note.info.clone(), read.links, read.stamp, read.source));
+            put.push((
+                read.note.info.clone(),
+                read.links,
+                read.stamp,
+                read.hash,
+                read.source,
+            ));
             notes.push(read.note);
         }
         for moved in settled.moved {
             carried.push((moved.info.path.clone(), self.outside(&moved.from)));
             removed.push(moved.from);
-            put.push((moved.info, moved.links, moved.stamp, moved.source));
+            put.push((
+                moved.info,
+                moved.links,
+                moved.stamp,
+                moved.hash,
+                moved.source,
+            ));
         }
         self.remove_and_put(removed, put);
         for (path, outside) in carried {
@@ -132,9 +147,10 @@ impl Facts {
         for path in &removed {
             self.files.remove(path);
         }
-        for (info, _, stamp, source) in &put {
+        for (info, _, stamp, hash, source) in &put {
             let file = File {
                 stamp: *stamp,
+                hash: *hash,
                 source: *source,
                 outside: self.outside(&info.path),
             };
@@ -142,7 +158,7 @@ impl Facts {
         }
         self.snapshot.swap(
             removed,
-            put.into_iter().map(|(info, links, _, _)| (info, links)),
+            put.into_iter().map(|(info, links, _, _, _)| (info, links)),
         );
     }
 

@@ -48,21 +48,23 @@ impl Touched {
 
     /// The facts after the write, and its change list from `source`. With a change, the
     /// facts get the next revision, and the list carries its snapshot. With no change, there is
-    /// no list, and the facts keep their revision. From outside, each note that was read gets
-    /// the revision of the facts after the write as its outside revision.
+    /// no list, and the facts keep their revision. From outside, each note that was read with a
+    /// new content hash gets the revision of the facts after the write as its outside revision.
     ///
     /// The list holds the moves of the write first, then the note changes in path order,
     /// then [`Change::Folders`] and [`Change::Tags`]. A note that a move of the write
     /// explains gives no other change. A gone note and a new note with the same id are one
-    /// [`Change::Moved`].
+    /// [`Change::Moved`]. A note with a new content hash is [`Change::Changed`], also when
+    /// what the snapshot shows of it stays.
     pub(crate) fn list(
         mut self,
         source: Source,
         before: &Facts,
         after: Facts,
     ) -> (Facts, Option<ChangeList>) {
-        let read = std::mem::take(&mut self.read);
-        let changes = self.changes(before.snapshot(), after.snapshot());
+        let mut read = std::mem::take(&mut self.read);
+        read.retain(|path| before.hash(path) != after.hash(path));
+        let changes = self.changes(before, &after);
         let mut after = if changes.is_empty() {
             after
         } else {
@@ -83,7 +85,8 @@ impl Touched {
         (after, Some(list))
     }
 
-    fn changes(mut self, before: &Snapshot, after: &Snapshot) -> Vec<Change> {
+    fn changes(mut self, before_facts: &Facts, after_facts: &Facts) -> Vec<Change> {
+        let (before, after) = (before_facts.snapshot(), after_facts.snapshot());
         self.notes.sort_unstable();
         self.notes.dedup();
         let mut tags = false;
@@ -95,7 +98,10 @@ impl Touched {
                 (Some((old, _)), None) => gone.push(old),
                 (None, Some((note, _))) => new.push(note),
                 (Some((old, old_links)), Some((note, links))) => {
-                    if old != note || old_links != links {
+                    if old != note
+                        || old_links != links
+                        || before_facts.hash(path) != after_facts.hash(path)
+                    {
                         tags = tags || !same_tags(old, note);
                         notes.push(Change::Changed(path.clone()));
                     }
@@ -198,7 +204,7 @@ mod tests {
 
     use super::*;
     use crate::links::LinkSource;
-    use crate::store::Stamp;
+    use crate::store::{ContentHash, Stamp};
     use crate::tag::TagName;
 
     const STAMP: Stamp = Stamp {
@@ -231,7 +237,15 @@ mod tests {
         Facts::new(
             notes
                 .iter()
-                .map(|note| (note.clone(), Vec::new(), STAMP, LinkSource::default()))
+                .map(|note| {
+                    (
+                        note.clone(),
+                        Vec::new(),
+                        STAMP,
+                        ContentHash::default(),
+                        LinkSource::default(),
+                    )
+                })
                 .collect(),
             folders.iter().map(|at| folder(at)).collect(),
         )
@@ -359,6 +373,47 @@ mod tests {
             changes(&before, after, &notes, &["work", "job"], moves.clone()),
             [moves, vec![Change::Folders]].concat()
         );
+    }
+
+    /// Facts with one note at `a.md`, whose file holds `text`.
+    fn with_hash(text: &str) -> Facts {
+        let note = (
+            info("a.md", None, &[]),
+            Vec::new(),
+            STAMP,
+            ContentHash::of(text),
+            LinkSource::default(),
+        );
+        Facts::new(vec![note], Vec::new())
+    }
+
+    #[test]
+    fn a_new_content_hash_is_a_change_with_the_same_info() {
+        let before = with_hash("one");
+
+        assert_eq!(
+            changes(&before, with_hash("two"), &["a.md"], &[], Vec::new()),
+            [Change::Changed(path("a.md"))]
+        );
+        assert_eq!(
+            changes(&before, with_hash("one"), &["a.md"], &[], Vec::new()),
+            []
+        );
+    }
+
+    #[test]
+    fn only_a_read_with_a_new_content_hash_marks_an_outside_change() {
+        let before = with_hash("one");
+        let touched = || Touched {
+            notes: vec![path("a.md")],
+            read: vec![path("a.md")],
+            ..Touched::default()
+        };
+
+        let (same, _) = touched().list(Source::Outside, &before, with_hash("one"));
+        assert!(!same.changed_after(&path("a.md"), 0));
+        let (new, _) = touched().list(Source::Outside, &before, with_hash("two"));
+        assert!(new.changed_after(&path("a.md"), 0));
     }
 
     #[test]

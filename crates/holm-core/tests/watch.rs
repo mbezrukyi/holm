@@ -539,6 +539,105 @@ fn a_tag_change_sends_a_tags_change() {
     assert_eq!(fed.core.snapshot().tags(), []);
 }
 
+/// Sets the modification time of the file at `path` to `time`, as when two writes come in
+/// one tick of the file clock.
+fn set_modified(path: &std::path::Path, time: std::time::SystemTime) {
+    let file = fs::File::options().write(true).open(path).unwrap();
+    file.set_modified(time).unwrap();
+}
+
+fn modified(path: &std::path::Path) -> std::time::SystemTime {
+    fs::metadata(path).unwrap().modified().unwrap()
+}
+
+#[test]
+fn a_second_write_in_the_same_tick_is_a_change() {
+    let fed = Fed::new(&[("a.md", &note("A", "", "# A\n"))]);
+    let seen = fed.core.snapshot().revision();
+
+    fed.write("a.md", &note("A", "tags: [work]\n", "# A\n"));
+    let first = modified(&fed.path("a.md"));
+    fed.feed.changed(["a.md"]).unwrap();
+    assert_eq!(
+        fed.take(),
+        [Change::Changed(note_path("a.md")), Change::Tags]
+    );
+    fed.write("a.md", &note("A", "tags: [work]\n", "# A\n\nText.\n"));
+    set_modified(&fed.path("a.md"), first);
+    fed.feed.changed(["a.md"]).unwrap();
+    assert_eq!(fed.take(), [Change::Changed(note_path("a.md"))]);
+
+    let saved = fed.core.save(&note_path("a.md"), "mine\n", Some(seen));
+    assert!(matches!(saved, Err(Error::Changed { .. })), "{saved:?}");
+    assert!(
+        fs::read_to_string(fed.path("a.md"))
+            .unwrap()
+            .ends_with("# A\n\nText.\n")
+    );
+}
+
+#[test]
+fn a_write_of_the_same_size_in_the_same_tick_is_a_change() {
+    let fed = Fed::new(&[("a.md", &note("A", "", "# A\n\nOne.\n"))]);
+    let first = modified(&fed.path("a.md"));
+    let seen = fed.core.snapshot().revision();
+
+    fed.write("a.md", &note("A", "", "# A\n\nTwo.\n"));
+    set_modified(&fed.path("a.md"), first);
+    fed.feed.changed(["a.md"]).unwrap();
+
+    assert_eq!(fed.take(), [Change::Changed(note_path("a.md"))]);
+    assert_eq!(
+        fed.core.read(&note_path("a.md")).unwrap().body,
+        "# A\n\nTwo.\n"
+    );
+    let saved = fed.core.save(&note_path("a.md"), "mine\n", Some(seen));
+    assert!(matches!(saved, Err(Error::Changed { .. })), "{saved:?}");
+}
+
+#[test]
+fn a_new_mode_alone_is_no_change() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let fed = Fed::new(&[("a.md", &note("A", "", "# A\n"))]);
+    let seen = fed.core.snapshot().revision();
+
+    fs::set_permissions(fed.path("a.md"), fs::Permissions::from_mode(0o600)).unwrap();
+    fed.feed.changed(["a.md"]).unwrap();
+
+    assert_eq!(fed.take(), []);
+    assert_eq!(fed.core.snapshot().revision(), seen);
+    fed.core
+        .save(&note_path("a.md"), "mine\n", Some(seen))
+        .unwrap();
+}
+
+#[test]
+fn the_event_of_a_write_of_holm_is_no_outside_change() {
+    let fed = Fed::new(&[("a.md", &note("A", "", "# A\n"))]);
+    let seen = fed.core.snapshot().revision();
+
+    fed.core
+        .save(&note_path("a.md"), "# A\n\nOne.\n", Some(seen))
+        .unwrap();
+    fed.feed.changed(["a.md"]).unwrap();
+    let outside: Vec<ChangeList> = fed
+        .lists()
+        .into_iter()
+        .filter(|list| list.source == Source::Outside)
+        .collect();
+    assert!(outside.is_empty(), "{outside:?}");
+    fed.core
+        .save(&note_path("a.md"), "# A\n\nTwo.\n", Some(seen))
+        .unwrap();
+
+    assert!(
+        fs::read_to_string(fed.path("a.md"))
+            .unwrap()
+            .ends_with("# A\n\nTwo.\n")
+    );
+}
+
 #[test]
 fn hidden_paths_and_other_files_send_nothing() {
     let fed = Fed::new(&[]);

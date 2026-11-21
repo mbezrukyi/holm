@@ -9,10 +9,10 @@ use std::ffi::OsStr;
 use crate::facts::Facts;
 use crate::links::LinkSource;
 use crate::model::{Link, LinkTarget, Note, NoteId, NoteInfo};
-use crate::nodes::Nodes;
+use crate::nodes::{Node, Nodes};
 use crate::paths::NotePath;
 use crate::snapshot::Snapshot;
-use crate::store::Stamp;
+use crate::store::{ContentHash, Stamp};
 
 /// What brings the notes of a scope up to date: the moves, the gone notes and the files to read.
 #[derive(Debug)]
@@ -30,6 +30,7 @@ pub(crate) struct Read {
     pub(crate) note: Note,
     pub(crate) links: Vec<Link>,
     pub(crate) stamp: Stamp,
+    pub(crate) hash: ContentHash,
     pub(crate) source: LinkSource,
     /// Whether a note file is at the path where the facts keep the id of the note, when that
     /// path is another one.
@@ -54,6 +55,7 @@ pub(crate) struct MovedNote {
     pub(crate) info: NoteInfo,
     pub(crate) links: Vec<Link>,
     pub(crate) stamp: Stamp,
+    pub(crate) hash: ContentHash,
     pub(crate) source: LinkSource,
 }
 
@@ -63,6 +65,7 @@ pub(crate) struct Put {
     pub(crate) note: Note,
     pub(crate) links: Vec<Link>,
     pub(crate) stamp: Stamp,
+    pub(crate) hash: ContentHash,
     pub(crate) source: LinkSource,
     /// Whether the note is a copy: another note file keeps its id. A copy has no id here, so
     /// the core can give it a new one.
@@ -76,8 +79,9 @@ pub(crate) struct Put {
 /// in it. A note with a file link is read again at its new path instead, since a relative file
 /// link points to another file after a move.
 ///
-/// It reads each new file, and each known file whose stamp changed. Known files come first,
-/// so a known file keeps its id when a new file has the same id.
+/// It reads each new file, and each known file whose stamp changed. A note that `nodes` name
+/// is read whatever its stamp, since two writes in one tick of the file clock can give one
+/// stamp. Known files come first, so a known file keeps its id when a new file has the same id.
 pub(crate) fn plan(facts: &Facts, nodes: &Nodes, files: Vec<(NotePath, Stamp)>) -> Plan {
     let known = facts.stamps_in(nodes);
     let found: HashMap<NotePath, Stamp> = files.into_iter().collect();
@@ -110,9 +114,18 @@ pub(crate) fn plan(facts: &Facts, nodes: &Nodes, files: Vec<(NotePath, Stamp)>) 
         .filter(|(path, _)| !done.contains(path))
         .map(|(path, _)| (*path).clone())
         .collect();
+    let named: HashSet<&NotePath> = nodes
+        .into_iter()
+        .filter_map(|node| match node {
+            Node::Note(path) => Some(path),
+            Node::Folder(_) => None,
+        })
+        .collect();
     let mut reads: Vec<(bool, &NotePath)> = found
         .iter()
-        .filter(|(path, stamp)| known.get(*path) != Some(stamp) && !done.contains(path))
+        .filter(|(path, stamp)| {
+            (known.get(*path) != Some(stamp) || named.contains(path)) && !done.contains(path)
+        })
         .map(|(path, _)| (!known.contains_key(path), path))
         .collect();
     reads.sort_unstable();
@@ -177,6 +190,7 @@ impl Plan {
             settled.moved.push(MovedNote {
                 links: snapshot.links(&from).to_vec(),
                 source: facts.link_source(&from).unwrap_or_default(),
+                hash: facts.hash(&from).unwrap_or_default(),
                 from,
                 info,
                 stamp,
@@ -193,6 +207,7 @@ impl Plan {
                 mut note,
                 links,
                 stamp,
+                hash,
                 source,
                 owner_on_disk,
             }) = reads.remove(&path)
@@ -223,6 +238,7 @@ impl Plan {
                 note,
                 links,
                 stamp,
+                hash,
                 source,
                 copy,
             });
@@ -306,6 +322,7 @@ mod tests {
     use crate::diff::Touched;
     use crate::model::{Change, Source};
     use crate::nodes::Node;
+    use crate::paths::FolderPath;
 
     /// The change list that `settled` makes in `before`, as a batch from outside.
     fn changes(before: &Facts, settled: Settled) -> Vec<Change> {
@@ -346,7 +363,16 @@ mod tests {
         Facts::new(
             notes
                 .iter()
-                .map(|(at, id, stamp)| (info(at, *id), Vec::new(), *stamp, LinkSource::default()))
+                .map(|(at, id, stamp)| {
+                    let hash = ContentHash::default();
+                    (
+                        info(at, *id),
+                        Vec::new(),
+                        *stamp,
+                        hash,
+                        LinkSource::default(),
+                    )
+                })
                 .collect(),
             Vec::new(),
         )
@@ -360,6 +386,7 @@ mod tests {
             },
             links: Vec::new(),
             stamp,
+            hash: ContentHash::default(),
             source: LinkSource::default(),
             owner_on_disk,
         }
@@ -429,6 +456,7 @@ mod tests {
                 info("a.md", Some("A")),
                 vec![link],
                 stamp(5),
+                ContentHash::default(),
                 LinkSource::default(),
             )],
             Vec::new(),
@@ -503,6 +531,21 @@ mod tests {
         assert_eq!(settled.removed, [path("a.md")]);
         assert!(settled.put.is_empty());
         assert_eq!(changes(&facts, settled), [Change::Removed(path("a.md"))]);
+    }
+
+    #[test]
+    fn a_named_note_is_read_with_its_old_stamp() {
+        let facts = facts(&[("a.md", Some("A"), stamp(5)), ("b.md", None, stamp(5))]);
+        let nodes = Nodes::new([Node::Note(path("a.md")), Node::Folder(FolderPath::root())]);
+        let named = Nodes::new([Node::Note(path("a.md"))]);
+        let files = vec![(path("a.md"), stamp(5))];
+
+        assert_eq!(plan(&facts, &named, files.clone()).reads(), [path("a.md")]);
+        assert_eq!(
+            plan(&facts, &nodes, files).reads(),
+            Vec::<NotePath>::new(),
+            "a folder keeps the stamp shortcut"
+        );
     }
 
     #[test]

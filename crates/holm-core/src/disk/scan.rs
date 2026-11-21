@@ -7,10 +7,10 @@ use crate::links::{self, LinkSource};
 use crate::model::{Note, NoteId};
 use crate::nodes::Nodes;
 use crate::reconcile::{self, Plan, Read, Settled};
-use crate::store::{Stamp, Store};
+use crate::store::{ContentHash, Stamp, Store};
 
 /// Brings the notes at or below each of `nodes` up to date with the files, from `facts`.
-/// It reads only the files whose stamp changed. A file that can't be read is left out with a
+/// It reads only the files whose stamp changed, and the notes that `nodes` name. A file that can't be read is left out with a
 /// log line.
 ///
 /// # Errors
@@ -26,7 +26,7 @@ pub(super) fn files(store: &Store, facts: &Facts, nodes: &Nodes) -> Result<Settl
         .reads()
         .iter()
         .filter_map(|path| match store.read(path) {
-            Ok((note, stamp)) => Some(read(store, facts, note, stamp)),
+            Ok((note, stamp, hash)) => Some(read(store, facts, note, stamp, hash)),
             Err(error) => {
                 tracing::warn!(%error, "skipped a note");
                 None
@@ -36,19 +36,23 @@ pub(super) fn files(store: &Store, facts: &Facts, nodes: &Nodes) -> Result<Settl
     Ok(decide_with_ids(store, facts, plan, reads))
 }
 
-/// Settles notes that Holm just wrote, with their stamps, against `facts`.
-pub(super) fn wrote(store: &Store, facts: &Facts, notes: Vec<(Note, Stamp)>) -> Settled {
-    let plan = reconcile::written(facts, notes.iter().map(|(note, _)| note.info.path.clone()));
+/// Settles notes that Holm just wrote, with their stamps and content hashes, against `facts`.
+pub(super) fn wrote(
+    store: &Store,
+    facts: &Facts,
+    notes: Vec<(Note, Stamp, ContentHash)>,
+) -> Settled {
+    let plan = reconcile::written(facts, notes.iter().map(|(note, ..)| note.info.path.clone()));
     let reads = notes
         .into_iter()
-        .map(|(note, stamp)| read(store, facts, note, stamp))
+        .map(|(note, stamp, hash)| read(store, facts, note, stamp, hash))
         .collect();
     decide_with_ids(store, facts, plan, reads)
 }
 
 /// The read of `note`. Its links come from `facts` when its link source stays, else from
 /// its body.
-fn read(store: &Store, facts: &Facts, note: Note, stamp: Stamp) -> Read {
+fn read(store: &Store, facts: &Facts, note: Note, stamp: Stamp, hash: ContentHash) -> Read {
     let owner_on_disk = note
         .info
         .id
@@ -67,6 +71,7 @@ fn read(store: &Store, facts: &Facts, note: Note, stamp: Stamp) -> Read {
         note,
         links,
         stamp,
+        hash,
         source,
         owner_on_disk,
     }
@@ -81,7 +86,7 @@ fn decide_with_ids(store: &Store, facts: &Facts, plan: Plan, reads: Vec<Read>) -
         let path = &put.note.info.path;
         tracing::info!(new = %id, %path, "gave a copied note a new id");
         match store.edit_fields(path, |text| text.set_id(Some(id.as_str()))) {
-            Ok((note, stamp)) => (put.note, put.stamp) = (note, stamp),
+            Ok((note, stamp, hash)) => (put.note, put.stamp, put.hash) = (note, stamp, hash),
             Err(error) => tracing::warn!(%error, "kept a copied note without an id"),
         }
     }

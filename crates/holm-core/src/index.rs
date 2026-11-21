@@ -21,7 +21,7 @@ use crate::facts::NoteFacts;
 use crate::links::LinkSource;
 use crate::model::{Link, LinkTarget, Note, NoteId, NoteInfo};
 use crate::paths::{NotePath, NoteReader};
-use crate::store::{Stamp, time};
+use crate::store::{ContentHash, Stamp, time};
 use crate::tag::TagName;
 
 mod search;
@@ -30,7 +30,7 @@ const FILE: &str = "index.sqlite";
 /// Change this number with each change to [`SCHEMA`], to [`search::SCHEMA`], or to what a
 /// column holds.
 /// An index with another number is rebuilt.
-const SHAPE: i32 = 9;
+const SHAPE: i32 = 10;
 
 const SCHEMA: &str = "
 CREATE TABLE notes (
@@ -44,6 +44,7 @@ CREATE TABLE notes (
     modified INTEGER NOT NULL,
     changed INTEGER NOT NULL,
     size INTEGER NOT NULL,
+    content_hash INTEGER NOT NULL,
     link_source INTEGER NOT NULL,
     links_hash INTEGER NOT NULL
 );
@@ -85,6 +86,7 @@ pub(crate) struct NoteRows<'a> {
     pub(crate) note: &'a Note,
     pub(crate) links: &'a [Link],
     pub(crate) stamp: Stamp,
+    pub(crate) hash: ContentHash,
     pub(crate) source: LinkSource,
 }
 
@@ -127,17 +129,18 @@ impl Index {
         self.run(|conn| Ok(search::find(conn, text)?))
     }
 
-    /// Every note with its links, its stamp and its link source, in no order.
+    /// Every note with its links, its stamp, its content hash and its link source, in no order.
     pub(crate) fn entries(&mut self) -> Result<Vec<NoteFacts>> {
         self.run(|conn| {
             let mut reader = NoteReader::default();
             let mut statement = conn.prepare_cached(&format!(
-                "SELECT {NOTE_INFO}, changed, size, link_source FROM notes ORDER BY key"
+                "SELECT {NOTE_INFO}, changed, size, link_source, content_hash FROM notes ORDER BY key"
             ))?;
             let notes = statement
                 .query_map([], |row| {
                     let source = LinkSource::from_stored(row.get(9)?);
-                    Ok((note_info(&mut reader, row)?, stamp(row)?, source))
+                    let hash = ContentHash::from_stored(row.get(10)?);
+                    Ok((note_info(&mut reader, row)?, stamp(row)?, hash, source))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             let mut statement = conn.prepare_cached(
@@ -153,9 +156,9 @@ impl Index {
             }
             Ok(notes
                 .into_iter()
-                .map(|(info, stamp, source)| {
+                .map(|(info, stamp, hash, source)| {
                     let links = links.remove(&info.path).unwrap_or_default();
-                    (info, links, stamp, source)
+                    (info, links, stamp, hash, source)
                 })
                 .collect())
         })
@@ -316,6 +319,7 @@ fn write(conn: &Connection, row: &NoteRows<'_>) -> Result<(), Fail> {
         note,
         links,
         stamp,
+        hash: content_hash,
         source,
     } = *row;
     let info = &note.info;
@@ -328,12 +332,12 @@ fn write(conn: &Connection, row: &NoteRows<'_>) -> Result<(), Fail> {
     let key: i64 = conn
         .prepare_cached(
             "INSERT INTO notes (path, folder, id, title, preview, pinned, modified, changed, size,
-                link_source, links_hash)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                content_hash, link_source, links_hash)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
             ON CONFLICT (path) DO UPDATE SET folder = excluded.folder, id = excluded.id,
                 title = excluded.title, preview = excluded.preview, pinned = excluded.pinned, modified = excluded.modified,
                 changed = excluded.changed, size = excluded.size,
-                link_source = excluded.link_source, links_hash = excluded.links_hash
+                content_hash = excluded.content_hash, link_source = excluded.link_source, links_hash = excluded.links_hash
             RETURNING key",
         )?
         .query_row(
@@ -347,6 +351,7 @@ fn write(conn: &Connection, row: &NoteRows<'_>) -> Result<(), Fail> {
                 stamp.modified,
                 stamp.changed,
                 stamp.size,
+                content_hash.stored(),
                 source.stored(),
                 links_hash,
             ],

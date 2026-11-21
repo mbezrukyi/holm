@@ -47,7 +47,7 @@ impl Disk {
 
     /// Reads one note.
     pub(crate) fn read(&self, path: &NotePath) -> Result<Note> {
-        self.store.read(path).map(|(note, _)| note)
+        self.store.read(path).map(|(note, ..)| note)
     }
 
     /// The path for a link from the note at `note` to the absolute path `file`, with no copy.
@@ -139,6 +139,7 @@ fn put_rows(settled: &Settled) -> Vec<NoteRows<'_>> {
             note: &put.note,
             links: &put.links,
             stamp: put.stamp,
+            hash: put.hash,
             source: put.source,
         })
         .collect()

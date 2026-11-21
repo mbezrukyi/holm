@@ -41,6 +41,31 @@ pub(crate) struct Stamp {
     pub(crate) size: i64,
 }
 
+/// A hash of the bytes of a note file. Two versions of a note with the same hash have the same
+/// content, also when their stamps are the same.
+///
+/// The hash may change with the `foldhash` version. Then each note counts as changed once.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) struct ContentHash(i64);
+
+impl ContentHash {
+    pub(crate) fn of(text: &str) -> Self {
+        use std::hash::BuildHasher as _;
+        let hash = foldhash::quality::FixedState::default().hash_one(text.as_bytes());
+        Self(i64::from_ne_bytes(hash.to_ne_bytes()))
+    }
+
+    /// The hash from its stored form, [`ContentHash::stored`].
+    pub(crate) fn from_stored(stored: i64) -> Self {
+        Self(stored)
+    }
+
+    /// The hash as a number to store.
+    pub(crate) fn stored(self) -> i64 {
+        self.0
+    }
+}
+
 impl Stamp {
     fn of(meta: &Metadata) -> Self {
         Self {
@@ -185,9 +210,11 @@ impl Store {
         Ok(folders)
     }
 
-    pub(crate) fn read(&self, rel: &NotePath) -> Result<(Note, Stamp)> {
+    /// Reads the note at `rel`, with the stamp and the content hash of its file.
+    pub(crate) fn read(&self, rel: &NotePath) -> Result<(Note, Stamp, ContentHash)> {
         let (text, stamp) = read_text(&self.root.join(rel))?;
-        Ok((note(rel, &NoteFile::parse(&text), stamp), stamp))
+        let note = note(rel, &NoteFile::parse(&text), stamp);
+        Ok((note, stamp, ContentHash::of(&text)))
     }
 
     /// Changes the frontmatter of the note with `edit` and keeps its modification time.
@@ -195,7 +222,7 @@ impl Store {
         &self,
         rel: &NotePath,
         edit: impl FnOnce(&mut NoteFile),
-    ) -> Result<(Note, Stamp)> {
+    ) -> Result<(Note, Stamp, ContentHash)> {
         let path = self.root.join(rel);
         let (old, stamp) = read_text(&path)?;
         let mut text = NoteFile::parse(&old);
@@ -280,16 +307,16 @@ impl Store {
     /// It adds an id when the file has none. When the body stays the same,
     /// the file keeps its old modification time.
     ///
-    /// With `base`, it fails with [`Error::Changed`] when the file has another stamp.
+    /// With `base`, it fails with [`Error::Changed`] when the file has other content.
     pub(crate) fn save(
         &self,
         rel: &NotePath,
         body: &str,
-        base: Option<Stamp>,
-    ) -> Result<(Note, Stamp)> {
+        base: Option<ContentHash>,
+    ) -> Result<(Note, Stamp, ContentHash)> {
         let path = self.root.join(rel);
         let (old, stamp) = read_text(&path)?;
-        if base.is_some_and(|base| base != stamp) {
+        if base.is_some_and(|base| base != ContentHash::of(&old)) {
             return Err(Error::Changed { path });
         }
         let mut text = NoteFile::parse(&old);
@@ -314,7 +341,7 @@ impl Store {
     /// Writes `note` again at its path after another tool deleted the file.
     /// It keeps the id, the tags and the pin. When a file is at the path again,
     /// it saves the body over it like [`Self::save`].
-    pub(crate) fn restore(&self, note: &Note) -> Result<(Note, Stamp)> {
+    pub(crate) fn restore(&self, note: &Note) -> Result<(Note, Stamp, ContentHash)> {
         let path = self.root.join(&note.info.path);
         let dir = self.root.join(note.info.path.folder());
         let mut text = NoteFile::parse("");
@@ -335,7 +362,7 @@ impl Store {
     /// Creates an empty note with a new id at `rel`.
     ///
     /// It fails with [`Error::NameTaken`] when something in its folder has the name.
-    pub(crate) fn create(&self, rel: &NotePath) -> Result<(Note, Stamp)> {
+    pub(crate) fn create(&self, rel: &NotePath) -> Result<(Note, Stamp, ContentHash)> {
         let folder = rel.folder();
         self.check_free(folder, rel.name(), None)?;
         let dir = self.root.join(folder);

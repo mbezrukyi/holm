@@ -11,7 +11,7 @@ use crate::nodes::{Node, Nodes};
 use crate::paths::{FolderPath, Name, NotePath};
 use crate::reconcile::Settled;
 use crate::retag::TagEdit;
-use crate::store::{Stamp, Store};
+use crate::store::{ContentHash, Stamp, Store};
 use crate::tag::TagName;
 use crate::watch::Batch;
 use crate::{Error, Result};
@@ -53,23 +53,23 @@ impl Write<'_> {
                     path: self.disk.store.root().join(path),
                 });
             }
-            Some(_) => self.next.stamp(path),
+            Some(_) => self.next.hash(path),
             None => None,
         };
-        let (note, stamp) = self.disk.store.save(path, body, base)?;
-        self.update(&note, stamp)
+        let (note, stamp, hash) = self.disk.store.save(path, body, base)?;
+        self.update(note, stamp, hash)
     }
 
     /// Writes `note` again at its path.
     pub(crate) fn restore(&mut self, note: &Note) -> Result<Note> {
-        let (note, stamp) = self.disk.store.restore(note)?;
-        self.update(&note, stamp)
+        let (note, stamp, hash) = self.disk.store.restore(note)?;
+        self.update(note, stamp, hash)
     }
 
     /// Creates an empty note at `path`.
     pub(crate) fn create(&mut self, path: &NotePath) -> Result<Note> {
-        let (note, stamp) = self.disk.store.create(path)?;
-        self.update(&note, stamp)
+        let (note, stamp, hash) = self.disk.store.create(path)?;
+        self.update(note, stamp, hash)
     }
 
     /// The id of the note. A note with no id gets one.
@@ -123,8 +123,8 @@ impl Write<'_> {
         path: &NotePath,
         edit: impl FnOnce(&mut holm_markdown::NoteFile),
     ) -> Result<Note> {
-        let (note, stamp) = self.disk.store.edit_fields(path, edit)?;
-        self.update(&note, stamp)
+        let (note, stamp, hash) = self.disk.store.edit_fields(path, edit)?;
+        self.update(note, stamp, hash)
     }
 
     /// Moves the note from `from` to `to`, and returns it at its new path. The note keeps its
@@ -133,7 +133,7 @@ impl Write<'_> {
         let outside = self.next.outside(from);
         let to = self.disk.store.move_note(from, to)?;
         if *from == to {
-            return self.disk.store.read(&to).map(|(note, _)| note.info);
+            return self.disk.store.read(&to).map(|(note, ..)| note.info);
         }
         self.refresh(vec![Node::Note(from.clone()), Node::Note(to.clone())])?;
         self.next.mark_outside([&to], outside);
@@ -287,12 +287,10 @@ impl Write<'_> {
     }
 
     /// Puts a note that Holm just wrote into the index and the next facts, and returns it.
-    fn update(&mut self, note: &Note, stamp: Stamp) -> Result<Note> {
-        let notes = self.update_all(vec![(note.clone(), stamp)]);
-        notes
-            .into_iter()
-            .next()
-            .ok_or_else(|| self.lost(&note.info.path))
+    fn update(&mut self, note: Note, stamp: Stamp, hash: ContentHash) -> Result<Note> {
+        let path = note.info.path.clone();
+        let notes = self.update_all(vec![(note, stamp, hash)]);
+        notes.into_iter().next().ok_or_else(|| self.lost(&path))
     }
 
     /// The error when the note that Holm just wrote at `path` does not read back as written.
@@ -304,7 +302,7 @@ impl Write<'_> {
     }
 
     /// Puts notes that Holm just wrote into the index and the next facts, and returns them.
-    fn update_all(&mut self, notes: Vec<(Note, Stamp)>) -> Vec<Note> {
+    fn update_all(&mut self, notes: Vec<(Note, Stamp, ContentHash)>) -> Vec<Note> {
         let settled = scan::wrote(&self.disk.store, &self.next, notes);
         self.take(settled)
     }
