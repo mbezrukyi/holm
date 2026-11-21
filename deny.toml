@@ -1,6 +1,14 @@
 [graph]
 all-features = true
 
+[advisories]
+# Unmaintained crates deep in GPUI and other libraries can't be fixed here. Report only the ones
+# that holm uses directly. Vulnerabilities are reported for all crates.
+unmaintained = "workspace"
+ignore = [
+    { id = "RUSTSEC-2026-0192", reason = "GPUI's font code uses ttf-parser too. Replace it when GPUI moves off it." },
+]
+
 [licenses]
 # LGPL is allowed only for system libraries, each as an exception.
 allow = [
