@@ -74,6 +74,7 @@ jobs:
         with:
           ref: ${{ needs.release.outputs.tag }}
       - run: rustup toolchain install
+      - uses: ./.github/actions/linux-deps
       - run: packaging/appimage/build.sh "${{ needs.release.outputs.version }}"
       - run: gh release upload "${{ needs.release.outputs.tag }}" target/appimage/*.AppImage target/appimage/SHA256SUMS
         env:
