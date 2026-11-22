@@ -16,7 +16,7 @@ use super::flow::{ChipBox, FlowLine, Icon};
 use super::theme::{Place, Theme};
 use crate::files::{FileKind, LinkedFiles};
 use crate::highlight::{Highlighter, Tokens};
-use crate::model::{Cell, Chip, DisplayLine, Embed, LineKind, Look, Mark, Model, Run, Styles};
+use crate::model::{Cell, Chip, Direction, DisplayLine, Embed, LineKind, Look, Mark, Model, Run, Styles};
 
 /// Above and below an image.
 pub(crate) const IMAGE_MARGIN: Pixels = px(4.);
@@ -933,14 +933,14 @@ impl Layout {
         None
     }
 
-    /// The source offset one text row above or below the cursor, near `goal_x`. It returns `None` when that row is not
-    /// in this layout.
+    /// The source offset one text row in `direction` from the cursor, near `goal_x`. It returns `None` when that row is
+    /// not in this layout.
     pub(crate) fn vertical(
         &self,
         cursor: usize,
         row_start: bool,
         goal_x: Option<Pixels>,
-        down: bool,
+        direction: Direction,
     ) -> Option<Vertical> {
         let ix = self
             .lines
@@ -950,32 +950,37 @@ impl Layout {
         let at = line.caret(cursor, row_start)?;
         let x = goal_x.unwrap_or(line.left + at.x);
         let origin = self.bounds.origin;
-        let (line, target) = if down && at.y + line.line_height < line.text_height {
-            (line, point(x, line.text_top() + at.y + line.line_height * 1.5))
-        } else if !down && at.y >= line.line_height {
-            (line, point(x, line.text_top() + at.y - line.line_height * 0.5))
-        } else {
-            let other = if down {
-                self.lines[ix + 1..].iter().find(|l| l.height > px(0.))?
-            } else {
-                self.lines[..ix].iter().rev().find(|l| l.height > px(0.))?
-            };
-            // A line with no text row: the cursor goes to its start or end.
-            if other.text().is_none() {
-                let source = other.display.source();
-                return Some(Vertical {
-                    offset: if down { source.start } else { source.end },
-                    x,
-                    row_start: false,
-                    hidden: true,
-                });
+        let (line, target) = match direction {
+            Direction::Down if at.y + line.line_height < line.text_height => {
+                (line, point(x, line.text_top() + at.y + line.line_height * 1.5))
             }
-            let y = if down {
-                other.text_top() + other.line_height * 0.5
-            } else {
-                other.text_top() + other.text_height - other.line_height * 0.5
-            };
-            (other, point(x, y))
+            Direction::Up if at.y >= line.line_height => {
+                (line, point(x, line.text_top() + at.y - line.line_height * 0.5))
+            }
+            _ => {
+                let other = match direction {
+                    Direction::Down => self.lines[ix + 1..].iter().find(|l| l.height > px(0.))?,
+                    Direction::Up => self.lines[..ix].iter().rev().find(|l| l.height > px(0.))?,
+                };
+                // A line with no text row: the cursor goes to its start or end.
+                if other.text().is_none() {
+                    let source = other.display.source();
+                    return Some(Vertical {
+                        offset: match direction {
+                            Direction::Down => source.start,
+                            Direction::Up => source.end,
+                        },
+                        x,
+                        row_start: false,
+                        hidden: true,
+                    });
+                }
+                let y = match direction {
+                    Direction::Down => other.text_top() + other.line_height * 0.5,
+                    Direction::Up => other.text_top() + other.text_height - other.line_height * 0.5,
+                };
+                (other, point(x, y))
+            }
         };
         let offset = self.offset_at(origin + target)?;
         let row_y = target.y - line.text_top();
@@ -987,18 +992,17 @@ impl Layout {
         })
     }
 
-    /// The source offset at `x` on the first or the last text row of the line with the cursor, and whether it is the
-    /// start of its row, as in [`LaidLine::caret`].
-    pub(crate) fn row_at(&self, cursor: usize, x: Pixels, first: bool) -> Option<(usize, bool)> {
+    /// The source offset at `x` on the row of the line with the cursor where a move in `direction` enters it, and
+    /// whether it is the start of its row, as in [`LaidLine::caret`].
+    pub(crate) fn row_at(&self, cursor: usize, x: Pixels, direction: Direction) -> Option<(usize, bool)> {
         let line = self
             .lines
             .iter()
             .find(|line| contains_with_end(&line.display.source(), cursor))?;
         line.text()?;
-        let row_y = if first {
-            px(0.)
-        } else {
-            line.text_height - line.line_height
+        let row_y = match direction {
+            Direction::Down => px(0.),
+            Direction::Up => line.text_height - line.line_height,
         };
         let target = point(x, line.text_top() + row_y + line.line_height * 0.5);
         let offset = self.offset_at(self.bounds.origin + target)?;

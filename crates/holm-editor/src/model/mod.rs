@@ -15,7 +15,7 @@ use std::time::Instant;
 use holm_markdown::{Body, Target};
 use ropey::{LineType, Rope};
 
-pub(crate) use caret::{Caret, GoalRow, Selection};
+pub(crate) use caret::{Caret, Direction, GoalRow, Selection};
 pub(crate) use display::{
     Cell, Chip, DisplayLine, Embed, Highlight, LineKind, LinkTarget, Look, Mark, Quote, Run, Styles, TextKind,
 };
@@ -554,7 +554,7 @@ mod tests {
 
     fn row_caret(offset: usize) -> Caret {
         let goal_row = GoalRow {
-            first: true,
+            direction: Direction::Down,
             selection: Selection::Collapse,
         };
         Caret::at(offset)

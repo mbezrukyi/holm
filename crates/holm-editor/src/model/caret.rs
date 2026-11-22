@@ -16,9 +16,15 @@ pub(crate) struct Caret {
 /// shows the source of that line.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct GoalRow {
-    /// The first row after Down, the last row after Up.
-    pub(crate) first: bool,
+    pub(crate) direction: Direction,
     pub(crate) selection: Selection,
+}
+
+/// Of Up or Down. The cursor enters a line at its first row after Down, and at its last row after Up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Direction {
+    Up,
+    Down,
 }
 
 /// What a cursor move does to the selection.

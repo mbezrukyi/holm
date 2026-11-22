@@ -18,7 +18,7 @@ use crate::files::{FileKind, LinkedFiles};
 use crate::find::Find;
 use crate::highlight::{self, Highlighter};
 use crate::ink;
-use crate::model::{Caret, Format, GoalRow, LinkForm, Model, Selection};
+use crate::model::{Caret, Direction, Format, GoalRow, LinkForm, Model, Selection};
 use crate::shortcuts::{Command, Place, Run};
 
 /// Spaces that Tab types outside a list.
@@ -408,7 +408,7 @@ impl Editor {
         let Some(x) = caret.goal_x() else {
             return;
         };
-        if let Some((offset, row_start)) = layout.row_at(caret.offset(), px(x), goal.first) {
+        if let Some((offset, row_start)) = layout.row_at(caret.offset(), px(x), goal.direction) {
             let caret = Caret::at(offset).with_row_start(row_start).with_goal_x(x);
             self.model.set_caret(caret, goal.selection);
         }
@@ -684,16 +684,10 @@ impl Editor {
                 cx.emit(UpFromStart);
                 return true;
             }
-            "up" | "down" => {
-                self.move_vertical(key == "down", selection);
-                self.moved(cx);
-                return true;
-            }
-            "pageup" | "pagedown" => {
-                self.move_page(key == "pagedown", selection);
-                self.moved(cx);
-                return true;
-            }
+            "up" => self.move_vertical(Direction::Up, selection),
+            "down" => self.move_vertical(Direction::Down, selection),
+            "pageup" => self.move_page(Direction::Up, selection),
+            "pagedown" => self.move_page(Direction::Down, selection),
             "home" | "end" => {
                 let cursor = self.model.cursor();
                 let end = key == "end";
@@ -741,22 +735,22 @@ impl Editor {
         }
     }
 
-    fn move_page(&mut self, down: bool, selection: Selection) {
+    fn move_page(&mut self, direction: Direction, selection: Selection) {
         let rows = self.current_layout().map_or(1, Layout::rows_in_view);
         for _ in 0..rows {
-            self.move_vertical(down, selection);
+            self.move_vertical(direction, selection);
         }
     }
 
-    fn move_vertical(&mut self, down: bool, selection: Selection) {
+    fn move_vertical(&mut self, direction: Direction, selection: Selection) {
         let caret = self.model.caret();
         let cursor = caret.offset();
         let goal_x = caret.goal_x().map(px);
         if let Some(to) = self
             .current_layout()
-            .and_then(|layout| layout.vertical(cursor, caret.row_start(), goal_x, down))
+            .and_then(|layout| layout.vertical(cursor, caret.row_start(), goal_x, direction))
         {
-            let goal_row = to.hidden.then_some(GoalRow { first: down, selection });
+            let goal_row = to.hidden.then_some(GoalRow { direction, selection });
             let caret = Caret::at(to.offset)
                 .with_row_start(to.row_start)
                 .with_goal_x(f32::from(to.x))
@@ -767,18 +761,21 @@ impl Editor {
         // The row is out of view: keep the byte column on the next source line.
         let line = self.model.line_of(cursor);
         let column = cursor - self.model.line_range(line).start;
-        let target = if down {
-            if line + 1 == self.model.line_count() {
-                self.model.set_cursor(self.model.text().len(), selection);
-                return;
+        let target = match direction {
+            Direction::Down => {
+                if line + 1 == self.model.line_count() {
+                    self.model.set_cursor(self.model.text().len(), selection);
+                    return;
+                }
+                line + 1
             }
-            line + 1
-        } else {
-            let Some(line) = line.checked_sub(1) else {
-                self.model.set_cursor(0, selection);
-                return;
-            };
-            line
+            Direction::Up => {
+                let Some(line) = line.checked_sub(1) else {
+                    self.model.set_cursor(0, selection);
+                    return;
+                };
+                line
+            }
         };
         let range = self.model.line_range(target);
         self.model.set_cursor((range.start + column).min(range.end), selection);
