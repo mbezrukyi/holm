@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Runs the checks that CI runs. It never changes files.
+#
+# Usage: scripts/check [fmt|check|deny|licenses]
+#
+# With no argument it runs all four. CI runs each job on its own and installs the tools at the
+# versions pinned here.
+set -euo pipefail
+
+cargo_deny_version=0.20.2
+cargo_about_version=0.9.3
+
+cd "$(dirname "$0")/.."
+export CARGO_BUILD_WARNINGS=deny
+
+require_tool() {
+  local tool=$1 subcommand=$2 version=$3 install=$4
+  local found
+  found=$(cargo "$subcommand" --version 2>/dev/null || true)
+  if [[ $found != "$tool $version" ]]; then
+    echo "scripts/check: needs $tool $version, found: ${found:-none}" >&2
+    echo "Install it with: $install" >&2
+    exit 1
+  fi
+}
+
+check_fmt() {
+  cargo fmt --all --check
+}
+
+check_check() {
+  cargo clippy --locked --workspace --all-targets --all-features
+  cargo test --locked --workspace
+  RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --no-deps --document-private-items
+}
+
+check_deny() {
+  require_tool cargo-deny deny "$cargo_deny_version" \
+    "cargo install --locked cargo-deny@$cargo_deny_version"
+  cargo deny --locked check bans sources
+}
+
+check_licenses() {
+  require_tool cargo-about about "$cargo_about_version" \
+    "cargo install --locked --features cli cargo-about@$cargo_about_version"
+  cargo about generate --locked --fail packaging/notices/crates.hbs >/dev/null
+}
+
+case "${1:-all}" in
+  fmt | check | deny | licenses) "check_$1" ;;
+  all)
+    check_fmt
+    check_check
+    check_deny
+    check_licenses
+    ;;
+  *)
+    echo "usage: scripts/check [fmt|check|deny|licenses]" >&2
+    exit 2
+    ;;
+esac
