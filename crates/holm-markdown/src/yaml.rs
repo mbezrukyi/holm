@@ -1,16 +1,21 @@
 //! The small part of YAML that Holm's own fields need.
 
+/// Where a scalar stands. In a flow list, `,` and `]` end a plain scalar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Context {
+    Block,
+    Flow,
+}
+
 /// The value at the start of `s`, and the text after it.
-///
-/// In a flow list, `,` and `]` end a plain scalar.
-pub(crate) fn read_scalar(s: &str, in_flow: bool) -> (String, &str) {
+pub(crate) fn read_scalar(s: &str, context: Context) -> (String, &str) {
     let s = s.trim_start_matches([' ', '\t']);
     if let Some(rest) = s.strip_prefix('"') {
         read_double_quoted(rest)
     } else if let Some(rest) = s.strip_prefix('\'') {
         read_single_quoted(rest)
     } else {
-        read_plain(s, in_flow)
+        read_plain(s, context)
     }
 }
 
@@ -47,12 +52,12 @@ fn read_single_quoted(s: &str) -> (String, &str) {
     (out, "")
 }
 
-fn read_plain(s: &str, in_flow: bool) -> (String, &str) {
+fn read_plain(s: &str, context: Context) -> (String, &str) {
     let mut end = s.len();
     // A `#` starts a comment only after a space, or at the start.
     let mut after_space = true;
     for (i, c) in s.char_indices() {
-        if (c == '#' && after_space) || (in_flow && (c == ',' || c == ']')) {
+        if (c == '#' && after_space) || (context == Context::Flow && (c == ',' || c == ']')) {
             end = i;
             break;
         }
@@ -74,7 +79,7 @@ pub(crate) fn read_flow_list(s: &str) -> Vec<String> {
             rest = r;
             continue;
         }
-        let (value, after) = read_scalar(r, true);
+        let (value, after) = read_scalar(r, Context::Flow);
         if after.len() == r.len() {
             // Nothing was read, for example at a `#`. Skip one char.
             let skip = r.chars().next().map_or(0, char::len_utf8);

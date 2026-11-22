@@ -1,7 +1,7 @@
 //! Each entry keeps its exact text.
 
 use crate::tag::clean_tags;
-use crate::yaml::{read_flow_list, read_scalar, write_scalar};
+use crate::yaml::{Context, read_flow_list, read_scalar, write_scalar};
 
 /// One of Holm's own fields. The order of the cases is the order in the file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -81,7 +81,7 @@ impl Frontmatter {
 
     pub(crate) fn id(&self) -> Option<String> {
         let value = value(self.raw(Key::Id)?);
-        let (id, _) = read_scalar(value, false);
+        let (id, _) = read_scalar(value, Context::Block);
         (!id.is_empty()).then_some(id)
     }
 
@@ -89,7 +89,8 @@ impl Frontmatter {
         // A quoted "true" is a string in YAML, not a bool.
         self.raw(Key::Pinned).is_some_and(|raw| {
             let value = value(raw).trim_start();
-            !value.starts_with(['"', '\'']) && matches!(read_scalar(value, false).0.as_str(), "true" | "True" | "TRUE")
+            !value.starts_with(['"', '\''])
+                && matches!(read_scalar(value, Context::Block).0.as_str(), "true" | "True" | "TRUE")
         })
     }
 
@@ -215,11 +216,11 @@ fn read_tags(raw: &str) -> Vec<String> {
         return clean_tags(read_flow_list(&joined.join(" ")));
     }
     if !value.is_empty() && !value.starts_with('#') {
-        return clean_tags([read_scalar(value, false).0]);
+        return clean_tags([read_scalar(value, Context::Block).0]);
     }
     let items = below.filter_map(|line| {
         let item = line.trim_start().strip_prefix('-')?;
-        (item.is_empty() || item.starts_with([' ', '\t'])).then(|| read_scalar(item, false).0)
+        (item.is_empty() || item.starts_with([' ', '\t'])).then(|| read_scalar(item, Context::Block).0)
     });
     clean_tags(items)
 }
