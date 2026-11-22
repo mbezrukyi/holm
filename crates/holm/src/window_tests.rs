@@ -209,15 +209,6 @@ fn read_only(dir: &Path, read_only: bool) {
     fs::set_permissions(dir, permissions).unwrap();
 }
 
-fn folder_names(dir: &Path) -> Vec<String> {
-    let mut names: Vec<String> = fs::read_dir(dir)
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
-    names.sort();
-    names
-}
-
 fn read(path: &Path) -> String {
     fs::read_to_string(path).unwrap()
 }
@@ -1124,7 +1115,7 @@ fn keys_make_rename_and_move_notes_and_folders(cx: &mut TestAppContext) {
     keys(cx, handle, "ctrl-shift-n");
     assert_eq!(tree(cx, handle), ["All notes*", text::NEW_FOLDER]);
     assert_eq!(tree_field(cx, handle).as_deref(), Some(""));
-    assert_eq!(folder_names(&notes_dir), ["Top.md"]);
+    assert_eq!(files(&notes_dir), ["Top.md"]);
     cx.simulate_input(handle, "work");
     keys(cx, handle, "enter");
     assert!(notes_dir.join("work").is_dir());
@@ -1772,14 +1763,14 @@ fn a_folder_rename_to_a_taken_name_keeps_the_field_and_shows_the_answer(cx: &mut
     assert_eq!(tree(cx, handle), ["All notes", "job", "work*"]);
     assert_eq!(tree_field(cx, handle).as_deref(), Some("Job"));
     assert_eq!(message(cx, handle).as_deref(), Some(text::NAME_TAKEN));
-    assert_eq!(folder_names(&notes_dir), ["Top.md", "job", "work"]);
+    assert_eq!(files(&notes_dir), ["Top.md", "job", "work"]);
 
     keys(cx, handle, "ctrl-a");
     cx.simulate_input(handle, "Work");
     keys(cx, handle, "enter");
     assert_eq!(tree_field(cx, handle), None);
     assert_eq!(tree(cx, handle), ["All notes", "Work*", "job"]);
-    assert_eq!(folder_names(&notes_dir), ["Top.md", "Work", "job"]);
+    assert_eq!(files(&notes_dir), ["Top.md", "Work", "job"]);
 }
 
 #[gpui_kit::test]
@@ -1954,7 +1945,7 @@ fn a_new_folder_with_a_taken_name_keeps_the_field_and_esc_leaves_nothing(cx: &mu
     keys(cx, handle, "escape");
     assert_eq!(tree_field(cx, handle), None);
     assert_eq!(tree(cx, handle), ["All notes", "area*", "area/bebra", "area/work"]);
-    assert_eq!(folder_names(&notes_dir.join("area")), ["bebra", "work"]);
+    assert_eq!(files(&notes_dir.join("area")), ["bebra", "work"]);
 
     keys(cx, handle, "ctrl-shift-n enter");
     assert_eq!(tree_field(cx, handle).as_deref(), Some(""));
@@ -2559,10 +2550,6 @@ fn quick_open_opens_a_note_by_its_title(cx: &mut TestAppContext) {
     assert_eq!(focus(cx, handle), "sidebar");
 }
 
-fn press_only(cx: &mut TestAppContext, handle: AnyWindowHandle, key: &'static str) {
-    cx.dispatch_keystroke(handle, gpui_kit::Keystroke::parse(key).unwrap());
-}
-
 /// Also after keys in the new note, while it opens.
 #[gpui_kit::test]
 fn text_typed_while_another_note_opens_reaches_its_file(cx: &mut TestAppContext) {
@@ -2577,10 +2564,10 @@ fn text_typed_while_another_note_opens_reaches_its_file(cx: &mut TestAppContext)
     cx.simulate_input(handle, "Top");
     settle(cx);
 
-    press_only(cx, handle, "enter");
+    press(cx, handle, "enter");
     let mut typed = 0;
     while editor_text(cx, handle).contains("# Plan") {
-        press_only(cx, handle, "m");
+        press(cx, handle, "m");
         typed += 1;
         if !cx.executor().tick() {
             break;
