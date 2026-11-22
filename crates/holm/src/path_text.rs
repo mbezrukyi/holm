@@ -368,8 +368,7 @@ impl Element for PathTextElement {
             });
             let rows = path_style.lay_out(&text, mode, width, window);
             let widest = rows.iter().map(|row| row.width).fold(px(0.), Pixels::max);
-            #[allow(clippy::cast_precision_loss, reason = "a few rows")]
-            let height = path_style.line_height * rows.len() as f32;
+            let height = path_style.line_height * rows.len();
             Size {
                 width: known.width.unwrap_or(widest),
                 height,
@@ -419,8 +418,7 @@ impl Element for PathTextElement {
         let background = cx.theme().accent;
         let line_height = path_style.line_height;
         for (ix, ShapedRow(pieces)) in rows.iter().enumerate() {
-            #[allow(clippy::cast_precision_loss, reason = "a few rows")]
-            let top = bounds.origin.y + line_height * ix as f32;
+            let top = bounds.origin.y + line_height * ix;
             let baseline = top + (line_height - ascent - descent) / 2. + ascent;
             for (x, line, chip) in pieces {
                 let left = bounds.origin.x + *x;
@@ -452,8 +450,7 @@ mod tests {
 
     /// 10 px for each char, in both fonts.
     fn measure(text: &str, _chip: bool) -> Pixels {
-        #[allow(clippy::cast_precision_loss, reason = "short texts")]
-        px(10. * text.chars().count() as f32)
+        px(10.) * text.chars().count()
     }
 
     fn rows(text: &PathText, mode: Mode, width: f32) -> Vec<Vec<Piece>> {

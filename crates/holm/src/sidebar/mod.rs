@@ -1017,12 +1017,11 @@ fn item_label(item: &Item) -> String {
 /// The frame of a tree row: its height, its indent, and the bar of an open name field.
 fn row_frame(depth: usize, editing: bool, cx: &App) -> Div {
     let theme = cx.theme();
-    let depth = f32::from(u16::try_from(depth).unwrap_or(u16::MAX));
     h_flex()
         .w_full()
         .h(px(TREE_ROW))
         .pr_3()
-        .pl(px(12. + 16. * depth))
+        .pl(px(12.) + px(16.) * depth)
         .gap_2()
         .when(editing, |row| {
             row.relative()

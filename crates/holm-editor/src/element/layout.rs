@@ -205,10 +205,8 @@ impl Shaper<'_> {
             _ => px(0.),
         };
 
-        #[allow(clippy::cast_precision_loss, reason = "a small depth")]
-        let quote_left = base * (display.quotes.len() as f32);
-        #[allow(clippy::cast_precision_loss, reason = "a small depth")]
-        let list_left = base * 1.6 * (display.depth as f32);
+        let quote_left = base * display.quotes.len();
+        let list_left = base * 1.6 * display.depth;
         let block_left = quote_left + list_left;
         let code = matches!(display.kind, LineKind::Code { .. });
         let left = if code {

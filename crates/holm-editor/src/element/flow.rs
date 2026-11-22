@@ -593,9 +593,7 @@ impl FlowLine {
     }
 
     pub(crate) fn size(&self, line_height: Pixels) -> Size<Pixels> {
-        #[allow(clippy::cast_precision_loss, reason = "a few rows")]
-        let rows = self.rows.len() as f32;
-        size(self.width(), line_height * rows)
+        size(self.width(), line_height * self.rows.len())
     }
 
     /// Where the screen offset `index` shows, from the top left of the line. An offset between
@@ -605,8 +603,7 @@ impl FlowLine {
         if index < row.range.start {
             return None;
         }
-        #[allow(clippy::cast_precision_loss, reason = "a few rows")]
-        let y = line_height * ix as f32;
+        let y = line_height * ix;
         Some(point(self.x_in(row, index), y))
     }
 
@@ -674,11 +671,10 @@ impl FlowLine {
     }
 
     fn rows_with_y(&self, line_height: Pixels) -> impl Iterator<Item = (Pixels, &Row)> {
-        self.rows.iter().enumerate().map(move |(ix, row)| {
-            #[allow(clippy::cast_precision_loss, reason = "a few rows")]
-            let y = line_height * ix as f32;
-            (y, row)
-        })
+        self.rows
+            .iter()
+            .enumerate()
+            .map(move |(ix, row)| (line_height * ix, row))
     }
 
     /// Whether the screen offset `at` is in the screen text of a chip.

@@ -326,8 +326,7 @@ fn paint_blocks(line: &LaidLine, column: Bounds<Pixels>, theme: &Theme, window: 
         )
     };
     for (ix, quote) in line.display.quotes.iter().enumerate() {
-        #[allow(clippy::cast_precision_loss, reason = "a small depth")]
-        let x = line.quote_step * (ix as f32);
+        let x = line.quote_step * ix;
         let color = match quote {
             Quote::Plain => theme.line,
             Quote::Callout(kind) => {

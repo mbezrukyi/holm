@@ -223,8 +223,7 @@ impl PickList {
 
     fn list(&self, cx: &Context<Self>) -> Stateful<Div> {
         let count = self.rows.len();
-        #[allow(clippy::cast_precision_loss, reason = "far fewer rows than 2^24")]
-        let full = ROW_HEIGHT * count as f32 + LIST_INSET * 2.;
+        let full = ROW_HEIGHT * count + LIST_INSET * 2.;
         let scrolls = full > LIST_HEIGHT;
         let rows = uniform_list(
             "rows",
