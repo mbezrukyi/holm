@@ -10,6 +10,7 @@ mod scan;
 use std::borrow::Cow;
 use std::ops::Range;
 
+use parse::OffsetMap;
 pub(crate) use parse::{Defs, Scratch};
 pub use restyle::{Edit, Format, restyle};
 
@@ -63,41 +64,6 @@ pub struct Destination<O = SourceOffset> {
     pub target: Option<Target>,
     /// The destination as written, with its `< >`. It is `None` for a reference link.
     pub range: Option<Range<O>>,
-}
-
-impl<O> Node<O> {
-    /// The node with each offset mapped by `to`.
-    fn map<P>(self, to: &impl Fn(O) -> P) -> Node<P> {
-        let kind = match self.kind {
-            Kind::Link(dest) => Kind::Link(Box::new(dest.map(to))),
-            Kind::Image(dest) => Kind::Image(Box::new(dest.map(to))),
-            Kind::Text => Kind::Text,
-            Kind::Emphasis => Kind::Emphasis,
-            Kind::Strong => Kind::Strong,
-            Kind::Strikethrough => Kind::Strikethrough,
-            Kind::Highlight(color) => Kind::Highlight(color),
-            Kind::Underline => Kind::Underline,
-            Kind::Color(color) => Kind::Color(color),
-            Kind::Code => Kind::Code,
-            Kind::HardBreak => Kind::HardBreak,
-            Kind::Html => Kind::Html,
-        };
-        Node {
-            kind,
-            source: to(self.source.start)..to(self.source.end),
-            content: to(self.content.start)..to(self.content.end),
-            children: self.children.into_iter().map(|child| child.map(to)).collect(),
-        }
-    }
-}
-
-impl<O> Destination<O> {
-    fn map<P>(self, to: &impl Fn(O) -> P) -> Destination<P> {
-        Destination {
-            target: self.target,
-            range: self.range.map(|range| to(range.start)..to(range.end)),
-        }
-    }
 }
 
 /// Where the text of a leaf block lies in the source. [`crate::Body::inline`] gives its tree.
@@ -168,29 +134,19 @@ impl Leaf {
         plain: Option<&mut String>,
     ) -> Vec<Node> {
         let joined = self.joined(text);
-        let nodes = parse::parse_with(&joined, defs, scratch);
+        let nodes = parse::parse_with(&joined, defs, self, scratch);
         if let Some(out) = plain {
-            plain_text(&joined, &nodes, out);
+            plain_text(&joined, self, &nodes, out);
             let trimmed = out.trim();
             if trimmed.len() != out.len() {
                 *out = trimmed.to_owned();
             }
         }
-        self.to_source_nodes(nodes)
+        nodes
     }
 
     pub(crate) fn tree(&self, text: &str, defs: &Defs) -> Vec<Node> {
         self.parse(text, defs, &mut Scratch::default(), None)
-    }
-
-    fn to_source_nodes(&self, nodes: Vec<Node<JoinedOffset>>) -> Vec<Node> {
-        let nodes = nodes.into_iter();
-        if self.lines.is_empty() {
-            let start = self.range.start;
-            nodes.map(|node| node.map(&|joined| start + joined.get())).collect()
-        } else {
-            nodes.map(|node| node.map(&|joined| self.to_source(joined))).collect()
-        }
     }
 
     /// The source from the start of the first line to the end of the last one.
@@ -259,18 +215,30 @@ impl Leaf {
     }
 }
 
+impl OffsetMap for Leaf {
+    type Offset = SourceOffset;
+
+    fn to_offset(&self, index: usize) -> SourceOffset {
+        self.to_source(JoinedOffset::new(index))
+    }
+
+    fn to_index(&self, offset: SourceOffset) -> usize {
+        self.to_joined(offset).get()
+    }
+}
+
 /// The text a reader sees: no markers, escapes, HTML or images. Line breaks become spaces.
-fn plain_text(joined: &str, nodes: &[Node<JoinedOffset>], out: &mut String) {
+fn plain_text<M: OffsetMap>(joined: &str, map: &M, nodes: &[Node<M::Offset>], out: &mut String) {
     for node in nodes {
         match &node.kind {
             Kind::Text => {
-                let text = scan::unescape(&joined[node.source.bytes()]);
+                let text = scan::unescape(&joined[map.to_indexes(&node.source)]);
                 out.push_str(&decode_entities(&text).replace('\n', " "));
             }
-            Kind::Code => out.push_str(&joined[node.content.bytes()].replace('\n', " ")),
+            Kind::Code => out.push_str(&joined[map.to_indexes(&node.content)].replace('\n', " ")),
             Kind::HardBreak => out.push(' '),
             Kind::Html | Kind::Image(_) => {}
-            _ => plain_text(joined, &node.children, out),
+            _ => plain_text(joined, map, &node.children, out),
         }
     }
 }

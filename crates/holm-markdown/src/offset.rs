@@ -18,10 +18,6 @@ macro_rules! offset {
             $vis const fn get(self) -> usize {
                 self.0
             }
-
-            $vis fn range(bytes: Range<usize>) -> Range<Self> {
-                Self(bytes.start)..Self(bytes.end)
-            }
         }
 
         /// Writes the bare number, like a `usize`.
@@ -101,7 +97,17 @@ offset! {
     pub struct NewOffset;
 }
 
+impl SourceOffset {
+    pub fn range(bytes: Range<usize>) -> Range<Self> {
+        Self(bytes.start)..Self(bytes.end)
+    }
+}
+
 impl NewOffset {
+    pub fn range(bytes: Range<usize>) -> Range<Self> {
+        Self(bytes.start)..Self(bytes.end)
+    }
+
     /// The source before an edit is the same in the new text.
     pub(crate) fn unmoved(offset: SourceOffset) -> Self {
         Self(offset.0)

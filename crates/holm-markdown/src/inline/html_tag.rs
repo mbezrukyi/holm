@@ -1,15 +1,15 @@
 use super::Kind;
-use crate::{Color, JoinedOffset};
+use crate::Color;
 
-pub(super) enum HtmlTag {
-    Open(&'static str, Kind<JoinedOffset>),
+pub(super) enum HtmlTag<O> {
+    Open(&'static str, Kind<O>),
     Close(&'static str),
 }
 
 const NAMES: [&str; 9] = ["u", "span", "mark", "b", "strong", "i", "em", "s", "del"];
 
 /// Other HTML tags, and a `<span>` with no hex color, give `None`.
-pub(super) fn read(source: &str) -> Option<HtmlTag> {
+pub(super) fn read<O>(source: &str) -> Option<HtmlTag<O>> {
     let inner = source.strip_prefix('<')?.strip_suffix('>')?;
     if let Some(name) = inner.strip_prefix('/') {
         return known(name.trim_end()).map(HtmlTag::Close);

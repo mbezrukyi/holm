@@ -1122,7 +1122,7 @@ impl Writer<'_> {
                 let escape = self.policy.escape == Escape::Markers;
                 if escape && piece.class == Class::Punct && piece.text.is_none() {
                     escape_markers(source, &mut self.out);
-                } else if escape && piece.class == Class::Html && html_tag::read(source).is_some() {
+                } else if escape && piece.class == Class::Html && html_tag::read::<JoinedOffset>(source).is_some() {
                     // A lone Holm tag could pair with a new one.
                     self.out.push('\\');
                     self.out.push_str(source);

@@ -8,7 +8,7 @@ use super::html_tag::{self, HtmlTag};
 use super::scan::{self, Autolink, InlineLink};
 use super::{Destination, Kind, Node};
 use crate::body::link;
-use crate::{JoinedOffset, LinkKind, OffsetRange};
+use crate::{JoinedOffset, LinkKind, SourceOffset};
 
 /// The link reference definitions of a note: each normalized label with its destination.
 #[derive(Clone, Debug, Default)]
@@ -24,26 +24,64 @@ impl Defs {
     }
 }
 
+/// Where a parse puts the offsets of its nodes. The parser itself works in byte indexes into the text it parses.
+pub(crate) trait OffsetMap {
+    type Offset: Copy + PartialEq;
+
+    fn to_offset(&self, index: usize) -> Self::Offset;
+
+    /// The byte index into the parsed text, to slice it.
+    fn to_index(&self, offset: Self::Offset) -> usize;
+
+    fn to_range(&self, indexes: Range<usize>) -> Range<Self::Offset> {
+        self.to_offset(indexes.start)..self.to_offset(indexes.end)
+    }
+
+    fn to_indexes(&self, range: &Range<Self::Offset>) -> Range<usize> {
+        self.to_index(range.start)..self.to_index(range.end)
+    }
+}
+
+/// Keeps the offsets in the parsed text.
+pub(crate) struct Joined;
+
+impl OffsetMap for Joined {
+    type Offset = JoinedOffset;
+
+    fn to_offset(&self, index: usize) -> JoinedOffset {
+        JoinedOffset::new(index)
+    }
+
+    fn to_index(&self, offset: JoinedOffset) -> usize {
+        offset.get()
+    }
+}
+
 /// `text` is one leaf block.
 pub(crate) fn parse(text: &str, defs: &Defs) -> Vec<Node<JoinedOffset>> {
-    parse_with(text, defs, &mut Scratch::default())
+    parse_with(text, defs, &Joined, &mut Scratch::default())
 }
 
 /// The buffers of the parser, kept from one leaf to the next.
 #[derive(Default)]
-pub(crate) struct Scratch {
-    slots: Vec<Slot>,
+pub(crate) struct Scratch<O = SourceOffset> {
+    slots: Vec<Slot<O>>,
     delims: Vec<usize>,
     brackets: Vec<usize>,
     no_closer: Vec<usize>,
 }
 
-pub(crate) fn parse_with(text: &str, defs: &Defs, scratch: &mut Scratch) -> Vec<Node<JoinedOffset>> {
+pub(crate) fn parse_with<M: OffsetMap>(
+    text: &str,
+    defs: &Defs,
+    map: &M,
+    scratch: &mut Scratch<M::Offset>,
+) -> Vec<Node<M::Offset>> {
     if is_plain(text) {
         return if text.is_empty() {
             Vec::new()
         } else {
-            vec![text_node(0..text.len())]
+            vec![text_node(map, 0..text.len())]
         };
     }
     let mut slots = std::mem::take(&mut scratch.slots);
@@ -56,6 +94,7 @@ pub(crate) fn parse_with(text: &str, defs: &Defs, scratch: &mut Scratch) -> Vec<
     let mut parser = Parser {
         text,
         defs,
+        map,
         slots,
         tail: HEAD,
         delims: std::mem::take(&mut scratch.delims),
@@ -72,7 +111,7 @@ pub(crate) fn parse_with(text: &str, defs: &Defs, scratch: &mut Scratch) -> Vec<
     scratch.delims = parser.delims;
     scratch.brackets = parser.brackets;
     scratch.no_closer = parser.no_closer;
-    finish(text, nodes)
+    finish(map, text, nodes)
 }
 
 /// No inline syntax, so the tree is one text node. A line break counts only after two spaces.
@@ -104,8 +143,8 @@ static SPECIAL: [bool; 256] = {
 const HEAD: usize = 0;
 const NONE: usize = usize::MAX;
 
-enum Item {
-    Node(Node<JoinedOffset>),
+enum Item<O> {
+    Node(Node<O>),
     Delim(Delim),
     /// `[` or `![`.
     Bracket(Bracket),
@@ -146,17 +185,18 @@ fn opener_len(kind: LinkKind) -> usize {
     }
 }
 
-struct Slot {
-    item: Item,
+struct Slot<O> {
+    item: Item<O>,
     prev: usize,
     next: usize,
 }
 
-struct Parser<'a> {
+struct Parser<'a, M: OffsetMap> {
     text: &'a str,
     defs: &'a Defs,
+    map: &'a M,
     /// A linked list of items. Slot 0 is its head and holds no item.
-    slots: Vec<Slot>,
+    slots: Vec<Slot<M::Offset>>,
     tail: usize,
     delims: Vec<usize>,
     /// The open bracket slots.
@@ -165,7 +205,7 @@ struct Parser<'a> {
     no_closer: Vec<usize>,
 }
 
-impl Parser<'_> {
+impl<M: OffsetMap> Parser<'_, M> {
     fn run(&mut self) {
         let b = self.text.as_bytes();
         let mut p = 0;
@@ -258,7 +298,7 @@ impl Parser<'_> {
         self.flush(text_start..b.len());
     }
 
-    fn push(&mut self, item: Item) -> usize {
+    fn push(&mut self, item: Item<M::Offset>) -> usize {
         let at = self.slots.len();
         self.slots.push(Slot {
             item,
@@ -270,11 +310,11 @@ impl Parser<'_> {
         at
     }
 
-    fn push_node(&mut self, kind: Kind<JoinedOffset>, source: Range<usize>, content: Range<usize>) {
+    fn push_node(&mut self, kind: Kind<M::Offset>, source: Range<usize>, content: Range<usize>) {
         self.push(Item::Node(Node {
             kind,
-            source: JoinedOffset::range(source),
-            content: JoinedOffset::range(content),
+            source: self.map.to_range(source),
+            content: self.map.to_range(content),
             children: Vec::new(),
         }));
     }
@@ -327,14 +367,14 @@ impl Parser<'_> {
             Autolink::Email => Some(link::Target::Web(format!("mailto:{dest}"))),
             Autolink::Uri => link::target(dest),
         };
-        let content = JoinedOffset::range(content);
+        let content = self.map.to_range(content);
         let destination = Destination {
             target,
             range: Some(content.clone()),
         };
         self.push(Item::Node(Node {
             kind: Kind::Link(Box::new(destination)),
-            source: JoinedOffset::range(source),
+            source: self.map.to_range(source),
             content: content.clone(),
             children: vec![Node {
                 kind: Kind::Text,
@@ -386,15 +426,15 @@ impl Parser<'_> {
         };
         self.flush(text_start..p);
         self.process_emphasis(delims);
-        let children = finish(self.text, self.take_after(at, NONE));
+        let children = finish(self.map, self.text, self.take_after(at, NONE));
         let kind = match link_kind {
             LinkKind::Embedded => Kind::Image(Box::new(destination)),
             LinkKind::Plain => Kind::Link(Box::new(destination)),
         };
         self.slots[at].item = Item::Node(Node {
             kind,
-            source: JoinedOffset::range(start..end),
-            content: JoinedOffset::range(content),
+            source: self.map.to_range(start..end),
+            content: self.map.to_range(content),
             children,
         });
         self.brackets.pop();
@@ -411,7 +451,7 @@ impl Parser<'_> {
     }
 
     /// The link that follows the link text `content` and its `]` at `p`.
-    fn link_after(&self, content: Range<usize>, p: usize) -> Option<(usize, Destination<JoinedOffset>)> {
+    fn link_after(&self, content: Range<usize>, p: usize) -> Option<(usize, Destination<M::Offset>)> {
         let text = self.text;
         let b = text.as_bytes();
         if b.get(p + 1) == Some(&b'(')
@@ -424,7 +464,7 @@ impl Parser<'_> {
                 .unwrap_or(written);
             let destination = Destination {
                 target: link::target(&scan::unescape(bare)),
-                range: Some(JoinedOffset::range(dest)),
+                range: Some(self.map.to_range(dest)),
             };
             return Some((end, destination));
         }
@@ -503,11 +543,11 @@ impl Parser<'_> {
                 (b'~', _) => Kind::Strikethrough,
                 _ => Kind::Highlight(None),
             };
-            let children = finish(self.text, self.take_after(oi, ci));
+            let children = finish(self.map, self.text, self.take_after(oi, ci));
             let node = Node {
                 kind,
-                source: JoinedOffset::range(o_end - n..c_start + n),
-                content: JoinedOffset::range(o_end..c_start),
+                source: self.map.to_range(o_end - n..c_start + n),
+                content: self.map.to_range(o_end..c_start),
                 children,
             };
             self.insert_after(oi, Item::Node(node));
@@ -551,7 +591,7 @@ impl Parser<'_> {
         }
     }
 
-    fn insert_after(&mut self, at: usize, item: Item) {
+    fn insert_after(&mut self, at: usize, item: Item<M::Offset>) {
         let next = self.slots[at].next;
         let new = self.slots.len();
         self.slots.push(Slot { item, prev: at, next });
@@ -575,16 +615,16 @@ impl Parser<'_> {
     }
 
     /// Takes the items between `from` and `to` out of the list, as nodes. `NONE` is the end.
-    fn take_after(&mut self, from: usize, to: usize) -> Vec<Node<JoinedOffset>> {
+    fn take_after(&mut self, from: usize, to: usize) -> Vec<Node<M::Offset>> {
         let mut nodes = Vec::new();
         let mut at = self.slots[from].next;
         while at != to {
             let slot = &mut self.slots[at];
             match std::mem::replace(&mut slot.item, Item::Gone) {
                 Item::Node(node) => nodes.push(node),
-                Item::Delim(d) if !d.range.is_empty() => nodes.push(text_node(d.range)),
+                Item::Delim(d) if !d.range.is_empty() => nodes.push(text_node(self.map, d.range)),
                 Item::Bracket(b) => {
-                    nodes.push(text_node(b.start..b.start + opener_len(b.kind)));
+                    nodes.push(text_node(self.map, b.start..b.start + opener_len(b.kind)));
                 }
                 Item::Delim(_) | Item::Gone => {}
             }
@@ -636,8 +676,8 @@ fn code_content(b: &[u8], inner: Range<usize>) -> Range<usize> {
     }
 }
 
-fn text_node(range: Range<usize>) -> Node<JoinedOffset> {
-    let range = JoinedOffset::range(range);
+fn text_node<M: OffsetMap>(map: &M, range: Range<usize>) -> Node<M::Offset> {
+    let range = map.to_range(range);
     Node {
         kind: Kind::Text,
         source: range.clone(),
@@ -646,7 +686,7 @@ fn text_node(range: Range<usize>) -> Node<JoinedOffset> {
     }
 }
 
-fn finish(text: &str, mut nodes: Vec<Node<JoinedOffset>>) -> Vec<Node<JoinedOffset>> {
+fn finish<M: OffsetMap>(map: &M, text: &str, mut nodes: Vec<Node<M::Offset>>) -> Vec<Node<M::Offset>> {
     nodes.dedup_by(|next, last| {
         let touch =
             matches!((&last.kind, &next.kind), (Kind::Text, Kind::Text)) && last.source.end == next.source.start;
@@ -656,22 +696,22 @@ fn finish(text: &str, mut nodes: Vec<Node<JoinedOffset>>) -> Vec<Node<JoinedOffs
         }
         touch
     });
-    pair_tags(text, nodes)
+    pair_tags(map, text, nodes)
 }
 
 /// Pairs Holm's HTML tags among sibling nodes. Tags that cross another node do not pair. Both stay raw HTML.
-fn pair_tags(text: &str, nodes: Vec<Node<JoinedOffset>>) -> Vec<Node<JoinedOffset>> {
+fn pair_tags<M: OffsetMap>(map: &M, text: &str, nodes: Vec<Node<M::Offset>>) -> Vec<Node<M::Offset>> {
     if !nodes.iter().any(|n| matches!(n.kind, Kind::Html)) {
         return nodes;
     }
-    let mut out: Vec<Node<JoinedOffset>> = Vec::with_capacity(nodes.len());
-    let mut open: Vec<(&'static str, usize, Kind<JoinedOffset>)> = Vec::new();
+    let mut out: Vec<Node<M::Offset>> = Vec::with_capacity(nodes.len());
+    let mut open: Vec<(&'static str, usize, Kind<M::Offset>)> = Vec::new();
     for node in nodes {
         if !matches!(node.kind, Kind::Html) {
             out.push(node);
             continue;
         }
-        match html_tag::read(&text[node.source.bytes()]) {
+        match html_tag::read(&text[map.to_indexes(&node.source)]) {
             Some(HtmlTag::Open(name, kind)) => {
                 open.push((name, out.len(), kind));
                 out.push(node);
@@ -683,7 +723,7 @@ fn pair_tags(text: &str, nodes: Vec<Node<JoinedOffset>>) -> Vec<Node<JoinedOffse
                 };
                 let (_, at, kind) = open.swap_remove(k);
                 open.truncate(k);
-                let children: Vec<Node<JoinedOffset>> = out.drain(at + 1..).collect();
+                let children: Vec<Node<M::Offset>> = out.drain(at + 1..).collect();
                 let Some(tag) = out.pop() else {
                     continue;
                 };
