@@ -10,14 +10,13 @@ use std::sync::{LazyLock, Mutex};
 use fontdb::{Database, Family, Query, Style, Weight};
 use ttf_parser::{Face, OutlineBuilder};
 
-/// The system fonts. The scan takes some milliseconds, so it happens once.
+/// The scan takes some milliseconds, so it happens once.
 static FONTS: LazyLock<Database> = LazyLock::new(|| {
     let mut fonts = Database::new();
     fonts.load_system_fonts();
     fonts
 });
 
-/// The gaps found so far, by letter, font and band.
 static GAPS: LazyLock<Mutex<HashMap<Key, Vec<Gap>>>> = LazyLock::new(Mutex::default);
 
 /// Scans the system fonts. Call it on a background thread, so the first underline does not wait.
@@ -37,9 +36,9 @@ pub(crate) struct FontKey {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Band {
     pub(crate) font_size: f32,
-    /// The top of the band, below the text line.
+    /// Below the text line.
     pub(crate) top: f32,
-    /// The bottom of the band, below the text line.
+    /// Below the text line.
     pub(crate) bottom: f32,
 }
 
@@ -90,7 +89,6 @@ fn find(font: &FontKey, letter: char, band: Band) -> Option<Vec<Gap>> {
         .flatten()
 }
 
-/// The parts of the band that the ink of `letter` in `face` covers.
 fn face_gaps(face: &Face<'_>, letter: char, band: Band) -> Vec<Gap> {
     let Some(glyph) = face.glyph_index(letter) else {
         return Vec::new();
@@ -107,8 +105,8 @@ fn face_gaps(face: &Face<'_>, letter: char, band: Band) -> Vec<Gap> {
     // Font units grow upward from the text line. The band lies below it. Some heights in the
     // band each give the parts inside the outline, between pairs of edges.
     let mut spans: Vec<Gap> = Vec::new();
-    for step in 0..=SAMPLES {
-        let below = band.top + (band.bottom - band.top) * f32::from(step) / f32::from(SAMPLES);
+    for step in 0..=BAND_STEPS {
+        let below = band.top + (band.bottom - band.top) * f32::from(step) / f32::from(BAND_STEPS);
         let y = -below / scale;
         let mut xs: Vec<f32> = ink
             .edges
@@ -135,8 +133,7 @@ fn face_gaps(face: &Face<'_>, letter: char, band: Band) -> Vec<Gap> {
     gaps
 }
 
-/// How many steps apart the heights in the band are.
-const SAMPLES: u8 = 4;
+const BAND_STEPS: u8 = 4;
 
 /// Collects the outline of a letter as straight edges, in font units.
 struct Ink {
@@ -145,8 +142,7 @@ struct Ink {
     edges: Vec<((f32, f32), (f32, f32))>,
 }
 
-/// How many straight pieces stand for one curve.
-const STEPS: u8 = 8;
+const PIECES_PER_CURVE: u8 = 8;
 
 impl Ink {
     fn piece(&mut self, to: (f32, f32)) {
@@ -167,8 +163,8 @@ impl OutlineBuilder for Ink {
 
     fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
         let from = self.at;
-        for step in 1..=STEPS {
-            let t = f32::from(step) / f32::from(STEPS);
+        for step in 1..=PIECES_PER_CURVE {
+            let t = f32::from(step) / f32::from(PIECES_PER_CURVE);
             let weights = [(1. - t) * (1. - t), 2. * (1. - t) * t, t * t];
             let point = |p: [f32; 3]| weights.iter().zip(p).map(|(w, p)| w * p).sum();
             self.piece((point([from.0, x1, x]), point([from.1, y1, y])));
@@ -177,8 +173,8 @@ impl OutlineBuilder for Ink {
 
     fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
         let from = self.at;
-        for step in 1..=STEPS {
-            let t = f32::from(step) / f32::from(STEPS);
+        for step in 1..=PIECES_PER_CURVE {
+            let t = f32::from(step) / f32::from(PIECES_PER_CURVE);
             let rest = 1. - t;
             let weights = [rest * rest * rest, 3. * rest * rest * t, 3. * rest * t * t, t * t * t];
             let point = |p: [f32; 4]| weights.iter().zip(p).map(|(w, p)| w * p).sum();

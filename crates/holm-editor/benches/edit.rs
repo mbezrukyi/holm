@@ -1,5 +1,3 @@
-//! Speed of the editor: a key press or a scroll, with the layout of the view.
-
 use gpui_kit::{ScrollDelta, ScrollEvent, point, px};
 
 fn main() {

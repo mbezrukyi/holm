@@ -1,5 +1,3 @@
-//! Find in the open note: the query, its matches, and the bar that shows them.
-
 use std::ops::Range;
 
 use gpui_kit::{InteractiveElement, IntoElement, MouseButton, ParentElement, Styled, div, px, rems};
@@ -7,7 +5,6 @@ use gpui_kit::{InteractiveElement, IntoElement, MouseButton, ParentElement, Styl
 use crate::element::Theme;
 use crate::model::Model;
 
-/// An open find bar.
 pub(crate) struct Find {
     query: String,
     /// Where the search starts: the selection start when find opened.
@@ -26,12 +23,12 @@ impl Find {
         }
     }
 
-    /// Adds typed or pasted text to the query. Only its first line counts.
+    /// Only the first line of `text` counts.
     pub(crate) fn push(&mut self, text: &str) {
         self.query.push_str(text.lines().next().unwrap_or_default());
     }
 
-    /// Removes the last char of the query, or all of it with `all`.
+    /// Removes the last char, or the whole query with `all`.
     pub(crate) fn pop(&mut self, all: bool) {
         if all {
             self.query.clear();
@@ -40,7 +37,7 @@ impl Find {
         }
     }
 
-    /// Finds the query again, and selects the first match from the origin on.
+    /// Selects the first match from the origin on.
     pub(crate) fn refresh(&mut self, model: &mut Model) {
         self.matches = model.find_all(&self.query);
         self.current = if self.matches.is_empty() {
@@ -52,7 +49,7 @@ impl Find {
         self.select(model);
     }
 
-    /// Selects the next match, or the one before with `back`. It goes round at the ends.
+    /// `back` selects the match before. It goes round at the ends.
     pub(crate) fn step(&mut self, back: bool, model: &mut Model) {
         let count = self.matches.len();
         let Some(current) = self.current.filter(|_| count > 0) else {
@@ -75,7 +72,6 @@ impl Find {
         }
     }
 
-    /// The bar at the top right of the editor: the query and the match count.
     pub(crate) fn bar(&self, theme: &Theme) -> impl IntoElement {
         let count = match self.current {
             Some(ix) => format!("{} of {}", ix + 1, self.matches.len()),

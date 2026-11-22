@@ -1,5 +1,3 @@
-//! A line of text with file chips in it, wrapped to a width.
-//!
 //! A chip is a box between the text pieces. Its icon, name and detail have exact sizes, and its
 //! detail has a smaller font. The line wraps with GPUI's [`LineWrapper`], which sees the parts of
 //! a chip around its name as fixed-width elements. So a chip only breaks at a space in its name.
@@ -41,14 +39,13 @@ const DETAIL_SCALE: f32 = 0.72;
 /// in the middle.
 const CHIP_NAME_WIDTH: f32 = 18.;
 
-/// The icon of a file chip.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Icon {
     File,
     Folder,
 }
 
-/// A file chip to lay out. It takes the place of its screen text.
+/// It takes the place of its screen text.
 pub(crate) struct ChipBox {
     /// The screen text of the chip.
     pub(crate) range: Range<usize>,
@@ -118,7 +115,6 @@ fn shorten(name: &str, fits: impl Fn(&str) -> bool) -> String {
     cut(low)
 }
 
-/// A line of screen text with its chips, wrapped into rows.
 pub(crate) struct FlowLine {
     pub(crate) text: SharedString,
     chips: Vec<ChipBox>,
@@ -158,7 +154,7 @@ struct ChipPiece {
     name: ShapedLine,
 }
 
-/// How to paint one piece of a chip. All points are from the top left of the line.
+/// All points are from the top left of the line.
 pub(crate) struct ChipPaint<'a> {
     pub(crate) bounds: Bounds<Pixels>,
     pub(crate) icon: Option<(Icon, Bounds<Pixels>)>,
@@ -167,8 +163,7 @@ pub(crate) struct ChipPaint<'a> {
     pub(crate) detail: Option<(&'a ShapedLine, Point<Pixels>, Bounds<Pixels>)>,
 }
 
-/// A part of the line for the wrapper.
-enum Seg {
+enum WrapSegment {
     Text {
         display: Range<usize>,
         line: Box<ShapedLine>,
@@ -192,8 +187,8 @@ impl FlowLine {
         wrap_width: Pixels,
         window: &Window,
     ) -> Self {
-        let (mut flow, segs) = Self::unwrapped(text, runs, chips, font, font_size, window);
-        flow.wrap_into_rows(&segs, font, wrap_width, window);
+        let (mut flow, segments) = Self::unwrapped(text, runs, chips, font, font_size, window);
+        flow.wrap_into_rows(&segments, font, wrap_width, window);
         flow
     }
 
@@ -210,8 +205,8 @@ impl FlowLine {
         font_size: Pixels,
         window: &Window,
     ) -> (Pixels, Pixels) {
-        let (mut flow, segs) = Self::unwrapped(text, runs, chips, font, font_size, window);
-        let fragments = flow.fragments(&segs);
+        let (mut flow, segments) = Self::unwrapped(text, runs, chips, font, font_size, window);
+        let fragments = flow.fragments(&segments);
         // The text the wrapper sees, with a letter for each byte of an element, as it does.
         let mut seen = String::new();
         for fragment in &fragments {
@@ -257,11 +252,11 @@ impl FlowLine {
             if end <= start {
                 continue;
             }
-            let piece = flow.measure(&segs, start..end).max(summed[end] - summed[start]);
+            let piece = flow.measure(&segments, start..end).max(summed[end] - summed[start]);
             narrowest = narrowest.max(piece);
             start = end;
         }
-        flow.wrap_into_rows(&segs, font, Pixels::MAX, window);
+        flow.wrap_into_rows(&segments, font, Pixels::MAX, window);
         (narrowest, flow.width().max(narrowest))
     }
 
@@ -273,7 +268,7 @@ impl FlowLine {
         font: &Font,
         font_size: Pixels,
         window: &Window,
-    ) -> (Self, Vec<Seg>) {
+    ) -> (Self, Vec<WrapSegment>) {
         let text_system = window.text_system();
         let shape = |range: Range<usize>| {
             text_system.shape_line(
@@ -283,28 +278,28 @@ impl FlowLine {
                 None,
             )
         };
-        let mut segs = Vec::new();
+        let mut segments = Vec::new();
         let mut at = 0;
         for (ix, chip) in chips.iter().enumerate() {
             if at < chip.range.start {
-                segs.push(Seg::Text {
+                segments.push(WrapSegment::Text {
                     display: at..chip.range.start,
                     line: Box::new(shape(at..chip.range.start)),
                 });
             }
-            segs.extend([Seg::Lead(ix), Seg::Name(ix), Seg::Tail(ix)]);
+            segments.extend([WrapSegment::Lead(ix), WrapSegment::Name(ix), WrapSegment::Tail(ix)]);
             at = chip.range.end;
         }
         if at < text.len() {
-            segs.push(Seg::Text {
+            segments.push(WrapSegment::Text {
                 display: at..text.len(),
                 line: Box::new(shape(at..text.len())),
             });
         }
 
         let font_id = text_system.resolve_font(font);
-        let lines = segs.iter().filter_map(|seg| match seg {
-            Seg::Text { line, .. } => Some(line.as_ref()),
+        let lines = segments.iter().filter_map(|segment| match segment {
+            WrapSegment::Text { line, .. } => Some(line.as_ref()),
             _ => None,
         });
         let lines = lines.chain(chips.iter().map(|chip| &chip.name));
@@ -324,17 +319,16 @@ impl FlowLine {
             ascent,
             descent,
         };
-        (flow, segs)
+        (flow, segments)
     }
 
-    /// Wraps the line into rows of `wrap_width`.
-    fn wrap_into_rows(&mut self, segs: &[Seg], font: &Font, wrap_width: Pixels, window: &Window) {
+    fn wrap_into_rows(&mut self, segments: &[WrapSegment], font: &Font, wrap_width: Pixels, window: &Window) {
         let mut wrapper = window.text_system().line_wrapper(font.clone(), self.font_size);
-        let cuts = self.wrap(segs, &mut wrapper, wrap_width);
-        let mut cutter = Cutter::new(segs.len());
+        let cuts = self.wrap(segments, &mut wrapper, wrap_width);
+        let mut cutter = Cutter::new(segments.len());
         self.rows = cuts
             .windows(2)
-            .map(|cut| self.row(segs, cut[0]..cut[1], &mut cutter))
+            .map(|cut| self.row(segments, cut[0]..cut[1], &mut cutter))
             .collect();
     }
 
@@ -355,24 +349,25 @@ impl FlowLine {
         }
     }
 
-    /// The length of `seg` for the wrapper. A part of a chip without text counts as one byte.
-    fn seg_len(&self, seg: &Seg) -> usize {
-        match seg {
-            Seg::Text { display, .. } => display.len(),
-            Seg::Lead(_) | Seg::Tail(_) => 1,
-            Seg::Name(chip) => self.chips[*chip].name.len(),
+    /// The length of `segment` for the wrapper. A part of a chip without text counts as one byte.
+    fn segment_len(&self, segment: &WrapSegment) -> usize {
+        match segment {
+            WrapSegment::Text { display, .. } => display.len(),
+            WrapSegment::Lead(_) | WrapSegment::Tail(_) => 1,
+            WrapSegment::Name(chip) => self.chips[*chip].name.len(),
         }
     }
 
     /// The parts of the line for the wrapper. It sees the parts of a chip around its name as
     /// elements of a fixed width.
-    fn fragments<'a>(&'a self, segs: &'a [Seg]) -> Vec<LineFragment<'a>> {
-        segs.iter()
-            .map(|seg| match seg {
-                Seg::Text { display, .. } => LineFragment::text(&self.text[display.clone()]),
-                Seg::Lead(_) => LineFragment::element(self.lead_width(true), 1),
-                Seg::Name(chip) => LineFragment::text(&self.chips[*chip].name.text),
-                Seg::Tail(chip) => LineFragment::element(self.tail_width(*chip, true), 1),
+    fn fragments<'a>(&'a self, segments: &'a [WrapSegment]) -> Vec<LineFragment<'a>> {
+        segments
+            .iter()
+            .map(|segment| match segment {
+                WrapSegment::Text { display, .. } => LineFragment::text(&self.text[display.clone()]),
+                WrapSegment::Lead(_) => LineFragment::element(self.lead_width(true), 1),
+                WrapSegment::Name(chip) => LineFragment::text(&self.chips[*chip].name.text),
+                WrapSegment::Tail(chip) => LineFragment::element(self.tail_width(*chip, true), 1),
             })
             .collect()
     }
@@ -381,10 +376,10 @@ impl FlowLine {
     ///
     /// The wrapper adds the width of each char and does not see kerning or other fonts, so each
     /// row is checked against its shaped width, as gpui-base does it.
-    fn wrap(&self, segs: &[Seg], wrapper: &mut LineWrapper, wrap_width: Pixels) -> Vec<usize> {
-        let total: usize = segs.iter().map(|seg| self.seg_len(seg)).sum();
-        let fragments = self.fragments(segs);
-        let width = |range: Range<usize>| self.measure(segs, range);
+    fn wrap(&self, segments: &[WrapSegment], wrapper: &mut LineWrapper, wrap_width: Pixels) -> Vec<usize> {
+        let total: usize = segments.iter().map(|segment| self.segment_len(segment)).sum();
+        let fragments = self.fragments(segments);
+        let width = |range: Range<usize>| self.measure(segments, range);
         let mut cuts = vec![0];
         let mut start = 0;
         // One wrapper pass gives the ends of all rows. Only a row that is too wide by its shaped
@@ -404,7 +399,7 @@ impl FlowLine {
                     // A new wrap of this row: the boundaries of `rest` count from the start of
                     // the pass, which is an earlier row.
                     let row = fragments_from(&fragments, start);
-                    start = self.shrink(segs, &row, wrapper, (start, end), total, wrap_width);
+                    start = self.shrink(segments, &row, wrapper, (start, end), total, wrap_width);
                     cuts.push(start);
                     continue 'pass;
                 }
@@ -429,7 +424,7 @@ impl FlowLine {
     /// keeps its row.
     fn shrink(
         &self,
-        segs: &[Seg],
+        segments: &[WrapSegment],
         rest: &[LineFragment<'_>],
         wrapper: &mut LineWrapper,
         (start, mut end): (usize, usize),
@@ -437,7 +432,7 @@ impl FlowLine {
         wrap_width: Pixels,
     ) -> usize {
         let mut budget = wrap_width;
-        let mut overflow = self.measure(segs, start..end) - wrap_width;
+        let mut overflow = self.measure(segments, start..end) - wrap_width;
         let mut step = overflow;
         while overflow > px(0.) {
             budget -= step.max(px(0.5));
@@ -447,7 +442,7 @@ impl FlowLine {
             let tighter = next_wrap(wrapper, rest, budget, start, total);
             if tighter < end {
                 end = tighter;
-                overflow = self.measure(segs, start..end) - wrap_width;
+                overflow = self.measure(segments, start..end) - wrap_width;
                 step = overflow;
             } else {
                 step *= 2.;
@@ -457,26 +452,26 @@ impl FlowLine {
     }
 
     /// The width of the row of the wrapper text in `range`, as [`Self::row`] lays it out.
-    fn measure(&self, segs: &[Seg], range: Range<usize>) -> Pixels {
+    fn measure(&self, segments: &[WrapSegment], range: Range<usize>) -> Pixels {
         let part = |line: &ShapedLine, low: usize, high: usize| line.x_for_index(high) - line.x_for_index(low);
         let mut width = px(0.);
         let (mut first, mut any, mut name) = (false, false, px(0.));
         let mut start = 0;
-        for seg in segs {
-            if start >= range.end && !matches!(seg, Seg::Name(_) | Seg::Tail(_)) {
+        for segment in segments {
+            if start >= range.end && !matches!(segment, WrapSegment::Name(_) | WrapSegment::Tail(_)) {
                 break;
             }
-            let end = start + self.seg_len(seg);
+            let end = start + self.segment_len(segment);
             let (low, high) = (range.start.max(start), range.end.min(end));
             let inside = low < high;
-            match seg {
-                Seg::Text { line, .. } if inside => width += part(line, low - start, high - start),
-                Seg::Lead(_) => (first, any, name) = (inside, inside, px(0.)),
-                Seg::Name(chip) if inside => {
+            match segment {
+                WrapSegment::Text { line, .. } if inside => width += part(line, low - start, high - start),
+                WrapSegment::Lead(_) => (first, any, name) = (inside, inside, px(0.)),
+                WrapSegment::Name(chip) if inside => {
                     any = true;
                     name = part(&self.chips[*chip].name, low - start, high - start);
                 }
-                Seg::Tail(chip) if inside || any => {
+                WrapSegment::Tail(chip) if inside || any => {
                     width += self.lead_width(first) + name + self.tail_width(*chip, inside);
                 }
                 _ => {}
@@ -487,14 +482,16 @@ impl FlowLine {
     }
 
     /// The screen offset of the wrapper offset `at`. All of a chip but its end maps to its start.
-    fn display_at(&self, segs: &[Seg], at: usize) -> usize {
+    fn display_at(&self, segments: &[WrapSegment], at: usize) -> usize {
         let mut start = 0;
-        for seg in segs {
-            let end = start + self.seg_len(seg);
+        for segment in segments {
+            let end = start + self.segment_len(segment);
             if at < end {
-                return match seg {
-                    Seg::Text { display, .. } => display.start + at - start,
-                    Seg::Lead(chip) | Seg::Name(chip) | Seg::Tail(chip) => self.chips[*chip].range.start,
+                return match segment {
+                    WrapSegment::Text { display, .. } => display.start + at - start,
+                    WrapSegment::Lead(chip) | WrapSegment::Name(chip) | WrapSegment::Tail(chip) => {
+                        self.chips[*chip].range.start
+                    }
                 };
             }
             start = end;
@@ -503,24 +500,24 @@ impl FlowLine {
     }
 
     /// The row of the wrapper text in `range`.
-    fn row(&self, segs: &[Seg], range: Range<usize>, cutter: &mut Cutter) -> Row {
+    fn row(&self, segments: &[WrapSegment], range: Range<usize>, cutter: &mut Cutter) -> Row {
         let mut pieces = Vec::new();
         let mut open: Option<ChipPiece> = None;
         let mut x = px(0.);
         let mut start = 0;
-        for (ix, seg) in segs.iter().enumerate() {
-            let end = start + self.seg_len(seg);
+        for (ix, segment) in segments.iter().enumerate() {
+            let end = start + self.segment_len(segment);
             let (low, high) = (range.start.max(start), range.end.min(end));
             if low < high {
-                let chip = match seg {
-                    Seg::Text { .. } => None,
-                    Seg::Lead(chip) | Seg::Name(chip) | Seg::Tail(chip) => Some(*chip),
+                let chip = match segment {
+                    WrapSegment::Text { .. } => None,
+                    WrapSegment::Lead(chip) | WrapSegment::Name(chip) | WrapSegment::Tail(chip) => Some(*chip),
                 };
                 if let Some(piece) = open.take_if(|piece| Some(piece.chip) != chip) {
                     x += self.close(&mut pieces, piece);
                 }
-                match seg {
-                    Seg::Text { display, line } => {
+                match segment {
+                    WrapSegment::Text { display, line } => {
                         let line = cutter.cut(ix, line, low - start..high - start);
                         let width = line.width();
                         pieces.push(Piece::Text {
@@ -530,7 +527,7 @@ impl FlowLine {
                         });
                         x += width;
                     }
-                    Seg::Lead(chip) | Seg::Name(chip) | Seg::Tail(chip) => {
+                    WrapSegment::Lead(chip) | WrapSegment::Name(chip) | WrapSegment::Tail(chip) => {
                         let piece = open.get_or_insert_with(|| ChipPiece {
                             chip: *chip,
                             x,
@@ -539,9 +536,9 @@ impl FlowLine {
                             last: false,
                             name: ShapedLine::default(),
                         });
-                        match seg {
-                            Seg::Lead(_) => piece.first = true,
-                            Seg::Tail(_) => piece.last = true,
+                        match segment {
+                            WrapSegment::Lead(_) => piece.first = true,
+                            WrapSegment::Tail(_) => piece.last = true,
                             _ => {
                                 piece.name = cutter.cut(ix, &self.chips[*chip].name, low - start..high - start);
                             }
@@ -555,7 +552,7 @@ impl FlowLine {
             x += self.close(&mut pieces, piece);
         }
         Row {
-            range: self.display_at(segs, range.start)..self.display_at(segs, range.end),
+            range: self.display_at(segments, range.start)..self.display_at(segments, range.end),
             pieces,
             width: x,
         }
@@ -683,7 +680,6 @@ impl FlowLine {
         self.chips.iter().any(|chip| chip.range.contains(&at))
     }
 
-    /// The pieces of the chips, for painting.
     pub(crate) fn chip_paints(&self, line_height: Pixels) -> Vec<ChipPaint<'_>> {
         let font_size = self.font_size;
         let height = (font_size * CHIP_HEIGHT).min(line_height - px(2.));

@@ -1,5 +1,3 @@
-//! Links, file paste and drop, through the editor interface.
-
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -46,7 +44,7 @@ fn link_at_cursor(editor: &Entity<Editor>, cx: &VisualTestContext) -> Option<Cur
     cx.read(|cx| editor.read(cx).link_at_cursor())
 }
 
-/// A point at a char column and a pixel height, from the top left of the editor.
+/// From the top left of the editor.
 fn at(cx: &VisualTestContext, column: f32, y: Pixels) -> gpui_kit::Point<Pixels> {
     point(column_x(cx, column), y)
 }
@@ -246,7 +244,6 @@ fn heading_at_top(note: &str, height: Pixels) -> Pixels {
     cursor_y(&editor, cx)
 }
 
-/// `count` plain lines.
 fn filler(count: usize) -> String {
     (0..count).fold(String::new(), |lines, n| lines + &format!("line {n}\n"))
 }

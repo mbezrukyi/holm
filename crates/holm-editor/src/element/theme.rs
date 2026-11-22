@@ -1,5 +1,3 @@
-//! The warm Holm colors of the text column, for light and dark mode.
-
 use gpui_kit::{Hsla, rgb, rgba};
 use holm_markdown::{CalloutKind, Color};
 
@@ -8,14 +6,12 @@ use crate::highlight::Token;
 use crate::model::{Highlight, LinkTarget, Look, Styles, TextKind};
 use crate::palette;
 
-/// The colors of one callout kind.
 #[derive(Clone, Copy)]
 pub(crate) struct CalloutColors {
     pub(crate) accent: Hsla,
     pub(crate) background: Hsla,
 }
 
-/// Where a piece of text sits, as far as its font and color care.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Place {
     /// In a heading or a table head.
@@ -162,8 +158,6 @@ impl Theme {
         self.tokens[ix]
     }
 
-    /// The color of a piece of text. Text in a quote is a bit lighter, and the text of a
-    /// checked task is muted.
     pub(crate) fn text_color(&self, look: Look, place: Place) -> Hsla {
         if look.kind == TextKind::Syntax || look.link == Some(LinkTarget::Missing) || place.done {
             self.muted
@@ -178,7 +172,6 @@ impl Theme {
         }
     }
 
-    /// The background of a piece of text: a highlight or inline code.
     pub(crate) fn text_background(&self, look: Look) -> Option<Hsla> {
         match look.highlight {
             Highlight::Color(color) => Some(self.note_color(color)),
@@ -187,7 +180,6 @@ impl Theme {
         }
     }
 
-    /// A color from the note. Palette colors get their dark tone in dark mode.
     pub(crate) fn note_color(&self, color: Color) -> Hsla {
         let color = if self.dark { palette::dark_tone(color) } else { color };
         rgb(u32::from(color.r) << 16 | u32::from(color.g) << 8 | u32::from(color.b)).into()

@@ -1,5 +1,3 @@
-//! The editor through its interface: keys, text input and clicks.
-
 use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
@@ -18,13 +16,12 @@ fn text(editor: &Entity<Editor>, cx: &VisualTestContext) -> String {
     cx.read(|cx| editor.read(cx).text().to_owned())
 }
 
-/// Clicks at a char column and a pixel height, from the top left of the editor.
+/// From the top left of the editor.
 fn click(cx: &mut VisualTestContext, column: f32, y: Pixels) {
     let x = column_x(cx, column);
     cx.simulate_click(point(x, y), Modifiers::none());
 }
 
-/// Clicks `count` times in a row at a char column and a pixel height.
 fn multi_click(cx: &mut VisualTestContext, column: f32, y: Pixels, count: usize) {
     let position = point(column_x(cx, column), y);
     for click_count in 1..=count {

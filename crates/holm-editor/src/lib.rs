@@ -1,6 +1,4 @@
-//! The live preview Markdown editor element for GPUI.
-//!
-//! It uses `holm-markdown` for parsing. It does not know the core.
+//! It does not know the core.
 
 mod color;
 mod editor;
@@ -19,12 +17,11 @@ pub use editor::{
 };
 pub use element::{TextColumn, text_column};
 
-/// Binds the keys of [`shortcuts`]. The app calls it once, before it opens an editor.
+/// Call it once, before the first editor opens.
 pub fn init(cx: &mut gpui_kit::App) {
     shortcuts::bind(cx);
 }
 
-/// An error from `holm-editor`.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {}

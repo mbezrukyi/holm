@@ -1,4 +1,3 @@
-//! Lays out source lines for one frame, and answers clicks and cursor moves from that layout.
 //! Only the visible lines are shaped.
 
 use std::collections::HashMap;
@@ -19,19 +18,18 @@ use crate::files::{FileKind, LinkedFiles};
 use crate::highlight::{Highlighter, Tokens};
 use crate::model::{Cell, Chip, DisplayLine, Embed, LineKind, Look, Mark, Model, Run, Styles};
 
-/// Space above and below an image.
+/// Above and below an image.
 pub(crate) const IMAGE_MARGIN: Pixels = px(4.);
 
-/// The space between the text column and each side of the editor.
+/// Between the text column and each side of the editor.
 pub(crate) const SIDE_MARGIN: Pixels = px(32.);
 
-/// The font of code blocks and inline code.
 pub(crate) const CODE_FONT: &str = "Adwaita Mono";
 
-/// The size of code text, as a part of the text size.
+/// A part of the text size.
 const CODE_SCALE: f32 = 0.9;
 
-/// The names that callouts show in place of their `> [!note]` line.
+/// Shows in place of the `> [!note]` line.
 fn callout_name(kind: CalloutKind) -> &'static str {
     match kind {
         CalloutKind::Note => "Note",
@@ -42,7 +40,7 @@ fn callout_name(kind: CalloutKind) -> &'static str {
     }
 }
 
-/// Where the view starts: a source line, and how far its top lies above the view.
+/// `offset` is how far the top of `line` lies above the view.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Scroll {
     pub(crate) line: usize,
@@ -73,19 +71,17 @@ pub(crate) struct Layout {
     pub(crate) start: Option<Bounds<Pixels>>,
 }
 
-/// What a line shows in its text row.
 pub(crate) enum Content {
     /// The screen text of the line, which maps to its source.
     Text(FlowLine),
     /// A name in place of the line, like the name of a callout. It maps to the line end.
     Label(FlowLine),
-    /// The cells of a table row.
     Cells(Vec<LaidCell>),
     /// No text row, like a line with only embedded files on it.
     Empty,
 }
 
-/// One source line, laid out. All bounds start at the left of the column and the top of the line.
+/// All bounds start at the left of the column and the top of the line.
 pub(crate) struct LaidLine {
     pub(crate) display: DisplayLine,
     pub(crate) content: Content,
@@ -93,11 +89,9 @@ pub(crate) struct LaidLine {
     pub(crate) top: Pixels,
     /// The space above the text row.
     pub(crate) pad: Pixels,
-    /// The text size of the line.
     pub(crate) font_size: Pixels,
-    /// The font of the plain text of the line.
+    /// For the plain text.
     pub(crate) font: Font,
-    /// Where the text of the line sits.
     pub(crate) place: Place,
     /// The space that each quote around the line takes on the left.
     pub(crate) quote_step: Pixels,
@@ -126,7 +120,7 @@ pub(crate) struct LaidCell {
 pub(crate) struct LaidMark {
     pub(crate) mark: Mark,
     pub(crate) bounds: Bounds<Pixels>,
-    /// The shaped number of an ordered list item.
+    /// Of an ordered list item.
     pub(crate) number: Option<ShapedLine>,
 }
 
@@ -154,11 +148,10 @@ fn file_size(bytes: u64) -> String {
     }
 }
 
-/// Shapes source lines for one frame.
+/// Lives for one frame.
 pub(crate) struct Shaper<'a> {
     style: TextStyle,
-    /// The width of the text column.
-    width: Pixels,
+    column_width: Pixels,
     files: &'a mut LinkedFiles,
     highlighter: &'a mut Highlighter,
     theme: &'a Theme,
@@ -167,17 +160,16 @@ pub(crate) struct Shaper<'a> {
 }
 
 impl<'a> Shaper<'a> {
-    /// A shaper for one frame, with a column of `width`.
     pub(crate) fn new(
         style: TextStyle,
-        width: Pixels,
+        column_width: Pixels,
         files: &'a mut LinkedFiles,
         highlighter: &'a mut Highlighter,
         theme: &'a Theme,
     ) -> Self {
         Self {
             style,
-            width,
+            column_width,
             files,
             highlighter,
             theme,
@@ -216,11 +208,11 @@ impl Shaper<'_> {
             block_left + base * 0.75
         } else if let Some(prefix) = display.prefix.as_ref().filter(|_| display.raw) {
             // The marker hangs to the left, so the text stays where the preview shows it.
-            (block_left - self.width_of(&model.text()[prefix.clone()], font_size, window)).max(quote_left)
+            (block_left - self.plain_text_width(&model.text()[prefix.clone()], font_size, window)).max(quote_left)
         } else {
             block_left
         };
-        let width = (self.width - left).max(px(1.));
+        let width = (self.column_width - left).max(px(1.));
 
         let (content, text_height) = self.content(model, &display, font_size, line_height, width, window);
         let mark = display
@@ -270,8 +262,7 @@ impl Shaper<'_> {
         }
     }
 
-    /// The width of `text` in the plain text font.
-    fn width_of(&self, text: &str, font_size: Pixels, window: &Window) -> Pixels {
+    fn plain_text_width(&self, text: &str, font_size: Pixels, window: &Window) -> Pixels {
         let run = TextRun {
             len: text.len(),
             font: self.style.font(),
@@ -365,7 +356,7 @@ impl Shaper<'_> {
         (content, height)
     }
 
-    /// The text runs of a code line, colored by the tokens of its block.
+    /// Colored by the tokens of the block.
     fn code_runs(&mut self, model: &Model, display: &DisplayLine, language: &str, code: &Range<usize>) -> Vec<TextRun> {
         let source = display.source();
         let text = &display.shown.text;
@@ -408,7 +399,6 @@ impl Shaper<'_> {
         self.text_runs(runs, line_place(display))
     }
 
-    /// The text runs of `runs` at `place`.
     fn text_runs(&self, runs: &[Run], place: Place) -> Vec<TextRun> {
         let base = self.style.font();
         runs.iter()
@@ -433,7 +423,7 @@ impl Shaper<'_> {
             .collect()
     }
 
-    /// The widths of the columns of `table`, so the table fits in the column.
+    /// So the table fits in the column.
     fn columns(
         &mut self,
         model: &Model,
@@ -530,7 +520,7 @@ impl Shaper<'_> {
         (Content::Cells(laid), height + line_height * 0.3)
     }
 
-    /// The text runs of a table cell. A head cell is bold.
+    /// A head cell is bold.
     fn cell_runs(&self, runs: &[Run], head: bool) -> Vec<TextRun> {
         self.text_runs(runs, cell_place(head))
     }
@@ -589,7 +579,6 @@ impl Shaper<'_> {
         LaidMark { mark, bounds, number }
     }
 
-    /// How a link to `target` shows.
     fn embed(&mut self, target: &str) -> Embed {
         match self.files.kind(target) {
             FileKind::Image(_) => Embed::Image,
@@ -597,7 +586,7 @@ impl Shaper<'_> {
         }
     }
 
-    /// The boxes of `chips` in a text with `runs`. A chip name has the look of its screen text.
+    /// A chip name has the look of its screen text.
     fn chip_boxes(&mut self, chips: &[Chip], runs: &[TextRun], font_size: Pixels, window: &Window) -> Vec<ChipBox> {
         let detail_run = TextRun {
             len: 0,
@@ -640,7 +629,7 @@ impl Shaper<'_> {
     }
 }
 
-/// The font of a piece of text with `look` at `place`, from the plain text font `base`.
+/// `base` is the plain text font.
 pub(crate) fn run_font(base: &Font, look: Look, place: Place) -> Font {
     let mut font = base.clone();
     if look.styles.contains(Styles::STRONG) || place.bold {
@@ -655,7 +644,6 @@ pub(crate) fn run_font(base: &Font, look: Look, place: Place) -> Font {
     font
 }
 
-/// Where the text of a line sits.
 fn line_place(display: &DisplayLine) -> Place {
     Place {
         bold: display.heading.is_some(),
@@ -664,7 +652,6 @@ fn line_place(display: &DisplayLine) -> Place {
     }
 }
 
-/// Where the text of a table cell sits.
 fn cell_place(head: bool) -> Place {
     Place {
         bold: head,
@@ -683,8 +670,6 @@ pub(crate) enum Reveal {
     Top,
 }
 
-/// Lays out the lines that fill `bounds`, from `scroll` on.
-///
 /// `start` is the height of the view before the first line. The scroll counts it as a part of
 /// line 0, so `scroll.offset` on line 0 starts at the top of that view.
 ///
@@ -738,7 +723,7 @@ fn to_edge(
     }
     let visible = lines
         .iter()
-        .find(|line| contains(&line.display.source(), model.cursor()));
+        .find(|line| contains_with_end(&line.display.source(), model.cursor()));
     if visible.is_some_and(|line| line.top + line.pad + line.text_height <= view) {
         return None;
     }
@@ -771,7 +756,7 @@ fn to_place(
     let row_start = model.caret().row_start();
     let shows = lines
         .iter()
-        .find(|line| contains(&line.display.source(), cursor))
+        .find(|line| contains_with_end(&line.display.source(), cursor))
         .is_some_and(|line| {
             let (top, height) = line.row_of(cursor, row_start);
             line.top + top >= px(0.) && line.top + top + height <= view
@@ -956,7 +941,7 @@ impl Layout {
         let ix = self
             .lines
             .iter()
-            .position(|line| contains(&line.display.source(), cursor))?;
+            .position(|line| contains_with_end(&line.display.source(), cursor))?;
         let line = &self.lines[ix];
         let at = line.caret(cursor, row_start)?;
         let x = goal_x.unwrap_or(line.left + at.x);
@@ -1004,7 +989,7 @@ impl Layout {
         let line = self
             .lines
             .iter()
-            .find(|line| contains(&line.display.source(), cursor))?;
+            .find(|line| contains_with_end(&line.display.source(), cursor))?;
         line.text()?;
         let row_y = if first {
             px(0.)
@@ -1023,7 +1008,7 @@ impl Layout {
         let line = self
             .lines
             .iter()
-            .find(|line| contains(&line.display.source(), cursor))?;
+            .find(|line| contains_with_end(&line.display.source(), cursor))?;
         let Some(text) = line.text() else {
             let source = line.display.source();
             return Some((if end { source.end } else { source.start }, false));
@@ -1055,7 +1040,7 @@ impl Layout {
         let line = self
             .lines
             .iter()
-            .find(|line| line.display.raw && contains(&line.display.source(), cursor))?;
+            .find(|line| line.display.raw && contains_with_end(&line.display.source(), cursor))?;
         let at = line.caret(cursor, row_start)?;
         // The cursor is as tall as the text, in the middle of its row.
         let height = (line.font_size * 1.3).min(line.line_height);
@@ -1083,7 +1068,7 @@ impl Layout {
             .collect()
     }
 
-    /// The rects of the text in `range`. With `raw_only`, only lines that show their syntax.
+    /// With `raw_only`, only lines that show their syntax.
     fn text_bounds(&self, selection: &Range<usize>, raw_only: bool) -> Vec<Bounds<Pixels>> {
         let mut rects = Vec::new();
         for line in self.lines.iter().filter(|line| line.display.raw || !raw_only) {
@@ -1146,8 +1131,7 @@ fn split(columns: &[(Pixels, Pixels)], room: Pixels, floor: Pixels) -> Vec<Pixel
     }
 }
 
-/// Whether `offset` is in `range`, with its end.
-fn contains(range: &Range<usize>, offset: usize) -> bool {
+fn contains_with_end(range: &Range<usize>, offset: usize) -> bool {
     range.start <= offset && offset <= range.end
 }
 

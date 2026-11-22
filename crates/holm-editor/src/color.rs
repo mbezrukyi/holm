@@ -1,5 +1,3 @@
-//! The color window: it sets the text color or the highlight color of the selection.
-
 use gpui_kit::{
     AnyElement, Hsla, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point, Styled, anchored,
     deferred, div, px, rems,
@@ -11,12 +9,9 @@ use crate::model::Format;
 use crate::palette;
 use crate::shortcuts::{Command, Place};
 
-/// How many custom colors the window keeps.
 pub(crate) const CUSTOM_COUNT: usize = 3;
-/// The most hex digits the field takes.
-const HEX_DIGITS: usize = 6;
+const MAX_HEX_DIGITS: usize = 6;
 
-/// What the window colors.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Paint {
     Text,
@@ -31,7 +26,7 @@ impl Paint {
         }
     }
 
-    /// The format key that sets `color`, or removes the color with `None`.
+    /// `None` removes the color.
     pub(crate) fn format(self, color: Option<Color>) -> Format {
         match self {
             Self::Text => Format::TextColor(color),
@@ -39,32 +34,28 @@ impl Paint {
         }
     }
 
-    /// Whether `color` is not in the palette of this window.
     pub(crate) fn is_custom(self, color: Color) -> bool {
         !self.palette().contains(&color)
     }
 }
 
-/// The index of a color with `number`, which counts from 1.
+/// `number` counts from 1.
 fn nth(number: u8) -> usize {
     usize::from(number).wrapping_sub(1)
 }
 
-/// What a key in the window does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum KeyResult {
-    /// The window stays open.
     Stay,
-    /// The window closes with no change.
+    /// Closes with no change.
     Close,
-    /// The window sets the color, or removes it with `None`, and closes.
+    /// Sets the color, or removes it with `None`, and closes.
     Apply(Option<Color>),
 }
 
-/// An open color window.
 pub(crate) struct ColorWindow {
     pub(crate) paint: Paint,
-    /// The typed hex digits, while the hex field is open.
+    /// `Some` while the hex field is open.
     hex: Option<String>,
 }
 
@@ -73,7 +64,6 @@ impl ColorWindow {
         Self { paint, hex: None }
     }
 
-    /// The place of the window in the key table.
     pub(crate) fn place(&self) -> Place {
         if self.hex.is_some() {
             Place::HexField
@@ -82,8 +72,7 @@ impl ColorWindow {
         }
     }
 
-    /// What `command` of the window's place does. `custom` are the last custom colors, the
-    /// newest first.
+    /// `custom` are the last custom colors, the newest first.
     ///
     /// Keys 1 to 6 pick a palette color, 7 to 9 a custom color, and 0 removes the color. `+`
     /// opens the hex field. In the field, Enter takes a `rgb` or `rrggbb` value. Esc closes.
@@ -112,22 +101,20 @@ impl ColorWindow {
         picked.map_or(KeyResult::Stay, |color| KeyResult::Apply(Some(*color)))
     }
 
-    /// Removes the last char of the hex field.
     pub(crate) fn pop(&mut self) {
         if let Some(hex) = &mut self.hex {
             hex.pop();
         }
     }
 
-    /// Adds typed or pasted text to the hex field. It keeps only hex digits.
     pub(crate) fn push(&mut self, text: &str) {
         if let Some(hex) = &mut self.hex {
-            let room = HEX_DIGITS - hex.len();
+            let room = MAX_HEX_DIGITS - hex.len();
             hex.extend(text.chars().filter(char::is_ascii_hexdigit).take(room));
         }
     }
 
-    /// The window below `at`, a point in the window. It moves to stay inside the window.
+    /// `at` is a point in the window. The color window sits below it and moves to stay inside the window.
     pub(crate) fn view(&self, theme: &Theme, custom: &[Color], at: Point<Pixels>) -> AnyElement {
         let paint = self.paint;
         let palette = paint
@@ -180,7 +167,6 @@ impl ColorWindow {
     }
 }
 
-/// The box of one key in the window.
 fn key_box(theme: &Theme) -> gpui_kit::Div {
     div()
         .flex()
@@ -192,8 +178,6 @@ fn key_box(theme: &Theme) -> gpui_kit::Div {
         .border_color(theme.line)
 }
 
-/// The key `number` with its color. A text color shows as the color of the number, and a
-/// highlight as its background. A free custom key shows only its number, muted.
 fn swatch(theme: &Theme, paint: Paint, color: Option<Color>, number: usize) -> gpui_kit::Div {
     let label = number.to_string();
     let base = key_box(theme);
@@ -207,8 +191,7 @@ fn swatch(theme: &Theme, paint: Paint, color: Option<Color>, number: usize) -> g
     }
 }
 
-/// Puts `color` first in the custom colors and keeps the newest ones. Returns whether the list
-/// changed.
+/// Returns whether the list changed.
 pub(crate) fn remember(custom: &mut Vec<Color>, color: Color) -> bool {
     let before = custom.clone();
     custom.retain(|c| *c != color);

@@ -1,5 +1,3 @@
-//! The view before the first line, through the editor interface.
-
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -49,7 +47,6 @@ impl gpui_kit::Render for Start {
     }
 }
 
-/// An editor with `text` and a start view.
 fn open_with_start<'a>(
     app: &'a mut gpui_kit::TestAppContext,
     text: &str,
@@ -78,12 +75,12 @@ fn text(editor: &Entity<Editor>, cx: &VisualTestContext) -> String {
     cx.read(|cx| editor.read(cx).text().to_owned())
 }
 
-/// A point at a char column and a pixel height, from the top left of the editor.
+/// From the top left of the editor.
 fn at(cx: &VisualTestContext, column: f32, y: Pixels) -> Point<Pixels> {
     point(column_x(cx, column), y)
 }
 
-/// Scrolls the editor down by `by`, or up when it is below zero.
+/// Up when `by` is below zero.
 fn scroll(cx: &mut VisualTestContext, by: Pixels) {
     cx.simulate_event(ScrollEvent {
         position: point(px(100.), px(100.)),
@@ -93,7 +90,6 @@ fn scroll(cx: &mut VisualTestContext, by: Pixels) {
     cx.run_until_parked();
 }
 
-/// Lines `l00` to `l29`.
 fn long_text() -> String {
     (0..30).map(|line| format!("l{line:02}")).collect::<Vec<_>>().join("\n")
 }

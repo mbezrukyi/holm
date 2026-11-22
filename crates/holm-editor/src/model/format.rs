@@ -1,5 +1,3 @@
-//! The writing helps: format keys, headings, and lists.
-
 use std::ops::Range;
 
 pub(crate) use holm_markdown::inline::Format;
@@ -10,8 +8,7 @@ use holm_markdown::{Block, BlockKind};
 use super::{Edit, Group, Model, map_offset};
 
 impl Model {
-    /// Adds or removes the style of `format` on the selection, or at the cursor. A color key
-    /// sets its color. Returns whether the text changed.
+    /// With no selection, it works at the cursor. A color key sets its color. Returns whether the text changed.
     pub(crate) fn toggle_format(&mut self, format: Format) -> bool {
         let Some(edit) = restyle(&self.text, &self.body, self.selection(), format) else {
             return false;
@@ -19,7 +16,7 @@ impl Model {
         self.apply(edit)
     }
 
-    /// Applies `edit` as one undo step. The selection keeps its direction.
+    /// The selection keeps its direction.
     fn apply(&mut self, edit: MarkdownEdit) -> bool {
         let ends = if self.is_reversed() {
             (edit.selection.end, edit.selection.start)
@@ -100,14 +97,12 @@ impl Model {
         Some(self.apply(edit))
     }
 
-    /// Checks or clears the task box with the `[ ]` source at `range`, as one undo step.
-    /// The cursor stays. Returns whether the text changed.
+    /// `range` is the source of the `[ ]`. The cursor stays. Returns whether the text changed.
     pub(crate) fn toggle_task(&mut self, range: &Range<usize>) -> bool {
         self.toggle_task_boxes(std::slice::from_ref(range))
     }
 
-    /// Checks or clears each task box on the lines that the selection touches.
-    /// Returns whether the text changed.
+    /// Checks or clears the task boxes on the lines that the selection touches. Returns whether the text changed.
     pub(crate) fn toggle_tasks(&mut self) -> bool {
         let selection = self.selection();
         let lines =
@@ -345,9 +340,8 @@ mod tests {
     ];
 
     proptest::proptest! {
-        /// Each key pressed twice on the same selection, in any order, gives back the text.
         #[test]
-        fn keys_pressed_twice_give_back_the_text(
+        fn keys_pressed_twice_in_any_order_give_back_the_text(
             words in proptest::collection::vec("[a-z]{1,5}", 1..5),
             keys in proptest::collection::vec(0..STYLES.len(), 1..6),
         ) {

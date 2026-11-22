@@ -1,6 +1,3 @@
-//! The text, the cursor, the selection, the undo stack, and the map from screen text to source
-//! text.
-//!
 //! This module has no GPUI. Every offset is a byte offset in the source text, on a char boundary.
 //! The text has only LF line breaks.
 
@@ -29,7 +26,6 @@ pub(crate) use links::LinkForm;
 
 const LF: LineType = LineType::LF;
 
-/// The note body with its parse, the cursor, the selection and the undo stack.
 pub(crate) struct Model {
     rope: Rope,
     /// The same text as `rope`. The parser and the text shaper need one `&str`.
@@ -45,10 +41,10 @@ pub(crate) struct Model {
     broken: HashSet<Target>,
 }
 
-/// One edit for [`Model::edit`]: a range of the current text and its new text.
+/// A range of the current text and its new text.
 type Edit = (Range<usize>, String);
 
-/// The kind of char, for word moves and double clicks.
+/// For word moves and double clicks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CharKind {
     Word,
@@ -69,7 +65,6 @@ fn char_kind(c: char) -> CharKind {
     }
 }
 
-/// The text with each CRLF and each lone CR as LF.
 fn lf_only(text: &str) -> Cow<'_, str> {
     if text.contains('\r') {
         Cow::Owned(text.replace("\r\n", "\n").replace('\r', "\n"))
@@ -78,9 +73,8 @@ fn lf_only(text: &str) -> Cow<'_, str> {
     }
 }
 
-/// Where `offset` lands after `edits`, which are in order and apart.
-/// An offset inside a replaced range lands at the end of its new text, and an offset on an
-/// insert lands after it.
+/// `edits` are in order and apart. An offset inside a replaced range lands at the end of its new text, and an offset on
+/// an insert lands after it.
 fn map_offset(edits: &[Edit], offset: usize) -> usize {
     let mut mapped = offset;
     for (range, text) in edits {
@@ -127,7 +121,6 @@ impl Model {
         self.caret
     }
 
-    /// The selected source, from the lower offset to the higher one. It is empty with no selection.
     pub(crate) fn selection(&self) -> Range<usize> {
         self.cursor().min(self.anchor)..self.cursor().max(self.anchor)
     }
@@ -136,13 +129,11 @@ impl Model {
         &self.text[self.selection()]
     }
 
-    /// Whether the cursor is at the start of the selection.
     pub(crate) fn is_reversed(&self) -> bool {
         self.cursor() < self.anchor
     }
 
-    /// Moves the cursor to `offset`, rounded down to a char boundary.
-    /// With `extend`, the selection keeps its other end.
+    /// Rounds `offset` down to a char boundary. With `extend`, the selection keeps its other end.
     pub(crate) fn set_cursor(&mut self, offset: usize, extend: bool) {
         self.set_caret(Caret::at(offset), extend);
     }
@@ -161,14 +152,12 @@ impl Model {
         }
     }
 
-    /// Drops the goal row and returns it.
     pub(crate) fn take_goal_row(&mut self) -> Option<GoalRow> {
         let goal = self.caret.goal_row();
         self.caret = self.caret.with_goal_row(None);
         goal
     }
 
-    /// Selects `range`, with the cursor at its end.
     pub(crate) fn select(&mut self, range: Range<usize>) {
         self.set_cursor(range.start, false);
         self.set_cursor(range.end, true);
@@ -191,7 +180,7 @@ impl Model {
         self.rope.floor_char_boundary(offset.min(self.text.len()))
     }
 
-    /// Replaces `range` in the rope and the text, with no parse and no undo step.
+    /// Makes no parse and no undo step.
     fn splice(&mut self, range: Range<usize>, text: &str) {
         self.rope.remove(range.clone());
         self.rope.insert(range.start, text);
@@ -209,14 +198,12 @@ impl Model {
         });
     }
 
-    /// Parses the text again after the splices.
     fn reparse(&mut self) {
         if let Some((old, new_end)) = self.changed.take() {
             self.body.reparse(&self.text, old.clone(), new_end - old.start);
         }
     }
 
-    /// Makes `edits` one undo step, then sets the anchor and the cursor to `ends`.
     /// The edits are in order and apart, in the current text. `ends` are in the new text.
     /// Returns whether the text changed.
     fn edit(&mut self, edits: Vec<Edit>, ends: Ends, group: Group, now: Option<Instant>) -> bool {
@@ -250,7 +237,6 @@ impl Model {
         true
     }
 
-    /// Replaces `range` with `text` as typing, and puts the cursor after it.
     pub(crate) fn type_in(&mut self, range: Range<usize>, text: &str, now: Instant) -> bool {
         let text = lf_only(text);
         let end = self.floor(range.end);
@@ -264,12 +250,11 @@ impl Model {
         )
     }
 
-    /// Replaces the selection with `text` as typing.
     pub(crate) fn type_text(&mut self, text: &str, now: Instant) -> bool {
         self.type_in(self.selection(), text, now)
     }
 
-    /// Replaces the selection with `text` as its own undo step, like a paste.
+    /// Its own undo step, like a paste.
     pub(crate) fn insert(&mut self, text: &str) -> bool {
         let text = lf_only(text);
         let range = self.selection();
@@ -277,8 +262,7 @@ impl Model {
         self.edit(vec![(range, text.into_owned())], (cursor, cursor), Group::Alone, None)
     }
 
-    /// Puts in `text` in place of the whole text, as one undo step. The cursor stays near its
-    /// place. Only the changed middle of the text goes into the step.
+    /// One undo step, with only the changed middle of the text. The cursor stays near its place.
     pub(crate) fn reload(&mut self, text: &str) -> bool {
         let text = lf_only(text);
         let old = self.text.as_bytes();
@@ -303,7 +287,7 @@ impl Model {
         self.edit(edits, ends, Group::Alone, None)
     }
 
-    /// Undoes the last step and puts the cursor back. Returns whether the text changed.
+    /// Returns whether the text changed.
     pub(crate) fn undo(&mut self) -> bool {
         let Some(step) = self.history.pop_undo() else {
             return false;
@@ -318,7 +302,7 @@ impl Model {
         true
     }
 
-    /// Makes the last undone step again. Returns whether the text changed.
+    /// Returns whether the text changed.
     pub(crate) fn redo(&mut self) -> bool {
         let Some(step) = self.history.pop_redo() else {
             return false;
@@ -333,7 +317,6 @@ impl Model {
         true
     }
 
-    /// Removes the selection, or the char or the word before the cursor.
     /// Returns whether the text changed.
     pub(crate) fn backspace(&mut self, word: bool, now: Instant) -> bool {
         let mut range = self.selection();
@@ -347,7 +330,6 @@ impl Model {
         self.remove(range, now)
     }
 
-    /// Removes the selection, or the char or the word after the cursor.
     /// Returns whether the text changed.
     pub(crate) fn delete(&mut self, word: bool, now: Instant) -> bool {
         let mut range = self.selection();
@@ -361,7 +343,7 @@ impl Model {
         self.remove(range, now)
     }
 
-    /// Removes the selection as its own undo step, like a cut.
+    /// Its own undo step, like a cut.
     pub(crate) fn remove_selection(&mut self) -> bool {
         let range = self.selection();
         self.edit(
@@ -384,7 +366,6 @@ impl Model {
         )
     }
 
-    /// Moves the cursor one char to the left. Without `extend`, a selection collapses to its start.
     pub(crate) fn move_left(&mut self, extend: bool) {
         let selection = self.selection();
         if !extend && !selection.is_empty() {
@@ -394,7 +375,6 @@ impl Model {
         }
     }
 
-    /// Moves the cursor one char to the right. Without `extend`, a selection collapses to its end.
     pub(crate) fn move_right(&mut self, extend: bool) {
         let selection = self.selection();
         if !extend && !selection.is_empty() {
@@ -404,12 +384,10 @@ impl Model {
         }
     }
 
-    /// Moves the cursor to the start of this or the last word.
     pub(crate) fn move_word_left(&mut self, extend: bool) {
         self.set_cursor(self.word_left(self.cursor()), extend);
     }
 
-    /// Moves the cursor to the end of this or the next word.
     pub(crate) fn move_word_right(&mut self, extend: bool) {
         self.set_cursor(self.word_right(self.cursor()), extend);
     }
@@ -494,7 +472,7 @@ impl Model {
         start..end
     }
 
-    /// The source line at `offset` with its line break, for a triple click.
+    /// With its line break, for a triple click.
     pub(crate) fn line_at(&self, offset: usize) -> Range<usize> {
         let range = self.line_range(self.line_of(offset));
         let end = if range.end < self.text.len() {
@@ -521,17 +499,16 @@ impl Model {
         }
     }
 
-    /// The number of source lines. An empty text has one line.
+    /// An empty text has one line.
     pub(crate) fn line_count(&self) -> usize {
         self.rope.len_lines(LF)
     }
 
-    /// The line that holds `offset`.
     pub(crate) fn line_of(&self, offset: usize) -> usize {
         self.rope.byte_to_line_idx(offset.min(self.text.len()), LF)
     }
 
-    /// The source of line `line`, without its line break.
+    /// Without its line break.
     pub(crate) fn line_range(&self, line: usize) -> Range<usize> {
         let start = self.rope.line_to_byte_idx(line, LF);
         let end = if line + 1 < self.line_count() {
@@ -548,12 +525,12 @@ impl Model {
         range.start <= selection.end && selection.start <= range.end
     }
 
-    /// The source offset as a UTF-16 offset, for the platform text input.
+    /// For the platform text input.
     pub(crate) fn offset_to_utf16(&self, offset: usize) -> usize {
         self.rope.byte_to_utf16_idx(offset.min(self.text.len()))
     }
 
-    /// The UTF-16 offset as a source offset, for the platform text input.
+    /// For the platform text input.
     pub(crate) fn utf16_to_offset(&self, offset: usize) -> usize {
         self.rope.utf16_to_byte_idx(offset.min(self.rope.len_utf16()))
     }
@@ -966,7 +943,7 @@ mod tests {
         ]
     }
 
-    /// Runs `op`. The clock moves on by the pause in each [`Op::Type`].
+    /// The clock moves on by the pause in each [`Op::Type`].
     fn run(model: &mut Model, op: Op, clock: &mut Instant) {
         match op {
             Op::Type(text, ms) => {

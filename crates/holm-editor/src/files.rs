@@ -1,23 +1,20 @@
-//! The files that the links of a note point to.
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use gpui_kit::Size;
 
-/// What a linked path is on the disk.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FileKind {
-    /// An image, with its size in pixels.
+    /// The size in pixels.
     Image(Size<usize>),
     Folder,
-    /// Any other file, with its size in bytes.
+    /// The size in bytes.
     File(u64),
     Missing,
 }
 
 impl FileKind {
-    /// Reads the kind of `path` from the disk. An image file gives its size from its header.
+    /// Reads the disk. An image file gives its size from its header.
     fn of(path: &Path) -> Self {
         let Ok(meta) = path.metadata() else {
             return Self::Missing;
@@ -34,8 +31,8 @@ impl FileKind {
     }
 }
 
-/// The linked files of one note. A relative link target starts at the folder of the note.
-/// It reads the kind of each path from the disk once, until the folder changes.
+/// A relative link target starts at the folder of the note. It reads the kind of each path from the disk once, until
+/// the folder changes.
 #[derive(Default)]
 pub(crate) struct LinkedFiles {
     folder: Option<PathBuf>,
@@ -48,7 +45,6 @@ impl LinkedFiles {
         self.kinds.clear();
     }
 
-    /// The path of a link target.
     pub(crate) fn path(&self, target: &str) -> PathBuf {
         match &self.folder {
             Some(folder) => folder.join(target),

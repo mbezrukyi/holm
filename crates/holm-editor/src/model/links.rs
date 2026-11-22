@@ -1,5 +1,3 @@
-//! Links in the text, and find.
-
 use std::collections::HashSet;
 use std::ops::Range;
 
@@ -7,7 +5,6 @@ use holm_markdown::{Link, Target, escape_text};
 
 use super::{Group, Model, map_offset};
 
-/// How a new link is written.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LinkForm {
     /// `[..](..)` at the cursor.
@@ -20,12 +17,11 @@ pub(crate) enum LinkForm {
 }
 
 impl Model {
-    /// Sets the targets that the app knows are broken.
     pub(crate) fn set_broken(&mut self, broken: HashSet<Target>) {
         self.broken = broken;
     }
 
-    /// Takes the broken targets out, to keep them for a new model.
+    /// To keep them for a new model.
     pub(crate) fn take_broken(&mut self) -> HashSet<Target> {
         std::mem::take(&mut self.broken)
     }
@@ -39,7 +35,6 @@ impl Model {
         }
     }
 
-    /// The start of the first heading with the text `name`.
     pub(crate) fn heading_start(&self, name: &str) -> Option<usize> {
         self.body
             .headings()
@@ -70,8 +65,7 @@ impl Model {
             .find(|l| !l.embedded && piece.end <= l.range.end)
     }
 
-    /// Puts a link to `target` in place of the selection, and the cursor after it. The selected
-    /// source becomes the link text. With no selection, the link text is `text`.
+    /// The selected source becomes the link text. With no selection, the link text is `text`.
     pub(crate) fn insert_link(&mut self, text: &str, target: &Target, form: LinkForm) -> bool {
         let range = self.selection();
         let label = if range.is_empty() {

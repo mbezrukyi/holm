@@ -1,5 +1,3 @@
-//! The undo stack.
-
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
@@ -31,7 +29,7 @@ pub(crate) enum Group {
     Deleting,
 }
 
-/// One undo step: the changes in the order they were made.
+/// `changes` are in the order they were made.
 #[derive(Debug)]
 pub(super) struct UndoStep {
     pub(super) changes: Vec<TextChange>,

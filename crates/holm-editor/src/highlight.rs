@@ -1,5 +1,3 @@
-//! Syntax colors for code blocks, from `syntect` and the syntaxes of `two-face`.
-//!
 //! This module has no GPUI. The element maps each [`Token`] to a theme color.
 
 use std::collections::HashMap;
@@ -17,7 +15,7 @@ static SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(two_face::syntax::extra_new
 /// The cache drops all entries when it grows past this count.
 const CACHE_LIMIT: usize = 256;
 
-/// The kind of a piece of code. Each kind has one color.
+/// Each kind has one color.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Token {
     Comment,
@@ -32,7 +30,7 @@ pub(crate) enum Token {
     Punctuation,
 }
 
-/// The tokens of one code block: byte ranges in its code, sorted, with no overlaps.
+/// Byte ranges in the code of one block, sorted, with no overlaps.
 pub(crate) type Tokens = Rc<[(Range<usize>, Token)]>;
 
 struct Entry {
@@ -54,7 +52,7 @@ pub(crate) fn warm_up() {
 }
 
 impl Highlighter {
-    /// The tokens of `code` in `language`. An unknown language has none.
+    /// An unknown language has none.
     pub(crate) fn tokens(&mut self, language: &str, code: &str) -> Tokens {
         let mut hasher = DefaultHasher::new();
         (language, code).hash(&mut hasher);
@@ -142,7 +140,7 @@ fn parse(syntax: &SyntaxReference, code: &str) -> Tokens {
     tokens.into()
 }
 
-/// The kind of a `TextMate` scope, or `None` to let an outer scope decide.
+/// `None` lets an outer scope decide.
 fn token_for(scope: Scope) -> Option<Token> {
     let scope = scope.build_string();
     let is = |prefix: &str| {

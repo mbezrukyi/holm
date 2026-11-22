@@ -1,5 +1,3 @@
-//! Find in the open note, through the editor interface.
-
 use gpui_kit::{ClipboardItem, Entity, Pixels, VisualTestContext, px};
 use holm_editor::Editor;
 use holm_editor_test::{LINE_HEIGHT, app, cursor_y, open};
@@ -15,7 +13,6 @@ fn selected(editor: &Entity<Editor>, cx: &VisualTestContext) -> String {
     cx.read(|cx| editor.read(cx).selected_text().to_owned())
 }
 
-/// A note of 100 lines, `item 000` to `item 099`.
 fn items() -> String {
     (0..100).map(|n| format!("item {n:03}")).collect::<Vec<_>>().join("\n")
 }

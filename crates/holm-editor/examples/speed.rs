@@ -179,7 +179,6 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// About 1 MB of note text.
 fn one_mb_note() -> String {
     const CHUNK: &str = include_str!("../tests/data/chunk.md");
     CHUNK.repeat(1_000_000 / CHUNK.len() + 1)

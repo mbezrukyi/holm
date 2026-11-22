@@ -1,5 +1,3 @@
-//! Holm's palette colors and their tones for dark mode.
-//!
 //! A note stores each color as hex. Holm finds its own palette hexes in it and shows their dark
 //! tone in dark mode. Any other color shows as it is.
 
@@ -10,7 +8,7 @@ const fn hex(value: u32) -> Color {
     Color { r, g, b }
 }
 
-/// The text colors of the color window, for keys 1 to 6.
+/// On keys 1 to 6 of the color window.
 pub(crate) const TEXT: [Color; 6] = [
     hex(0x00b5_442c),
     hex(0x00a8_5d12),
@@ -20,8 +18,7 @@ pub(crate) const TEXT: [Color; 6] = [
     hex(0x0082_50a0),
 ];
 
-/// The highlight colors of the color window, for keys 1 to 6. The first one is the color of
-/// `==text==`.
+/// On keys 1 to 6 of the color window. The first one is the color of `==text==`.
 pub(crate) const HIGHLIGHT: [Color; 6] = [
     hex(0x00fd_e68a),
     hex(0x00f9_cfa4),
@@ -31,7 +28,7 @@ pub(crate) const HIGHLIGHT: [Color; 6] = [
     hex(0x00dc_cff0),
 ];
 
-/// Each palette color, with its dark tone. Colors of old palette versions stay in this list.
+/// Colors of old palette versions stay in this list.
 const DARK_TONES: [(Color, Color); 17] = [
     (TEXT[0], hex(0x00ec_8a70)),
     (TEXT[1], hex(0x00e6_a85a)),
@@ -53,7 +50,6 @@ const DARK_TONES: [(Color, Color); 17] = [
     (hex(0x008a_5aa8), hex(0x00b8_92d4)),
 ];
 
-/// The color to show for `color` in dark mode.
 pub(crate) fn dark_tone(color: Color) -> Color {
     DARK_TONES
         .iter()

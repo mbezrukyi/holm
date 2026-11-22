@@ -1,5 +1,3 @@
-//! Draws the editor: the text column, its blocks, the selection and the cursor.
-
 mod flow;
 mod layout;
 mod theme;
@@ -25,10 +23,8 @@ use flow::{ChipPaint, FlowLine, Icon};
 use layout::SIDE_MARGIN;
 use layout::{Content, LaidLine, Shaper, lay_out, run_font};
 
-/// The width of a quote bar.
-const BAR: Pixels = px(3.);
+const QUOTE_BAR_WIDTH: Pixels = px(3.);
 
-/// The GPUI element that draws an [`Editor`].
 pub(crate) struct EditorElement {
     pub(crate) editor: Entity<Editor>,
 }
@@ -51,7 +47,6 @@ pub fn text_column(width: TextWidth, child: impl IntoElement) -> TextColumn {
     }
 }
 
-/// The element of [`text_column`].
 pub struct TextColumn {
     width: TextWidth,
     child: Option<AnyElement>,
@@ -87,7 +82,7 @@ impl gpui_kit::Element for TextColumn {
         // The char width needs the text style, which is known only now.
         let mut column = div().w_full();
         if let TextWidth::Limited(chars) = self.width {
-            column = column.max_w(limit(chars, window));
+            column = column.max_w(width_of_chars(chars, window));
         }
         let mut view = div()
             .size_full()
@@ -133,7 +128,7 @@ impl gpui_kit::Element for TextColumn {
     }
 }
 
-/// The width of one char in the current text style: the advance of `0`, like the CSS `ch`.
+/// The advance of `0` in the current text style, like the CSS `ch`.
 fn char_width(window: &Window) -> Pixels {
     let style = window.text_style();
     let font_size = style.font_size.to_pixels(window.rem_size());
@@ -142,9 +137,8 @@ fn char_width(window: &Window) -> Pixels {
     text_system.ch_advance(font_id, font_size).unwrap_or(font_size * 0.5)
 }
 
-/// The width of `chars` chars, as a whole pixel. It is a little wider than the chars, so a sum
-/// of char widths with a rounding error still fits.
-fn limit(chars: u16, window: &Window) -> Pixels {
+/// A whole pixel, a little wider than the chars, so a sum of char widths with a rounding error still fits.
+fn width_of_chars(chars: u16, window: &Window) -> Pixels {
     (char_width(window) * f32::from(chars)).floor() + px(1.)
 }
 
@@ -154,7 +148,7 @@ fn column(bounds: Bounds<Pixels>, width: TextWidth, window: &Window) -> Bounds<P
     let room = (bounds.size.width - SIDE_MARGIN * 2.).max(px(0.));
     let width = match width {
         TextWidth::Full => room,
-        TextWidth::Limited(chars) => limit(chars, window).min(room),
+        TextWidth::Limited(chars) => width_of_chars(chars, window).min(room),
     };
     // A whole pixel keeps the text sharp.
     let left = ((bounds.size.width - width) / 2.).round();
@@ -164,9 +158,9 @@ fn column(bounds: Bounds<Pixels>, width: TextWidth, window: &Window) -> Bounds<P
     )
 }
 
-/// The layout of a frame, and the view before the text.
 pub(crate) struct Prepainted {
     layout: Rc<Layout>,
+    /// The view before the text.
     start: Option<AnyElement>,
 }
 
@@ -336,7 +330,7 @@ fn paint_blocks(line: &LaidLine, column: Bounds<Pixels>, theme: &Theme, window: 
             }
         };
         window.paint_quad(fill(
-            Bounds::new(origin + point(x, px(0.)), size(BAR, line.height)),
+            Bounds::new(origin + point(x, px(0.)), size(QUOTE_BAR_WIDTH, line.height)),
             color,
         ));
     }
@@ -377,7 +371,6 @@ fn paint_blocks(line: &LaidLine, column: Bounds<Pixels>, theme: &Theme, window: 
     }
 }
 
-/// Paints the text, the list marker and the images of a line.
 fn paint_line(line: &LaidLine, column: Bounds<Pixels>, theme: &Theme, window: &mut Window, cx: &mut App) {
     let origin = column.origin + point(px(0.), line.top);
     let text_origin = origin + point(line.left, line.pad);
@@ -425,8 +418,6 @@ fn paint_line(line: &LaidLine, column: Bounds<Pixels>, theme: &Theme, window: &m
     }
 }
 
-/// Paints a text of `line`, with its runs, its place and its file chips, and the highlights,
-/// code backgrounds and underlines of its runs.
 fn paint_text(
     (text, runs, place): (&FlowLine, &[Run], Place),
     origin: Point<Pixels>,
@@ -461,7 +452,6 @@ fn paint_text(
     paint_underlines(text, runs, place, origin, line, theme, window);
 }
 
-/// Paints one piece of a file chip: its box, its icon, its name and its detail.
 /// A failed paint only loses glyphs in this frame.
 fn paint_chip(
     chip: &ChipPaint<'_>,
@@ -490,7 +480,7 @@ fn paint_chip(
     }
 }
 
-/// The lines of each icon, on a grid of 24 by 24. A line that ends where it starts is closed.
+/// On a grid of 24 by 24. A line that ends where it starts is closed.
 fn icon_lines(icon: Icon) -> &'static [&'static [(f32, f32)]] {
     match icon {
         Icon::File => &[
@@ -509,7 +499,7 @@ fn icon_lines(icon: Icon) -> &'static [&'static [(f32, f32)]] {
     }
 }
 
-/// Draws the lines of `icon` in `bounds`, which is square.
+/// `bounds` is square.
 fn paint_icon(icon: Icon, bounds: Bounds<Pixels>, color: Hsla, window: &mut Window) {
     let unit = bounds.size.width / 24.;
     let at = |(x, y): (f32, f32)| bounds.origin + point(unit * x, unit * y);
@@ -535,8 +525,8 @@ fn paint_icon(icon: Icon, bounds: Bounds<Pixels>, color: Hsla, window: &mut Wind
     }
 }
 
-/// Paints the underlines of underlined text and links: thin, a bit light, close below the text
-/// line, with a gap where the ink of a letter crosses it, like a browser does.
+/// Thin, a bit light, close below the text line, with a gap where the ink of a letter crosses it, like a browser
+/// does.
 fn paint_underlines(
     text: &FlowLine,
     runs: &[Run],
@@ -548,8 +538,7 @@ fn paint_underlines(
 ) {
     let line_height = line.line_height;
     let baseline = (line_height - text.ascent() - text.descent()) / 2. + text.ascent();
-    // The room between the line and the ink on each side of a gap.
-    let room = (line.font_size * 0.07).max(px(1.));
+    let ink_clearance = (line.font_size * 0.07).max(px(1.));
     let content = text.text.as_ref();
     let mut start = 0;
     for run in runs {
@@ -596,9 +585,9 @@ fn paint_underlines(
                 // A tail can reach under the letter before, like the tail of `y`, so the part
                 // before the gap can get shorter.
                 if let Some(last) = parts.last_mut() {
-                    last.1 = last.1.min(here.x + px(left) - room);
+                    last.1 = last.1.min(here.x + px(left) - ink_clearance);
                 }
-                let after = here.x + px(gap_right) + room;
+                let after = here.x + px(gap_right) + ink_clearance;
                 parts.push((after, after));
             }
             if let Some(last) = parts.last_mut() {

@@ -1,5 +1,3 @@
-//! The color window, through the editor interface.
-
 use std::cell::RefCell;
 use std::rc::Rc;
 

@@ -1,5 +1,3 @@
-//! Test windows for the editor, with a real text system and the font from the repo.
-
 #![expect(clippy::expect_used, reason = "test helpers")]
 
 use std::borrow::Cow;
@@ -46,7 +44,7 @@ pub fn app() -> TestAppContext {
     cx
 }
 
-/// A focused editor with `text` in a window of `width` by `height`.
+/// The editor has the focus.
 pub fn open<'a>(
     cx: &'a mut TestAppContext,
     text: &str,
@@ -80,7 +78,6 @@ pub fn cursor_y(editor: &Entity<Editor>, cx: &mut VisualTestContext) -> Pixels {
     .expect("the cursor line is in the layout")
 }
 
-/// The width of one char of the repo font.
 /// The x of a char column, from the left of the editor.
 pub fn column_x(cx: &VisualTestContext, column: f32) -> Pixels {
     MARGIN + advance(cx) * column
@@ -102,12 +99,11 @@ pub fn data_folder() -> PathBuf {
 /// A part of a note with every element, each block closed.
 const CHUNK: &str = include_str!("../../holm-editor/tests/data/chunk.md");
 
-/// About 1 MB of [`CHUNK`] parts, one after another.
 pub fn one_mb_note() -> String {
     CHUNK.repeat(1_000_000 / CHUNK.len() + 1)
 }
 
-/// 200 long lines that wrap, each with 12 file chips.
+/// The lines wrap.
 pub fn chip_lines_note() -> String {
     let part = "some words before a file ![report](attachments/report.pdf) and more words after it, ";
     let line = part.repeat(12);

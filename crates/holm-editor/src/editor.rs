@@ -27,8 +27,6 @@ const TAB: &str = "    ";
 /// How far the mouse moves with the button down before a click becomes a drag.
 const DRAG_START: Pixels = px(4.);
 
-/// The live preview editor for one note body.
-///
 /// The text is the note body only, with LF line breaks. The editor turns other line breaks
 /// into LF. Markdown syntax shows on the lines with the cursor or the selection, and hides on
 /// all other lines. A code block or a table shows its whole source while the cursor or the
@@ -69,7 +67,7 @@ pub struct Editor {
     pub(crate) model: Model,
     pub(crate) focus: FocusHandle,
     pub(crate) scroll: Scroll,
-    /// How the next layout brings the cursor into view, if it does.
+    /// How the next layout brings the cursor into view.
     pub(crate) reveal: Option<Reveal>,
     /// The count of text changes, to know when [`Self::layout`] is out of date.
     pub(crate) version: u64,
@@ -82,14 +80,14 @@ pub struct Editor {
     pub(crate) text_width: TextWidth,
     pub(crate) find: Option<Find>,
     color: Option<ColorWindow>,
-    /// The last custom colors, the newest first.
+    /// The newest first.
     custom_colors: Vec<Color>,
     pub(crate) start: Option<AnyView>,
-    /// Whether the start view had the focus in the last frame.
-    start_focused: bool,
+    /// In the last frame.
+    was_start_focused: bool,
 }
 
-/// A mouse drag after a click. The selection grows by `unit` from `origin`.
+/// The selection grows by `unit` from `origin`.
 ///
 /// A click can show the syntax of its line and so move the text under the mouse. So the
 /// drag waits until the mouse is [`DRAG_START`] away from `down`.
@@ -108,7 +106,7 @@ enum Unit {
     Line,
 }
 
-/// The writing helps that the user can turn off. All are on by default.
+/// The user can turn each one off.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WritingHelp {
     /// The keys that add or remove Markdown syntax, like Ctrl+B, and the color window.
@@ -129,10 +127,9 @@ impl Default for WritingHelp {
     }
 }
 
-/// How wide the text column is.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TextWidth {
-    /// The column fills the editor, minus the space on each side.
+    /// Fills the editor, minus the space on each side.
     #[default]
     Full,
     /// The column is as wide as this many chars at the text size, and centered. In a narrower
@@ -140,13 +137,10 @@ pub enum TextWidth {
     Limited(u16),
 }
 
-/// Light or dark mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Appearance {
-    /// Dark text on a light background.
     #[default]
     Light,
-    /// Light text on a dark background.
     Dark,
 }
 
@@ -167,13 +161,12 @@ impl EventEmitter<UpFromStart> for Editor {}
 /// chip, or Ctrl+Enter at the cursor.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpenFile {
-    /// The path of the file. A relative link starts at the folder of the note.
+    /// A relative link starts at the folder of the note.
     pub path: PathBuf,
 }
 
 impl EventEmitter<OpenFile> for Editor {}
 
-/// The user asked to open a link to a note or a web address.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpenLink {
     /// A [`Target::Note`] or a [`Target::Web`].
@@ -186,22 +179,19 @@ impl EventEmitter<OpenLink> for Editor {}
 /// [`Editor::insert_link`] for each one. A drop first moves the cursor to the drop point.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PasteFiles {
-    /// The files, in order.
     pub files: Vec<PastedFile>,
 }
 
 impl EventEmitter<PasteFiles> for Editor {}
 
-/// One pasted or dropped file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PastedFile {
-    /// A file on the disk.
     Path(PathBuf),
-    /// Image data from the clipboard, with no file yet.
+    /// From the clipboard, with no file yet.
     Image {
         /// The file extension of its format, like `png`.
         extension: &'static str,
-        /// The bytes of the image file.
+        /// Encoded in the format of `extension`.
         bytes: Vec<u8>,
     },
 }
@@ -210,23 +200,21 @@ pub enum PastedFile {
 /// The app stores them and gives them back with [`Editor::set_custom_colors`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CustomColors {
-    /// The colors, the newest first. There are at most 3.
+    /// The newest first. There are at most 3.
     pub colors: Vec<Color>,
 }
 
 impl EventEmitter<CustomColors> for Editor {}
 
-/// The link at the cursor, from [`Editor::link_at_cursor`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CursorLink {
-    /// Where the link points.
     pub target: Target,
-    /// Whether it is `![..](..)`: an image or a file chip.
+    /// `![..](..)`: an image or a file chip.
     pub embedded: bool,
 }
 
 impl Editor {
-    /// An empty editor in light mode.
+    /// Starts in light mode.
     pub fn new(cx: &mut Context<Self>) -> Self {
         cx.background_executor()
             .spawn(async {
@@ -251,7 +239,7 @@ impl Editor {
             color: None,
             custom_colors: Vec::new(),
             start: None,
-            start_focused: false,
+            was_start_focused: false,
         }
     }
 
@@ -280,17 +268,14 @@ impl Editor {
         }
     }
 
-    /// The text.
     pub fn text(&self) -> &str {
         self.model.text()
     }
 
-    /// Sets the writing helps, from the settings.
     pub fn set_writing_help(&mut self, help: WritingHelp) {
         self.help = help;
     }
 
-    /// Sets the width of the text column, from the settings.
     pub fn set_text_width(&mut self, width: TextWidth, cx: &mut Context<Self>) {
         if self.text_width != width {
             self.text_width = width;
@@ -298,26 +283,23 @@ impl Editor {
         }
     }
 
-    /// The width of the text column, for a view in the place of the editor. See
-    /// [`crate::text_column`].
+    /// For a view in the place of the editor. See [`crate::text_column`].
     pub fn text_width(&self) -> TextWidth {
         self.text_width
     }
 
-    /// Sets the last custom colors, the newest first, from the settings. The color window shows
-    /// the first 3 on keys 7 to 9.
+    /// The newest first. The color window shows the first 3 on keys 7 to 9.
     pub fn set_custom_colors(&mut self, colors: &[Color], cx: &mut Context<Self>) {
         self.custom_colors = colors.iter().copied().take(color::CUSTOM_COUNT).collect();
         cx.notify();
     }
 
-    /// Sets light or dark mode, from the app theme.
     pub fn set_appearance(&mut self, appearance: Appearance, cx: &mut Context<Self>) {
         self.theme = Theme::new(appearance);
         cx.notify();
     }
 
-    /// Sets the folder of the note. Relative paths of embedded files start there.
+    /// Relative paths of embedded files start there.
     pub fn set_folder(&mut self, folder: Option<PathBuf>, cx: &mut Context<Self>) {
         self.files.set_folder(folder);
         cx.notify();
@@ -331,7 +313,7 @@ impl Editor {
         cx.notify();
     }
 
-    /// The selected source text. It is empty with no selection.
+    /// It is empty with no selection.
     pub fn selected_text(&self) -> &str {
         self.model.selected_text()
     }
@@ -357,7 +339,7 @@ impl Editor {
             _ => LinkForm::Inline,
         };
         let changed = self.model.insert_link(text, target, form);
-        self.finish(changed, cx);
+        self.report_edit(changed, cx);
     }
 
     /// Points the link at the cursor to `target`, as one undo step. The link text stays.
@@ -365,7 +347,7 @@ impl Editor {
     /// for a reference link like `[text][name]`. It sends [`Changed`] when the text changes.
     pub fn set_link_target(&mut self, target: &Target, cx: &mut Context<Self>) -> bool {
         let changed = self.model.set_link_target(target);
-        self.finish(changed, cx);
+        self.report_edit(changed, cx);
         changed
     }
 
@@ -399,10 +381,10 @@ impl Editor {
     /// Scrolls when the focus moves into the start view or back to the editor.
     /// `in_start` and `focused` describe the focus now.
     pub(crate) fn follow_focus(&mut self, in_start: bool, focused: bool) {
-        if in_start == self.start_focused {
+        if in_start == self.was_start_focused {
             return;
         }
-        self.start_focused = in_start;
+        self.was_start_focused = in_start;
         if in_start {
             self.scroll = Scroll::default();
             self.reveal = None;
@@ -411,7 +393,6 @@ impl Editor {
         }
     }
 
-    /// Opens `target`: moves to a heading in this note, or tells the app.
     fn open_link(&mut self, target: Target, cx: &mut Context<Self>) {
         match target {
             Target::Heading(name) => {
@@ -443,7 +424,6 @@ impl Editor {
         }
     }
 
-    /// The place of the editor in the key table.
     fn place(&self) -> Place {
         match (&self.color, &self.find) {
             (Some(window), _) => window.place(),
@@ -452,7 +432,6 @@ impl Editor {
         }
     }
 
-    /// The last layout, when it still shows the current text.
     fn current_layout(&self) -> Option<&Layout> {
         self.layout.as_deref().filter(|layout| layout.version == self.version)
     }
@@ -480,8 +459,7 @@ impl Editor {
         }
     }
 
-    /// A shortcut from the key table. A command that the editor does not take goes on to the
-    /// next binding.
+    /// A command that the editor does not take goes on to the next binding.
     fn run(&mut self, run: &Run, window: &mut Window, cx: &mut Context<Self>) {
         // A key in the start view, which lies inside the editor.
         let taken = self.focus.is_focused(window)
@@ -495,7 +473,7 @@ impl Editor {
         }
     }
 
-    /// A key that is no shortcut. It returns whether the key stops here.
+    /// For a key that is no shortcut. It returns whether the key stops here.
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) -> bool {
         // A key in the start view, which lies inside the editor.
         if !self.focus.is_focused(window) {
@@ -536,8 +514,8 @@ impl Editor {
         self.plain_key(key, modifiers.shift, cx)
     }
 
-    /// A shortcut of the editor. Shift extends the selection of a cursor move. Ctrl+Shift with a
-    /// letter belongs to the app. It returns whether the key stops here.
+    /// Shift extends the selection of a cursor move. Ctrl+Shift with a letter belongs to the app. It returns whether
+    /// the key stops here.
     fn command(&mut self, command: Command, shift: bool, cx: &mut Context<Self>) -> bool {
         let now = cx.background_executor().now();
         match command {
@@ -560,7 +538,7 @@ impl Editor {
             Command::Cut => {
                 self.copy(cx);
                 let changed = self.model.remove_selection();
-                self.finish(changed, cx);
+                self.report_edit(changed, cx);
                 return true;
             }
             Command::Paste => {
@@ -579,7 +557,7 @@ impl Editor {
                     None if outdent => false,
                     None => self.model.type_text(TAB, now),
                 };
-                self.finish(changed, cx);
+                self.report_edit(changed, cx);
                 return true;
             }
             _ if command.is_format_key() && !self.help.format_keys => return false,
@@ -606,7 +584,7 @@ impl Editor {
                         None => return false,
                     },
                 };
-                self.finish(changed, cx);
+                self.report_edit(changed, cx);
                 return true;
             }
         }
@@ -614,7 +592,7 @@ impl Editor {
         true
     }
 
-    /// A shortcut while the color window is open. It returns whether the key stops here.
+    /// It returns whether the key stops here.
     fn color_command(&mut self, command: Command, cx: &mut Context<Self>) -> bool {
         let Some(window) = &mut self.color else {
             return false;
@@ -633,7 +611,7 @@ impl Editor {
                 let paint = window.paint;
                 self.color = None;
                 let changed = self.model.toggle_format(paint.format(color));
-                self.finish(changed, cx);
+                self.report_edit(changed, cx);
                 if let Some(color) = color.filter(|c| paint.is_custom(*c))
                     && color::remember(&mut self.custom_colors, color)
                 {
@@ -661,7 +639,6 @@ impl Editor {
         self.jumped(Reveal::Middle, cx);
     }
 
-    /// Pastes text, or sends [`PasteFiles`] for files or an image.
     fn paste(&mut self, cx: &mut Context<Self>) {
         let item = cx.read_from_clipboard();
         let files = item.as_ref().map(pasted_files).unwrap_or_default();
@@ -671,11 +648,10 @@ impl Editor {
         }
         let text = item.and_then(|item| item.text());
         let changed = text.is_some_and(|text| self.model.insert(&text));
-        self.finish(changed, cx);
+        self.report_edit(changed, cx);
     }
 
-    /// A shortcut while find is open. It returns whether the key stops here. Ctrl+V pastes into
-    /// the query. Other keys of each text input go on to the app.
+    /// It returns whether the key stops here. Other keys of each text input go on to the app.
     fn find_command(&mut self, command: Command, cx: &mut Context<Self>) -> bool {
         let Some(find) = &mut self.find else {
             return false;
@@ -700,7 +676,7 @@ impl Editor {
         true
     }
 
-    /// A key with no Ctrl that is not a shortcut. Shift extends the selection.
+    /// `key` has no Ctrl and is no shortcut. `shift` extends the selection.
     fn plain_key(&mut self, key: &str, shift: bool, cx: &mut Context<Self>) -> bool {
         let now = cx.background_executor().now();
         match key {
@@ -740,12 +716,12 @@ impl Editor {
                 } else {
                     self.model.delete(false, now)
                 };
-                self.finish(changed, cx);
+                self.report_edit(changed, cx);
                 return true;
             }
             "enter" => {
                 let changed = self.model.newline(self.help.continue_lists, now);
-                self.finish(changed, cx);
+                self.report_edit(changed, cx);
                 return true;
             }
             _ => return false,
@@ -754,8 +730,7 @@ impl Editor {
         true
     }
 
-    /// Tells the app and the view about an edit, when there was one.
-    fn finish(&mut self, changed: bool, cx: &mut Context<Self>) {
+    fn report_edit(&mut self, changed: bool, cx: &mut Context<Self>) {
         if changed {
             self.edited(cx);
         }
@@ -768,7 +743,6 @@ impl Editor {
         }
     }
 
-    /// Moves the cursor by the rows that fit in the view.
     fn move_page(&mut self, down: bool, extend: bool) {
         let rows = self.current_layout().map_or(1, Layout::rows_in_view);
         for _ in 0..rows {
@@ -893,7 +867,6 @@ impl Editor {
         }
     }
 
-    /// Selects from the drag origin to the unit at `offset`.
     fn drag_to(&mut self, offset: usize) {
         let Some(drag) = &self.drag else { return };
         let target = match drag.unit {
@@ -1041,7 +1014,7 @@ impl EntityInputHandler for Editor {
         }
         let range = range.map_or_else(|| self.model.selection(), |r| self.range_from_utf16(&r));
         let changed = self.model.type_in(range, text, cx.background_executor().now());
-        self.finish(changed, cx);
+        self.report_edit(changed, cx);
     }
 
     fn replace_and_mark_text_in_range(
@@ -1086,7 +1059,6 @@ impl EntityInputHandler for Editor {
     }
 }
 
-/// The inline format of a format key.
 fn format_of(command: Command) -> Option<Format> {
     Some(match command {
         Command::Bold => Format::Bold,
@@ -1099,7 +1071,6 @@ fn format_of(command: Command) -> Option<Format> {
     })
 }
 
-/// The files or the image on the clipboard. Files come first. It is empty for text.
 fn pasted_files(item: &ClipboardItem) -> Vec<PastedFile> {
     let paths: Vec<PastedFile> = item
         .entries()

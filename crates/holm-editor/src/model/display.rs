@@ -1,16 +1,12 @@
-//! Source lines as the screen shows them.
-
 use std::ops::Range;
 
 use holm_markdown::{Alignment, Block, BlockKind, CalloutKind, Color, Style, Target};
 
 use super::Model;
 
-/// How a piece of screen text looks.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Look {
     pub(crate) styles: Styles,
-    /// The target of the link that the text is in.
     pub(crate) link: Option<LinkTarget>,
     pub(crate) kind: TextKind,
     pub(crate) color: Option<Color>,
@@ -18,7 +14,6 @@ pub(crate) struct Look {
 }
 
 bitflags::bitflags! {
-    /// The text styles of a piece of screen text.
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
     pub(crate) struct Styles: u8 {
         const STRONG = 1;
@@ -29,14 +24,12 @@ bitflags::bitflags! {
     }
 }
 
-/// Whether the target of a link exists.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LinkTarget {
     Found,
     Missing,
 }
 
-/// What a piece of screen text is in the source.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum TextKind {
     #[default]
@@ -45,7 +38,6 @@ pub(crate) enum TextKind {
     Syntax,
 }
 
-/// The background of a highlight.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Highlight {
     #[default]
@@ -61,13 +53,12 @@ pub(crate) struct Run {
     pub(crate) look: Look,
 }
 
-/// Screen text with its looks, and the map back to its source.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Shown {
     pub(crate) text: String,
-    /// The looks of `text`, in order. Their lengths add up to the length of `text`.
+    /// In order. Their lengths add up to the length of `text`.
     pub(crate) runs: Vec<Run>,
-    /// The file chips in `text`, in order.
+    /// In order.
     pub(crate) chips: Vec<Chip>,
     /// Where an empty text maps to.
     start: usize,
@@ -78,18 +69,16 @@ pub(crate) struct Shown {
 /// [`CHIP_ATOM`], which is not in the source and maps to the start of the link.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Chip {
-    /// The screen text of the chip.
+    /// In screen text.
     pub(crate) range: Range<usize>,
-    /// The link target.
     pub(crate) target: String,
     /// The link text as plain text, with no Markdown escapes.
     pub(crate) name: String,
 }
 
-/// The screen text of a chip. The layout puts a box in its place.
+/// The layout puts a box in its place.
 const CHIP_ATOM: &str = "\u{fffc}";
 
-/// How an embedded file shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Embed {
     /// An image under the line.
@@ -98,15 +87,13 @@ pub(crate) enum Embed {
     Chip,
 }
 
-/// Shows each embedded file as a chip, for tests.
 #[cfg(test)]
 pub(crate) fn plain_chip(_target: &str) -> Embed {
     Embed::Chip
 }
 
-/// An embedded file link on a line that shows as a chip.
 struct ChipLink<'a> {
-    /// The source range of the link.
+    /// In the source.
     range: Range<usize>,
     target: &'a str,
     name: &'a str,
@@ -120,19 +107,17 @@ struct Segment {
     len: usize,
 }
 
-/// One source line as the screen shows it.
 #[derive(Clone, Debug)]
 pub(crate) struct DisplayLine {
     /// The source line without its hidden syntax.
     pub(crate) shown: Shown,
-    /// The heading level, when the line is part of a heading.
     pub(crate) heading: Option<u8>,
-    /// The targets of the embedded images on the line, in order. They show under the line.
+    /// In order. They show under the line.
     pub(crate) images: Vec<String>,
     /// Whether the line shows its syntax.
     pub(crate) raw: bool,
     pub(crate) kind: LineKind,
-    /// The quotes and callouts around the line, from the outside in.
+    /// The quotes and callouts, from the outside in.
     pub(crate) quotes: Vec<Quote>,
     /// How many list items hold the line.
     pub(crate) depth: usize,
@@ -144,21 +129,17 @@ pub(crate) struct DisplayLine {
     source: Range<usize>,
 }
 
-/// What a line is part of, when the screen draws it in its own way.
 #[derive(Clone, Debug)]
 pub(crate) enum LineKind {
     Text,
-    /// A line of a code block.
     Code {
         language: String,
         /// The source of all code lines of the block, without the fences.
         code: Range<usize>,
-        /// Whether the line is a fence.
         fence: bool,
     },
     /// The `> [!note]` line of a callout, which shows the callout name instead.
     CalloutTitle(CalloutKind),
-    /// A table row in the grid.
     Row {
         head: bool,
         /// The source of the whole table.
@@ -171,21 +152,18 @@ pub(crate) enum LineKind {
     Rule,
 }
 
-/// One table cell in the grid.
 #[derive(Clone, Debug)]
 pub(crate) struct Cell {
     pub(crate) shown: Shown,
     pub(crate) alignment: Alignment,
 }
 
-/// A quote around a line.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Quote {
     Plain,
     Callout(CalloutKind),
 }
 
-/// The marker of a list item.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Mark {
     Bullet,
@@ -199,8 +177,7 @@ pub(crate) enum Mark {
 }
 
 impl Model {
-    /// Line `line` as the screen shows it. `embed` tells how an embedded file with a target
-    /// shows.
+    /// `embed` tells how an embedded file with a target shows.
     pub(crate) fn display_line(&self, line: usize, embed: &mut dyn FnMut(&str) -> Embed) -> DisplayLine {
         let source = self.line_range(line);
         let mut images = Vec::new();
@@ -302,7 +279,7 @@ impl Model {
             .collect()
     }
 
-    /// The blocks that hold the source line `line`, from the top level block inward.
+    /// From the top level block inward.
     pub(super) fn blocks_of_line(&self, line: &Range<usize>) -> Vec<&Block> {
         self.chain_at(self.probe(line))
     }
@@ -330,7 +307,7 @@ impl Model {
         first_text.unwrap_or(line.start)
     }
 
-    /// The blocks that hold `offset`, from the top level block inward.
+    /// From the top level block inward.
     pub(super) fn chain_at(&self, offset: usize) -> Vec<&Block> {
         let mut chain = Vec::new();
         let mut blocks = self.body.blocks();
@@ -400,7 +377,6 @@ impl Model {
         }
     }
 
-    /// A table line in the grid: a row with its cells, or the `|---|` line.
     fn table_kind(
         &self,
         line: &Range<usize>,
@@ -618,7 +594,7 @@ impl Shown {
         });
     }
 
-    /// The source offset for a screen offset. Between two visible parts it picks the later one.
+    /// Between two visible parts it picks the later one.
     pub(crate) fn to_source(&self, display: usize) -> usize {
         let Some(ix) = self.segments.partition_point(|s| s.display <= display).checked_sub(1) else {
             return self.start;
@@ -627,7 +603,7 @@ impl Shown {
         segment.source + (display - segment.display).min(segment.len)
     }
 
-    /// The screen offset for a source offset. Hidden source maps to the next visible text.
+    /// Hidden source maps to the next visible text.
     pub(crate) fn to_display(&self, source: usize) -> usize {
         let Some(ix) = self.segments.partition_point(|s| s.source <= source).checked_sub(1) else {
             return 0;
@@ -638,17 +614,15 @@ impl Shown {
 }
 
 impl DisplayLine {
-    /// The source of the line, without its line break.
+    /// Without its line break.
     pub(crate) fn source(&self) -> Range<usize> {
         self.source.clone()
     }
 
-    /// The source offset for a screen offset.
     pub(crate) fn to_source(&self, display: usize) -> usize {
         self.shown.to_source(display)
     }
 
-    /// The screen offset for a source offset.
     pub(crate) fn to_display(&self, source: usize) -> usize {
         self.shown.to_display(source)
     }

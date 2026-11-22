@@ -1,6 +1,3 @@
-//! How the editor shows Markdown elements: the cursor rules of code blocks and tables, task
-//! boxes and file chips.
-
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -19,7 +16,7 @@ fn text(editor: &Entity<Editor>, cx: &VisualTestContext) -> String {
     cx.read(|cx| editor.read(cx).text().to_owned())
 }
 
-/// Clicks at a char column and a pixel height, from the top left of the editor.
+/// From the top left of the editor.
 fn click(cx: &mut VisualTestContext, column: f32, y: Pixels) {
     let x = column_x(cx, column);
     cx.simulate_click(point(x, y), Modifiers::none());
