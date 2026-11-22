@@ -619,14 +619,10 @@ impl CoreDoor {
             }
             self.watch = Self::watch(cx);
         }
-        self.tell_writing(writing, cx);
-    }
-
-    /// Notifies the observers when [`Self::writing`] changed since `before`. It comes after the ends of the jobs, so
-    /// the observers run after the deferred steps of the ends. A step can ask for a new late job, and the observers
-    /// never see the short state between the jobs.
-    fn tell_writing(&self, before: bool, cx: &mut Context<Self>) {
-        if self.writing() != before {
+        // The observers hear of a change of `Self::writing` after the ends of the jobs, so they run after the
+        // deferred steps of the ends. A step can ask for a new late job, and the observers never see the short state
+        // between the jobs.
+        if self.writing() != writing {
             cx.notify();
         }
     }
