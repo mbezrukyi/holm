@@ -122,12 +122,29 @@ struct Delim {
     dead: bool,
 }
 
+/// What a bracket opens: `[` a link, `![` an image.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BracketKind {
+    Link,
+    Image,
+}
+
 struct Bracket {
-    image: bool,
+    kind: BracketKind,
     start: usize,
     active: bool,
     /// How many delimiters stood before it.
     delims: usize,
+}
+
+impl BracketKind {
+    /// The length of the opener in bytes.
+    fn len(self) -> usize {
+        match self {
+            Self::Link => 1,
+            Self::Image => 2,
+        }
+    }
 }
 
 struct Slot {
@@ -194,13 +211,13 @@ impl Parser<'_> {
                 }
                 b'[' => {
                     self.flush(text_start..p);
-                    self.push_bracket(false, p);
+                    self.push_bracket(BracketKind::Link, p);
                     p += 1;
                     text_start = p;
                 }
                 b'!' if b.get(p + 1) == Some(&b'[') => {
                     self.flush(text_start..p);
-                    self.push_bracket(true, p);
+                    self.push_bracket(BracketKind::Image, p);
                     p += 2;
                     text_start = p;
                 }
@@ -293,10 +310,10 @@ impl Parser<'_> {
         self.delims.push(at);
     }
 
-    fn push_bracket(&mut self, image: bool, start: usize) {
+    fn push_bracket(&mut self, kind: BracketKind, start: usize) {
         let delims = self.delims.len();
         let at = self.push(Item::Bracket(Bracket {
-            image,
+            kind,
             start,
             active: true,
             delims,
@@ -358,12 +375,12 @@ impl Parser<'_> {
             self.brackets.pop();
             return None;
         };
-        let (image, start, active, delims) = (bracket.image, bracket.start, bracket.active, bracket.delims);
+        let (bracket_kind, start, active, delims) = (bracket.kind, bracket.start, bracket.active, bracket.delims);
         if !active {
             self.brackets.pop();
             return None;
         }
-        let content = start + if image { 2 } else { 1 }..p;
+        let content = start + bracket_kind.len()..p;
         let Some((end, destination)) = self.link_after(content.clone(), p) else {
             self.brackets.pop();
             return None;
@@ -371,10 +388,9 @@ impl Parser<'_> {
         self.flush(text_start..p);
         self.process_emphasis(delims);
         let children = finish(self.text, self.take_after(at, NONE));
-        let kind = if image {
-            Kind::Image(Box::new(destination))
-        } else {
-            Kind::Link(Box::new(destination))
+        let kind = match bracket_kind {
+            BracketKind::Image => Kind::Image(Box::new(destination)),
+            BracketKind::Link => Kind::Link(Box::new(destination)),
         };
         self.slots[at].item = Item::Node(Node {
             kind,
@@ -383,10 +399,10 @@ impl Parser<'_> {
             children,
         });
         self.brackets.pop();
-        if !image {
+        if bracket_kind == BracketKind::Link {
             for &earlier in &self.brackets {
                 if let Item::Bracket(b) = &mut self.slots[earlier].item
-                    && !b.image
+                    && b.kind == BracketKind::Link
                 {
                     b.active = false;
                 }
@@ -570,8 +586,7 @@ impl Parser<'_> {
                 Item::Node(node) => nodes.push(node),
                 Item::Delim(d) if !d.range.is_empty() => nodes.push(text_node(d.range)),
                 Item::Bracket(b) => {
-                    let len = if b.image { 2 } else { 1 };
-                    nodes.push(text_node(b.start..b.start + len));
+                    nodes.push(text_node(b.start..b.start + b.kind.len()));
                 }
                 Item::Delim(_) | Item::Gone => {}
             }
