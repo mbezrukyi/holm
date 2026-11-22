@@ -96,6 +96,13 @@ pub(crate) struct ShortcutList {
     scroll: ScrollHandle,
 }
 
+/// Which way the list scrolls.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Direction {
+    Up,
+    Down,
+}
+
 impl ShortcutList {
     /// It takes the focus.
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -109,9 +116,12 @@ impl ShortcutList {
     }
 
     /// It stops at the ends.
-    fn scroll_by(&self, down: bool, cx: &mut Context<Self>) {
+    fn scroll_by(&self, direction: Direction, cx: &mut Context<Self>) {
         let offset = self.scroll.offset();
-        let step = if down { -SCROLL_STEP } else { SCROLL_STEP };
+        let step = match direction {
+            Direction::Down => -SCROLL_STEP,
+            Direction::Up => SCROLL_STEP,
+        };
         let y = (offset.y + step).clamp(-self.scroll.max_offset().y, px(0.));
         self.scroll.set_offset(point(offset.x, y));
         cx.notify();
@@ -247,8 +257,8 @@ impl Render for ShortcutList {
             .track_focus(&self.focus)
             .on_action(cx.listener(|list, Run(command): &Run, _, cx| match command {
                 Command::Close => cx.emit(Close),
-                Command::Next => list.scroll_by(true, cx),
-                Command::Previous => list.scroll_by(false, cx),
+                Command::Next => list.scroll_by(Direction::Down, cx),
+                Command::Previous => list.scroll_by(Direction::Up, cx),
                 _ => cx.propagate(),
             }))
             .child(panel)
