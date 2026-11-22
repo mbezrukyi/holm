@@ -1,4 +1,4 @@
-//! The app menu: Settings, Shortcuts, Pin note and Quit, each with its keys.
+//! The app menu: Settings, Shortcuts, Pin note, About Holm and Quit, each with its keys.
 //!
 //! - It opens under the ☰ button of the sidebar head, or at the top-left corner of the window while the sidebar is
 //!   hidden.
@@ -23,7 +23,13 @@ use crate::popup::{self, Cursor, Dropdown};
 use crate::shortcuts::{self, Command, Place, Run};
 use crate::{shortcut_list, text};
 
-const ITEMS: [Command; 4] = [Command::Settings, Command::ShortcutList, Command::Pin, Command::Quit];
+const ITEMS: [Command; 5] = [
+    Command::Settings,
+    Command::ShortcutList,
+    Command::Pin,
+    Command::About,
+    Command::Quit,
+];
 
 const WIDTH: Pixels = px(240.);
 /// The space between the menu and its button, or the window corner.
@@ -168,6 +174,7 @@ impl Render for AppMenu {
                 Command::Settings => text::MENU_SETTINGS,
                 Command::ShortcutList => text::MENU_SHORTCUTS,
                 Command::Pin => text::MENU_PIN,
+                Command::About => text::MENU_ABOUT,
                 _ => text::MENU_QUIT,
             };
             let works = self.works(at);

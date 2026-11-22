@@ -20,6 +20,7 @@ use gpui_kit::{
 use holm_core::model::Note;
 use holm_core::{FolderPath, NotePath, TagName};
 
+use crate::about::{self, About};
 use crate::app_menu::{AppMenu, OpenNote, Picked, Spot};
 use crate::config::{Config, SidebarSettings};
 use crate::core_door::{CoreDoor, Done, JobFailed, NotSaved, Then};
@@ -58,9 +59,10 @@ pub(crate) struct NotesView {
     link_picker: Option<Entity<LinkPicker>>,
     settings: Option<Entity<SettingsDialog>>,
     shortcut_list: Option<Entity<ShortcutList>>,
+    about: Option<Entity<About>>,
     app_menu: Entity<AppMenu>,
-    /// The part that had the focus before quick open, the link picker, the settings or the shortcut list. It gets the
-    /// focus back on `Esc`.
+    /// The part that had the focus before quick open, the link picker, the settings, the shortcut list or About Holm.
+    /// It gets the focus back on `Esc`.
     before_popup: Option<FocusHandle>,
     message_line: Entity<MessageLine>,
     subscriptions: Vec<Subscription>,
@@ -125,6 +127,7 @@ impl NotesView {
             link_picker: None,
             settings: None,
             shortcut_list: None,
+            about: None,
             app_menu,
             before_popup: None,
             message_line,
@@ -399,6 +402,22 @@ impl NotesView {
         cx.notify();
     }
 
+    /// From the app menu.
+    fn open_about(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.before_popup = window.focused(cx);
+        let about = cx.new(|cx| About::new(about::notices_file(), window, cx));
+        self.subscriptions.push(
+            cx.subscribe_in(&about, window, |this, _, _: &about::Close, window, cx| {
+                this.about = None;
+                let before = this.before_popup.take();
+                this.focus_before(before, window, cx);
+                cx.notify();
+            }),
+        );
+        self.about = Some(about);
+        cx.notify();
+    }
+
     /// F10 or the button of the sidebar head. With the sidebar hidden, it opens at the window corner, and the sidebar
     /// stays hidden.
     fn toggle_app_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -625,6 +644,7 @@ impl NotesView {
             || self.link_picker.is_some()
             || self.settings.is_some()
             || self.shortcut_list.is_some()
+            || self.about.is_some()
     }
 
     fn run_key(&mut self, Run(command): &Run, window: &mut Window, cx: &mut Context<Self>) {
@@ -654,6 +674,7 @@ impl NotesView {
             }
             Command::Settings => self.open_settings(window, cx),
             Command::ShortcutList => self.open_shortcut_list(window, cx),
+            Command::About => self.open_about(window, cx),
             Command::AppMenu => self.toggle_app_menu(window, cx),
             Command::ScaleUp => self.step_scale(Size::Bigger, cx),
             Command::ScaleDown => self.step_scale(Size::Smaller, cx),
@@ -763,6 +784,7 @@ impl Render for NotesView {
             .children(self.link_picker.clone())
             .children(self.settings.clone())
             .children(self.shortcut_list.clone())
+            .children(self.about.clone())
             .child(self.app_menu.clone())
     }
 }

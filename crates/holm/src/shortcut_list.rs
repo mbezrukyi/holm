@@ -66,6 +66,7 @@ fn heading(place: Place) -> Option<&'static str> {
         Place::TextField => Some(text::IN_NAME_FIELD),
         Place::Settings => Some(text::IN_SETTINGS),
         Place::ShortcutList => Some(text::IN_SHORTCUT_LIST),
+        Place::About => Some(text::IN_ABOUT),
         Place::Editor(editor::Place::Find) => Some(text::IN_FIND),
         Place::Editor(editor::Place::ColorWindow) => Some(text::IN_COLOR_WINDOW),
         Place::Editor(editor::Place::HexField) => Some(text::IN_HEX_FIELD),

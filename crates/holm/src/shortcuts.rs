@@ -35,6 +35,7 @@ pub(crate) enum Place {
     TextField,
     Settings,
     ShortcutList,
+    About,
     /// Only [`list`] has it.
     Editor(editor::Place),
 }
@@ -57,6 +58,7 @@ impl Place {
             Self::TextField => "TextField",
             Self::Settings => "Settings",
             Self::ShortcutList => "ShortcutList",
+            Self::About => "About",
             Self::Note | Self::Editor(_) => "Editor",
         }
     }
@@ -100,6 +102,7 @@ pub(crate) enum Command {
     Problems,
     Settings,
     ShortcutList,
+    About,
     Quit,
     AppMenu,
     ScaleUp,
@@ -460,6 +463,16 @@ const ROWS: &[Row] = &[
         G::Window,
         text::KEY_CLOSE,
     ),
+    row(P::About, Keys::plain("tab"), C::Next, G::Window, text::KEY_NEXT_LINK),
+    row(
+        P::About,
+        Keys::plain("tab").shift(Shift::Down),
+        C::Previous,
+        G::Window,
+        text::KEY_PREVIOUS_LINK,
+    ),
+    row(P::About, Keys::plain("enter"), C::Pick, G::Window, text::KEY_OPEN_LINK),
+    row(P::About, Keys::plain("escape"), C::Close, G::Window, text::KEY_CLOSE),
 ];
 
 /// Second keys of a row. They work in the place of the first row of their command, and the shortcut list does not show

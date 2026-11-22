@@ -230,6 +230,7 @@ pub(crate) const APP_MENU: &str = "App menu";
 pub(crate) const MENU_SETTINGS: &str = "Settings";
 pub(crate) const MENU_SHORTCUTS: &str = "Shortcuts";
 pub(crate) const MENU_PIN: &str = "Pin note";
+pub(crate) const MENU_ABOUT: &str = "About Holm";
 pub(crate) const MENU_QUIT: &str = "Quit";
 
 pub(crate) const KEY_NEW_NOTE: &str = "New note";
@@ -287,6 +288,20 @@ pub(crate) const KEY_PREVIOUS_OPTION: &str = "Previous option";
 pub(crate) const KEY_SCROLL_DOWN: &str = "Scroll down";
 pub(crate) const KEY_SCROLL_UP: &str = "Scroll up";
 pub(crate) const KEY_CHANGE_FOLDER: &str = "Change the notes folder";
+pub(crate) const KEY_NEXT_LINK: &str = "Next link";
+pub(crate) const KEY_PREVIOUS_LINK: &str = "Previous link";
+pub(crate) const KEY_OPEN_LINK: &str = "Open the link";
+
+pub(crate) const ABOUT: &str = "About Holm";
+pub(crate) fn version(version: &str) -> String {
+    format!("Version {version}")
+}
+pub(crate) const HOLM: &str = "Holm";
+pub(crate) const COPYRIGHT: &str = "© 2026 Mykola Bezrukyi";
+pub(crate) const LICENCE: &str = "Free software under the GNU GPL, version 3 or later.";
+pub(crate) const NO_WARRANTY: &str = "It comes with no warranty.";
+pub(crate) const LICENCE_LINK: &str = "Licence";
+pub(crate) const NOTICES_LINK: &str = "Third-party notices";
 
 pub(crate) const SHORTCUT_LIST: &str = "Shortcuts";
 pub(crate) const GROUP_TEXT: &str = "TEXT";
@@ -305,6 +320,7 @@ pub(crate) const IN_POPUP_LIST: &str = "In a popup list";
 pub(crate) const IN_NAME_FIELD: &str = "In a name field";
 pub(crate) const IN_SETTINGS: &str = "In the settings";
 pub(crate) const IN_SHORTCUT_LIST: &str = "In this list";
+pub(crate) const IN_ABOUT: &str = "In About Holm";
 pub(crate) const IN_FIND: &str = "In find";
 pub(crate) const IN_COLOR_WINDOW: &str = "In the color window";
 pub(crate) const IN_HEX_FIELD: &str = "In the hex field";
