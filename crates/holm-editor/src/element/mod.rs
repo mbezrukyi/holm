@@ -19,7 +19,7 @@ pub(crate) use theme::Theme;
 
 use crate::editor::Focus;
 use crate::ink;
-use crate::model::{LineKind, Mark, Quote, Run, ScreenOffset, ScreenRange, Styles};
+use crate::model::{LineIndex, LineKind, Mark, Quote, Run, ScreenOffset, ScreenRange, Styles};
 use crate::{Editor, TextWidth};
 use flow::{ChipPaint, FlowLine, Icon};
 use layout::SIDE_MARGIN;
@@ -233,7 +233,7 @@ impl gpui_kit::Element for EditorElement {
                 start_height,
                 window,
             );
-            let shows_start = editor.scroll.line == 0;
+            let shows_start = editor.scroll.line == LineIndex::FIRST;
             // Out of sight, the start view still gets drawn, far above the view and clipped. So it keeps the focus and
             // its keys. Its popups stay out of the view too.
             let start_origin = if shows_start {

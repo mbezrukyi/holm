@@ -17,8 +17,8 @@ use super::theme::{Place, Theme};
 use crate::files::{FileKind, LinkedFiles};
 use crate::highlight::{Highlighter, Tokens};
 use crate::model::{
-    Affinity, Cell, Chip, CodeLine, Direction, DisplayLine, Embed, LineKind, Look, Mark, Model, Run, ScreenOffset,
-    Styles, Syntax,
+    Affinity, Cell, Chip, CodeLine, Direction, DisplayLine, Embed, LineIndex, LineKind, Look, Mark, Model, Run,
+    ScreenOffset, Styles, Syntax,
 };
 
 /// Above and below an image.
@@ -46,7 +46,7 @@ fn callout_name(kind: CalloutKind) -> &'static str {
 /// `offset` is how far the top of `line` lies above the view.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Scroll {
-    pub(crate) line: usize,
+    pub(crate) line: LineIndex,
     /// Can be below zero after a scroll up. The next layout fixes it.
     pub(crate) offset: Pixels,
 }
@@ -201,7 +201,7 @@ impl Shaper<'_> {
         self.style.font_size.to_pixels(window.rem_size())
     }
 
-    pub(crate) fn line(&mut self, model: &Model, line: usize, window: &Window) -> LaidLine {
+    pub(crate) fn line(&mut self, model: &Model, line: LineIndex, window: &Window) -> LaidLine {
         let display = model.display_line(line, &mut |target| self.embed(target));
         let base = self.font_size(window);
         let base_height = window.line_height();
@@ -470,7 +470,7 @@ impl Shaper<'_> {
         let pad = font_size;
         // The narrowest and the widest width of each column.
         let mut widths: Vec<(Pixels, Pixels)> = Vec::new();
-        for line in model.line_of(table.start)..=model.line_of(table.end) {
+        for line in model.line_of(table.start).through(model.line_of(table.end)) {
             let display = model.display_line(line, &mut |target| self.embed(target));
             let LineKind::Row { cells, part, .. } = &display.kind else {
                 continue;
@@ -744,7 +744,7 @@ fn to_edge(
     start: Pixels,
     window: &Window,
 ) -> Option<Scroll> {
-    let start_of = |line: usize| if line == 0 { start } else { px(0.) };
+    let start_of = |line: LineIndex| if line == LineIndex::FIRST { start } else { px(0.) };
     let cursor = model.line_of(model.cursor());
     // On line 0 the start view can be cut off while the text still shows. Then nothing moves.
     let text_cut_off = lines.first().is_some_and(|line| line.text_top() < px(0.));
@@ -764,8 +764,10 @@ fn to_edge(
     let laid = shaper.line(model, cursor, window);
     let mut top = view - laid.pad - laid.text_height - start_of(cursor);
     let mut line = cursor;
-    while line > 0 && top > px(0.) {
-        line -= 1;
+    while top > px(0.)
+        && let Some(above) = line.previous()
+    {
+        line = above;
         top -= shaper.line(model, line, window).height + start_of(line);
     }
     Some(Scroll {
@@ -798,7 +800,7 @@ fn to_place(
         return None;
     }
     let line = model.line_of(cursor);
-    let start = if line == 0 { start } else { px(0.) };
+    let start = if line == LineIndex::FIRST { start } else { px(0.) };
     let offset = match reveal {
         Reveal::Middle => {
             let (top, height) = shaper.line(model, line, window).row_of(cursor, affinity);
@@ -821,17 +823,17 @@ fn fill_view(
     start: Pixels,
     window: &Window,
 ) -> Vec<LaidLine> {
-    let last = model.line_count() - 1;
-    let start_of = |line: usize| if line == 0 { start } else { px(0.) };
+    let last = model.last_line();
+    let start_of = |line: LineIndex| if line == LineIndex::FIRST { start } else { px(0.) };
     scroll.line = scroll.line.min(last);
     // The lines that a scroll up passes. The last one is the new scroll line.
     let mut above = Vec::new();
     while scroll.offset < px(0.) {
-        if scroll.line == 0 {
+        let Some(previous) = scroll.line.previous() else {
             scroll.offset = px(0.);
             break;
-        }
-        scroll.line -= 1;
+        };
+        scroll.line = previous;
         let line = shaper.line(model, scroll.line, window);
         scroll.offset += line.height + start_of(scroll.line);
         above.push(line);
@@ -839,7 +841,7 @@ fn fill_view(
 
     let mut lines = Vec::new();
     let mut top = -scroll.offset;
-    for ix in scroll.line..=last {
+    for ix in scroll.line.through(last) {
         top += start_of(ix);
         if top >= view {
             break;
@@ -848,7 +850,7 @@ fn fill_view(
         let bottom = top + line.height;
         if bottom <= px(0.) && ix < last {
             *scroll = Scroll {
-                line: ix + 1,
+                line: ix.next(),
                 offset: -bottom,
             };
         } else {

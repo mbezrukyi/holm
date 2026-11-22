@@ -806,14 +806,14 @@ impl Editor {
         let column = cursor - self.model.line_range(line).start;
         let target = match direction {
             Direction::Down => {
-                if line + 1 == self.model.line_count() {
+                if line == self.model.last_line() {
                     self.model.set_cursor(self.model.end(), selection);
                     return;
                 }
-                line + 1
+                line.next()
             }
             Direction::Up => {
-                let Some(line) = line.checked_sub(1) else {
+                let Some(line) = line.previous() else {
                     self.model.set_cursor(SourceOffset::default(), selection);
                     return;
                 };

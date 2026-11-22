@@ -515,15 +515,19 @@ impl Model {
         self.rope.len_lines(LF)
     }
 
-    pub(crate) fn line_of(&self, offset: SourceOffset) -> usize {
-        self.rope.byte_to_line_idx(offset.min(self.end()).get(), LF)
+    pub(crate) fn last_line(&self) -> LineIndex {
+        LineIndex(self.line_count() - 1)
+    }
+
+    pub(crate) fn line_of(&self, offset: SourceOffset) -> LineIndex {
+        LineIndex(self.rope.byte_to_line_idx(offset.min(self.end()).get(), LF))
     }
 
     /// Without its line break.
-    pub(crate) fn line_range(&self, line: usize) -> Range<SourceOffset> {
-        let start = SourceOffset::new(self.rope.line_to_byte_idx(line, LF));
-        let end = if line + 1 < self.line_count() {
-            SourceOffset::new(self.rope.line_to_byte_idx(line + 1, LF) - 1)
+    pub(crate) fn line_range(&self, line: LineIndex) -> Range<SourceOffset> {
+        let start = SourceOffset::new(self.rope.line_to_byte_idx(line.0, LF));
+        let end = if line < self.last_line() {
+            SourceOffset::new(self.rope.line_to_byte_idx(line.next().0, LF) - 1)
         } else {
             self.end()
         };
@@ -545,6 +549,28 @@ impl Model {
 
     pub(crate) fn utf16_to_offset(&self, utf16: Utf16Offset) -> SourceOffset {
         SourceOffset::new(self.rope.utf16_to_byte_idx(utf16.0.min(self.rope.len_utf16())))
+    }
+}
+
+/// The index of a line of the text.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct LineIndex(usize);
+
+impl LineIndex {
+    pub(crate) const FIRST: Self = Self(0);
+
+    pub(crate) fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
+
+    /// `None` on the first line.
+    pub(crate) fn previous(self) -> Option<Self> {
+        self.0.checked_sub(1).map(Self)
+    }
+
+    /// The lines from this one to `last`, with both.
+    pub(crate) fn through(self, last: Self) -> impl Iterator<Item = Self> {
+        (self.0..=last.0).map(Self)
     }
 }
 
@@ -809,17 +835,17 @@ mod tests {
     fn lines_have_no_line_break() {
         let model = Model::new("one\ntwo\n");
         assert_eq!(model.line_count(), 3);
-        assert_eq!(model.line_range(0), SourceOffset::range(0..3));
-        assert_eq!(model.line_range(1), SourceOffset::range(4..7));
-        assert_eq!(model.line_range(2), SourceOffset::range(8..8));
-        assert_eq!(model.line_of(SourceOffset::new(3)), 0);
-        assert_eq!(model.line_of(SourceOffset::new(4)), 1);
+        assert_eq!(model.line_range(LineIndex(0)), SourceOffset::range(0..3));
+        assert_eq!(model.line_range(LineIndex(1)), SourceOffset::range(4..7));
+        assert_eq!(model.line_range(LineIndex(2)), SourceOffset::range(8..8));
+        assert_eq!(model.line_of(SourceOffset::new(3)), LineIndex(0));
+        assert_eq!(model.line_of(SourceOffset::new(4)), LineIndex(1));
     }
 
     #[test]
     fn syntax_hides_away_from_the_cursor_line() {
         let model = model_at("a **b** c\n\nnext", 12);
-        let line = model.display_line(0, &mut plain_chip);
+        let line = model.display_line(LineIndex(0), &mut plain_chip);
         assert_eq!(line.syntax, Syntax::Hidden);
         assert_eq!(line.shown.text, "a b c");
         assert_eq!(line.shown.runs.len(), 3);
@@ -833,7 +859,7 @@ mod tests {
     #[test]
     fn syntax_shows_on_the_cursor_line() {
         let model = model_at("a **b** c\n\nnext", 1);
-        let line = model.display_line(0, &mut plain_chip);
+        let line = model.display_line(LineIndex(0), &mut plain_chip);
         assert_eq!(line.syntax, Syntax::Shown);
         assert_eq!(line.shown.text, "a **b** c");
         assert_eq!(line.shown.runs[1].look.kind, TextKind::Syntax);
@@ -844,15 +870,15 @@ mod tests {
     fn a_selection_shows_syntax_on_each_line_it_touches() {
         let mut model = Model::new("**a**\n**b**\n**c**");
         model.select(SourceOffset::range(2..8));
-        assert_eq!(model.display_line(0, &mut plain_chip).syntax, Syntax::Shown);
-        assert_eq!(model.display_line(1, &mut plain_chip).syntax, Syntax::Shown);
-        assert_eq!(model.display_line(2, &mut plain_chip).syntax, Syntax::Hidden);
+        assert_eq!(model.display_line(LineIndex(0), &mut plain_chip).syntax, Syntax::Shown);
+        assert_eq!(model.display_line(LineIndex(1), &mut plain_chip).syntax, Syntax::Shown);
+        assert_eq!(model.display_line(LineIndex(2), &mut plain_chip).syntax, Syntax::Hidden);
     }
 
     #[test]
     fn embedded_images_hide_and_are_listed() {
         let model = model_at("top\n\n![cat](cat.png)\n", 0);
-        let line = model.display_line(2, &mut |_| Embed::Image);
+        let line = model.display_line(LineIndex(2), &mut |_| Embed::Image);
         assert_eq!(line.shown.text, "");
         assert_eq!(line.images, ["cat.png"]);
         assert_eq!(line.shown.chips, []);
@@ -863,7 +889,7 @@ mod tests {
     fn an_embedded_file_shows_as_a_chip_in_its_line() {
         let text = "top\n\nSee ![f](docs/report.pdf) now\n";
         let model = model_at(text, 0);
-        let line = model.display_line(2, &mut |_| Embed::Chip);
+        let line = model.display_line(LineIndex(2), &mut |_| Embed::Chip);
         assert_eq!(line.images, [] as [String; 0]);
         let [chip] = line.shown.chips.as_slice() else {
             panic!("one chip");
@@ -885,7 +911,7 @@ mod tests {
     fn the_right_edge_of_a_chip_at_the_end_of_a_line_maps_to_the_end_of_its_link() {
         for text in ["![](a)\nb", "c ![](a\n)"] {
             let model = model_at(text, text.len());
-            let line = model.display_line(0, &mut plain_chip);
+            let line = model.display_line(LineIndex(0), &mut plain_chip);
             let [chip] = line.shown.chips.as_slice() else {
                 panic!("one chip in {text:?}");
             };
@@ -902,7 +928,7 @@ mod tests {
     #[test]
     fn a_line_with_the_cursor_shows_the_chip_as_markdown() {
         let model = model_at("![f](report.pdf)\n", 3);
-        let line = model.display_line(0, &mut plain_chip);
+        let line = model.display_line(LineIndex(0), &mut plain_chip);
         assert_eq!(line.shown.text, "![f](report.pdf)");
         assert_eq!(line.shown.chips, []);
     }
@@ -910,7 +936,7 @@ mod tests {
     #[test]
     fn heading_lines_know_their_level() {
         let model = model_at("x\n\n## Plans\n", 0);
-        let line = model.display_line(2, &mut plain_chip);
+        let line = model.display_line(LineIndex(2), &mut plain_chip);
         assert_eq!(line.heading, Some(2));
         assert_eq!(line.shown.text, "Plans");
     }
@@ -1083,7 +1109,7 @@ mod tests {
         fn screen_lines_map_back_into_their_source(start in text(), at in 0..60usize, image in any::<bool>()) {
             let model = model_at(&start, at);
             let embed = if image { Embed::Image } else { Embed::Chip };
-            for line in 0..model.line_count() {
+            for line in LineIndex::FIRST.through(model.last_line()) {
                 let display = model.display_line(line, &mut |_| embed);
                 let source = display.source();
                 prop_assert_eq!(display.shown.runs.iter().map(|r| r.len).sum::<usize>(), display.shown.text.len());

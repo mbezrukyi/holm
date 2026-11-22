@@ -159,8 +159,8 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::LinkTarget;
     use crate::model::display::plain_chip;
+    use crate::model::{LineIndex, LinkTarget};
 
     fn model(text: &str, selection: Range<usize>) -> Model {
         let mut model = Model::new(text);
@@ -265,7 +265,7 @@ mod tests {
         let mut m = model("[a](holm:X#b) [c](#d) [e](holm:Y)\n\n# d\n", 40..40);
         m.set_broken(HashSet::from([note("X", Some("b"))]));
         let looks: Vec<_> = m
-            .display_line(0, &mut plain_chip)
+            .display_line(LineIndex(0), &mut plain_chip)
             .shown
             .runs
             .iter()

@@ -51,7 +51,8 @@ impl Model {
         let selection = self.selection();
         let first = self.line_of(selection.start);
         let last = self.line_of(selection.end);
-        let lines: Vec<_> = (first..=last)
+        let lines: Vec<_> = first
+            .through(last)
             .map(|line| self.line_range(line))
             .filter(|line| first == last || !line.is_empty())
             .map(|line| {
