@@ -129,6 +129,13 @@ enum BracketKind {
     Image,
 }
 
+/// Which side of a style a delimiter stands on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Side {
+    Opener,
+    Closer,
+}
+
 struct Bracket {
     kind: BracketKind,
     start: usize,
@@ -511,10 +518,10 @@ impl Parser<'_> {
                 children,
             };
             self.insert_after(oi, Item::Node(node));
-            if self.use_chars(oi, n, true) {
+            if self.use_chars(oi, n, Side::Opener) {
                 self.unlink(oi);
             }
-            if self.use_chars(ci, n, false) {
+            if self.use_chars(ci, n, Side::Closer) {
                 self.unlink(ci);
                 pos += 1;
             }
@@ -533,14 +540,13 @@ impl Parser<'_> {
     }
 
     /// Uses `n` chars at the inner end of the delimiter at `at`. Gives whether it is used up.
-    fn use_chars(&mut self, at: usize, n: usize, opener: bool) -> bool {
+    fn use_chars(&mut self, at: usize, n: usize, side: Side) -> bool {
         let Item::Delim(d) = &mut self.slots[at].item else {
             return true;
         };
-        if opener {
-            d.range.end -= n;
-        } else {
-            d.range.start += n;
+        match side {
+            Side::Opener => d.range.end -= n,
+            Side::Closer => d.range.start += n,
         }
         d.dead |= d.range.is_empty();
         d.range.is_empty()
