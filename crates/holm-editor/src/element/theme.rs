@@ -5,7 +5,7 @@ use holm_markdown::{CalloutKind, Color};
 
 use crate::Appearance;
 use crate::highlight::Token;
-use crate::model::{Highlight, Look};
+use crate::model::{Highlight, LinkTarget, Look, Styles, TextKind};
 use crate::palette;
 
 /// The colors of one callout kind.
@@ -165,11 +165,11 @@ impl Theme {
     /// The color of a piece of text. Text in a quote is a bit lighter, and the text of a
     /// checked task is muted.
     pub(crate) fn text_color(&self, look: Look, place: Place) -> Hsla {
-        if look.syntax || look.broken || place.done {
+        if look.kind == TextKind::Syntax || look.link == Some(LinkTarget::Missing) || place.done {
             self.muted
         } else if let Some(color) = look.color {
             self.note_color(color)
-        } else if look.link {
+        } else if look.link.is_some() {
             self.link
         } else if place.quoted {
             self.text.opacity(0.8)
@@ -183,7 +183,7 @@ impl Theme {
         match look.highlight {
             Highlight::Color(color) => Some(self.note_color(color)),
             Highlight::Default => Some(self.highlight),
-            Highlight::None => look.code.then_some(self.code_background),
+            Highlight::None => look.styles.contains(Styles::CODE).then_some(self.code_background),
         }
     }
 

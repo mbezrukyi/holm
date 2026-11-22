@@ -165,6 +165,7 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::LinkTarget;
     use crate::model::display::plain_chip;
 
     fn model(text: &str, selection: Range<usize>) -> Model {
@@ -262,8 +263,8 @@ mod tests {
             .shown
             .runs
             .iter()
-            .filter(|run| run.look.link)
-            .map(|run| run.look.broken)
+            .filter_map(|run| run.look.link)
+            .map(|link| link == LinkTarget::Missing)
             .collect();
         assert_eq!(looks, [true, false, false]);
     }

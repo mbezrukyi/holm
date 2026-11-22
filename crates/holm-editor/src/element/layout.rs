@@ -17,7 +17,7 @@ use super::flow::{ChipBox, FlowLine, Icon};
 use super::theme::{Place, Theme};
 use crate::files::{FileKind, LinkedFiles};
 use crate::highlight::{Highlighter, Tokens};
-use crate::model::{Cell, Chip, DisplayLine, Embed, LineKind, Look, Mark, Model, Run};
+use crate::model::{Cell, Chip, DisplayLine, Embed, LineKind, Look, Mark, Model, Run, Styles};
 
 /// Space above and below an image.
 pub(crate) const IMAGE_MARGIN: Pixels = px(4.);
@@ -420,10 +420,14 @@ impl Shaper<'_> {
                     color,
                     background_color: None,
                     underline: None,
-                    strikethrough: run.look.strikethrough.then_some(StrikethroughStyle {
-                        thickness: px(1.),
-                        color: Some(color),
-                    }),
+                    strikethrough: run
+                        .look
+                        .styles
+                        .contains(Styles::STRIKETHROUGH)
+                        .then_some(StrikethroughStyle {
+                            thickness: px(1.),
+                            color: Some(color),
+                        }),
                 }
             })
             .collect()
@@ -639,13 +643,13 @@ impl Shaper<'_> {
 /// The font of a piece of text with `look` at `place`, from the plain text font `base`.
 pub(crate) fn run_font(base: &Font, look: Look, place: Place) -> Font {
     let mut font = base.clone();
-    if look.strong || place.bold {
+    if look.styles.contains(Styles::STRONG) || place.bold {
         font.weight = FontWeight::BOLD;
     }
-    if look.emphasis {
+    if look.styles.contains(Styles::EMPHASIS) {
         font.style = FontStyle::Italic;
     }
-    if look.code {
+    if look.styles.contains(Styles::CODE) {
         font.family = CODE_FONT.into();
     }
     font

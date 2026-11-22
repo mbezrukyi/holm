@@ -19,7 +19,9 @@ use holm_markdown::{Body, Target};
 use ropey::{LineType, Rope};
 
 pub(crate) use caret::{Caret, GoalRow};
-pub(crate) use display::{Cell, Chip, DisplayLine, Embed, Highlight, LineKind, Look, Mark, Quote, Run};
+pub(crate) use display::{
+    Cell, Chip, DisplayLine, Embed, Highlight, LineKind, LinkTarget, Look, Mark, Quote, Run, Styles, TextKind,
+};
 pub(crate) use format::Format;
 pub(crate) use history::Group;
 use history::{Ends, History, TextChange, UndoStep};
@@ -809,7 +811,7 @@ mod tests {
         assert!(!line.raw);
         assert_eq!(line.shown.text, "a b c");
         assert_eq!(line.shown.runs.len(), 3);
-        assert!(line.shown.runs[1].look.strong);
+        assert!(line.shown.runs[1].look.styles.contains(Styles::STRONG));
         assert_eq!(line.to_source(2), 4);
         assert_eq!(line.to_source(3), 7);
         assert_eq!(line.to_display(4), 2);
@@ -822,7 +824,7 @@ mod tests {
         let line = model.display_line(0, &mut plain_chip);
         assert!(line.raw);
         assert_eq!(line.shown.text, "a **b** c");
-        assert!(line.shown.runs[1].look.syntax);
+        assert_eq!(line.shown.runs[1].look.kind, TextKind::Syntax);
         assert_eq!(line.to_source(5), 5);
     }
 

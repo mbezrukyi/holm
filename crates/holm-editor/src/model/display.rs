@@ -8,20 +8,41 @@ use super::Model;
 
 /// How a piece of screen text looks.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[allow(clippy::struct_excessive_bools)]
 pub(crate) struct Look {
-    pub(crate) strong: bool,
-    pub(crate) emphasis: bool,
-    pub(crate) strikethrough: bool,
-    pub(crate) underline: bool,
-    pub(crate) code: bool,
-    pub(crate) link: bool,
-    /// The text of a link whose target is missing.
-    pub(crate) broken: bool,
-    /// Markdown syntax on a line that shows it.
-    pub(crate) syntax: bool,
+    pub(crate) styles: Styles,
+    /// The target of the link that the text is in.
+    pub(crate) link: Option<LinkTarget>,
+    pub(crate) kind: TextKind,
     pub(crate) color: Option<Color>,
     pub(crate) highlight: Highlight,
+}
+
+bitflags::bitflags! {
+    /// The text styles of a piece of screen text.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub(crate) struct Styles: u8 {
+        const STRONG = 1;
+        const EMPHASIS = 1 << 1;
+        const STRIKETHROUGH = 1 << 2;
+        const UNDERLINE = 1 << 3;
+        const CODE = 1 << 4;
+    }
+}
+
+/// Whether the target of a link exists.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LinkTarget {
+    Found,
+    Missing,
+}
+
+/// What a piece of screen text is in the source.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum TextKind {
+    #[default]
+    Content,
+    /// Markdown syntax on a line that shows it.
+    Syntax,
 }
 
 /// The background of a highlight.
@@ -497,7 +518,7 @@ impl Model {
                 continue;
             }
             let mut look = Look {
-                syntax,
+                kind: if syntax { TextKind::Syntax } else { TextKind::Content },
                 ..Look::default()
             };
             for span in spans
@@ -506,10 +527,12 @@ impl Model {
             {
                 look.add(span.style);
             }
-            if look.link {
-                look.broken = self
+            if look.link.is_some()
+                && self
                     .link_over(&piece, range.start)
-                    .is_some_and(|link| self.is_broken(&link.target));
+                    .is_some_and(|link| self.is_broken(&link.target))
+            {
+                look.link = Some(LinkTarget::Missing);
             }
             shown.push(piece, look, &self.text);
         }
@@ -534,16 +557,16 @@ impl Model {
 impl Look {
     fn add(&mut self, style: Style) {
         match style {
-            Style::Emphasis => self.emphasis = true,
-            Style::Strong => self.strong = true,
-            Style::Strikethrough => self.strikethrough = true,
-            Style::Code => self.code = true,
-            Style::Underline => self.underline = true,
+            Style::Emphasis => self.styles |= Styles::EMPHASIS,
+            Style::Strong => self.styles |= Styles::STRONG,
+            Style::Strikethrough => self.styles |= Styles::STRIKETHROUGH,
+            Style::Code => self.styles |= Styles::CODE,
+            Style::Underline => self.styles |= Styles::UNDERLINE,
             Style::Highlight(color) => {
                 self.highlight = color.map_or(Highlight::Default, Highlight::Color);
             }
             Style::Color(color) => self.color = Some(color),
-            Style::Link => self.link = true,
+            Style::Link => self.link = Some(LinkTarget::Found),
         }
     }
 }
@@ -584,7 +607,7 @@ impl Shown {
         self.runs.push(Run {
             len: CHIP_ATOM.len(),
             look: Look {
-                link: true,
+                link: Some(LinkTarget::Found),
                 ..Look::default()
             },
         });

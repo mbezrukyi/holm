@@ -19,7 +19,7 @@ use theme::Place;
 pub(crate) use theme::Theme;
 
 use crate::ink;
-use crate::model::{LineKind, Mark, Quote, Run};
+use crate::model::{LineKind, Mark, Quote, Run, Styles};
 use crate::{Editor, TextWidth};
 use flow::{ChipPaint, FlowLine, Icon};
 use layout::SIDE_MARGIN;
@@ -554,7 +554,7 @@ fn paint_underlines(
     let mut start = 0;
     for run in runs {
         let end = start + run.len;
-        if !(run.look.underline || run.look.link) {
+        if !(run.look.styles.contains(Styles::UNDERLINE) || run.look.link.is_some()) {
             start = end;
             continue;
         }

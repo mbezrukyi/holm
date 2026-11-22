@@ -7,6 +7,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+bitflags.workspace = true
 fontdb.workspace = true
 gpui-kit.workspace = true
 holm-markdown.workspace = true
