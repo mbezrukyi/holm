@@ -1,0 +1,33 @@
+name: advisories
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  advisories:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+      - run: cargo install --locked "cargo-deny@$(sed -n 's/^cargo_deny_version=//p' scripts/check)"
+      - run: cargo deny --locked check advisories
+
+  toolchain:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: |
+          latest=$(curl -fsSL https://static.rust-lang.org/dist/channel-rust-stable.toml | sed -n '/^\[pkg\.rust\]$/,/^version = /s/^version = "\([0-9.]*\) .*/\1/p')
+          pinned=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          echo "pinned $pinned, newest stable $latest"
+          test -n "$latest" && test -n "$pinned"
+          test "$(printf '%s\n' "$pinned" "$latest" | sort -V | tail -n 1)" = "$pinned"
