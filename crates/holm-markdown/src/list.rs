@@ -207,7 +207,7 @@ fn next(text: &str, body: &Body, selection: Range<usize>) -> Option<Plan> {
         prefix: current.prefix.clone(),
         mark: current.mark,
         number: current.number,
-        first: false,
+        position: Position::Later,
         rel: current.rel,
         gap: gap(&kept)?,
         kept: Src::New(kept),
@@ -357,8 +357,7 @@ struct Item {
     prefix: Range<usize>,
     mark: Mark,
     number: u64,
-    /// Whether the item was the first of its list in the parse.
-    first: bool,
+    position: Position,
     /// The indent of the marker past the content column of the parent.
     rel: usize,
     /// The columns from the end of the marker to the content column.
@@ -368,6 +367,13 @@ struct Item {
     /// Whether the marker line has no text.
     empty: bool,
     parts: Vec<Part>,
+}
+
+/// Where an item stood in its list in the parse.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Position {
+    First,
+    Later,
 }
 
 #[derive(Clone, Debug)]
@@ -548,7 +554,8 @@ impl<'a> Source<'a> {
         let mut built = Vec::with_capacity(items.len());
         for (k, item) in items.iter().enumerate() {
             let end = firsts.get(k + 1).map_or(last, |next| next - 1);
-            built.push(self.item(item, firsts[k]..=end, k == 0, col)?);
+            let position = if k == 0 { Position::First } else { Position::Later };
+            built.push(self.item(item, firsts[k]..=end, position, col)?);
         }
         Some(List {
             mark: built.first()?.mark,
@@ -557,7 +564,13 @@ impl<'a> Source<'a> {
         })
     }
 
-    fn item(&self, block: &Block, lines: std::ops::RangeInclusive<usize>, first: bool, col: usize) -> Option<Item> {
+    fn item(
+        &self,
+        block: &Block,
+        lines: std::ops::RangeInclusive<usize>,
+        position: Position,
+        col: usize,
+    ) -> Option<Item> {
         let (head, last) = (*lines.start(), *lines.end());
         let line = self.lines[head].clone();
         let prefix_end = self.prefix_end(head);
@@ -603,7 +616,7 @@ impl<'a> Source<'a> {
             prefix: line.start..prefix_end,
             mark,
             number,
-            first,
+            position,
             rel,
             gap,
             kept: Src::Old(at + width..line.end),
@@ -853,7 +866,7 @@ fn move_out(tree: &mut Vec<Part>, id: usize) -> Option<()> {
             // A list after the text of its new parent must start at 1 to be a list.
             list.renumber = true;
             if let Some(head) = list.items.first_mut() {
-                head.first = false;
+                head.position = Position::Later;
             }
             item.parts.push(Part::List(list));
         } else {
@@ -1123,7 +1136,7 @@ fn numbers(list: &List) -> impl Iterator<Item = u64> + '_ {
     let start = list
         .items
         .first()
-        .filter(|item| item.first)
+        .filter(|item| item.position == Position::First)
         .map_or(1, |item| item.number);
     list.items
         .iter()
