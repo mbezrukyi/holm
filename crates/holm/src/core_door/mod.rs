@@ -38,8 +38,9 @@ use holm_editor::PastedFile;
 
 use crate::error::AppError;
 use crate::tags::TagChange;
+pub(crate) use draft::DraftVersion;
 use draft::{Draft, DraftSave, Written};
-use write_line::{Ended, Work, WriteLine};
+use write_line::{Ended, JobNumber, Work, WriteLine};
 
 mod draft;
 mod write_line;
@@ -203,7 +204,7 @@ impl CoreDoor {
     }
 
     /// It grows with each new editor text.
-    pub(crate) fn draft_version(&self) -> u64 {
+    pub(crate) fn draft_version(&self) -> DraftVersion {
         self.draft.version()
     }
 
@@ -580,7 +581,7 @@ impl CoreDoor {
         &mut self,
         job: impl FnOnce(&Core) -> holm_core::Result<T> + Send + 'static,
         end: impl FnOnce(&mut Self, holm_core::Result<T>, &mut Context<Self>) + 'static,
-    ) -> u64 {
+    ) -> JobNumber {
         let (send, mut receive) = oneshot::channel();
         let work: Work = Box::new(move |core: &Core| {
             let result = job(core);
@@ -604,7 +605,7 @@ impl CoreDoor {
 
     /// Runs the jobs of the write line. With `until`, it waits on this thread up to the budget, until the job `until`
     /// ends. A job that does not end in time ends later, in its own update.
-    fn run(&mut self, until: Option<u64>, cx: &mut Context<Self>) {
+    fn run(&mut self, until: Option<JobNumber>, cx: &mut Context<Self>) {
         let writing = self.writing();
         let run = self.write_line.run(until, self.budget, cx);
         if let Some(wake) = run.wake {

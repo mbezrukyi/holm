@@ -42,7 +42,7 @@ use holm_editor::{Changed, Editor, UpFromStart};
 
 use crate::backlinks::{Backlinks, OpenBacklink};
 use crate::config::Config;
-use crate::core_door::{CoreDoor, Done, DoorEvent, NotSaved, SaveEvent, Then};
+use crate::core_door::{CoreDoor, Done, DoorEvent, DraftVersion, NotSaved, SaveEvent, Then};
 use crate::error::AppError;
 use crate::link_picker::{LinkChoice, LinkStart};
 use crate::message_line::MessageLine;
@@ -192,7 +192,7 @@ pub(crate) struct NotePane {
     open_heading: Option<String>,
     is_saving_for_close: bool,
     /// The draft version at a close that failed to save. A close at the same version closes, so typed text stops it.
-    close_again: Option<u64>,
+    close_again: Option<DraftVersion>,
     _subscriptions: Vec<Subscription>,
 }
 

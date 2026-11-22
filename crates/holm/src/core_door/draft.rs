@@ -54,10 +54,20 @@ impl NoteText {
     }
 }
 
+/// A count of the bodies the draft took. It grows with each new body.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct DraftVersion(u64);
+
+impl DraftVersion {
+    fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
+}
+
 /// One write of the draft. Its id and version tell the draft which text it wrote.
 pub(super) struct DraftSave {
-    pub(super) id: u64,
-    pub(super) version: u64,
+    pub(super) id: DraftVersion,
+    pub(super) version: DraftVersion,
     pub(super) text: NoteText,
 }
 
@@ -81,11 +91,11 @@ pub(super) enum Written {
 struct Text {
     note: NoteText,
     /// The version at which the draft took the note. The end of a write finds its text by it.
-    id: u64,
+    id: DraftVersion,
     /// The version of the body.
-    version: u64,
+    version: DraftVersion,
     /// The version of the save in the write line, until it ends.
-    writing: Option<u64>,
+    writing: Option<DraftVersion>,
     /// The reason why the last write of the text failed.
     failed: Option<&'static str>,
     /// A disk question holds the text, so it gives no write.
@@ -136,8 +146,7 @@ pub(super) struct Draft {
     left: Vec<Text>,
     /// The texts that a read of their file replaces, until the read ends.
     reading: Vec<Text>,
-    /// It grows with each new body.
-    version: u64,
+    version: DraftVersion,
 }
 
 impl Draft {
@@ -145,7 +154,7 @@ impl Draft {
     /// another note, it gives the write of that text, and the caller puts it in the write line.
     #[must_use = "the write of the old text goes in the write line"]
     pub(super) fn set(&mut self, path: NotePath, body: String) -> Option<DraftSave> {
-        self.version += 1;
+        self.version = self.version.next();
         let version = self.version;
         if let Some(open) = self.open.as_mut().filter(|open| *open.note.path() == path) {
             *open.note.body_mut() = body;
@@ -185,7 +194,7 @@ impl Draft {
 
     /// Takes out the text of the note at `path` for a read of its file, and gives the id of the text. Until
     /// [`Self::read_ended`], the text gives no write and is not unsaved.
-    pub(super) fn drop_for_read(&mut self, path: &NotePath) -> Option<u64> {
+    pub(super) fn drop_for_read(&mut self, path: &NotePath) -> Option<DraftVersion> {
         let text = if self.open.as_ref().is_some_and(|open| open.note.path() == path) {
             self.open.take()
         } else {
@@ -199,7 +208,7 @@ impl Draft {
 
     /// The read for the text `id` ended. A failed read gives the text back, with its hold. When a newer text of the
     /// note came during the read, the newer text stays and takes the hold.
-    pub(super) fn read_ended(&mut self, id: u64, read: &holm_core::Result<Note>) {
+    pub(super) fn read_ended(&mut self, id: DraftVersion, read: &holm_core::Result<Note>) {
         let Some(at) = self.reading.iter().position(|text| text.id == id) else {
             return;
         };
@@ -230,8 +239,8 @@ impl Draft {
         }
     }
 
-    /// It grows with each new body, so a change of the text changes it.
-    pub(super) fn version(&self) -> u64 {
+    /// A change of the text changes it.
+    pub(super) fn version(&self) -> DraftVersion {
         self.version
     }
 
@@ -273,7 +282,12 @@ impl Draft {
 
     /// Takes the end of the write of `version` of the text `id`, with the reason of its `failure`. The text goes only
     /// when this write saved it and no newer body came. A saved left text tells the user only when no other text waits.
-    pub(super) fn written(&mut self, id: u64, version: u64, failure: Option<&'static str>) -> Written {
+    pub(super) fn written(
+        &mut self,
+        id: DraftVersion,
+        version: DraftVersion,
+        failure: Option<&'static str>,
+    ) -> Written {
         let first = !self.failed();
         let is_open = self.open.as_ref().is_some_and(|open| open.id == id);
         let text = if is_open {
@@ -307,7 +321,7 @@ impl Draft {
 
     /// Takes the end of the write of `version` of the text `id`, which the core refused after an outside change. The
     /// text stays, and the draft holds it until [`Self::release`].
-    pub(super) fn refused(&mut self, id: u64, version: u64) -> Written {
+    pub(super) fn refused(&mut self, id: DraftVersion, version: DraftVersion) -> Written {
         let is_open = self.open.as_ref().is_some_and(|open| open.id == id);
         let text = self.left.iter_mut().chain(&mut self.open).find(|text| text.id == id);
         let Some(text) = text else {

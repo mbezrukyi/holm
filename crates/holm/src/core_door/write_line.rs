@@ -42,15 +42,24 @@ impl IntoFuture for Wake {
     }
 }
 
-/// Its number grows with each job.
+/// It grows with each job.
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct JobNumber(u64);
+
+impl JobNumber {
+    fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
+}
+
 struct Job<E> {
-    number: u64,
+    number: JobNumber,
     work: Work,
     end: E,
 }
 
 struct RunningJob<E> {
-    number: u64,
+    number: JobNumber,
     end: E,
     /// It comes when the work ends. It is gone when the drain ran the work.
     done: oneshot::Receiver<()>,
@@ -64,10 +73,10 @@ pub(super) struct WriteLine<E> {
     core: Core,
     changes: ChangeLists,
     jobs: VecDeque<Job<E>>,
-    next_number: u64,
-    last_ended: u64,
+    next_number: JobNumber,
+    last_ended: Option<JobNumber>,
     /// The last job that is past its budget, until it ends.
-    late: Option<u64>,
+    late: Option<JobNumber>,
     /// The work that left the line. Its thread holds the lock while it runs, so the drain waits for it, or runs it
     /// when the thread did not start yet.
     work: Arc<Mutex<Option<Work>>>,
@@ -83,8 +92,8 @@ impl<E> WriteLine<E> {
             core,
             changes,
             jobs: VecDeque::new(),
-            next_number: 1,
-            last_ended: 0,
+            next_number: JobNumber::default(),
+            last_ended: None,
             late: None,
             work: Arc::default(),
             running: None,
@@ -92,9 +101,9 @@ impl<E> WriteLine<E> {
         }
     }
 
-    pub(super) fn push(&mut self, work: Work, end: E) -> u64 {
+    pub(super) fn push(&mut self, work: Work, end: E) -> JobNumber {
         let number = self.next_number;
-        self.next_number += 1;
+        self.next_number = number.next();
         self.jobs.push_back(Job { number, work, end });
         number
     }
@@ -107,7 +116,7 @@ impl<E> WriteLine<E> {
     /// Runs the jobs, one at a time, and gives the jobs that ended. With `until`, it waits on this thread up to
     /// `budget` until the job `until` ended. When the time is up, that job is late until it ends. Without `until`, it
     /// only starts the next job.
-    pub(super) fn run(&mut self, until: Option<u64>, budget: Duration, cx: &App) -> Run<E> {
+    pub(super) fn run(&mut self, until: Option<JobNumber>, budget: Duration, cx: &App) -> Run<E> {
         let deadline = Instant::now() + budget;
         let mut ended = Vec::new();
         loop {
@@ -115,11 +124,11 @@ impl<E> WriteLine<E> {
                 break;
             }
             let wait = until
-                .filter(|until| self.last_ended < *until)
+                .filter(|until| self.last_ended < Some(*until))
                 .map(|_| deadline.saturating_duration_since(Instant::now()));
             let Some(ran) = self.wait(wait, cx) else {
                 if let Some(until) = until
-                    && self.last_ended < until
+                    && self.last_ended < Some(until)
                     && self.late < Some(until)
                 {
                     self.late = Some(until);
@@ -213,8 +222,8 @@ impl<E> WriteLine<E> {
     /// once it ends.
     fn end(&mut self, ran: Result<(), oneshot::Canceled>) -> Option<Ended<E>> {
         let job = self.running.take()?;
-        self.last_ended = job.number;
-        if self.late.is_some_and(|late| late <= self.last_ended) {
+        self.last_ended = Some(job.number);
+        if self.late.is_some_and(|late| late <= job.number) {
             self.late = None;
         }
         ran.ok().map(|()| Ended {
