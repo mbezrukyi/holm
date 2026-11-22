@@ -145,7 +145,7 @@ mod tests {
     use std::time::Instant;
 
     use super::*;
-    use crate::model::Selection;
+    use crate::model::{Selection, Step};
 
     fn model_with(text: &str, selection: Range<usize>) -> Model {
         let mut model = Model::new(text);
@@ -317,7 +317,7 @@ mod tests {
     #[test]
     fn typing_deleting_and_pasting_do_not_count_a_list_again() {
         let mut model = model_with("1. a\n2. b\n3. c", 4..9);
-        model.backspace(false, Instant::now());
+        model.backspace(Step::Char, Instant::now());
         assert_eq!(model.text(), "1. a\n3. c");
         model.insert("\n7. x");
         assert_eq!(model.text(), "1. a\n7. x\n3. c");

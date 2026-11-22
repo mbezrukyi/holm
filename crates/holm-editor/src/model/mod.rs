@@ -43,6 +43,14 @@ pub(crate) struct Model {
 /// A range of the current text and its new text.
 type Edit = (Range<usize>, String);
 
+/// How far Backspace or Delete reaches with no selection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Step {
+    Char,
+    /// To the edge of the word, as a word move goes.
+    Word,
+}
+
 /// For word moves and double clicks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CharKind {
@@ -317,26 +325,24 @@ impl Model {
     }
 
     /// Returns whether the text changed.
-    pub(crate) fn backspace(&mut self, word: bool, now: Instant) -> bool {
+    pub(crate) fn backspace(&mut self, step: Step, now: Instant) -> bool {
         let mut range = self.selection();
         if range.is_empty() {
-            range.start = if word {
-                self.word_left(self.cursor())
-            } else {
-                self.prev_char(self.cursor())
+            range.start = match step {
+                Step::Char => self.prev_char(self.cursor()),
+                Step::Word => self.word_left(self.cursor()),
             };
         }
         self.remove(range, now)
     }
 
     /// Returns whether the text changed.
-    pub(crate) fn delete(&mut self, word: bool, now: Instant) -> bool {
+    pub(crate) fn delete(&mut self, step: Step, now: Instant) -> bool {
         let mut range = self.selection();
         if range.is_empty() {
-            range.end = if word {
-                self.word_right(self.cursor())
-            } else {
-                self.next_char(self.cursor())
+            range.end = match step {
+                Step::Char => self.next_char(self.cursor()),
+                Step::Word => self.word_right(self.cursor()),
             };
         }
         self.remove(range, now)
@@ -616,16 +622,16 @@ mod tests {
     #[test]
     fn backspace_and_delete_remove_whole_chars() {
         let mut model = model_at("aé🙂b", 7);
-        assert!(model.backspace(false, now()));
+        assert!(model.backspace(Step::Char, now()));
         assert_eq!(model.text(), "aéb");
         assert_eq!(model.cursor(), 3);
-        assert!(model.backspace(false, now()));
+        assert!(model.backspace(Step::Char, now()));
         assert_eq!(model.text(), "ab");
-        assert!(model.delete(false, now()));
+        assert!(model.delete(Step::Char, now()));
         assert_eq!(model.text(), "a");
-        assert!(!model.delete(false, now()));
+        assert!(!model.delete(Step::Char, now()));
         model.set_cursor(0, Selection::Collapse);
-        assert!(!model.backspace(false, now()));
+        assert!(!model.backspace(Step::Char, now()));
     }
 
     #[test]
@@ -661,10 +667,10 @@ mod tests {
     #[test]
     fn word_keys_remove_a_word() {
         let mut model = model_at("one two", 7);
-        assert!(model.backspace(true, now()));
+        assert!(model.backspace(Step::Word, now()));
         assert_eq!(model.text(), "one ");
         model.set_cursor(0, Selection::Collapse);
-        assert!(model.delete(true, now()));
+        assert!(model.delete(Step::Word, now()));
         assert_eq!(model.text(), " ");
     }
 
@@ -724,9 +730,9 @@ mod tests {
     fn removals_join_one_undo_step() {
         let start = now();
         let mut model = model_at("abcd", 2);
-        model.backspace(false, start);
-        model.backspace(false, start);
-        model.delete(false, start);
+        model.backspace(Step::Char, start);
+        model.backspace(Step::Char, start);
+        model.delete(Step::Char, start);
         assert_eq!(model.text(), "d");
         model.undo();
         assert_eq!(model.text(), "abcd");
@@ -901,8 +907,8 @@ mod tests {
     enum Op {
         Type(String, u64),
         Insert(String),
-        Backspace(bool),
-        Delete(bool),
+        Backspace(Step),
+        Delete(Step),
         Left(Selection),
         Right(Selection),
         Cursor(usize, Selection),
@@ -927,12 +933,16 @@ mod tests {
         prop_oneof![Just(Selection::Collapse), Just(Selection::Extend)]
     }
 
+    fn step() -> impl Strategy<Value = Step> {
+        prop_oneof![Just(Step::Char), Just(Step::Word)]
+    }
+
     fn op() -> impl Strategy<Value = Op> {
         prop_oneof![
             (text(), 0..1500u64).prop_map(|(text, ms)| Op::Type(text, ms)),
             text().prop_map(Op::Insert),
-            any::<bool>().prop_map(Op::Backspace),
-            any::<bool>().prop_map(Op::Delete),
+            step().prop_map(Op::Backspace),
+            step().prop_map(Op::Delete),
             selection().prop_map(Op::Left),
             selection().prop_map(Op::Right),
             (0..60usize, selection()).prop_map(|(at, selection)| Op::Cursor(at, selection)),
@@ -955,11 +965,11 @@ mod tests {
             Op::Insert(text) => {
                 model.insert(&text);
             }
-            Op::Backspace(word) => {
-                model.backspace(word, *clock);
+            Op::Backspace(step) => {
+                model.backspace(step, *clock);
             }
-            Op::Delete(word) => {
-                model.delete(word, *clock);
+            Op::Delete(step) => {
+                model.delete(step, *clock);
             }
             Op::Left(selection) => model.move_left(selection),
             Op::Right(selection) => model.move_right(selection),

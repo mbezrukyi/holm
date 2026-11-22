@@ -18,7 +18,7 @@ use crate::files::{FileKind, LinkedFiles};
 use crate::find::Find;
 use crate::highlight::{self, Highlighter};
 use crate::ink;
-use crate::model::{Affinity, Caret, Direction, Format, GoalRow, LinkForm, Model, Selection};
+use crate::model::{Affinity, Caret, Direction, Format, GoalRow, LinkForm, Model, Selection, Step};
 use crate::shortcuts::{Command, Place, Run};
 
 /// Spaces that Tab types outside a list.
@@ -571,8 +571,8 @@ impl Editor {
             }
             _ => {
                 let changed = match command {
-                    Command::DeleteWordLeft => self.model.backspace(true, now),
-                    Command::DeleteWordRight => self.model.delete(true, now),
+                    Command::DeleteWordLeft => self.model.backspace(Step::Word, now),
+                    Command::DeleteWordRight => self.model.delete(Step::Word, now),
                     Command::Undo => self.model.undo(),
                     Command::Redo => self.model.redo(),
                     Command::Tasks => self.model.toggle_tasks(),
@@ -690,12 +690,13 @@ impl Editor {
             "pagedown" => self.move_page(Direction::Down, selection),
             "home" => self.move_to_row_edge(Edge::Start, selection),
             "end" => self.move_to_row_edge(Edge::End, selection),
-            "backspace" | "delete" => {
-                let changed = if key == "backspace" {
-                    self.model.backspace(false, now)
-                } else {
-                    self.model.delete(false, now)
-                };
+            "backspace" => {
+                let changed = self.model.backspace(Step::Char, now);
+                self.report_edit(changed, cx);
+                return true;
+            }
+            "delete" => {
+                let changed = self.model.delete(Step::Char, now);
                 self.report_edit(changed, cx);
                 return true;
             }
