@@ -13,6 +13,13 @@ pub(crate) enum Toward {
     Previous,
 }
 
+/// How much of the query [`Find::pop`] removes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Erase {
+    LastChar,
+    All,
+}
+
 pub(crate) struct Find {
     query: String,
     /// Where the search starts: the selection start when find opened.
@@ -36,13 +43,13 @@ impl Find {
         self.query.push_str(text.lines().next().unwrap_or_default());
     }
 
-    /// Removes the last char.
-    pub(crate) fn pop(&mut self) {
-        self.query.pop();
-    }
-
-    pub(crate) fn clear(&mut self) {
-        self.query.clear();
+    pub(crate) fn pop(&mut self, erase: Erase) {
+        match erase {
+            Erase::LastChar => {
+                self.query.pop();
+            }
+            Erase::All => self.query.clear(),
+        }
     }
 
     /// Selects the first match from the origin on.

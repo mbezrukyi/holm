@@ -16,7 +16,7 @@ use holm_markdown::{Color, LinkKind, Target};
 use crate::color::{self, ColorWindow, KeyResult, Paint};
 use crate::element::{Edge, EditorElement, Layout, Reveal, Scroll, Theme};
 use crate::files::{FileKind, LinkedFiles};
-use crate::find::{Find, Toward};
+use crate::find::{Erase, Find, Toward};
 use crate::highlight::{self, Highlighter};
 use crate::ink;
 use crate::model::{Affinity, Caret, Direction, Format, GoalRow, LinkForm, Model, Selection, Step};
@@ -491,11 +491,7 @@ impl Editor {
         if let Some(find) = &mut self.find
             && key == "backspace"
         {
-            if control {
-                find.clear();
-            } else {
-                find.pop();
-            }
+            find.pop(if control { Erase::All } else { Erase::LastChar });
             find.refresh(&mut self.model);
             self.jumped(Reveal::Middle, cx);
             return true;
