@@ -63,3 +63,17 @@ Attach the log, `~/.local/state/holm/holm.log`. It is the log of today, and the 
 
 - After a crash, Holm shows the log path at the next start.
 - For more detail, start Holm with `HOLM_LOG=debug holm` and do the steps again.
+
+## Contributing
+
+Issues are welcome: bugs, ideas and questions. Holm takes no pull requests. Code in an issue is taken as an idea, and the fix is written fresh in Holm.
+
+## How Holm is made
+
+Holm is written with Claude, an AI model by Anthropic. Its author decides what Holm does and how it works, and directs the work.
+
+## Licence
+
+Holm is free software under the GNU General Public License, version 3 or later. See [`LICENSE`](LICENSE).
+
+Each release ships the notices of the third-party code and fonts in Holm, as `THIRD-PARTY-NOTICES.txt` inside the AppImage and on the release page.
