@@ -6,12 +6,8 @@
 use holm_markdown::Color;
 
 const fn hex(value: u32) -> Color {
-    #[allow(clippy::cast_possible_truncation, reason = "each part is one byte")]
-    Color {
-        r: (value >> 16) as u8,
-        g: (value >> 8) as u8,
-        b: value as u8,
-    }
+    let [_, r, g, b] = value.to_be_bytes();
+    Color { r, g, b }
 }
 
 /// The text colors of the color window, for keys 1 to 6.
