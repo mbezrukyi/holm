@@ -33,7 +33,7 @@ impl LinkStart {
     pub(crate) fn new(snapshot: &Snapshot, open_note: NotePath, target: Option<&Target>) -> Self {
         let query = match target {
             Some(Target::Note { id, heading }) => snapshot
-                .note_with_id(&NoteId::from_field(id.clone()))
+                .note_with_id(&NoteId::new(id.clone()))
                 .map(|note| Query::text(Some(&note.title), heading.as_deref()))
                 .unwrap_or_default(),
             Some(Target::Heading(heading)) => Query::text(None, Some(heading)),

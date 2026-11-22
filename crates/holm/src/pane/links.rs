@@ -236,7 +236,7 @@ impl Links {
             }
             Target::Heading(_) | Target::File(_) => return,
         };
-        match self.core_door.read(cx).snapshot().note_with_id(&NoteId::from_field(id)) {
+        match self.core_door.read(cx).snapshot().note_with_id(&NoteId::new(id)) {
             Some(note) => self.open_at(note.path.clone(), heading, cx),
             None => cx.emit(LinksEvent::Error(text::NOTE_GONE)),
         }

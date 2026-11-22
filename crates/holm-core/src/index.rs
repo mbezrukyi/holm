@@ -398,7 +398,7 @@ fn note_info(reader: &mut NoteReader, row: &rusqlite::Row<'_>) -> rusqlite::Resu
     let tags: Option<String> = row.get(6)?;
     Ok(NoteInfo {
         path: note_path(reader, row, 0)?,
-        id: row.get::<_, Option<String>>(1)?.map(NoteId::from_field),
+        id: row.get::<_, Option<String>>(1)?.map(NoteId::new),
         title: row.get(2)?,
         preview: row.get(5)?,
         tags: tags
@@ -427,7 +427,7 @@ fn link(row: &rusqlite::Row<'_>) -> rusqlite::Result<LinkTarget> {
     let text = || -> rusqlite::Result<String> { row.get(1) };
     Ok(match kind.as_str() {
         "note" => LinkTarget::Note {
-            id: NoteId::from_field(text()?),
+            id: NoteId::new(text()?),
             heading: row.get(2)?,
         },
         "heading" => LinkTarget::Heading(text()?),

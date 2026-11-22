@@ -567,7 +567,7 @@ fn note(rel: &NotePath, text: &NoteFile, stamp: Stamp) -> Note {
     Note {
         info: NoteInfo {
             path: rel.clone(),
-            id: text.id().map(NoteId::from_field),
+            id: text.id().map(NoteId::new),
             title: rel.title().into_owned(),
             preview: text.preview(),
             tags: TagName::of_note(text),

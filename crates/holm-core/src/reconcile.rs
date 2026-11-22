@@ -336,7 +336,7 @@ mod tests {
     fn info(at: &str, id: Option<&str>) -> NoteInfo {
         NoteInfo {
             path: path(at),
-            id: id.map(|id| NoteId::from_field(id.to_owned())),
+            id: id.map(|id| NoteId::new(id.to_owned())),
             title: String::new(),
             preview: String::new(),
             tags: Vec::new(),

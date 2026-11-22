@@ -81,7 +81,7 @@ fn note_with_id_finds_the_note_or_none() {
     let found = folder
         .core
         .snapshot()
-        .note_with_id(&NoteId::from_field("01A".to_owned()))
+        .note_with_id(&NoteId::new("01A".to_owned()))
         .cloned()
         .unwrap();
 
@@ -90,7 +90,7 @@ fn note_with_id_finds_the_note_or_none() {
         folder
             .core
             .snapshot()
-            .note_with_id(&NoteId::from_field("01X".to_owned()))
+            .note_with_id(&NoteId::new("01X".to_owned()))
             .cloned(),
         None
     );
@@ -98,7 +98,7 @@ fn note_with_id_finds_the_note_or_none() {
         folder
             .core
             .snapshot()
-            .note_with_id(&NoteId::from_field(String::new()))
+            .note_with_id(&NoteId::new(String::new()))
             .cloned(),
         None
     );

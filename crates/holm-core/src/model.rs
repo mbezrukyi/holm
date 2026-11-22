@@ -14,7 +14,7 @@ impl NoteId {
         Self(ulid::Ulid::generate().to_string())
     }
 
-    pub fn from_field(id: String) -> Self {
+    pub fn new(id: String) -> Self {
         Self(id)
     }
 

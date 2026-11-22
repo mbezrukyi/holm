@@ -103,7 +103,7 @@ fn note_writes_show_in_the_snapshot_after_them() {
     fs::remove_file(folder.path("Plans.md")).unwrap();
     let (_, snapshot) = one_step(core, |core| core.restore(&plans));
     assert_eq!(
-        snapshot.note_with_id(&NoteId::from_field("P".to_owned())).unwrap().path,
+        snapshot.note_with_id(&NoteId::new("P".to_owned())).unwrap().path,
         note_path("Plans.md")
     );
 }

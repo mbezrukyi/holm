@@ -38,7 +38,7 @@ pub(crate) fn links(root: &AbsolutePath, note: &Note) -> Vec<LinkTarget> {
         .iter()
         .map(|link| match &link.target {
             Target::Note { id, heading } => LinkTarget::Note {
-                id: NoteId::from_field(id.clone()),
+                id: NoteId::new(id.clone()),
                 heading: heading.clone(),
             },
             Target::Heading(heading) => LinkTarget::Heading(heading.clone()),
