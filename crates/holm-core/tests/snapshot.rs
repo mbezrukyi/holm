@@ -31,7 +31,7 @@ fn one_step<T>(core: &Core, write: impl FnOnce(&Core) -> Result<T>) -> (T, Snaps
     let before = core.snapshot().revision();
     let result = write(core).unwrap();
     let snapshot = core.snapshot();
-    assert_eq!(snapshot.revision(), before + 1);
+    assert_eq!(snapshot.revision(), before.next());
     (result, snapshot)
 }
 
@@ -152,7 +152,7 @@ fn a_change_through_the_feed_shows_in_the_snapshot() {
     folder.feed(["work"]);
 
     let snapshot = folder.core.snapshot();
-    assert_eq!(snapshot.revision(), before + 1);
+    assert_eq!(snapshot.revision(), before.next());
     assert_eq!(titles(&snapshot), ["a", "b"]);
     assert_eq!(folders(&snapshot), ["work"]);
     assert_eq!(tag_names(&snapshot), ["home"]);

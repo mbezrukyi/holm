@@ -5,7 +5,7 @@ use crate::model::{Link, Note, NoteInfo};
 use crate::nodes::{Node, Nodes};
 use crate::paths::{FolderPath, NotePath};
 use crate::reconcile::Settled;
-use crate::snapshot::Snapshot;
+use crate::snapshot::{Revision, Snapshot};
 use crate::store::{ContentHash, Stamp};
 
 /// Each note of the snapshot has file facts.
@@ -22,16 +22,16 @@ struct File {
     stamp: Stamp,
     hash: ContentHash,
     source: LinkSource,
-    /// The revision of the last outside change that gave the file new content, or 0. A move keeps it, and so does a
-    /// write of Holm.
-    outside: u64,
+    /// The revision of the last outside change that gave the file new content. A move keeps it, and so does a write of
+    /// Holm.
+    outside: Option<Revision>,
 }
 
 /// The facts of one note: what the snapshot shows, its links, its stamp, its content hash and its link source.
 pub(crate) type NoteFacts = (NoteInfo, Vec<Link>, Stamp, ContentHash, LinkSource);
 
 impl Facts {
-    /// With revision 0.
+    /// With the first revision.
     pub(crate) fn new(notes: Vec<NoteFacts>, folders: Vec<FolderPath>) -> Self {
         let mut facts = Self {
             snapshot: Snapshot::new(folders),
@@ -71,18 +71,22 @@ impl Facts {
     }
 
     /// Whether an outside change after revision `seen` gave the file of the note at `path` new content.
-    pub(crate) fn changed_after(&self, path: &NotePath, seen: u64) -> bool {
-        self.files.get(path).is_some_and(|file| file.outside > seen)
+    pub(crate) fn changed_after(&self, path: &NotePath, seen: Revision) -> bool {
+        self.files.get(path).is_some_and(|file| file.outside > Some(seen))
     }
 
-    /// The revision of the last outside change that gave the file of the note at `path` new content, or 0.
-    pub(crate) fn outside(&self, path: &NotePath) -> u64 {
-        self.files.get(path).map_or(0, |file| file.outside)
+    /// The revision of the last outside change that gave the file of the note at `path` new content.
+    pub(crate) fn outside(&self, path: &NotePath) -> Option<Revision> {
+        self.files.get(path).and_then(|file| file.outside)
     }
 
     /// Records that an outside change of `revision` gave each file at `paths` new content. A newer revision that a file
     /// has stays.
-    pub(crate) fn mark_outside<'p>(&mut self, paths: impl IntoIterator<Item = &'p NotePath>, revision: u64) {
+    pub(crate) fn mark_outside<'p>(
+        &mut self,
+        paths: impl IntoIterator<Item = &'p NotePath>,
+        revision: Option<Revision>,
+    ) {
         for path in paths {
             if let Some(file) = self.files.get_mut(path) {
                 file.outside = file.outside.max(revision);

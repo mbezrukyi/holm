@@ -14,7 +14,7 @@ use crate::retag::TagEdit;
 use crate::store::{ContentHash, Stamp, Store};
 use crate::tag::TagName;
 use crate::watch::Batch;
-use crate::{Error, Result};
+use crate::{Error, Result, Revision};
 
 pub(crate) struct Write<'a> {
     disk: &'a mut Disk,
@@ -44,7 +44,7 @@ pub(crate) fn run<T>(
 impl Write<'_> {
     /// With `seen`, it refuses an outside change of the note that revision `seen` does not hold: one that the facts
     /// know, or one on disk that they do not know yet.
-    pub(crate) fn save(&mut self, path: &NotePath, body: &str, seen: Option<u64>) -> Result<Note> {
+    pub(crate) fn save(&mut self, path: &NotePath, body: &str, seen: Option<Revision>) -> Result<Note> {
         let base = match seen {
             Some(seen) if self.next.changed_after(path, seen) => {
                 return Err(Error::Changed {

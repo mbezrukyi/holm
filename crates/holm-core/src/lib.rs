@@ -25,7 +25,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 pub use changes::ChangeLists;
 pub use error::{Error, NameProblem, Result};
 pub use paths::{FolderPath, NotePath};
-pub use snapshot::Snapshot;
+pub use snapshot::{Revision, Snapshot};
 pub use tag::TagName;
 pub use watch::Feed;
 
@@ -188,7 +188,7 @@ impl Core {
     ///
     /// - [`Error::Changed`] when `seen` misses a change from another tool. Nothing is written.
     /// - [`Error::Write`] when the new file can't be written. The old file then stays.
-    pub fn save(&self, path: &NotePath, body: &str, seen: Option<u64>) -> Result<Note> {
+    pub fn save(&self, path: &NotePath, body: &str, seen: Option<Revision>) -> Result<Note> {
         self.inner.write(|write| write.save(path, body, seen))
     }
 

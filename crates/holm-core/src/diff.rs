@@ -61,7 +61,7 @@ impl Touched {
         };
         if source == Source::Outside {
             let revision = after.snapshot().revision();
-            after.mark_outside(&read, revision);
+            after.mark_outside(&read, Some(revision));
         }
         if changes.is_empty() {
             return (after, None);
@@ -173,6 +173,7 @@ mod tests {
     use std::time::SystemTime;
 
     use super::*;
+    use crate::Revision;
     use crate::links::LinkSource;
     use crate::store::{ContentHash, Stamp};
     use crate::tag::TagName;
@@ -261,7 +262,7 @@ mod tests {
 
         let list = list.unwrap();
         assert_eq!(list.source, Source::Outside);
-        assert_eq!(list.snapshot.revision(), before.snapshot().revision() + 1);
+        assert_eq!(list.snapshot.revision(), before.snapshot().revision().next());
         assert_eq!(after.snapshot().revision(), list.snapshot.revision());
         assert_eq!(list.changes, [Change::Added(path("a.md"))]);
     }
@@ -356,9 +357,9 @@ mod tests {
         };
 
         let (same, _) = touched().list(Source::Outside, &before, with_hash("one"));
-        assert!(!same.changed_after(&path("a.md"), 0));
+        assert!(!same.changed_after(&path("a.md"), Revision::default()));
         let (new, _) = touched().list(Source::Outside, &before, with_hash("two"));
-        assert!(new.changed_after(&path("a.md"), 0));
+        assert!(new.changed_after(&path("a.md"), Revision::default()));
     }
 
     #[test]

@@ -14,10 +14,24 @@ use crate::tag::{self, TagName};
 /// It is cheap to clone.
 #[derive(Clone, Debug, Default)]
 pub struct Snapshot {
-    revision: u64,
+    revision: Revision,
     notes: Map<NotePath, Arc<NoteData>>,
     ids: Map<NoteId, NotePath>,
     folders: imbl::OrdSet<FolderPath>,
+}
+
+/// A number that grows with each new snapshot.
+///
+/// Two snapshots with the same revision hold the same facts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Revision(u64);
+
+impl Revision {
+    /// The revision after this one.
+    #[must_use]
+    pub fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
 }
 
 /// The paths come from file names on disk, so the hasher has a random seed.
@@ -38,10 +52,7 @@ struct NoteData {
 }
 
 impl Snapshot {
-    /// A number that grows with each new snapshot.
-    ///
-    /// Two snapshots with the same revision hold the same facts.
-    pub fn revision(&self) -> u64 {
+    pub fn revision(&self) -> Revision {
         self.revision
     }
 
@@ -263,7 +274,7 @@ impl Snapshot {
     }
 
     pub(crate) fn next_revision(mut self) -> Self {
-        self.revision += 1;
+        self.revision = self.revision.next();
         self
     }
 

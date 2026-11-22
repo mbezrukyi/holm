@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use futures_core::Stream;
 
 use holm_core::model::{Change, ChangeList, LinkTarget, NoteId, NoteInfo, NoteSet, Order, Source};
-use holm_core::{ChangeLists, Core, Error, Feed, FolderPath, NotePath};
+use holm_core::{ChangeLists, Core, Error, Feed, FolderPath, NotePath, Revision};
 use tempfile::TempDir;
 
 /// A notes folder with a core that sees changes only through its feed.
@@ -225,7 +225,7 @@ fn each_own_move_comes_as_one_list_with_its_revision() {
     fed.core.rename_tag(&tag_name("gone"), &tag_name("x")).unwrap();
     fed.core.rename_folder(&folder_path("zone"), "zone").unwrap();
 
-    let lists: Vec<(u64, Vec<Change>)> = fed
+    let lists: Vec<(Revision, Vec<Change>)> = fed
         .lists()
         .into_iter()
         .map(|list| (list.snapshot.revision(), list.changes))
@@ -634,7 +634,7 @@ fn a_stream_starts_at_the_revision_after_its_snapshot() {
         let (snapshot, mut changes) = fed.core.follow();
         while !writer.is_finished() {
             if let Some(list) = changes.try_next() {
-                assert_eq!(list.snapshot.revision(), snapshot.revision() + 1);
+                assert_eq!(list.snapshot.revision(), snapshot.revision().next());
                 seen += 1;
                 break;
             }

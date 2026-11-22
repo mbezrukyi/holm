@@ -13,7 +13,7 @@
 //! and it comes back when the read fails.
 
 use holm_core::model::{Change, Note, NoteInfo, Source};
-use holm_core::{Core, NotePath, Snapshot};
+use holm_core::{Core, NotePath, Revision, Snapshot};
 
 /// The editor text of a note, for a write.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,7 +46,7 @@ impl NoteText {
     }
 
     /// With `seen`, the core refuses a save over an outside change after that revision.
-    pub(super) fn write(self, core: &Core, seen: Option<u64>) -> holm_core::Result<()> {
+    pub(super) fn write(self, core: &Core, seen: Option<Revision>) -> holm_core::Result<()> {
         match self {
             Self::Save { path, body } => core.save(&path, &body, seen).map(drop),
             Self::Restore { info, body } => core.restore(&Note { info, body }).map(drop),
