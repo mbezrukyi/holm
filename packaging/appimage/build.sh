@@ -30,6 +30,42 @@ curl -fsSL -o "$out/runtime" \
   "https://github.com/AppImage/type2-runtime/releases/download/$runtime_tag/runtime-x86_64"
 echo "$runtime_sha256  $out/runtime" | sha256sum -c --quiet -
 
+notices="$out/THIRD-PARTY-NOTICES.txt"
+cargo about generate --fail packaging/notices/crates.hbs -o "$out/crates.txt"
+{
+  cat <<EOF
+Third-party notices for Holm $version
+
+Holm is Copyright (C) 2026 Mykola Bezrukyi and licensed under the GNU General Public License,
+version 3 or later; see LICENSE. Its source is https://github.com/mbezrukyi/holm at the tag
+v$version, with the changed copies of gpui-pre and gpui-pre-linux in vendor/.
+
+This file holds the notices of the parts of Holm that others wrote:
+
+1. Rust crates. The source of each is on crates.io at the version named here.
+2. The Inter font.
+3. The AppImage runtime.
+
+================================================================================
+1. Rust crates
+================================================================================
+EOF
+  cat "$out/crates.txt"
+  printf '\n================================================================================\n'
+  printf '2. The Inter font\n'
+  printf '================================================================================\n\n'
+  cat crates/holm/fonts/Inter-LICENSE
+  printf '\n================================================================================\n'
+  printf '3. The AppImage runtime\n'
+  printf '================================================================================\n\n'
+  sed "s/{runtime_tag}/$runtime_tag/g" packaging/notices/appimage-runtime.txt
+} > "$notices"
+rm "$out/crates.txt"
+
+doc="$out/AppDir/usr/share/doc/holm"
+mkdir -p "$doc"
+cp LICENSE "$notices" "$doc/"
+
 # Extract and run, so the build needs no FUSE. libxkbcommon stays out: it reads the keyboard
 # files of the system, and an old copy fails on the files of a newer system.
 APPIMAGE_EXTRACT_AND_RUN=1 LDAI_OUTPUT="$out/$name" LDAI_RUNTIME_FILE="$out/runtime" "$out/linuxdeploy" \
