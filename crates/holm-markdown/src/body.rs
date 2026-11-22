@@ -79,7 +79,7 @@ pub enum BlockKind {
     },
     /// A table row. Its children are [`BlockKind::TableCell`] blocks.
     TableRow {
-        head: bool,
+        part: TablePart,
     },
     /// A table cell. Its range has the spaces around the cell text.
     TableCell,
@@ -94,6 +94,14 @@ pub enum CodeStyle {
     Fenced,
     /// Indented by four spaces, with no fences.
     Indented,
+}
+
+/// The part of a table a row is in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TablePart {
+    /// The first row, above the `|---|` line.
+    Head,
+    Body,
 }
 
 /// The kind of a GitHub callout.
@@ -665,8 +673,8 @@ impl<'a> Walker<'a> {
             Tag::Table(alignments) => Some(BlockKind::Table {
                 alignments: alignments.into_iter().map(alignment).collect(),
             }),
-            Tag::TableHead => Some(BlockKind::TableRow { head: true }),
-            Tag::TableRow => Some(BlockKind::TableRow { head: false }),
+            Tag::TableHead => Some(BlockKind::TableRow { part: TablePart::Head }),
+            Tag::TableRow => Some(BlockKind::TableRow { part: TablePart::Body }),
             Tag::TableCell => Some(BlockKind::TableCell),
             _ => None,
         };

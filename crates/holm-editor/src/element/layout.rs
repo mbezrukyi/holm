@@ -9,7 +9,7 @@ use gpui_kit::{
     Bounds, Font, FontStyle, FontWeight, Pixels, Point, ShapedLine, StrikethroughStyle, TextRun, TextStyle, Window,
     point, px, size,
 };
-use holm_markdown::{Alignment, CalloutKind, TaskState};
+use holm_markdown::{Alignment, CalloutKind, TablePart, TaskState};
 use num_traits::ToPrimitive as _;
 
 use super::flow::{ChipBox, FlowLine, Icon};
@@ -331,9 +331,9 @@ impl Shaper<'_> {
                     window,
                 ))
             }
-            LineKind::Row { head, table, cells } => {
+            LineKind::Row { part, table, cells } => {
                 let columns = self.columns(model, table, width, font_size, window);
-                return self.row(cells, cell_place(*head), &columns, font_size, line_height, window);
+                return self.row(cells, cell_place(*part), &columns, font_size, line_height, window);
             }
             LineKind::Code {
                 language,
@@ -461,11 +461,11 @@ impl Shaper<'_> {
         let mut widths: Vec<(Pixels, Pixels)> = Vec::new();
         for line in model.line_of(table.start)..=model.line_of(table.end) {
             let display = model.display_line(line, &mut |target| self.embed(target));
-            let LineKind::Row { cells, head, .. } = &display.kind else {
+            let LineKind::Row { cells, part, .. } = &display.kind else {
                 continue;
             };
             for (ix, cell) in cells.iter().enumerate() {
-                let runs = self.text_runs(&cell.shown.runs, cell_place(*head));
+                let runs = self.text_runs(&cell.shown.runs, cell_place(*part));
                 let chips = self.chip_boxes(&cell.shown.chips, &runs, font_size, window);
                 let (min, max) = FlowLine::widths(
                     cell.shown.text.clone().into(),
@@ -675,9 +675,9 @@ fn line_place(display: &DisplayLine) -> Place {
 }
 
 /// A head cell is bold.
-fn cell_place(head: bool) -> Place {
+fn cell_place(part: TablePart) -> Place {
     Place {
-        bold: head,
+        bold: part == TablePart::Head,
         ..Place::default()
     }
 }

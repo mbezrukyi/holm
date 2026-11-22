@@ -12,7 +12,7 @@ use gpui_kit::{
     outline, point, px, relative, size,
 };
 
-use holm_markdown::TaskState;
+use holm_markdown::{TablePart, TaskState};
 pub(crate) use layout::{Edge, Layout, Reveal, Scroll};
 use theme::Place;
 pub(crate) use theme::Theme;
@@ -350,13 +350,13 @@ fn paint_blocks(line: &LaidLine, column: Bounds<Pixels>, theme: &Theme, window: 
             ),
             theme.line,
         )),
-        LineKind::Row { head, .. } => {
+        LineKind::Row { part, .. } => {
             let Content::Cells(cells) = &line.content else {
                 return;
             };
             let right = cells.last().map_or(px(0.), |cell| cell.x + cell.width);
             let table = Bounds::new(origin + point(line.left, px(0.)), size(right, line.height));
-            if *head {
+            if *part == TablePart::Head {
                 window.paint_quad(fill(table, theme.panel));
                 window.paint_quad(fill(Bounds::new(table.origin, size(right, px(1.))), theme.line));
             }

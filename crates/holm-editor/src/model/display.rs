@@ -1,6 +1,8 @@
 use std::ops::Range;
 
-use holm_markdown::{Alignment, Block, BlockKind, CalloutKind, CodeStyle, Color, LinkKind, Style, Target, TaskState};
+use holm_markdown::{
+    Alignment, Block, BlockKind, CalloutKind, CodeStyle, Color, LinkKind, Style, TablePart, Target, TaskState,
+};
 
 use super::Model;
 
@@ -147,7 +149,7 @@ pub(crate) enum LineKind {
     /// The `> [!note]` line of a callout, which shows the callout name instead.
     CalloutTitle(CalloutKind),
     Row {
-        head: bool,
+        part: TablePart,
         /// The source of the whole table.
         table: Range<usize>,
         cells: Vec<Cell>,
@@ -417,7 +419,10 @@ impl Model {
             })
             .collect();
         LineKind::Row {
-            head: matches!(row.kind, BlockKind::TableRow { head: true }),
+            part: match row.kind {
+                BlockKind::TableRow { part } => part,
+                _ => TablePart::Body,
+            },
             table: table.range.clone(),
             cells,
         }
@@ -730,10 +735,10 @@ mod tests {
     fn a_table_is_a_grid_until_the_cursor_is_inside() {
         let text = "a\n\n| x | **y** |\n|---|--:|\n| 1 | 2 |\n";
         let away = model_at(text, 0);
-        let LineKind::Row { head, cells, .. } = away.display_line(2, &mut plain_chip).kind else {
+        let LineKind::Row { part, cells, .. } = away.display_line(2, &mut plain_chip).kind else {
             panic!("line 2 is a row");
         };
-        assert!(head);
+        assert_eq!(part, TablePart::Head);
         assert_eq!(cells[0].shown.text, "x");
         assert_eq!(cells[1].shown.text, "y");
         assert_eq!(cells[1].alignment, Alignment::Right);

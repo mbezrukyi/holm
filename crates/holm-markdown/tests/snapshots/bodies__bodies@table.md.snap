@@ -5,13 +5,13 @@ input_file: crates/holm-markdown/tests/bodies/table.md
 ---
 --- blocks ---
 Table { alignments: [Left, Right] } 0..58 "| Name | Size |\n|:-----|-----:|\n| `a`  | **1** |\n| b | 2 |"
-  TableRow { head: true } 0..15 "| Name | Size |"
+  TableRow { part: Head } 0..15 "| Name | Size |"
     TableCell 1..7 " Name "
     TableCell 8..14 " Size "
-  TableRow { head: false } 32..48 "| `a`  | **1** |"
+  TableRow { part: Body } 32..48 "| `a`  | **1** |"
     TableCell 33..39 " `a`  "
     TableCell 40..47 " **1** "
-  TableRow { head: false } 49..58 "| b | 2 |"
+  TableRow { part: Body } 49..58 "| b | 2 |"
     TableCell 50..53 " b "
     TableCell 54..57 " 2 "
 --- spans ---
