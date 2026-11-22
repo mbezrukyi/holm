@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use super::parse::{Defs, parse};
-use super::{Kind, Leaf, Node};
+use super::{Container, Kind, Leaf, Node};
 use super::{html_tag, scan};
 use crate::{BlockKind, Body, Color};
 
@@ -609,7 +609,7 @@ fn write_region(
         action,
         &work.joined,
         at_line_start,
-        work.leaf.is_table_cell(),
+        work.leaf.container(),
     )?;
     trim_edges(&mut pieces);
     let mut wanted: Vec<Piece> = work
@@ -725,7 +725,7 @@ fn act(
     action: Action,
     joined: &str,
     at_line_start: bool,
-    table: bool,
+    container: Container,
 ) -> Option<()> {
     match action {
         Action::Add(look) => add(pieces, outer, look),
@@ -741,7 +741,7 @@ fn act(
             for piece in pieces.iter_mut().filter(|p| p.selected && p.class == Class::Code) {
                 let start = at_line_start && piece.src.start == 0;
                 let code = &joined[piece.inner.clone()];
-                piece.text = Some(escape(code, start, table));
+                piece.text = Some(escape(code, start, container));
                 piece.class = Class::Punct;
             }
         }
@@ -757,7 +757,9 @@ fn act(
                 match piece.class {
                     Class::Code => code.push_str(&joined[piece.inner.clone()]),
                     Class::Html => code.push_str(&joined[piece.src.clone()]),
-                    _ if table => code.push_str(&unescape_but_pipes(&joined[piece.src.clone()])),
+                    _ if container == Container::TableCell => {
+                        code.push_str(&unescape_but_pipes(&joined[piece.src.clone()]));
+                    }
                     _ => code.push_str(&scan::unescape(&joined[piece.src.clone()])),
                 }
             }
@@ -834,11 +836,11 @@ fn fence(code: &str) -> String {
 }
 
 /// Text that shows `code` as it is: each char that Markdown reads as syntax gets a backslash.
-fn escape(code: &str, at_line_start: bool, table: bool) -> String {
+fn escape(code: &str, at_line_start: bool, container: Container) -> String {
     let mut out = String::with_capacity(code.len() + 8);
     let mut chars = code.char_indices().peekable();
     while let Some((i, c)) = chars.next() {
-        if table && c == '\\' && chars.peek().is_some_and(|&(_, n)| n == '|') {
+        if container == Container::TableCell && c == '\\' && chars.peek().is_some_and(|&(_, n)| n == '|') {
             out.push_str("\\|");
             chars.next();
             continue;

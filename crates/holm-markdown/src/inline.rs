@@ -71,7 +71,14 @@ pub struct Leaf {
     /// All lines, when quote markers, an indent or `\r` stand between them. Without a list, the source of the leaf is
     /// its joined text.
     lines: Box<[Line]>,
-    table: bool,
+    container: Container,
+}
+
+/// What holds a leaf. In a table cell, `\|` is a pipe in the text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Container {
+    Block,
+    TableCell,
 }
 
 /// One line of a leaf with a gap between its lines.
@@ -84,7 +91,7 @@ struct Line {
 
 impl Leaf {
     /// The leaf of the text in `segments`. There is at least one segment, and they are in order.
-    pub(crate) fn new(text: &str, segments: &[Range<usize>], table: bool) -> Self {
+    pub(crate) fn new(text: &str, segments: &[Range<usize>], container: Container) -> Self {
         let start = segments.first().map_or(0, |s| s.start);
         let end = segments.last().map_or(start, |s| s.end);
         let one_piece = segments
@@ -105,7 +112,7 @@ impl Leaf {
         Self {
             range: start..end,
             lines: lines.into_boxed_slice(),
-            table,
+            container,
         }
     }
 
@@ -166,8 +173,8 @@ impl Leaf {
         }
     }
 
-    pub(crate) fn is_table_cell(&self) -> bool {
-        self.table
+    pub(crate) fn container(&self) -> Container {
+        self.container
     }
 
     /// The text of the lines joined with `\n`. The parser and the format keys work on it.

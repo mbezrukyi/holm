@@ -8,7 +8,7 @@ use pulldown_cmark::{
 
 pub use link::{Target, escape_text, unescape_text};
 
-use crate::inline::{Defs, Destination, Kind, Leaf, Node, Scratch};
+use crate::inline::{Container, Defs, Destination, Kind, Leaf, Node, Scratch};
 
 const OPTIONS: Options = Options::ENABLE_TABLES
     .union(Options::ENABLE_TASKLISTS)
@@ -510,7 +510,7 @@ struct OpenLeaf {
     depth: usize,
     /// Whether it is the text of a tight list item. Such text has no frame of its own.
     item: bool,
-    table: bool,
+    container: Container,
     heading: Option<usize>,
     first: usize,
     last: usize,
@@ -590,7 +590,7 @@ impl<'a> Walker<'a> {
             self.leaf = Some(OpenLeaf {
                 depth: self.frames.len(),
                 item: true,
-                table: false,
+                container: Container::Block,
                 heading: None,
                 first: range.start,
                 last: range.end,
@@ -646,7 +646,11 @@ impl<'a> Walker<'a> {
             kind,
             Some(BlockKind::Paragraph | BlockKind::Heading { .. } | BlockKind::TableCell)
         );
-        let table = matches!(kind, Some(BlockKind::TableCell));
+        let container = if matches!(kind, Some(BlockKind::TableCell)) {
+            Container::TableCell
+        } else {
+            Container::Block
+        };
         let heading = matches!(kind, Some(BlockKind::Heading { .. }));
         self.frames.push(Frame {
             kind,
@@ -659,7 +663,7 @@ impl<'a> Walker<'a> {
             self.leaf = Some(OpenLeaf {
                 depth: self.frames.len(),
                 item: false,
-                table,
+                container,
                 heading: heading.then(|| self.body.headings.len() - 1),
                 first: usize::MAX,
                 last: 0,
@@ -703,7 +707,7 @@ impl<'a> Walker<'a> {
         if leaf.first < leaf.last {
             self.segments.clear();
             segments(self.text, leaf.first..leaf.last, &mut self.segments);
-            self.parse_leaf(Leaf::new(self.text, &self.segments, leaf.table), leaf.heading);
+            self.parse_leaf(Leaf::new(self.text, &self.segments, leaf.container), leaf.heading);
         }
     }
 
