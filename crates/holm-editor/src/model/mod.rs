@@ -17,7 +17,8 @@ use ropey::{LineType, Rope};
 
 pub(crate) use caret::{Affinity, Caret, Direction, GoalRow, Selection};
 pub(crate) use display::{
-    Cell, Chip, DisplayLine, Embed, Highlight, LineKind, LinkTarget, Look, Mark, Quote, Run, Styles, Syntax, TextKind,
+    Cell, Chip, CodeLine, DisplayLine, Embed, Highlight, LineKind, LinkTarget, Look, Mark, Quote, Run, Styles, Syntax,
+    TextKind,
 };
 pub(crate) use format::Format;
 pub(crate) use history::Group;

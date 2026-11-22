@@ -513,11 +513,17 @@ struct Change {
     /// The old source.
     old: Range<usize>,
     new: String,
-    /// For each piece: its old source in the joined text of the leaf, and its new source in `new`. The flag says
-    /// whether the piece is written as it was.
-    pieces: Vec<(Range<usize>, Range<usize>, bool)>,
+    /// For each piece: its old source in the joined text of the leaf, its new source in `new`, and its text.
+    pieces: Vec<(Range<usize>, Range<usize>, PieceText)>,
     /// The leaf, to map a source offset into its joined text.
     leaf: Leaf,
+}
+
+/// Whether a piece is written as it was.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PieceText {
+    Kept,
+    Rewritten,
 }
 
 fn change(text: &str, body: &Body, selection: &Range<usize>, format: Format) -> Option<Vec<Change>> {
@@ -1206,7 +1212,11 @@ fn source_change(
         .zip(at)
         .map(|(p, at)| {
             // A piece written as it was keeps the offsets inside it.
-            let text = escape == Escape::None && p.text.is_none();
+            let text = if escape == Escape::None && p.text.is_none() {
+                PieceText::Kept
+            } else {
+                PieceText::Rewritten
+            };
             (p.src.clone(), offsets[at.start]..offsets[at.end], text)
         })
         .collect();
@@ -1252,7 +1262,7 @@ fn map_in(change: &Change, pos: usize, end: End) -> usize {
             let Some((old, new, text)) = change.pieces.iter().find(|(old, _, _)| old.end > pos) else {
                 return change.new.len();
             };
-            if *text && old.start <= pos {
+            if *text == PieceText::Kept && old.start <= pos {
                 new.start + (pos - old.start)
             } else {
                 new.start
@@ -1262,7 +1272,7 @@ fn map_in(change: &Change, pos: usize, end: End) -> usize {
             let Some((old, new, text)) = change.pieces.iter().rev().find(|(old, _, _)| old.start < pos) else {
                 return 0;
             };
-            if *text && pos <= old.end {
+            if *text == PieceText::Kept && pos <= old.end {
                 new.start + (pos - old.start)
             } else {
                 new.end

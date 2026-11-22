@@ -17,7 +17,7 @@ use super::theme::{Place, Theme};
 use crate::files::{FileKind, LinkedFiles};
 use crate::highlight::{Highlighter, Tokens};
 use crate::model::{
-    Affinity, Cell, Chip, Direction, DisplayLine, Embed, LineKind, Look, Mark, Model, Run, Styles, Syntax,
+    Affinity, Cell, Chip, CodeLine, Direction, DisplayLine, Embed, LineKind, Look, Mark, Model, Run, Styles, Syntax,
 };
 
 /// Above and below an image.
@@ -253,7 +253,9 @@ impl Shaper<'_> {
             height = bounds.bottom() + IMAGE_MARGIN;
             images.push(LaidImage { path, bounds });
         }
-        if let LineKind::Code { fence: true, .. } = display.kind
+        if let LineKind::Code {
+            line: CodeLine::Fence, ..
+        } = display.kind
             && display.syntax == Syntax::Hidden
         {
             height = base_height * 0.5;
@@ -306,7 +308,9 @@ impl Shaper<'_> {
         let mut code_font = self.style.font();
         code_font.family = CODE_FONT.into();
         let content = match &display.kind {
-            LineKind::Code { fence: true, .. } if display.syntax == Syntax::Hidden => Content::Empty,
+            LineKind::Code {
+                line: CodeLine::Fence, ..
+            } if display.syntax == Syntax::Hidden => Content::Empty,
             LineKind::TableRule => Content::Empty,
             LineKind::Rule => return (Content::Empty, line_height),
             LineKind::CalloutTitle(kind) => {
@@ -338,7 +342,7 @@ impl Shaper<'_> {
             LineKind::Code {
                 language,
                 code,
-                fence: false,
+                line: CodeLine::Code,
             } => {
                 let runs = self.code_runs(model, display, language, code);
                 Content::Text(FlowLine::new(

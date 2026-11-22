@@ -137,6 +137,14 @@ pub(crate) struct DisplayLine {
     source: Range<usize>,
 }
 
+/// Which line of a code block a line is.
+#[derive(Clone, Debug)]
+pub(crate) enum CodeLine {
+    /// An opening or closing fence.
+    Fence,
+    Code,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) enum LineKind {
     Text,
@@ -144,7 +152,7 @@ pub(crate) enum LineKind {
         language: String,
         /// The source of all code lines of the block, without the fences.
         code: Range<usize>,
-        fence: bool,
+        line: CodeLine,
     },
     /// The `> [!note]` line of a callout, which shows the callout name instead.
     CalloutTitle(CalloutKind),
@@ -385,7 +393,11 @@ impl Model {
         LineKind::Code {
             language: language.unwrap_or_default().to_owned(),
             code: start..end,
-            fence: fenced && (line == first || (closed && line == last)),
+            line: if fenced && (line == first || (closed && line == last)) {
+                CodeLine::Fence
+            } else {
+                CodeLine::Code
+            },
         }
     }
 
@@ -709,11 +721,17 @@ mod tests {
         let away = model_at(text, 0);
         let fence = away.display_line(1, &mut plain_chip);
         assert_eq!(fence.syntax, Syntax::Hidden);
-        assert!(matches!(fence.kind, LineKind::Code { fence: true, .. }));
+        assert!(matches!(
+            fence.kind,
+            LineKind::Code {
+                line: CodeLine::Fence,
+                ..
+            }
+        ));
         let LineKind::Code {
             language,
             code,
-            fence: false,
+            line: CodeLine::Code,
         } = away.display_line(2, &mut plain_chip).kind
         else {
             panic!("line 2 is code");
@@ -722,7 +740,10 @@ mod tests {
         assert_eq!(&text[code], "fn x() {}");
         assert!(matches!(
             away.display_line(3, &mut plain_chip).kind,
-            LineKind::Code { fence: true, .. }
+            LineKind::Code {
+                line: CodeLine::Fence,
+                ..
+            }
         ));
 
         let inside = model_at(text, 12);
