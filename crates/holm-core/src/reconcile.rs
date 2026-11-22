@@ -5,7 +5,7 @@ use std::ffi::OsStr;
 
 use crate::facts::Facts;
 use crate::links::LinkSource;
-use crate::model::{Link, LinkTarget, Note, NoteId, NoteInfo};
+use crate::model::{LinkTarget, Note, NoteId, NoteInfo};
 use crate::nodes::{Node, Nodes};
 use crate::paths::NotePath;
 use crate::snapshot::Snapshot;
@@ -23,7 +23,7 @@ pub(crate) struct Plan {
 #[derive(Debug)]
 pub(crate) struct Read {
     pub(crate) note: Note,
-    pub(crate) links: Vec<Link>,
+    pub(crate) links: Vec<LinkTarget>,
     pub(crate) stamp: Stamp,
     pub(crate) hash: ContentHash,
     pub(crate) source: LinkSource,
@@ -54,7 +54,7 @@ pub(crate) struct Settled {
 pub(crate) struct MovedNote {
     pub(crate) from: NotePath,
     pub(crate) info: NoteInfo,
-    pub(crate) links: Vec<Link>,
+    pub(crate) links: Vec<LinkTarget>,
     pub(crate) stamp: Stamp,
     pub(crate) hash: ContentHash,
     pub(crate) source: LinkSource,
@@ -63,7 +63,7 @@ pub(crate) struct MovedNote {
 #[derive(Debug)]
 pub(crate) struct Put {
     pub(crate) note: Note,
-    pub(crate) links: Vec<Link>,
+    pub(crate) links: Vec<LinkTarget>,
     pub(crate) stamp: Stamp,
     pub(crate) hash: ContentHash,
     pub(crate) source: LinkSource,
@@ -101,7 +101,7 @@ pub(crate) fn plan(facts: &Facts, nodes: &Nodes, files: Vec<(NotePath, Stamp)>) 
             .snapshot()
             .links(from)
             .iter()
-            .any(|link| matches!(link.target, LinkTarget::File(_)));
+            .any(|link| matches!(link, LinkTarget::File(_)));
         if !file_link {
             done.insert(from);
             done.insert(to);
@@ -423,9 +423,7 @@ mod tests {
 
     #[test]
     fn a_note_with_a_file_link_is_read_at_its_new_path() {
-        let link = Link {
-            target: LinkTarget::File(FileTarget::Inside(RawPath::new("b.png").unwrap())),
-        };
+        let link = LinkTarget::File(FileTarget::Inside(RawPath::new("b.png").unwrap()));
         let facts = Facts::new(
             vec![(
                 info("a.md", Some("A")),

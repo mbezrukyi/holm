@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::model::{FileTarget, Link, LinkTarget, NoteId, NoteInfo, NoteSet, Order, Tag};
+use crate::model::{FileTarget, LinkTarget, NoteId, NoteInfo, NoteSet, Order, Tag};
 use crate::nodes::Node;
 use crate::paths::{FolderPath, NotePath, RawPath};
 use crate::tag::{self, TagName};
@@ -46,7 +46,7 @@ pub(crate) struct Removal {
 #[derive(Debug, PartialEq, Eq)]
 struct NoteData {
     info: NoteInfo,
-    links: Vec<Link>,
+    links: Vec<LinkTarget>,
 }
 
 impl Snapshot {
@@ -135,7 +135,7 @@ impl Snapshot {
     /// In the order of the text of the note.
     ///
     /// A note that the snapshot does not know has no links.
-    pub fn links(&self, path: &NotePath) -> &[Link] {
+    pub fn links(&self, path: &NotePath) -> &[LinkTarget] {
         self.notes.get(path).map_or(&[], |entry| entry.links.as_slice())
     }
 
@@ -151,7 +151,7 @@ impl Snapshot {
             .values()
             .filter(|entry| {
                 entry.info.path != *path
-                    && entry.links.iter().any(|link| match &link.target {
+                    && entry.links.iter().any(|link| match link {
                         LinkTarget::Note { id: to, .. } => Some(to) == id,
                         LinkTarget::File(FileTarget::Inside(file)) => path.as_ref() == file.as_ref(),
                         LinkTarget::File(FileTarget::Outside(_)) | LinkTarget::Heading(_) | LinkTarget::Web(_) => false,
@@ -171,7 +171,7 @@ impl Snapshot {
         for entry in self.notes.values() {
             let held = node.holds_note(&entry.info.path);
             notes += usize::from(held);
-            let files = entry.links.iter().filter_map(|link| match &link.target {
+            let files = entry.links.iter().filter_map(|link| match link {
                 LinkTarget::File(FileTarget::Inside(file)) => Some(file),
                 LinkTarget::File(FileTarget::Outside(_))
                 | LinkTarget::Note { .. }
@@ -192,7 +192,7 @@ impl Snapshot {
         Removal { notes, files }
     }
 
-    pub(crate) fn note_and_links(&self, path: &NotePath) -> Option<(&NoteInfo, &[Link])> {
+    pub(crate) fn note_and_links(&self, path: &NotePath) -> Option<(&NoteInfo, &[LinkTarget])> {
         self.notes.get(path).map(|entry| (&entry.info, entry.links.as_slice()))
     }
 
@@ -240,7 +240,7 @@ impl Snapshot {
     }
 
     /// Takes out the notes at `removed`, then puts in `put`. So a note can move to a path and keep its id.
-    pub(crate) fn swap(&mut self, removed: Vec<NotePath>, put: impl IntoIterator<Item = (NoteInfo, Vec<Link>)>) {
+    pub(crate) fn swap(&mut self, removed: Vec<NotePath>, put: impl IntoIterator<Item = (NoteInfo, Vec<LinkTarget>)>) {
         for path in removed {
             self.remove(&path);
         }

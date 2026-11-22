@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use holm_core::model::{FileTarget, Link, LinkTarget, NoteId};
+use holm_core::model::{FileTarget, LinkTarget, NoteId};
 use holm_core::{Error, RawPath};
 use holm_core_test::{Folder, folder_path, note_path, tag_name};
 
@@ -12,7 +12,7 @@ fn note(id: &str, body: &str) -> String {
 }
 
 /// The links of `path` in the snapshot. It checks that the index rows and a new index give the same links.
-fn links_everywhere(folder: &mut Folder, path: &str) -> Vec<Link> {
+fn links_everywhere(folder: &mut Folder, path: &str) -> Vec<LinkTarget> {
     let links = folder.core.snapshot().links(&note_path(path)).to_vec();
     folder.reopen();
     assert_eq!(folder.core.snapshot().links(&note_path(path)), links, "index rows");
@@ -22,10 +22,8 @@ fn links_everywhere(folder: &mut Folder, path: &str) -> Vec<Link> {
     links
 }
 
-fn file(path: &str) -> Link {
-    Link {
-        target: LinkTarget::File(FileTarget::Inside(RawPath::new(path).unwrap())),
-    }
+fn file(path: &str) -> LinkTarget {
+    LinkTarget::File(FileTarget::Inside(RawPath::new(path).unwrap()))
 }
 
 #[test]

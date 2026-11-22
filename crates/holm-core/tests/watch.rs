@@ -449,7 +449,7 @@ fn a_renamed_folder_keeps_search_links_and_file_links_of_its_notes() {
     assert_eq!(back(&note_path("job/a.md")), [note_path("b.md")]);
     assert_eq!(back(&note_path("c.md")), [note_path("job/a.md")]);
     assert_eq!(
-        snapshot.links(&note_path("job/pic.md"))[0].target,
+        snapshot.links(&note_path("job/pic.md"))[0],
         LinkTarget::File(FileTarget::Inside(RawPath::new("job/pic.png").unwrap()))
     );
     assert_eq!(

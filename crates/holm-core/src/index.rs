@@ -17,7 +17,7 @@ use rusqlite::{Connection, OptionalExtension as _, params};
 use crate::error::{Error, Result};
 use crate::facts::NoteFacts;
 use crate::links::LinkSource;
-use crate::model::{FileTarget, Link, LinkTarget, Note, NoteId, NoteInfo};
+use crate::model::{FileTarget, LinkTarget, Note, NoteId, NoteInfo};
 use crate::paths::{AbsolutePath, NotePath, NoteReader, RawPath};
 use crate::store::{ContentHash, Stamp, time};
 use crate::tag::TagName;
@@ -78,7 +78,7 @@ pub(crate) struct Index {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct NoteRows<'a> {
     pub(crate) note: &'a Note,
-    pub(crate) links: &'a [Link],
+    pub(crate) links: &'a [LinkTarget],
     pub(crate) stamp: Stamp,
     pub(crate) hash: ContentHash,
     pub(crate) source: LinkSource,
@@ -136,7 +136,7 @@ impl Index {
                 "SELECT kind, target, heading, notes.path FROM links
                 JOIN notes ON notes.key = links.note ORDER BY links.note, pos",
             )?;
-            let mut links: HashMap<NotePath, Vec<Link>> = HashMap::new();
+            let mut links: HashMap<NotePath, Vec<LinkTarget>> = HashMap::new();
             let rows = statement.query_map([], |row| Ok((note_path(&mut reader, row, 3)?, link(row)?)))?;
             for row in rows {
                 let (note, link) = row?;
@@ -352,7 +352,7 @@ fn write(conn: &Connection, row: &NoteRows<'_>) -> Result<(), Fail> {
     Ok(())
 }
 
-fn write_links(conn: &Connection, key: i64, links: &[Link]) -> Result<(), Fail> {
+fn write_links(conn: &Connection, key: i64, links: &[LinkTarget]) -> Result<(), Fail> {
     conn.prepare_cached("DELETE FROM links WHERE note = ?1")?
         .execute([key])?;
     let mut add_link = conn.prepare_cached(
@@ -360,7 +360,7 @@ fn write_links(conn: &Connection, key: i64, links: &[Link]) -> Result<(), Fail> 
         VALUES (?1, ?2, ?3, ?4, ?5)",
     )?;
     for (pos, link) in (0_i64..).zip(links) {
-        let (kind, target, heading) = match &link.target {
+        let (kind, target, heading) = match link {
             LinkTarget::Note { id, heading } => ("note", Value::Text(id.as_str().to_owned()), heading.as_deref()),
             LinkTarget::Heading(heading) => ("heading", Value::Text(heading.clone()), None),
             LinkTarget::File(FileTarget::Inside(file)) => ("file", bytes(file), None),
@@ -422,10 +422,10 @@ fn stamp(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stamp> {
     })
 }
 
-fn link(row: &rusqlite::Row<'_>) -> rusqlite::Result<Link> {
+fn link(row: &rusqlite::Row<'_>) -> rusqlite::Result<LinkTarget> {
     let kind: String = row.get(0)?;
     let text = || -> rusqlite::Result<String> { row.get(1) };
-    let target = match kind.as_str() {
+    Ok(match kind.as_str() {
         "note" => LinkTarget::Note {
             id: NoteId::from_field(text()?),
             heading: row.get(2)?,
@@ -433,8 +433,7 @@ fn link(row: &rusqlite::Row<'_>) -> rusqlite::Result<Link> {
         "heading" => LinkTarget::Heading(text()?),
         "file" => LinkTarget::File(file_target(row, 1)?),
         _ => LinkTarget::Web(text()?),
-    };
-    Ok(Link { target })
+    })
 }
 
 fn bytes(path: impl AsRef<Path>) -> Value {

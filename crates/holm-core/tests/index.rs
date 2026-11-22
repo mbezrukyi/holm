@@ -3,7 +3,7 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt as _;
 
-use holm_core::model::{FileTarget, Link, LinkTarget, NoteInfo, NoteSet, Order, Tag};
+use holm_core::model::{FileTarget, LinkTarget, NoteInfo, NoteSet, Order, Tag};
 use holm_core::{AbsolutePath, Core, NotePath, RawPath};
 use holm_core_test::{Folder, folder_path, note_path, tag_name};
 
@@ -218,7 +218,6 @@ fn links_give_every_link_of_a_note_in_order() {
 ![img](attachments/a.png) [up](../x.pdf) [out](/etc/hosts) [web](https://example.com)
 ";
     let folder = Folder::new(&[("work/a.md", body)]);
-    let link = |target| Link { target };
     let inside = |path: &str| LinkTarget::File(FileTarget::Inside(RawPath::new(path).unwrap()));
     let outside = |path: &str| LinkTarget::File(FileTarget::Outside(AbsolutePath::new(path).unwrap()));
 
@@ -226,7 +225,7 @@ fn links_give_every_link_of_a_note_in_order() {
 
     let notes: Vec<(&str, Option<&str>)> = links[..2]
         .iter()
-        .filter_map(|l| match &l.target {
+        .filter_map(|l| match l {
             LinkTarget::Note { id, heading } => Some((id.as_str(), heading.as_deref())),
             _ => None,
         })
@@ -235,16 +234,16 @@ fn links_give_every_link_of_a_note_in_order() {
     assert_eq!(
         links[2..],
         [
-            link(LinkTarget::Heading("Top".to_owned())),
-            link(inside("work/attachments/a.png")),
-            link(inside("x.pdf")),
-            link(outside("/etc/hosts")),
-            link(LinkTarget::Web("https://example.com".to_owned())),
+            LinkTarget::Heading("Top".to_owned()),
+            inside("work/attachments/a.png"),
+            inside("x.pdf"),
+            outside("/etc/hosts"),
+            LinkTarget::Web("https://example.com".to_owned()),
         ]
     );
     assert_eq!(
         folder.core.snapshot().links(&note_path("missing.md")).to_vec(),
-        Vec::<Link>::new()
+        Vec::<LinkTarget>::new()
     );
 }
 

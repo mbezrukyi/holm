@@ -36,7 +36,7 @@ fn file_links(folder: &Folder, path: &str) -> Vec<FileTarget> {
         .links(&note_path(path))
         .to_vec()
         .into_iter()
-        .filter_map(|link| match link.target {
+        .filter_map(|link| match link {
             LinkTarget::File(file) => Some(file),
             _ => None,
         })

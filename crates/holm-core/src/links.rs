@@ -5,7 +5,7 @@ use std::path::Path;
 
 use holm_markdown::{Body, NoteFile, OffsetRange, SourceOffset, Target};
 
-use crate::model::{FileTarget, Link, LinkTarget, Note, NoteId};
+use crate::model::{FileTarget, LinkTarget, Note, NoteId};
 use crate::{AbsolutePath, FolderPath, LinkPath, NotePath, Result, Snapshot};
 
 /// A hash of what the links of a note come from: its body and its folder. Two notes with the same hash have the same
@@ -31,21 +31,19 @@ impl LinkSource {
     }
 }
 
-pub(crate) fn links(root: &AbsolutePath, note: &Note) -> Vec<Link> {
+pub(crate) fn links(root: &AbsolutePath, note: &Note) -> Vec<LinkTarget> {
     let folder = note.info.path.folder();
     Body::parse(&note.body)
         .links()
         .iter()
-        .map(|link| Link {
-            target: match &link.target {
-                Target::Note { id, heading } => LinkTarget::Note {
-                    id: NoteId::from_field(id.clone()),
-                    heading: heading.clone(),
-                },
-                Target::Heading(heading) => LinkTarget::Heading(heading.clone()),
-                Target::File(file) => LinkTarget::File(resolve(root, folder, file)),
-                Target::Web(address) => LinkTarget::Web(address.clone()),
+        .map(|link| match &link.target {
+            Target::Note { id, heading } => LinkTarget::Note {
+                id: NoteId::from_field(id.clone()),
+                heading: heading.clone(),
             },
+            Target::Heading(heading) => LinkTarget::Heading(heading.clone()),
+            Target::File(file) => LinkTarget::File(resolve(root, folder, file)),
+            Target::Web(address) => LinkTarget::Web(address.clone()),
         })
         .collect()
 }
@@ -68,7 +66,7 @@ pub(crate) fn broken(
     let mut known: HashMap<&NoteId, Option<Vec<String>>> = HashMap::new();
     let mut broken = Vec::new();
     for link in snapshot.links(path) {
-        let LinkTarget::Note { id, heading } = &link.target else {
+        let LinkTarget::Note { id, heading } = link else {
             continue;
         };
         let targets = match known.entry(id) {
@@ -83,8 +81,8 @@ pub(crate) fn broken(
             (Some(_), None) => true,
             (Some(targets), Some(heading)) => targets.contains(heading),
         };
-        if !found && !broken.contains(&link.target) {
-            broken.push(link.target.clone());
+        if !found && !broken.contains(link) {
+            broken.push(link.clone());
         }
     }
     Ok(broken)

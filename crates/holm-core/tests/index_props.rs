@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
 
-use holm_core::model::{Link, NoteInfo, NoteSet, Order, Tag};
+use holm_core::model::{LinkTarget, NoteInfo, NoteSet, Order, Tag};
 use holm_core::{Core, NotePath, TagName};
 use holm_core_test::{Folder, folder_path, tag_name};
 use proptest::prelude::*;
@@ -74,7 +74,7 @@ struct Answers {
     tags: Vec<Tag>,
     with_tag: Vec<Vec<NoteInfo>>,
     search: Vec<Vec<NotePath>>,
-    links: Vec<Vec<Link>>,
+    links: Vec<Vec<LinkTarget>>,
     backlinks: Vec<Vec<NoteInfo>>,
 }
 

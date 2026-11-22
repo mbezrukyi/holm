@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::links::LinkSource;
-use crate::model::{Link, Note, NoteInfo};
+use crate::model::{LinkTarget, Note, NoteInfo};
 use crate::nodes::{Node, Nodes};
 use crate::paths::{FolderPath, NotePath};
 use crate::reconcile::Settled;
@@ -28,7 +28,7 @@ struct File {
 }
 
 /// The facts of one note: what the snapshot shows, its links, its stamp, its content hash and its link source.
-pub(crate) type NoteFacts = (NoteInfo, Vec<Link>, Stamp, ContentHash, LinkSource);
+pub(crate) type NoteFacts = (NoteInfo, Vec<LinkTarget>, Stamp, ContentHash, LinkSource);
 
 impl Facts {
     /// With the first revision.

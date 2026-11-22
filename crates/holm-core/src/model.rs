@@ -119,11 +119,6 @@ impl Tag {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Link {
-    pub target: LinkTarget,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum LinkTarget {
     /// Another note, or a heading in it: `holm:<id>` or `holm:<id>#<heading>`.
     Note {
