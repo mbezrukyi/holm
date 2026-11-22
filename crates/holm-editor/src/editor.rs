@@ -15,7 +15,7 @@ use holm_markdown::{Color, LinkKind, Target};
 use crate::color::{self, ColorWindow, KeyResult, Paint};
 use crate::element::{Edge, EditorElement, Layout, Reveal, Scroll, Theme};
 use crate::files::{FileKind, LinkedFiles};
-use crate::find::Find;
+use crate::find::{Find, Toward};
 use crate::highlight::{self, Highlighter};
 use crate::ink;
 use crate::model::{Affinity, Caret, Direction, Format, GoalRow, LinkForm, Model, Selection, Step};
@@ -660,8 +660,8 @@ impl Editor {
                 self.moved(cx);
                 return true;
             }
-            Command::NextMatch => find.step(false, &mut self.model),
-            Command::PreviousMatch => find.step(true, &mut self.model),
+            Command::NextMatch => find.step(Toward::Next, &mut self.model),
+            Command::PreviousMatch => find.step(Toward::Previous, &mut self.model),
             Command::Paste => {
                 if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
                     find.push(&text);

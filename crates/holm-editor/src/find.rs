@@ -5,6 +5,14 @@ use gpui_kit::{InteractiveElement, IntoElement, MouseButton, ParentElement, Styl
 use crate::element::Theme;
 use crate::model::Model;
 
+/// Which match [`Find::step`] selects.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Toward {
+    Next,
+    /// The match before.
+    Previous,
+}
+
 pub(crate) struct Find {
     query: String,
     /// Where the search starts: the selection start when find opened.
@@ -49,16 +57,15 @@ impl Find {
         self.select(model);
     }
 
-    /// `back` selects the match before. It goes round at the ends.
-    pub(crate) fn step(&mut self, back: bool, model: &mut Model) {
+    /// It goes round at the ends.
+    pub(crate) fn step(&mut self, toward: Toward, model: &mut Model) {
         let count = self.matches.len();
         let Some(current) = self.current.filter(|_| count > 0) else {
             return;
         };
-        self.current = Some(if back {
-            (current + count - 1) % count
-        } else {
-            (current + 1) % count
+        self.current = Some(match toward {
+            Toward::Next => (current + 1) % count,
+            Toward::Previous => (current + count - 1) % count,
         });
         if let Some(found) = self.current.and_then(|ix| self.matches.get(ix)) {
             self.origin = found.start;
