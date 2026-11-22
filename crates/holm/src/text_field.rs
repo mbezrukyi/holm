@@ -18,7 +18,7 @@ use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::{
     App, Bounds, ClipboardItem, ContentMask, Context, Element, ElementId, ElementInputHandler, Entity,
     EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, InspectorElementId,
-    InteractiveElement as _, IntoElement, KeyDownEvent, Keystroke, LayoutId, MouseButton, MouseDownEvent,
+    InteractiveElement as _, IntoElement, KeyDownEvent, Keystroke, LayoutId, Modifiers, MouseButton, MouseDownEvent,
     MouseMoveEvent, ParentElement as _, Pixels, Point, Render, Role, ShapedLine, SharedString,
     StatefulInteractiveElement as _, Style, Styled as _, Subscription, TestSupportExt as _, TextAlign, UTF16Selection,
     Window, div, fill, point, px, size,
@@ -34,6 +34,22 @@ pub(crate) enum FieldEvent {
     Enter,
     Escape,
     Blur,
+}
+
+/// What a caret move does to the selection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Selection {
+    /// The anchor moves with the caret, so nothing stays selected.
+    Collapse,
+    /// The anchor stays, so the selection grows or shrinks.
+    Extend,
+}
+
+impl Selection {
+    /// Shift extends the selection.
+    fn of(modifiers: Modifiers) -> Self {
+        if modifiers.shift { Self::Extend } else { Self::Collapse }
+    }
 }
 
 pub(crate) struct TextField {
@@ -117,9 +133,9 @@ impl TextField {
         self.anchor.min(self.head)..self.anchor.max(self.head)
     }
 
-    fn select(&mut self, to: usize, extend: bool, cx: &mut Context<Self>) {
+    fn select(&mut self, to: usize, selection: Selection, cx: &mut Context<Self>) {
         self.head = to;
-        if !extend {
+        if selection == Selection::Collapse {
             self.anchor = to;
         }
         cx.notify();
@@ -135,7 +151,7 @@ impl TextField {
     fn replace(&mut self, range: Range<usize>, text: &str, cx: &mut Context<Self>) {
         let text = text.replace(['\n', '\r'], " ");
         self.text.replace_range(range.clone(), &text);
-        self.select(range.start + text.len(), false, cx);
+        self.select(range.start + text.len(), Selection::Collapse, cx);
     }
 
     fn previous(&self, at: usize) -> usize {
@@ -184,13 +200,13 @@ impl TextField {
 
     /// A cursor key, Backspace or Delete. It stops the key when the field takes it.
     fn edit_key(&mut self, keystroke: &Keystroke, selection: Range<usize>, cx: &mut Context<Self>) {
-        let shift = keystroke.modifiers.shift;
+        let shift = Selection::of(keystroke.modifiers);
         match (keystroke.modifiers.control, keystroke.key.as_str()) {
-            (false, "left") if !shift && !selection.is_empty() => {
-                self.select(selection.start, false, cx);
+            (false, "left") if shift == Selection::Collapse && !selection.is_empty() => {
+                self.select(selection.start, Selection::Collapse, cx);
             }
-            (false, "right") if !shift && !selection.is_empty() => {
-                self.select(selection.end, false, cx);
+            (false, "right") if shift == Selection::Collapse && !selection.is_empty() => {
+                self.select(selection.end, Selection::Collapse, cx);
             }
             (false, "left") => self.select(self.previous(self.head), shift, cx),
             (false, "right") => self.select(self.next(self.head), shift, cx),
@@ -228,13 +244,13 @@ impl TextField {
         }
         self.selecting = true;
         let at = self.offset_at(event.position);
-        self.select(at, event.modifiers.shift, cx);
+        self.select(at, Selection::of(event.modifiers), cx);
     }
 
     fn mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
         if self.selecting && event.pressed_button == Some(MouseButton::Left) {
             let at = self.offset_at(event.position);
-            self.select(at, true, cx);
+            self.select(at, Selection::Extend, cx);
         }
     }
 
