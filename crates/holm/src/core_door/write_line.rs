@@ -192,9 +192,9 @@ impl<E> WriteLine<E> {
         true
     }
 
-    /// Whether the work of the running job ended, and whether it ran. With `wait`, it waits on this thread up to that
-    /// time. It gives `None` while the work runs.
-    fn wait(&mut self, wait: Option<Duration>, cx: &App) -> Option<bool> {
+    /// Whether the work of the running job ended: `Ok` when it ran, `Canceled` when it never ran. With `wait`, it waits
+    /// on this thread up to that time. It gives `None` while the work runs.
+    fn wait(&mut self, wait: Option<Duration>, cx: &App) -> Option<Result<(), oneshot::Canceled>> {
         let job = self.running.as_mut()?;
         let done = match job.done.try_recv() {
             Ok(None) => match wait {
@@ -206,18 +206,18 @@ impl<E> WriteLine<E> {
             Ok(Some(())) => Ok(()),
             Err(canceled) => Err(canceled),
         };
-        Some(done.is_ok())
+        Some(done)
     }
 
-    /// Ends the running job. When its work `ran`, it gives the job with the lists that wait. A late job is no longer
-    /// late once it ends.
-    fn end(&mut self, ran: bool) -> Option<Ended<E>> {
+    /// Ends the running job. When its work ran, it gives the job with the lists that wait. A late job is no longer late
+    /// once it ends.
+    fn end(&mut self, ran: Result<(), oneshot::Canceled>) -> Option<Ended<E>> {
         let job = self.running.take()?;
         self.last_ended = job.number;
         if self.late.is_some_and(|late| late <= self.last_ended) {
             self.late = None;
         }
-        ran.then(|| Ended {
+        ran.ok().map(|()| Ended {
             end: job.end,
             lists: std::iter::from_fn(|| self.changes.try_next()).collect(),
         })
