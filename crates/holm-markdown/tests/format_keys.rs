@@ -498,7 +498,7 @@ proptest! {
                 selection = sel;
             }
         }
-        prop_assert_eq!(visible(&now), text.clone());
+        prop_assert_eq!(visible(&now), text);
         prop_assert!(Body::parse(&now).spans().is_empty(), "{:?} has styles", now);
     }
 }

@@ -12,7 +12,7 @@ fn key(marked: &str, key: Move) -> String {
     let Some(edit) = relist(&text, &Body::parse(&text), selection, key) else {
         return NO_EDIT.to_owned();
     };
-    let mut new = text.clone();
+    let mut new = text;
     new.replace_range(edit.range, &edit.text);
     mark(&new, &edit.selection)
 }

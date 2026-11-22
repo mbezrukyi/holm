@@ -140,7 +140,6 @@ fn main() -> ExitCode {
             cx.quit();
             return;
         };
-        let times = times.clone();
         cx.spawn(async move |cx| {
             cx.background_executor().timer(Duration::from_secs(1)).await;
             for key in KEYS {

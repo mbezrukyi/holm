@@ -162,7 +162,7 @@ fn save_adds_an_id_on_the_first_write_and_keeps_it() {
 
     let saved = folder.core.save(&note_path("a.md"), "# A\n\nMore.\n", None).unwrap();
 
-    let id = saved.info.id.clone().unwrap();
+    let id = saved.info.id.unwrap();
     assert_eq!(id.as_str().len(), 26, "a ULID");
     assert_eq!(folder.text("a.md"), format!("---\nid: {id}\n---\n# A\n\nMore.\n"));
     assert_eq!(
