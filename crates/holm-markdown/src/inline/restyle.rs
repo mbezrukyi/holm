@@ -602,15 +602,12 @@ fn write_region(
     }
     let region = list[range.start].source.start..list[range.end - 1].source.end;
     let mut pieces = pieces_of(&work.joined, &list[range], &work.selection);
-    let at_line_start = region.start == 0 || work.joined.as_bytes()[region.start - 1] == b'\n';
-    act(
-        &mut pieces,
-        &outer,
-        action,
-        &work.joined,
-        at_line_start,
-        work.leaf.container(),
-    )?;
+    let start = if region.start == 0 || work.joined.as_bytes()[region.start - 1] == b'\n' {
+        Start::LineStart
+    } else {
+        Start::MidLine
+    };
+    act(&mut pieces, &outer, action, &work.joined, start, work.leaf.container())?;
     trim_edges(&mut pieces);
     let mut wanted: Vec<Piece> = work
         .pieces
@@ -718,13 +715,20 @@ fn widen(list: &[Node], mut range: Range<usize>) -> Range<usize> {
     range
 }
 
+/// Where a text starts. At the start of a line, `#`, `-`, `+`, `>`, `|` and `1.` could start a block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Start {
+    LineStart,
+    MidLine,
+}
+
 /// Changes the selected pieces for `action`. `outer` are the styles around all of them.
 fn act(
     pieces: &mut Vec<Piece>,
     outer: &[Mark],
     action: Action,
     joined: &str,
-    at_line_start: bool,
+    start: Start,
     container: Container,
 ) -> Option<()> {
     match action {
@@ -739,7 +743,7 @@ fn act(
         }
         Action::RemoveCode => {
             for piece in pieces.iter_mut().filter(|p| p.selected && p.class == Class::Code) {
-                let start = at_line_start && piece.src.start == 0;
+                let start = if piece.src.start == 0 { start } else { Start::MidLine };
                 let code = &joined[piece.inner.clone()];
                 piece.text = Some(escape(code, start, container));
                 piece.class = Class::Punct;
@@ -836,7 +840,7 @@ fn fence(code: &str) -> String {
 }
 
 /// Text that shows `code` as it is: each char that Markdown reads as syntax gets a backslash.
-fn escape(code: &str, at_line_start: bool, container: Container) -> String {
+fn escape(code: &str, start: Start, container: Container) -> String {
     let mut out = String::with_capacity(code.len() + 8);
     let mut chars = code.char_indices().peekable();
     while let Some((i, c)) = chars.next() {
@@ -845,13 +849,13 @@ fn escape(code: &str, at_line_start: bool, container: Container) -> String {
             chars.next();
             continue;
         }
-        let line_start = i == 0 && at_line_start;
+        let line_start = i == 0 && start == Start::LineStart;
         if "\\`*_~=[]<&!".contains(c) || (line_start && "#-+>|".contains(c)) {
             out.push('\\');
         }
         out.push(c);
     }
-    if at_line_start {
+    if start == Start::LineStart {
         let digits = out.bytes().take_while(u8::is_ascii_digit).count();
         if digits > 0 && matches!(out.as_bytes().get(digits), Some(b'.' | b')')) {
             out.insert(digits, '\\');
