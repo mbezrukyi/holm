@@ -17,7 +17,8 @@ use super::theme::{Place, Theme};
 use crate::files::{FileKind, LinkedFiles};
 use crate::highlight::{Highlighter, Tokens};
 use crate::model::{
-    Affinity, Cell, Chip, CodeLine, Direction, DisplayLine, Embed, LineKind, Look, Mark, Model, Run, Styles, Syntax,
+    Affinity, Cell, Chip, CodeLine, Direction, DisplayLine, Embed, LineKind, Look, Mark, Model, Run, ScreenOffset,
+    Styles, Syntax,
 };
 
 /// Above and below an image.
@@ -625,7 +626,7 @@ impl Shaper<'_> {
         chips
             .iter()
             .map(|chip| {
-                let mut at = 0;
+                let mut at = ScreenOffset::default();
                 let run = runs
                     .iter()
                     .find(|run| {

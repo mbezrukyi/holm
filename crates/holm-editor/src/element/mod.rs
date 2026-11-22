@@ -19,7 +19,7 @@ pub(crate) use theme::Theme;
 
 use crate::editor::Focus;
 use crate::ink;
-use crate::model::{LineKind, Mark, Quote, Run, Styles};
+use crate::model::{LineKind, Mark, Quote, Run, ScreenOffset, ScreenRange, Styles};
 use crate::{Editor, TextWidth};
 use flow::{ChipPaint, FlowLine, Icon};
 use layout::SIDE_MARGIN;
@@ -436,7 +436,7 @@ fn paint_text(
     // and the text keeps some room on its sides.
     let height = (line.font_size * 1.3).min(line_height);
     let side = line.font_size * 0.25;
-    let mut start = 0;
+    let mut start = ScreenOffset::default();
     for run in runs {
         let end = start + run.len;
         if let Some(color) = theme.text_background(run.look) {
@@ -544,7 +544,7 @@ fn paint_underlines(
     let baseline = (line_height - text.ascent() - text.descent()) / 2. + text.ascent();
     let ink_clearance = (line.font_size * 0.07).max(px(1.));
     let content = text.text.as_ref();
-    let mut start = 0;
+    let mut start = ScreenOffset::default();
     for run in runs {
         let end = start + run.len;
         if !(run.look.styles.contains(Styles::UNDERLINE) || run.look.link.is_some()) {
@@ -567,7 +567,7 @@ fn paint_underlines(
         let color = theme.text_color(run.look, place).opacity(0.7);
         // Each screen row of the run: its top, and its parts of line from left to right.
         let mut rows: Vec<(Pixels, Vec<(Pixels, Pixels)>)> = Vec::new();
-        for (at, c) in content[start..end].char_indices() {
+        for (at, c) in content[(start..end).bytes()].char_indices() {
             let at = start + at;
             if text.in_chip(at) {
                 continue;
@@ -613,13 +613,13 @@ fn paint_underlines(
 /// The left x, the top y and the right x of each screen row that the text in `range` takes.
 fn row_spans(
     text: &FlowLine,
-    range: std::ops::Range<usize>,
+    range: std::ops::Range<ScreenOffset>,
     line_height: Pixels,
     font_size: Pixels,
 ) -> Vec<(Pixels, Pixels, Pixels)> {
     let content = text.text.as_ref();
     let mut spans: Vec<(Pixels, Pixels, Pixels)> = Vec::new();
-    for (at, c) in content[range.clone()].char_indices() {
+    for (at, c) in content[range.bytes()].char_indices() {
         let at = range.start + at;
         let Some(mut here) = text.position_for_index(at, line_height) else {
             continue;

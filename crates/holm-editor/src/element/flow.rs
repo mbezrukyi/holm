@@ -4,7 +4,7 @@
 //!
 //! [`LineWrapper`]: gpui_kit::LineWrapper
 
-use std::ops::Range;
+use std::ops::{Add, Range, Sub};
 
 use icu_segmenter::LineSegmenter;
 use icu_segmenter::options::LineBreakOptions;
@@ -13,6 +13,8 @@ use gpui_kit::{
     App, Bounds, Font, IndentAdjustment, LineFragment, LineWrapper, Pixels, Point, ShapedLine, SharedString, Size,
     TextAlign, TextRun, Window, point, px, size,
 };
+
+use crate::model::{ScreenOffset, ScreenRange};
 
 /// The space between the edge of a chip and its content, as a part of the text size.
 const CHIP_PAD: f32 = 0.45;
@@ -38,6 +40,38 @@ const DETAIL_SCALE: f32 = 0.72;
 /// The widest the name in a chip gets, as a part of the text size. A longer name loses chars in the middle.
 const CHIP_NAME_WIDTH: f32 = 18.;
 
+/// A byte offset into the text that the wrapper sees: the screen text with the name of each chip in place of its screen
+/// text, and one byte before and after the name.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+struct WrapOffset(usize);
+
+impl WrapOffset {
+    const fn new(bytes: usize) -> Self {
+        Self(bytes)
+    }
+
+    const fn get(self) -> usize {
+        self.0
+    }
+}
+
+impl Add<usize> for WrapOffset {
+    type Output = Self;
+
+    fn add(self, bytes: usize) -> Self {
+        Self(self.0 + bytes)
+    }
+}
+
+/// The bytes from `other` to `self`.
+impl Sub for WrapOffset {
+    type Output = usize;
+
+    fn sub(self, other: Self) -> usize {
+        self.0 - other.0
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Icon {
     File,
@@ -47,7 +81,7 @@ pub(crate) enum Icon {
 /// It takes the place of its screen text.
 pub(crate) struct ChipBox {
     /// The screen text of the chip.
-    pub(crate) range: Range<usize>,
+    pub(crate) range: Range<ScreenOffset>,
     pub(crate) icon: Icon,
     pub(crate) name: ShapedLine,
     /// A small text after the name, like the file size.
@@ -58,7 +92,7 @@ impl ChipBox {
     /// A chip in place of the screen text `range`. Its name has the look of a run, and gets shorter to fit. Its detail
     /// has the look of a run too, in a smaller font. All sizes grow with `font_size`, so a chip fits in a heading too.
     pub(crate) fn new(
-        range: Range<usize>,
+        range: Range<ScreenOffset>,
         icon: Icon,
         (name, name_run): (&str, &TextRun),
         detail: Option<(String, &TextRun)>,
@@ -124,15 +158,15 @@ pub(crate) struct FlowLine {
 
 struct Row {
     /// The screen text of the row. The end of a row is also the start of the next row.
-    range: Range<usize>,
+    range: Range<ScreenOffset>,
     pieces: Vec<Piece>,
     width: Pixels,
 }
 
 enum Piece {
     Text {
-        /// The screen offset of the start of `line`.
-        start: usize,
+        /// Where `line` starts.
+        start: ScreenOffset,
         x: Pixels,
         line: ShapedLine,
     },
@@ -170,7 +204,7 @@ pub(crate) struct ChipPaint<'a> {
 
 enum WrapSegment {
     Text {
-        display: Range<usize>,
+        display: Range<ScreenOffset>,
         line: Box<ShapedLine>,
     },
     /// The part of a chip before its name.
@@ -257,7 +291,9 @@ impl FlowLine {
             if end <= start {
                 continue;
             }
-            let piece = flow.measure(&segments, start..end).max(summed[end] - summed[start]);
+            let piece = flow
+                .measure(&segments, WrapOffset::new(start)..WrapOffset::new(end))
+                .max(summed[end] - summed[start]);
             narrowest = narrowest.max(piece);
             start = end;
         }
@@ -275,16 +311,18 @@ impl FlowLine {
         window: &Window,
     ) -> (Self, Vec<WrapSegment>) {
         let text_system = window.text_system();
-        let shape = |range: Range<usize>| {
+        let shape = |range: Range<ScreenOffset>| {
+            let bytes = range.bytes();
             text_system.shape_line(
-                SharedString::from(text[range.clone()].to_owned()),
+                SharedString::from(text[bytes.clone()].to_owned()),
                 font_size,
-                &slice_runs(runs, &range),
+                &slice_runs(runs, &bytes),
                 None,
             )
         };
+        let end = ScreenOffset::new(text.len());
         let mut segments = Vec::new();
-        let mut at = 0;
+        let mut at = ScreenOffset::default();
         for (ix, chip) in chips.iter().enumerate() {
             if at < chip.range.start {
                 segments.push(WrapSegment::Text {
@@ -295,10 +333,10 @@ impl FlowLine {
             segments.extend([WrapSegment::Lead(ix), WrapSegment::Name(ix), WrapSegment::Tail(ix)]);
             at = chip.range.end;
         }
-        if at < text.len() {
+        if at < end {
             segments.push(WrapSegment::Text {
-                display: at..text.len(),
-                line: Box::new(shape(at..text.len())),
+                display: at..end,
+                line: Box::new(shape(at..end)),
             });
         }
 
@@ -356,7 +394,7 @@ impl FlowLine {
     /// The length of `segment` for the wrapper. A part of a chip without text counts as one byte.
     fn segment_len(&self, segment: &WrapSegment) -> usize {
         match segment {
-            WrapSegment::Text { display, .. } => display.len(),
+            WrapSegment::Text { display, .. } => display.end - display.start,
             WrapSegment::Lead(_) | WrapSegment::Tail(_) => 1,
             WrapSegment::Name(chip) => self.chips[*chip].name.len(),
         }
@@ -367,7 +405,7 @@ impl FlowLine {
         segments
             .iter()
             .map(|segment| match segment {
-                WrapSegment::Text { display, .. } => LineFragment::text(&self.text[display.clone()]),
+                WrapSegment::Text { display, .. } => LineFragment::text(&self.text[display.bytes()]),
                 WrapSegment::Lead(_) => LineFragment::element(self.lead_width(ChipEnd::ThisRow), 1),
                 WrapSegment::Name(chip) => LineFragment::text(&self.chips[*chip].name.text),
                 WrapSegment::Tail(chip) => LineFragment::element(self.tail_width(*chip, ChipEnd::ThisRow), 1),
@@ -379,17 +417,17 @@ impl FlowLine {
     ///
     /// The wrapper adds the width of each char and does not see kerning or other fonts, so each row is checked against
     /// its shaped width, as gpui-base does it.
-    fn wrap(&self, segments: &[WrapSegment], wrapper: &mut LineWrapper, wrap_width: Pixels) -> Vec<usize> {
-        let total: usize = segments.iter().map(|segment| self.segment_len(segment)).sum();
+    fn wrap(&self, segments: &[WrapSegment], wrapper: &mut LineWrapper, wrap_width: Pixels) -> Vec<WrapOffset> {
+        let total = WrapOffset::new(segments.iter().map(|segment| self.segment_len(segment)).sum());
         let fragments = self.fragments(segments);
-        let width = |range: Range<usize>| self.measure(segments, range);
-        let mut cuts = vec![0];
-        let mut start = 0;
+        let width = |range: Range<WrapOffset>| self.measure(segments, range);
+        let mut cuts = vec![WrapOffset::default()];
+        let mut start = WrapOffset::default();
         // One wrapper pass gives the ends of all rows. Only a row that is too wide by its shaped width starts a new
         // pass, after its new end.
         'pass: while start < total {
             let rest = fragments_from(&fragments, start);
-            let mut ends: Vec<usize> = wrapper
+            let mut ends: Vec<WrapOffset> = wrapper
                 .wrap_line(&rest, wrap_width, IndentAdjustment::NoIndent)
                 .map(|boundary| (start + boundary.ix).min(total))
                 .collect();
@@ -416,8 +454,8 @@ impl FlowLine {
                 start = end;
             }
         }
-        if total == 0 {
-            cuts.push(0);
+        if total == WrapOffset::default() {
+            cuts.push(total);
         }
         cuts
     }
@@ -429,10 +467,10 @@ impl FlowLine {
         segments: &[WrapSegment],
         rest: &[LineFragment<'_>],
         wrapper: &mut LineWrapper,
-        (start, mut end): (usize, usize),
-        total: usize,
+        (start, mut end): (WrapOffset, WrapOffset),
+        total: WrapOffset,
         wrap_width: Pixels,
-    ) -> usize {
+    ) -> WrapOffset {
         let mut budget = wrap_width;
         let mut overflow = self.measure(segments, start..end) - wrap_width;
         let mut step = overflow;
@@ -454,11 +492,11 @@ impl FlowLine {
     }
 
     /// The width of the row of the wrapper text in `range`, as [`Self::row`] lays it out.
-    fn measure(&self, segments: &[WrapSegment], range: Range<usize>) -> Pixels {
+    fn measure(&self, segments: &[WrapSegment], range: Range<WrapOffset>) -> Pixels {
         let part = |line: &ShapedLine, low: usize, high: usize| line.x_for_index(high) - line.x_for_index(low);
         let mut width = px(0.);
         let (mut start_row, mut any, mut name) = (ChipEnd::OtherRow, false, px(0.));
-        let mut start = 0;
+        let mut start = WrapOffset::default();
         for segment in segments {
             if start >= range.end && !matches!(segment, WrapSegment::Name(_) | WrapSegment::Tail(_)) {
                 break;
@@ -485,13 +523,13 @@ impl FlowLine {
     }
 
     /// The screen offset of the wrapper offset `at`. All of a chip but its end maps to its start.
-    fn display_at(&self, segments: &[WrapSegment], at: usize) -> usize {
-        let mut start = 0;
+    fn display_at(&self, segments: &[WrapSegment], at: WrapOffset) -> ScreenOffset {
+        let mut start = WrapOffset::default();
         for segment in segments {
             let end = start + self.segment_len(segment);
             if at < end {
                 return match segment {
-                    WrapSegment::Text { display, .. } => display.start + at - start,
+                    WrapSegment::Text { display, .. } => display.start + (at - start),
                     WrapSegment::Lead(chip) | WrapSegment::Name(chip) | WrapSegment::Tail(chip) => {
                         self.chips[*chip].range.start
                     }
@@ -499,15 +537,15 @@ impl FlowLine {
             }
             start = end;
         }
-        self.text.len()
+        ScreenOffset::new(self.text.len())
     }
 
     /// The row of the wrapper text in `range`.
-    fn row(&self, segments: &[WrapSegment], range: Range<usize>, cutter: &mut Cutter) -> Row {
+    fn row(&self, segments: &[WrapSegment], range: Range<WrapOffset>, cutter: &mut Cutter) -> Row {
         let mut pieces = Vec::new();
         let mut open: Option<ChipPiece> = None;
         let mut x = px(0.);
-        let mut start = 0;
+        let mut start = WrapOffset::default();
         for (ix, segment) in segments.iter().enumerate() {
             let end = start + self.segment_len(segment);
             let (low, high) = (range.start.max(start), range.end.min(end));
@@ -524,7 +562,7 @@ impl FlowLine {
                         let line = cutter.cut(ix, line, low - start..high - start);
                         let width = line.width();
                         pieces.push(Piece::Text {
-                            start: display.start + low - start,
+                            start: display.start + (low - start),
                             x,
                             line,
                         });
@@ -597,7 +635,7 @@ impl FlowLine {
 
     /// Where the screen offset `index` shows, from the top left of the line. An offset between two rows shows at the
     /// end of the first row, as in [`gpui_kit::WrappedLine`].
-    pub(crate) fn position_for_index(&self, index: usize, line_height: Pixels) -> Option<Point<Pixels>> {
+    pub(crate) fn position_for_index(&self, index: ScreenOffset, line_height: Pixels) -> Option<Point<Pixels>> {
         let (ix, row) = self.rows.iter().enumerate().find(|(_, row)| index <= row.range.end)?;
         if index < row.range.start {
             return None;
@@ -606,12 +644,12 @@ impl FlowLine {
         Some(point(self.x_in(row, index), y))
     }
 
-    fn x_in(&self, row: &Row, index: usize) -> Pixels {
+    fn x_in(&self, row: &Row, index: ScreenOffset) -> Pixels {
         for piece in &row.pieces {
             match piece {
                 Piece::Text { start, x, line } => {
-                    if *start <= index && index <= start + line.len() {
-                        return *x + line.x_for_index(index - start);
+                    if *start <= index && index <= *start + line.len() {
+                        return *x + line.x_for_index(index - *start);
                     }
                 }
                 Piece::Chip(piece) => {
@@ -634,12 +672,12 @@ impl FlowLine {
         &self,
         position: Point<Pixels>,
         line_height: Pixels,
-    ) -> Result<usize, usize> {
+    ) -> Result<ScreenOffset, ScreenOffset> {
         let Some((_, row)) = self
             .rows_with_y(line_height)
             .find(|(y, _)| position.y < *y + line_height)
         else {
-            return Err(self.text.len());
+            return Err(ScreenOffset::new(self.text.len()));
         };
         if position.x < px(0.) {
             return Err(row.range.start);
@@ -647,7 +685,7 @@ impl FlowLine {
         for piece in &row.pieces {
             match piece {
                 Piece::Text { start, x, line } if position.x < *x + line.width() => {
-                    return Ok(start + line.closest_index_for_x(position.x - *x));
+                    return Ok(*start + line.closest_index_for_x(position.x - *x));
                 }
                 Piece::Chip(piece) if position.x < piece.x + piece.width => {
                     return Ok(self.chips[piece.chip].range.start);
@@ -678,7 +716,7 @@ impl FlowLine {
     }
 
     /// Whether the screen offset `at` is in the screen text of a chip.
-    pub(crate) fn in_chip(&self, at: usize) -> bool {
+    pub(crate) fn in_chip(&self, at: ScreenOffset) -> bool {
         self.chips.iter().any(|chip| chip.range.contains(&at))
     }
 
@@ -787,9 +825,9 @@ fn next_wrap(
     wrapper: &mut LineWrapper,
     fragments: &[LineFragment<'_>],
     wrap_width: Pixels,
-    start: usize,
-    total: usize,
-) -> usize {
+    start: WrapOffset,
+    total: WrapOffset,
+) -> WrapOffset {
     let end = wrapper
         .wrap_line(fragments, wrap_width, IndentAdjustment::NoIndent)
         .next()
@@ -798,7 +836,8 @@ fn next_wrap(
 }
 
 /// `fragments` without their first `skip` bytes. A wrap never falls inside an element.
-fn fragments_from<'a>(fragments: &[LineFragment<'a>], skip: usize) -> Vec<LineFragment<'a>> {
+fn fragments_from<'a>(fragments: &[LineFragment<'a>], skip: WrapOffset) -> Vec<LineFragment<'a>> {
+    let skip = skip.get();
     let mut offset = 0;
     let mut rest = Vec::with_capacity(fragments.len());
     for fragment in fragments {
@@ -865,9 +904,9 @@ mod tests {
         (before, name, detail, after): (&str, &str, Option<&str>, &str),
         wrap: Pixels,
         window: &Window,
-    ) -> (FlowLine, Range<usize>) {
+    ) -> (FlowLine, Range<ScreenOffset>) {
         let text = format!("{before}\u{fffc}{after}");
-        let range = before.len()..text.len() - after.len();
+        let range = ScreenOffset::new(before.len())..ScreenOffset::new(text.len() - after.len());
         let look = run(0);
         let chip = ChipBox::new(
             range.clone(),
@@ -889,7 +928,7 @@ mod tests {
         (line, range)
     }
 
-    fn x(line: &FlowLine, index: usize) -> Pixels {
+    fn x(line: &FlowLine, index: ScreenOffset) -> Pixels {
         line.position_for_index(index, LINE).expect("in the line").x
     }
 
@@ -1034,11 +1073,11 @@ mod tests {
                 assert!(min <= max, "{line_text}");
                 let line = FlowLine::new((*line_text).into(), runs, Vec::new(), base, SIZE, min, window);
                 for row in &line.rows {
-                    let end = row.range.end;
+                    let end = row.range.bytes().end;
                     assert!(
                         end == line_text.len() || matches!(&line_text[end - 1..end], " " | "-"),
                         "a row of {min:?} ends in {:?}",
-                        &line_text[row.range.clone()]
+                        &line_text[row.range.bytes()]
                     );
                 }
             }
@@ -1050,7 +1089,7 @@ mod tests {
             let text = "\u{fffc}";
             let look = run(0);
             let chip = ChipBox::new(
-                0..text.len(),
+                ScreenOffset::default()..ScreenOffset::new(text.len()),
                 Icon::File,
                 ("my report.pdf", &look),
                 detail.map(|detail| (detail.to_owned(), &look)),
@@ -1101,7 +1140,7 @@ mod tests {
                 let wrap = px(f32::from(half) / 2.);
                 let line = FlowLine::new(text.into(), &runs, Vec::new(), &inter, SIZE, wrap, window);
                 for row in &line.rows {
-                    let end = row.range.end;
+                    let end = row.range.bytes().end;
                     assert!(
                         end <= word || end >= word + "aspect-ratio".len() || end == after_hyphen,
                         "a row of {wrap:?} ends in {:?}",

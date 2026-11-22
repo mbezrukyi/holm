@@ -16,8 +16,8 @@ use ropey::{LineType, Rope};
 
 pub(crate) use caret::{Affinity, Caret, Direction, GoalRow, Selection};
 pub(crate) use display::{
-    Cell, Chip, CodeLine, DisplayLine, Embed, Highlight, LineKind, LinkTarget, Look, Mark, Quote, Run, Styles, Syntax,
-    TextKind,
+    Cell, Chip, CodeLine, DisplayLine, Embed, Highlight, LineKind, LinkTarget, Look, Mark, Quote, Run, ScreenOffset,
+    ScreenRange, Styles, Syntax, TextKind,
 };
 pub(crate) use format::Format;
 pub(crate) use history::Group;
@@ -824,10 +824,10 @@ mod tests {
         assert_eq!(line.shown.text, "a b c");
         assert_eq!(line.shown.runs.len(), 3);
         assert!(line.shown.runs[1].look.styles.contains(Styles::STRONG));
-        assert_eq!(line.to_source(2), SourceOffset::new(4));
-        assert_eq!(line.to_source(3), SourceOffset::new(7));
-        assert_eq!(line.to_display(SourceOffset::new(4)), 2);
-        assert_eq!(line.to_display(SourceOffset::new(2)), 2);
+        assert_eq!(line.to_source(ScreenOffset::new(2)), SourceOffset::new(4));
+        assert_eq!(line.to_source(ScreenOffset::new(3)), SourceOffset::new(7));
+        assert_eq!(line.to_display(SourceOffset::new(4)), ScreenOffset::new(2));
+        assert_eq!(line.to_display(SourceOffset::new(2)), ScreenOffset::new(2));
     }
 
     #[test]
@@ -837,7 +837,7 @@ mod tests {
         assert_eq!(line.syntax, Syntax::Shown);
         assert_eq!(line.shown.text, "a **b** c");
         assert_eq!(line.shown.runs[1].look.kind, TextKind::Syntax);
-        assert_eq!(line.to_source(5), SourceOffset::new(5));
+        assert_eq!(line.to_source(ScreenOffset::new(5)), SourceOffset::new(5));
     }
 
     #[test]
@@ -856,7 +856,7 @@ mod tests {
         assert_eq!(line.shown.text, "");
         assert_eq!(line.images, ["cat.png"]);
         assert_eq!(line.shown.chips, []);
-        assert_eq!(line.to_source(0), line.source().start);
+        assert_eq!(line.to_source(ScreenOffset::new(0)), line.source().start);
     }
 
     #[test]
@@ -870,8 +870,8 @@ mod tests {
         };
         assert_eq!(chip.target, "docs/report.pdf");
         assert_eq!(line.shown.text, "See \u{fffc} now");
-        assert_eq!(&line.shown.text[..chip.range.start], "See ");
-        assert_eq!(&line.shown.text[chip.range.end..], " now");
+        assert_eq!(&line.shown.text[..chip.range.bytes().start], "See ");
+        assert_eq!(&line.shown.text[chip.range.bytes().end..], " now");
         let bang = text.find('!').unwrap_or_default();
         assert_eq!(line.to_source(chip.range.start), SourceOffset::new(bang));
         assert_eq!(line.to_display(SourceOffset::new(bang + 3)), chip.range.start);
@@ -889,7 +889,7 @@ mod tests {
             let [chip] = line.shown.chips.as_slice() else {
                 panic!("one chip in {text:?}");
             };
-            assert_eq!(chip.range.end, line.shown.text.len(), "{text:?}");
+            assert_eq!(chip.range.end, ScreenOffset::new(line.shown.text.len()), "{text:?}");
             let end = line.source().end;
             assert_eq!(line.to_source(chip.range.end), end, "{text:?}");
             assert_eq!(line.to_display(end), chip.range.end, "{text:?}");
@@ -1088,10 +1088,10 @@ mod tests {
                 let source = display.source();
                 prop_assert_eq!(display.shown.runs.iter().map(|r| r.len).sum::<usize>(), display.shown.text.len());
                 for offset in (0..=display.shown.text.len()).filter(|o| display.shown.text.is_char_boundary(*o)) {
-                    let mapped = display.to_source(offset);
+                    let mapped = display.to_source(ScreenOffset::new(offset));
                     prop_assert!(source.start <= mapped && mapped <= source.end);
                     prop_assert!(model.text().is_char_boundary(mapped.get()));
-                    prop_assert_eq!(display.to_display(mapped), offset);
+                    prop_assert_eq!(display.to_display(mapped), ScreenOffset::new(offset));
                 }
             }
         }

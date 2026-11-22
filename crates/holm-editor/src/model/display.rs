@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::ops::{Add, AddAssign, Range, Sub};
 
 use holm_markdown::{
     Alignment, Block, BlockKind, CalloutKind, CodeStyle, Color, LinkKind, OffsetRange, SourceOffset, Style, TablePart,
@@ -49,6 +49,51 @@ pub(crate) enum Highlight {
     Color(Color),
 }
 
+/// A byte offset into the screen text of a line.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct ScreenOffset(usize);
+
+impl ScreenOffset {
+    pub(crate) const fn new(bytes: usize) -> Self {
+        Self(bytes)
+    }
+}
+
+impl Add<usize> for ScreenOffset {
+    type Output = Self;
+
+    fn add(self, bytes: usize) -> Self {
+        Self(self.0 + bytes)
+    }
+}
+
+impl AddAssign<usize> for ScreenOffset {
+    fn add_assign(&mut self, bytes: usize) {
+        self.0 += bytes;
+    }
+}
+
+/// The bytes from `other` to `self`.
+impl Sub for ScreenOffset {
+    type Output = usize;
+
+    fn sub(self, other: Self) -> usize {
+        self.0 - other.0
+    }
+}
+
+/// A range of screen text.
+pub(crate) trait ScreenRange {
+    /// The range as plain byte offsets, to slice the screen text.
+    fn bytes(&self) -> Range<usize>;
+}
+
+impl ScreenRange for Range<ScreenOffset> {
+    fn bytes(&self) -> Range<usize> {
+        self.start.0..self.end.0
+    }
+}
+
 /// A run of screen text with one look.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Run {
@@ -72,8 +117,7 @@ pub(crate) struct Shown {
 /// is not in the source and maps to the start of the link.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Chip {
-    /// In screen text.
-    pub(crate) range: Range<usize>,
+    pub(crate) range: Range<ScreenOffset>,
     pub(crate) target: String,
     /// The link text as plain text, with no Markdown escapes.
     pub(crate) name: String,
@@ -104,7 +148,7 @@ struct ChipLink<'a> {
 /// A part of the source that the screen shows.
 #[derive(Clone, Copy, Debug)]
 struct Segment {
-    display: usize,
+    display: ScreenOffset,
     source: SourceOffset,
     len: usize,
 }
@@ -583,7 +627,7 @@ impl Shown {
         match self.segments.last_mut() {
             Some(last) if last.source + last.len == piece.start => last.len += len,
             _ => self.segments.push(Segment {
-                display: self.text.len(),
+                display: self.end(),
                 source: piece.start,
                 len,
             }),
@@ -598,7 +642,7 @@ impl Shown {
     /// Adds a chip. Its left edge maps to the start of its link, and its right edge to the end of its link, cut at
     /// `end`.
     fn push_chip(&mut self, chip: &ChipLink<'_>, end: SourceOffset) {
-        let start = self.text.len();
+        let start = self.end();
         self.segments.push(Segment {
             display: start,
             source: chip.range.start,
@@ -606,7 +650,7 @@ impl Shown {
         });
         self.text.push_str(CHIP_ATOM);
         self.segments.push(Segment {
-            display: self.text.len(),
+            display: self.end(),
             source: chip.range.end.min(end),
             len: 0,
         });
@@ -618,14 +662,19 @@ impl Shown {
             },
         });
         self.chips.push(Chip {
-            range: start..self.text.len(),
+            range: start..self.end(),
             target: chip.target.to_owned(),
             name: holm_markdown::unescape_text(chip.name),
         });
     }
 
+    /// The offset after the last byte of the screen text.
+    pub(crate) fn end(&self) -> ScreenOffset {
+        ScreenOffset(self.text.len())
+    }
+
     /// Between two visible parts it picks the later one.
-    pub(crate) fn to_source(&self, display: usize) -> SourceOffset {
+    pub(crate) fn to_source(&self, display: ScreenOffset) -> SourceOffset {
         let Some(ix) = self.segments.partition_point(|s| s.display <= display).checked_sub(1) else {
             return self.start;
         };
@@ -634,9 +683,9 @@ impl Shown {
     }
 
     /// Hidden source maps to the next visible text.
-    pub(crate) fn to_display(&self, source: SourceOffset) -> usize {
+    pub(crate) fn to_display(&self, source: SourceOffset) -> ScreenOffset {
         let Some(ix) = self.segments.partition_point(|s| s.source <= source).checked_sub(1) else {
-            return 0;
+            return ScreenOffset::default();
         };
         let segment = self.segments[ix];
         segment.display + (source - segment.source).min(segment.len)
@@ -649,11 +698,11 @@ impl DisplayLine {
         self.source.clone()
     }
 
-    pub(crate) fn to_source(&self, display: usize) -> SourceOffset {
+    pub(crate) fn to_source(&self, display: ScreenOffset) -> SourceOffset {
         self.shown.to_source(display)
     }
 
-    pub(crate) fn to_display(&self, source: SourceOffset) -> usize {
+    pub(crate) fn to_display(&self, source: SourceOffset) -> ScreenOffset {
         self.shown.to_display(source)
     }
 }
