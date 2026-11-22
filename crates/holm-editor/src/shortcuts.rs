@@ -8,6 +8,8 @@ use std::rc::Rc;
 
 use gpui_kit::{Action, App, KeyBinding, KeyBindingContextPredicate, Keystroke};
 
+use crate::model::Selection;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Keys {
     /// The GPUI key name, like `b`, `enter` or `f2`.
@@ -135,8 +137,8 @@ impl Place {
 #[action(namespace = holm_editor, no_json)]
 pub(crate) struct Run {
     pub(crate) command: Command,
-    /// With a cursor move, Shift extends the selection.
-    pub(crate) shift: bool,
+    /// For a cursor move: Shift extends the selection.
+    pub(crate) selection: Selection,
 }
 
 /// For the shortcut list.
@@ -444,7 +446,11 @@ pub(crate) fn bind(cx: &mut App) {
         .flat_map(|shortcut| {
             let command = shortcut.command;
             let context = shortcut.place.binding_context();
-            shortcut.keys.bindings(context, |shift| Run { command, shift }, cx)
+            let run = |shift| Run {
+                command,
+                selection: if shift { Selection::Extend } else { Selection::Collapse },
+            };
+            shortcut.keys.bindings(context, run, cx)
         })
         .collect();
     cx.bind_keys(bindings);
@@ -479,10 +485,14 @@ mod tests {
         cx.update(|cx| {
             for shortcut in SHORTCUTS {
                 let command = shortcut.command;
-                let bindings =
-                    shortcut
-                        .keys
-                        .bindings(shortcut.place.binding_context(), |shift| Run { command, shift }, cx);
+                let bindings = shortcut.keys.bindings(
+                    shortcut.place.binding_context(),
+                    |_| Run {
+                        command,
+                        selection: Selection::Collapse,
+                    },
+                    cx,
+                );
                 let count = if shortcut.keys.shift == Shift::Either { 2 } else { 1 };
                 assert_eq!(bindings.len(), count, "{shortcut:?}");
                 assert!(

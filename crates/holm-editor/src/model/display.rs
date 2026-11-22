@@ -631,10 +631,11 @@ impl DisplayLine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Selection;
 
     fn model_at(text: &str, cursor: usize) -> Model {
         let mut model = Model::new(text);
-        model.set_cursor(cursor, false);
+        model.set_cursor(cursor, Selection::Collapse);
         model
     }
 
@@ -763,7 +764,7 @@ mod tests {
         model.select(0..12);
         assert!(model.toggle_tasks());
         assert_eq!(model.text(), "- [ ] a\n- [ ] b\n- c\n");
-        model.set_cursor(17, false);
+        model.set_cursor(17, Selection::Collapse);
         assert!(!model.toggle_tasks());
         model.undo();
         assert_eq!(model.text(), "- [x] a\n- [x] b\n- c\n");

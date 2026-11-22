@@ -145,6 +145,7 @@ mod tests {
     use std::time::Instant;
 
     use super::*;
+    use crate::model::Selection;
 
     fn model_with(text: &str, selection: Range<usize>) -> Model {
         let mut model = Model::new(text);
@@ -162,8 +163,8 @@ mod tests {
     fn a_format_key_wraps_the_selection_as_one_undo_step() {
         assert_eq!(toggled("a word", 2..6, Format::Bold), ("a **word**".into(), 4..8));
         let mut model = Model::new("a word");
-        model.set_cursor(6, false);
-        model.set_cursor(2, true);
+        model.set_cursor(6, Selection::Collapse);
+        model.set_cursor(2, Selection::Extend);
         model.toggle_format(Format::Underline);
         assert_eq!(model.text(), "a <u>word</u>");
         assert_eq!((model.cursor(), model.selection()), (5, 5..9));

@@ -15,7 +15,7 @@ use std::time::Instant;
 use holm_markdown::{Body, Target};
 use ropey::{LineType, Rope};
 
-pub(crate) use caret::{Caret, GoalRow};
+pub(crate) use caret::{Caret, GoalRow, Selection};
 pub(crate) use display::{
     Cell, Chip, DisplayLine, Embed, Highlight, LineKind, LinkTarget, Look, Mark, Quote, Run, Styles, TextKind,
 };
@@ -132,21 +132,21 @@ impl Model {
         self.cursor() < self.anchor
     }
 
-    /// Rounds `offset` down to a char boundary. With `extend`, the selection keeps its other end.
-    pub(crate) fn set_cursor(&mut self, offset: usize, extend: bool) {
-        self.set_caret(Caret::at(offset), extend);
+    /// Rounds `offset` down to a char boundary. With [`Selection::Extend`], the selection keeps its other end.
+    pub(crate) fn set_cursor(&mut self, offset: usize, selection: Selection) {
+        self.set_caret(Caret::at(offset), selection);
     }
 
     /// Moves the cursor like [`Self::set_cursor`], and keeps the row start and the goals of `caret` while its offset is
     /// on a char boundary.
-    pub(crate) fn set_caret(&mut self, caret: Caret, extend: bool) {
+    pub(crate) fn set_caret(&mut self, caret: Caret, selection: Selection) {
         let offset = self.floor(caret.offset());
         self.caret = if offset == caret.offset() {
             caret
         } else {
             Caret::at(offset)
         };
-        if !extend {
+        if selection == Selection::Collapse {
             self.anchor = offset;
         }
     }
@@ -158,8 +158,8 @@ impl Model {
     }
 
     pub(crate) fn select(&mut self, range: Range<usize>) {
-        self.set_cursor(range.start, false);
-        self.set_cursor(range.end, true);
+        self.set_cursor(range.start, Selection::Collapse);
+        self.set_cursor(range.end, Selection::Extend);
     }
 
     pub(crate) fn select_all(&mut self) {
@@ -171,8 +171,8 @@ impl Model {
     }
 
     fn set_ends(&mut self, (anchor, cursor): Ends) {
-        self.set_cursor(anchor, false);
-        self.set_cursor(cursor, true);
+        self.set_cursor(anchor, Selection::Collapse);
+        self.set_cursor(cursor, Selection::Extend);
     }
 
     fn floor(&self, offset: usize) -> usize {
@@ -365,30 +365,30 @@ impl Model {
         )
     }
 
-    pub(crate) fn move_left(&mut self, extend: bool) {
-        let selection = self.selection();
-        if !extend && !selection.is_empty() {
-            self.set_cursor(selection.start, false);
+    pub(crate) fn move_left(&mut self, selection: Selection) {
+        let selected = self.selection();
+        if selection == Selection::Collapse && !selected.is_empty() {
+            self.set_cursor(selected.start, Selection::Collapse);
         } else {
-            self.set_cursor(self.prev_char(self.cursor()), extend);
+            self.set_cursor(self.prev_char(self.cursor()), selection);
         }
     }
 
-    pub(crate) fn move_right(&mut self, extend: bool) {
-        let selection = self.selection();
-        if !extend && !selection.is_empty() {
-            self.set_cursor(selection.end, false);
+    pub(crate) fn move_right(&mut self, selection: Selection) {
+        let selected = self.selection();
+        if selection == Selection::Collapse && !selected.is_empty() {
+            self.set_cursor(selected.end, Selection::Collapse);
         } else {
-            self.set_cursor(self.next_char(self.cursor()), extend);
+            self.set_cursor(self.next_char(self.cursor()), selection);
         }
     }
 
-    pub(crate) fn move_word_left(&mut self, extend: bool) {
-        self.set_cursor(self.word_left(self.cursor()), extend);
+    pub(crate) fn move_word_left(&mut self, selection: Selection) {
+        self.set_cursor(self.word_left(self.cursor()), selection);
     }
 
-    pub(crate) fn move_word_right(&mut self, extend: bool) {
-        self.set_cursor(self.word_right(self.cursor()), extend);
+    pub(crate) fn move_word_right(&mut self, selection: Selection) {
+        self.set_cursor(self.word_right(self.cursor()), selection);
     }
 
     /// The offset before the spaces and then the run of one kind of chars before `offset`. A line break is a run of its
@@ -548,14 +548,14 @@ mod tests {
 
     fn model_at(text: &str, cursor: usize) -> Model {
         let mut model = Model::new(text);
-        model.set_cursor(cursor, false);
+        model.set_cursor(cursor, Selection::Collapse);
         model
     }
 
     fn row_caret(offset: usize) -> Caret {
         let goal_row = GoalRow {
             first: true,
-            extend: false,
+            selection: Selection::Collapse,
         };
         Caret::at(offset)
             .with_row_start(true)
@@ -566,22 +566,22 @@ mod tests {
     #[test]
     fn a_row_move_keeps_the_row_start_and_the_goals() {
         let mut model = Model::new("one two three");
-        model.set_caret(row_caret(4), false);
+        model.set_caret(row_caret(4), Selection::Collapse);
         assert_eq!(model.caret(), row_caret(4));
     }
 
     #[test]
     fn any_other_cursor_change_drops_the_row_start_and_the_goals() {
         let mut model = Model::new("one two three");
-        model.set_caret(row_caret(4), false);
-        model.move_right(false);
+        model.set_caret(row_caret(4), Selection::Collapse);
+        model.move_right(Selection::Collapse);
         assert_eq!(model.caret(), Caret::at(5));
 
-        model.set_caret(row_caret(4), false);
+        model.set_caret(row_caret(4), Selection::Collapse);
         model.type_text("x", now());
         assert_eq!(model.caret(), Caret::at(5));
 
-        model.set_caret(row_caret(4), false);
+        model.set_caret(row_caret(4), Selection::Collapse);
         model.undo();
         assert_eq!(model.caret(), Caret::at(4));
     }
@@ -589,14 +589,14 @@ mod tests {
     #[test]
     fn a_caret_off_a_char_boundary_drops_the_row_start_and_the_goals() {
         let mut model = Model::new("aé");
-        model.set_caret(row_caret(2), false);
+        model.set_caret(row_caret(2), Selection::Collapse);
         assert_eq!(model.caret(), Caret::at(1));
     }
 
     #[test]
     fn the_goal_row_goes_once_and_the_goal_x_stays() {
         let mut model = Model::new("one two three");
-        model.set_caret(row_caret(4), false);
+        model.set_caret(row_caret(4), Selection::Collapse);
         assert!(model.take_goal_row().is_some());
         assert_eq!(model.take_goal_row(), None);
         assert_eq!(model.caret().goal_x(), Some(40.));
@@ -624,7 +624,7 @@ mod tests {
         assert!(model.delete(false, now()));
         assert_eq!(model.text(), "a");
         assert!(!model.delete(false, now()));
-        model.set_cursor(0, false);
+        model.set_cursor(0, Selection::Collapse);
         assert!(!model.backspace(false, now()));
     }
 
@@ -632,29 +632,29 @@ mod tests {
     fn arrows_collapse_a_selection() {
         let mut model = Model::new("abcdef");
         model.select(2..4);
-        model.move_left(false);
+        model.move_left(Selection::Collapse);
         assert_eq!(model.selection(), 2..2);
-        model.move_right(true);
-        model.move_right(true);
+        model.move_right(Selection::Extend);
+        model.move_right(Selection::Extend);
         assert_eq!(model.selection(), 2..4);
-        model.move_right(false);
+        model.move_right(Selection::Collapse);
         assert_eq!(model.selection(), 4..4);
     }
 
     #[test]
     fn word_moves_skip_spaces_and_one_run_of_chars() {
         let mut model = Model::new("one, two\nthree");
-        model.move_word_right(false);
+        model.move_word_right(Selection::Collapse);
         assert_eq!(model.cursor(), 3);
-        model.move_word_right(false);
+        model.move_word_right(Selection::Collapse);
         assert_eq!(model.cursor(), 4);
-        model.move_word_right(false);
+        model.move_word_right(Selection::Collapse);
         assert_eq!(model.cursor(), 8);
-        model.move_word_right(false);
+        model.move_word_right(Selection::Collapse);
         assert_eq!(model.cursor(), 9);
-        model.move_word_left(true);
+        model.move_word_left(Selection::Extend);
         assert_eq!(model.selection(), 8..9);
-        model.move_word_left(false);
+        model.move_word_left(Selection::Collapse);
         assert_eq!(model.cursor(), 5);
     }
 
@@ -663,7 +663,7 @@ mod tests {
         let mut model = model_at("one two", 7);
         assert!(model.backspace(true, now()));
         assert_eq!(model.text(), "one ");
-        model.set_cursor(0, false);
+        model.set_cursor(0, Selection::Collapse);
         assert!(model.delete(true, now()));
         assert_eq!(model.text(), " ");
     }
@@ -684,7 +684,7 @@ mod tests {
     fn the_text_has_only_lf_line_breaks() {
         let mut model = Model::new("a\r\nb\rc");
         assert_eq!(model.text(), "a\nb\nc");
-        model.set_cursor(5, false);
+        model.set_cursor(5, Selection::Collapse);
         model.insert("\r\nd");
         assert_eq!(model.text(), "a\nb\nc\nd");
     }
@@ -738,7 +738,7 @@ mod tests {
         let mut model = Model::new("one two");
         model.select(4..7);
         model.toggle_format(Format::Bold);
-        model.set_cursor(0, false);
+        model.set_cursor(0, Selection::Collapse);
         model.undo();
         assert_eq!(model.text(), "one two");
         assert_eq!(model.selection(), 4..7);
@@ -903,9 +903,9 @@ mod tests {
         Insert(String),
         Backspace(bool),
         Delete(bool),
-        Left(bool),
-        Right(bool),
-        Cursor(usize, bool),
+        Left(Selection),
+        Right(Selection),
+        Cursor(usize, Selection),
         Format(usize),
         Heading(u8),
         Newline,
@@ -923,15 +923,19 @@ mod tests {
         Format::Code,
     ];
 
+    fn selection() -> impl Strategy<Value = Selection> {
+        prop_oneof![Just(Selection::Collapse), Just(Selection::Extend)]
+    }
+
     fn op() -> impl Strategy<Value = Op> {
         prop_oneof![
             (text(), 0..1500u64).prop_map(|(text, ms)| Op::Type(text, ms)),
             text().prop_map(Op::Insert),
             any::<bool>().prop_map(Op::Backspace),
             any::<bool>().prop_map(Op::Delete),
-            any::<bool>().prop_map(Op::Left),
-            any::<bool>().prop_map(Op::Right),
-            (0..60usize, any::<bool>()).prop_map(|(at, extend)| Op::Cursor(at, extend)),
+            selection().prop_map(Op::Left),
+            selection().prop_map(Op::Right),
+            (0..60usize, selection()).prop_map(|(at, selection)| Op::Cursor(at, selection)),
             (0..FORMATS.len()).prop_map(Op::Format),
             (0..=6u8).prop_map(Op::Heading),
             Just(Op::Newline),
@@ -957,9 +961,9 @@ mod tests {
             Op::Delete(word) => {
                 model.delete(word, *clock);
             }
-            Op::Left(extend) => model.move_left(extend),
-            Op::Right(extend) => model.move_right(extend),
-            Op::Cursor(at, extend) => model.set_cursor(at, extend),
+            Op::Left(selection) => model.move_left(selection),
+            Op::Right(selection) => model.move_right(selection),
+            Op::Cursor(at, selection) => model.set_cursor(at, selection),
             Op::Format(ix) => {
                 model.toggle_format(FORMATS[ix]);
             }

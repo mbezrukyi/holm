@@ -18,7 +18,16 @@ pub(crate) struct Caret {
 pub(crate) struct GoalRow {
     /// The first row after Down, the last row after Up.
     pub(crate) first: bool,
-    pub(crate) extend: bool,
+    pub(crate) selection: Selection,
+}
+
+/// What a cursor move does to the selection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Selection {
+    /// The anchor moves with the cursor, so nothing stays selected.
+    Collapse,
+    /// The anchor stays, so the selection grows or shrinks.
+    Extend,
 }
 
 impl Caret {

@@ -18,7 +18,7 @@ use crate::files::{FileKind, LinkedFiles};
 use crate::find::Find;
 use crate::highlight::{self, Highlighter};
 use crate::ink;
-use crate::model::{Caret, Format, GoalRow, LinkForm, Model};
+use crate::model::{Caret, Format, GoalRow, LinkForm, Model, Selection};
 use crate::shortcuts::{Command, Place, Run};
 
 /// Spaces that Tab types outside a list.
@@ -348,7 +348,7 @@ impl Editor {
         let Some(start) = self.model.heading_start(heading) else {
             return false;
         };
-        self.model.set_cursor(start, false);
+        self.model.set_cursor(start, Selection::Collapse);
         self.scroll = Scroll {
             line: self.model.line_of(start),
             offset: px(0.),
@@ -387,7 +387,7 @@ impl Editor {
         match target {
             Target::Heading(name) => {
                 if let Some(start) = self.model.heading_start(&name) {
-                    self.model.set_cursor(start, false);
+                    self.model.set_cursor(start, Selection::Collapse);
                     self.jumped(Reveal::Top, cx);
                 }
             }
@@ -410,7 +410,7 @@ impl Editor {
         };
         if let Some((offset, row_start)) = layout.row_at(caret.offset(), px(x), goal.first) {
             let caret = Caret::at(offset).with_row_start(row_start).with_goal_x(x);
-            self.model.set_caret(caret, goal.extend);
+            self.model.set_caret(caret, goal.selection);
         }
     }
 
@@ -456,7 +456,7 @@ impl Editor {
             && match self.place() {
                 Place::ColorWindow | Place::HexField => self.color_command(run.command, cx),
                 Place::Find => self.find_command(run.command, cx),
-                Place::Text | Place::Editor => self.command(run.command, run.shift, cx),
+                Place::Text | Place::Editor => self.command(run.command, run.selection, cx),
             };
         if !taken {
             cx.propagate();
@@ -501,18 +501,26 @@ impl Editor {
             // A typed char goes on to the text input, which adds it to the query.
             return key.chars().count() > 1 && key != "space";
         }
-        self.plain_key(key, modifiers.shift, cx)
+        if key == "delete" && modifiers.shift {
+            return false;
+        }
+        let selection = if modifiers.shift {
+            Selection::Extend
+        } else {
+            Selection::Collapse
+        };
+        self.plain_key(key, selection, cx)
     }
 
-    /// Shift extends the selection of a cursor move. Ctrl+Shift with a letter belongs to the app. It returns whether
-    /// the key stops here.
-    fn command(&mut self, command: Command, shift: bool, cx: &mut Context<Self>) -> bool {
+    /// `selection` is for a cursor move. Ctrl+Shift with a letter belongs to the app. It returns whether the key stops
+    /// here.
+    fn command(&mut self, command: Command, selection: Selection, cx: &mut Context<Self>) -> bool {
         let now = cx.background_executor().now();
         match command {
-            Command::WordLeft => self.model.move_word_left(shift),
-            Command::WordRight => self.model.move_word_right(shift),
-            Command::NoteStart => self.model.set_cursor(0, shift),
-            Command::NoteEnd => self.model.set_cursor(self.model.text().len(), shift),
+            Command::WordLeft => self.model.move_word_left(selection),
+            Command::WordRight => self.model.move_word_right(selection),
+            Command::NoteStart => self.model.set_cursor(0, selection),
+            Command::NoteEnd => self.model.set_cursor(self.model.text().len(), selection),
             Command::SelectAll => self.model.select_all(),
             Command::OpenLink => {
                 let Some(link) = self.model.link_at(self.model.cursor()) else {
@@ -666,23 +674,23 @@ impl Editor {
         true
     }
 
-    /// `key` has no Ctrl and is no shortcut. `shift` extends the selection.
-    fn plain_key(&mut self, key: &str, shift: bool, cx: &mut Context<Self>) -> bool {
+    /// `key` has no Ctrl and is no shortcut. `selection` is for a cursor move.
+    fn plain_key(&mut self, key: &str, selection: Selection, cx: &mut Context<Self>) -> bool {
         let now = cx.background_executor().now();
         match key {
-            "left" => self.model.move_left(shift),
-            "right" => self.model.move_right(shift),
-            "up" if !shift && self.model.selection() == (0..0) => {
+            "left" => self.model.move_left(selection),
+            "right" => self.model.move_right(selection),
+            "up" if selection == Selection::Collapse && self.model.selection() == (0..0) => {
                 cx.emit(UpFromStart);
                 return true;
             }
             "up" | "down" => {
-                self.move_vertical(key == "down", shift);
+                self.move_vertical(key == "down", selection);
                 self.moved(cx);
                 return true;
             }
             "pageup" | "pagedown" => {
-                self.move_page(key == "pagedown", shift);
+                self.move_page(key == "pagedown", selection);
                 self.moved(cx);
                 return true;
             }
@@ -698,9 +706,9 @@ impl Editor {
                         (if end { line.end } else { line.start }, false)
                     });
                 let caret = Caret::at(offset).with_row_start(row_start);
-                self.model.set_caret(caret, shift);
+                self.model.set_caret(caret, selection);
             }
-            "backspace" | "delete" if !shift || key == "backspace" => {
+            "backspace" | "delete" => {
                 let changed = if key == "backspace" {
                     self.model.backspace(false, now)
                 } else {
@@ -733,14 +741,14 @@ impl Editor {
         }
     }
 
-    fn move_page(&mut self, down: bool, extend: bool) {
+    fn move_page(&mut self, down: bool, selection: Selection) {
         let rows = self.current_layout().map_or(1, Layout::rows_in_view);
         for _ in 0..rows {
-            self.move_vertical(down, extend);
+            self.move_vertical(down, selection);
         }
     }
 
-    fn move_vertical(&mut self, down: bool, extend: bool) {
+    fn move_vertical(&mut self, down: bool, selection: Selection) {
         let caret = self.model.caret();
         let cursor = caret.offset();
         let goal_x = caret.goal_x().map(px);
@@ -748,12 +756,12 @@ impl Editor {
             .current_layout()
             .and_then(|layout| layout.vertical(cursor, caret.row_start(), goal_x, down))
         {
-            let goal_row = to.hidden.then_some(GoalRow { first: down, extend });
+            let goal_row = to.hidden.then_some(GoalRow { first: down, selection });
             let caret = Caret::at(to.offset)
                 .with_row_start(to.row_start)
                 .with_goal_x(f32::from(to.x))
                 .with_goal_row(goal_row);
-            self.model.set_caret(caret, extend);
+            self.model.set_caret(caret, selection);
             return;
         }
         // The row is out of view: keep the byte column on the next source line.
@@ -761,19 +769,19 @@ impl Editor {
         let column = cursor - self.model.line_range(line).start;
         let target = if down {
             if line + 1 == self.model.line_count() {
-                self.model.set_cursor(self.model.text().len(), extend);
+                self.model.set_cursor(self.model.text().len(), selection);
                 return;
             }
             line + 1
         } else {
             let Some(line) = line.checked_sub(1) else {
-                self.model.set_cursor(0, extend);
+                self.model.set_cursor(0, selection);
                 return;
             };
             line
         };
         let range = self.model.line_range(target);
-        self.model.set_cursor((range.start + column).min(range.end), extend);
+        self.model.set_cursor((range.start + column).min(range.end), selection);
     }
 
     fn offset_at(&self, position: Point<Pixels>) -> Option<usize> {
@@ -866,11 +874,11 @@ impl Editor {
         };
         let origin = drag.origin.clone();
         if target.start < origin.start {
-            self.model.set_cursor(origin.end, false);
-            self.model.set_cursor(target.start, true);
+            self.model.set_cursor(origin.end, Selection::Collapse);
+            self.model.set_cursor(target.start, Selection::Extend);
         } else {
-            self.model.set_cursor(origin.start, false);
-            self.model.set_cursor(target.end.max(origin.end), true);
+            self.model.set_cursor(origin.start, Selection::Collapse);
+            self.model.set_cursor(target.end.max(origin.end), Selection::Extend);
         }
     }
 
@@ -883,7 +891,7 @@ impl Editor {
         self.find = None;
         self.color = None;
         if let Some(offset) = self.offset_at(window.mouse_position()) {
-            self.model.set_cursor(offset, false);
+            self.model.set_cursor(offset, Selection::Collapse);
         }
         let files = paths.paths().iter().cloned().map(PastedFile::Path).collect();
         cx.emit(PasteFiles { files });
