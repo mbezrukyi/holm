@@ -35,7 +35,8 @@ Holm reads its notes folder from a config file. Give it its own folders in a tem
 
 3. Drive it: `look.sh do <vncdo commands>`. One call can hold many commands. For example:
    - `type 'some text'` types the text.
-   - `key enter`, `key ctrl-end` press keys.
+   - `key enter`, `key ctrl-end` press keys. Backspace is `bsp`.
+   - A key with Shift takes the shifted char: `key ctrl-shift-O`, `key ctrl-shift-?`. With the plain char, `key ctrl-shift-o` types `o`.
    - `move 300 50 click 1` clicks at x 300, y 50. The point is in pixels, from the top left.
    - `pause 0.3` waits 0.3 seconds.
    - `capture <file.png>` takes a screenshot. Then read the file to see it.
