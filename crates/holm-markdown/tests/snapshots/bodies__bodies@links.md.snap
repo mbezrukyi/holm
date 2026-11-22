@@ -54,61 +54,61 @@ Link 390..405 "![inner](i.png)"
 0..45 "[Holm ideas](holm:01JC3X0000000000000000000A)"
   target: Note { id: "01JC3X0000000000000000000A", heading: None }
   target range: Some("13..44 \"holm:01JC3X0000000000000000000A\"")
-  embedded: false
+  kind: Plain
 47..98 "[plans](<holm:01JC3X0000000000000000000A#Bug list>)"
   target: Note { id: "01JC3X0000000000000000000A", heading: Some("Bug list") }
   target range: Some("55..97 \"<holm:01JC3X0000000000000000000A#Bug list>\"")
-  embedded: false
+  kind: Plain
 103..122 "[here](<#Bug list>)"
   target: Heading("Bug list")
   target range: Some("110..121 \"<#Bug list>\"")
-  embedded: false
+  kind: Plain
 124..149 "[file](attachments/a.pdf)"
   target: File("attachments/a.pdf")
   target range: Some("131..148 \"attachments/a.pdf\"")
-  embedded: false
+  kind: Plain
 154..176 "[space](<my file.pdf>)"
   target: File("my file.pdf")
   target range: Some("162..175 \"<my file.pdf>\"")
-  embedded: false
+  kind: Plain
 181..205 "[up](../x(1).md \"title\")"
   target: File("../x(1).md")
   target range: Some("186..196 \"../x(1).md\"")
-  embedded: false
+  kind: Plain
 207..236 "![image](attachments/cat.png)"
   target: File("attachments/cat.png")
   target range: Some("216..235 \"attachments/cat.png\"")
-  embedded: true
+  kind: Embedded
 237..274 "![card](</home/me/Docs/report 1.pdf>)"
   target: File("/home/me/Docs/report 1.pdf")
   target range: Some("245..273 \"</home/me/Docs/report 1.pdf>\"")
-  embedded: true
+  kind: Embedded
 276..297 "<https://example.com>"
   target: Web("https://example.com")
   target range: Some("277..296 \"https://example.com\"")
-  embedded: false
+  kind: Plain
 298..314 "<me@example.com>"
   target: Web("mailto:me@example.com")
   target range: Some("299..313 \"me@example.com\"")
-  embedded: false
+  kind: Plain
 315..347 "[web](https://example.com/a?b=c)"
   target: Web("https://example.com/a?b=c")
   target range: Some("321..346 \"https://example.com/a?b=c\"")
-  embedded: false
+  kind: Plain
 349..354 "[ref]"
   target: Note { id: "01JC3X0000000000000000000B", heading: None }
   target range: None
-  embedded: false
+  kind: Plain
 373..387 "[](no-text.md)"
   target: File("no-text.md")
   target range: Some("376..386 \"no-text.md\"")
-  embedded: false
+  kind: Plain
 389..416 "[![inner](i.png)](outer.md)"
   target: File("outer.md")
   target range: Some("407..415 \"outer.md\"")
-  embedded: false
+  kind: Plain
 390..405 "![inner](i.png)"
   target: File("i.png")
   target range: Some("399..404 \"i.png\"")
-  embedded: true
+  kind: Embedded
 --- headings ---

@@ -8,7 +8,7 @@ use gpui_kit::{
 };
 use holm_editor::{CursorLink, Editor, OpenFile, OpenLink, PasteFiles, PastedFile};
 use holm_editor_test::{LINE_HEIGHT, app, column_x, cursor_y, data_folder, open};
-use holm_markdown::Target;
+use holm_markdown::{LinkKind, Target};
 
 const WIDTH: Pixels = px(600.);
 const HEIGHT: Pixels = px(400.);
@@ -64,7 +64,7 @@ fn a_click_on_a_link_places_the_cursor() {
         link_at_cursor(&editor, cx),
         Some(CursorLink {
             target: note("X"),
-            embedded: false
+            kind: LinkKind::Plain
         })
     );
 }
@@ -126,7 +126,7 @@ fn insert_link_takes_the_selection_and_set_link_target_keeps_the_text() {
     assert_eq!(cx.read(|cx| editor.read(cx).selected_text().to_owned()), "plans");
     cx.update(|_, cx| {
         editor.update(cx, |editor, cx| {
-            editor.insert_link("Plans", &note("X"), false, cx);
+            editor.insert_link("Plans", &note("X"), LinkKind::Plain, cx);
         });
     });
     assert_eq!(text(&editor, cx), "see [plans](holm:X)");
@@ -174,7 +174,7 @@ fn ctrl_v_with_files_sends_paste_files() {
 
     cx.update(|_, cx| {
         editor.update(cx, |editor, cx| {
-            editor.insert_link("", &Target::File("attachments/a.pdf".into()), true, cx);
+            editor.insert_link("", &Target::File("attachments/a.pdf".into()), LinkKind::Embedded, cx);
         });
     });
     assert_eq!(text(&editor, cx), "![](attachments/a.pdf)");
@@ -222,10 +222,10 @@ fn an_embedded_image_gets_a_line_of_its_own_and_a_file_stays_in_the_line() {
     cx.update(|_, cx| {
         editor.update(cx, |editor, cx| {
             editor.set_folder(Some(data_folder()), cx);
-            editor.insert_link("x", &file("x.pdf"), true, cx);
-            editor.insert_link("y", &file("../data"), true, cx);
-            editor.insert_link("cat", &file("cat.png"), true, cx);
-            editor.insert_link("z", &file("z.pdf"), false, cx);
+            editor.insert_link("x", &file("x.pdf"), LinkKind::Embedded, cx);
+            editor.insert_link("y", &file("../data"), LinkKind::Embedded, cx);
+            editor.insert_link("cat", &file("cat.png"), LinkKind::Embedded, cx);
+            editor.insert_link("z", &file("z.pdf"), LinkKind::Plain, cx);
         });
     });
     assert_eq!(

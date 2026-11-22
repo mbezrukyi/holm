@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::ops::Range;
 
-use holm_markdown::{Link, Target, escape_text};
+use holm_markdown::{Link, LinkKind, Target, escape_text};
 
 use super::{Group, Model, map_offset};
 
@@ -62,7 +62,7 @@ impl Model {
             .iter()
             .rev()
             .take_while(|l| l.range.end >= line_start)
-            .find(|l| !l.embedded && piece.end <= l.range.end)
+            .find(|l| l.kind == LinkKind::Plain && piece.end <= l.range.end)
     }
 
     /// The selected source becomes the link text. With no selection, the link text is `text`.

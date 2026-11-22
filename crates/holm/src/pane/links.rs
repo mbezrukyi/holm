@@ -13,7 +13,7 @@ use gpui_kit::{App, Context, Entity, EventEmitter, PathPromptOptions, Subscripti
 use holm_core::NotePath;
 use holm_core::model::LinkTarget;
 use holm_editor::{Editor, OpenFile, OpenLink, PasteFiles, PastedFile};
-use holm_markdown::Target;
+use holm_markdown::{LinkKind, Target};
 
 use crate::backlinks::Backlinks;
 use crate::core_door::{CoreDoor, Done, DoorEvent, Then};
@@ -131,7 +131,7 @@ impl Links {
             return;
         };
         let link = self.editor.read(cx).link_at_cursor();
-        self.replace = link.as_ref().is_some_and(|link| !link.embedded);
+        self.replace = link.as_ref().is_some_and(|link| link.kind == LinkKind::Plain);
         let target = link.map(|link| link.target);
         let links = cx.weak_entity();
         let done = Done::value(move |(), cx| {
@@ -196,7 +196,7 @@ impl Links {
         let replace = self.replace;
         self.editor.update(cx, |editor, cx| {
             if !(replace && editor.set_link_target(target, cx)) {
-                editor.insert_link(text, target, false, cx);
+                editor.insert_link(text, target, LinkKind::Plain, cx);
             }
         });
     }
@@ -289,7 +289,7 @@ impl Links {
             };
             let target = Target::File(path.to_string_lossy().into_owned());
             self.editor.update(cx, |editor, cx| {
-                editor.insert_link(&name, &target, true, cx);
+                editor.insert_link(&name, &target, LinkKind::Embedded, cx);
             });
         }
     }

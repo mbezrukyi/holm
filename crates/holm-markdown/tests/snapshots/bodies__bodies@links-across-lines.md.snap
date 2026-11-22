@@ -24,13 +24,13 @@ Link 94..106 "quote\n> link"
 2..8 "[\n][a]"
   target: File("/x")
   target range: None
-  embedded: false
+  kind: Plain
 20..60 "[link\n](holm:01JC3X0000000000000000000A)"
   target: Note { id: "01JC3X0000000000000000000A", heading: None }
   target range: Some("28..59 \"holm:01JC3X0000000000000000000A\"")
-  embedded: false
+  kind: Plain
 93..115 "[quote\n> link](#Plans)"
   target: Heading("Plans")
   target range: Some("108..114 \"#Plans\"")
-  embedded: false
+  kind: Plain
 --- headings ---

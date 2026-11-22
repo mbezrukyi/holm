@@ -10,7 +10,7 @@ use gpui_kit::{
     MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render, ScrollEvent, Styled, TestSupportExt as _,
     UTF16Selection, Window, div, px,
 };
-use holm_markdown::{Color, Target};
+use holm_markdown::{Color, LinkKind, Target};
 
 use crate::color::{self, ColorWindow, KeyResult, Paint};
 use crate::element::{EditorElement, Layout, Reveal, Scroll, Theme};
@@ -204,8 +204,7 @@ impl EventEmitter<CustomColors> for Editor {}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CursorLink {
     pub target: Target,
-    /// `![..](..)`: an image or a file chip.
-    pub embedded: bool,
+    pub kind: LinkKind,
 }
 
 impl Editor {
@@ -316,18 +315,17 @@ impl Editor {
     pub fn link_at_cursor(&self) -> Option<CursorLink> {
         self.model.link_at(self.model.cursor()).map(|link| CursorLink {
             target: link.target.clone(),
-            embedded: link.embedded,
+            kind: link.kind,
         })
     }
 
     /// Puts a link to `target` in place of the selection, as one undo step, and the cursor after it. The selection
-    /// becomes the link text. With no selection, `text` does, written so that it shows as it is. `embedded` writes
-    /// `![..](..)`. A link to an image gets a line of its own, and the image shows under it. A link to another file or
-    /// a folder stays at the cursor, as a file chip, with a space on each side where the text needs one. It sends
-    /// [`Changed`].
-    pub fn insert_link(&mut self, text: &str, target: &Target, embedded: bool, cx: &mut Context<Self>) {
+    /// becomes the link text. With no selection, `text` does, written so that it shows as it is. An embedded link to an
+    /// image gets a line of its own, and the image shows under it. An embedded link to another file or a folder stays
+    /// at the cursor, as a file chip, with a space on each side where the text needs one. It sends [`Changed`].
+    pub fn insert_link(&mut self, text: &str, target: &Target, kind: LinkKind, cx: &mut Context<Self>) {
         let form = match target {
-            _ if !embedded => LinkForm::Text,
+            _ if kind == LinkKind::Plain => LinkForm::Text,
             Target::File(path) if matches!(self.files.kind(path), FileKind::Image(_)) => LinkForm::Block,
             _ => LinkForm::Inline,
         };

@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use holm_markdown::{Alignment, Block, BlockKind, CalloutKind, Color, Style, Target, TaskState};
+use holm_markdown::{Alignment, Block, BlockKind, CalloutKind, Color, LinkKind, Style, Target, TaskState};
 
 use super::Model;
 
@@ -521,7 +521,7 @@ impl Model {
         links
             [links.partition_point(|l| l.range.start < line.start)..links.partition_point(|l| l.range.start < line.end)]
             .iter()
-            .filter(|link| link.embedded)
+            .filter(|link| link.kind == LinkKind::Embedded)
             .filter_map(|link| match &link.target {
                 Target::File(path) => Some((link.range.clone(), path.as_str(), &self.text[link.text.clone()])),
                 _ => None,

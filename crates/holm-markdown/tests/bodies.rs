@@ -34,7 +34,7 @@ fn report(text: &str) -> String {
         let _ = writeln!(out, "  target: {:?}", link.target);
         let target = link.target_range.as_ref().map(|r| show(text, r));
         let _ = writeln!(out, "  target range: {target:?}");
-        let _ = writeln!(out, "  embedded: {}", link.embedded);
+        let _ = writeln!(out, "  kind: {:?}", link.kind);
     }
     out.push_str("--- headings ---\n");
     for heading in body.headings() {

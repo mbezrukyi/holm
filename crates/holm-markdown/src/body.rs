@@ -214,8 +214,15 @@ pub struct Link {
     /// The target as written, with its `< >`. It is `None` for a reference link, because the target is in its
     /// definition line.
     pub target_range: Option<Range<usize>>,
-    /// Whether it is `![..](..)`: an image or a file chip.
-    pub embedded: bool,
+    pub kind: LinkKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinkKind {
+    /// `[..](..)`.
+    Plain,
+    /// `![..](..)`: an image or a file chip.
+    Embedded,
 }
 
 /// A heading, for heading links.
@@ -898,11 +905,11 @@ impl<'a> Walker<'a> {
                 }
                 Kind::Image(dest) => {
                     self.hide_inline(node.source.clone());
-                    self.push_link(node.source, node.content, *dest, true);
+                    self.push_link(node.source, node.content, *dest, LinkKind::Embedded);
                     continue;
                 }
                 Kind::Link(dest) => {
-                    self.push_link(node.source.clone(), node.content.clone(), *dest, false);
+                    self.push_link(node.source.clone(), node.content.clone(), *dest, LinkKind::Plain);
                     if node.content.is_empty() {
                         continue;
                     }
@@ -936,14 +943,14 @@ impl<'a> Walker<'a> {
         }
     }
 
-    fn push_link(&mut self, range: Range<usize>, text: Range<usize>, dest: Destination, embedded: bool) {
+    fn push_link(&mut self, range: Range<usize>, text: Range<usize>, dest: Destination, kind: LinkKind) {
         if let Some(target) = dest.target {
             self.body.links.push(Link {
                 range,
                 text,
                 target,
                 target_range: dest.range,
-                embedded,
+                kind,
             });
         }
     }

@@ -22,6 +22,6 @@ Link 36..41 "lïnk"
 35..52 "[lïnk](fïle.md)"
   target: File("fïle.md")
   target range: Some("43..51 \"fïle.md\"")
-  embedded: false
+  kind: Plain
 --- headings ---
 1 "Ш заголовок" 54..77 "# Ш заголовок"
