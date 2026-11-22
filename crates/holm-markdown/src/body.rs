@@ -106,9 +106,16 @@ pub enum CalloutKind {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Task {
-    pub checked: bool,
+    pub state: TaskState,
     /// The source of the marker, like `[ ]`.
     pub range: Range<usize>,
+}
+
+/// `[ ]` or `[x]`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TaskState {
+    Unchecked,
+    Checked,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -559,7 +566,14 @@ impl<'a> Walker<'a> {
             Event::End(TagEnd::Heading(_)) if self.empty_item.is_some() => self.end_empty_item(),
             Event::Start(tag) => self.start(tag, range),
             Event::End(_) => self.end(),
-            Event::TaskListMarker(checked) => self.task(checked, range),
+            Event::TaskListMarker(checked) => {
+                let state = if checked {
+                    TaskState::Checked
+                } else {
+                    TaskState::Unchecked
+                };
+                self.task(state, range);
+            }
             Event::Rule => {
                 self.touch(&range);
                 let block = Block {
@@ -763,7 +777,7 @@ impl<'a> Walker<'a> {
         self.end();
     }
 
-    fn task(&mut self, checked: bool, range: Range<usize>) {
+    fn task(&mut self, state: TaskState, range: Range<usize>) {
         self.touch(&range);
         let item = self
             .frames
@@ -772,7 +786,7 @@ impl<'a> Walker<'a> {
             .find(|frame| matches!(frame.kind, Some(BlockKind::Item { .. })));
         if let Some(frame) = item {
             frame.kind = Some(BlockKind::Item {
-                task: Some(Task { checked, range }),
+                task: Some(Task { state, range }),
             });
         }
     }

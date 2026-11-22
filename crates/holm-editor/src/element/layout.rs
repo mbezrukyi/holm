@@ -9,7 +9,7 @@ use gpui_kit::{
     Bounds, Font, FontStyle, FontWeight, Pixels, Point, ShapedLine, StrikethroughStyle, TextRun, TextStyle, Window,
     point, px, size,
 };
-use holm_markdown::{Alignment, CalloutKind};
+use holm_markdown::{Alignment, CalloutKind, TaskState};
 use num_traits::ToPrimitive as _;
 
 use super::flow::{ChipBox, FlowLine, Icon};
@@ -648,7 +648,13 @@ fn line_place(display: &DisplayLine) -> Place {
     Place {
         bold: display.heading.is_some(),
         quoted: !display.quotes.is_empty(),
-        done: matches!(display.mark, Some(Mark::Task { checked: true, .. })),
+        done: matches!(
+            display.mark,
+            Some(Mark::Task {
+                state: TaskState::Checked,
+                ..
+            })
+        ),
     }
 }
 

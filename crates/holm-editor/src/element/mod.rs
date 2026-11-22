@@ -12,6 +12,7 @@ use gpui_kit::{
     outline, point, px, relative, size,
 };
 
+use holm_markdown::TaskState;
 pub(crate) use layout::{Layout, Reveal, Scroll};
 use theme::Place;
 pub(crate) use theme::Theme;
@@ -401,7 +402,7 @@ fn paint_line(line: &LaidLine, column: Bounds<Pixels>, theme: &Theme, window: &m
                     let _ = number.paint(bounds.origin, line.line_height, TextAlign::Left, None, window, cx);
                 }
             }
-            Mark::Task { checked, .. } => paint_task(bounds, *checked, theme, window),
+            Mark::Task { state, .. } => paint_task(bounds, *state, theme, window),
         }
     }
     for image in &line.images {
@@ -634,9 +635,9 @@ fn row_spans(
     spans
 }
 
-fn paint_task(bounds: Bounds<Pixels>, checked: bool, theme: &Theme, window: &mut Window) {
+fn paint_task(bounds: Bounds<Pixels>, state: TaskState, theme: &Theme, window: &mut Window) {
     let radius = bounds.size.width * 0.2;
-    if !checked {
+    if state == TaskState::Unchecked {
         window.paint_quad(
             outline(bounds, theme.muted, BorderStyle::Solid)
                 .corner_radii(radius)

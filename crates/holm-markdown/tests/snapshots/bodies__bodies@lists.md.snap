@@ -6,8 +6,8 @@ input_file: crates/holm-markdown/tests/bodies/lists.md
 --- blocks ---
 List { start: None } 0..38 "- one\n- [ ] task\n- [x] done\n  - nested"
   Item { task: None } 0..5 "- one"
-  Item { task: Some(Task { checked: false, range: 8..11 }) } 6..16 "- [ ] task"
-  Item { task: Some(Task { checked: true, range: 19..22 }) } 17..38 "- [x] done\n  - nested"
+  Item { task: Some(Task { state: Unchecked, range: 8..11 }) } 6..16 "- [ ] task"
+  Item { task: Some(Task { state: Checked, range: 19..22 }) } 17..38 "- [x] done\n  - nested"
     List { start: None } 30..38 "- nested"
       Item { task: None } 30..38 "- nested"
 List { start: Some(3) } 40..56 "3. three\n4. four"

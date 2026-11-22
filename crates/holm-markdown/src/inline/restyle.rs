@@ -91,7 +91,7 @@ fn same_shape(a: &[crate::Block], b: &[crate::Block]) -> bool {
     let kind = |block: &crate::Block| match &block.kind {
         BlockKind::Item { task } => BlockKind::Item {
             task: task.as_ref().map(|t| crate::Task {
-                checked: t.checked,
+                state: t.state,
                 range: 0..0,
             }),
         },

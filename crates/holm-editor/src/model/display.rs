@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use holm_markdown::{Alignment, Block, BlockKind, CalloutKind, Color, Style, Target};
+use holm_markdown::{Alignment, Block, BlockKind, CalloutKind, Color, Style, Target, TaskState};
 
 use super::Model;
 
@@ -171,7 +171,7 @@ pub(crate) enum Mark {
     Number(String),
     /// A task box, with the source of its `[ ]`.
     Task {
-        checked: bool,
+        state: TaskState,
         range: Range<usize>,
     },
 }
@@ -430,7 +430,7 @@ impl Model {
         };
         if let BlockKind::Item { task: Some(task) } = &item.kind {
             mark = Mark::Task {
-                checked: task.checked,
+                state: task.state,
                 range: task.range.clone(),
             };
             end = task.range.end;
@@ -654,7 +654,13 @@ mod tests {
         );
         let done = model.display_line(5, &mut plain_chip);
         assert_eq!(done.shown.text, "done");
-        assert!(matches!(done.mark, Some(Mark::Task { checked: true, .. })));
+        assert!(matches!(
+            done.mark,
+            Some(Mark::Task {
+                state: TaskState::Checked,
+                ..
+            })
+        ));
     }
 
     #[test]
