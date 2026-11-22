@@ -50,23 +50,17 @@ pub(crate) type Gap = (f32, f32);
 struct Key {
     font: FontKey,
     letter: char,
-    /// The band, in hundredths of a pixel.
-    band: [i32; 3],
+    /// The band, as the bits of its floats.
+    band: [u32; 3],
 }
 
 /// The parts of the band that the ink of `letter` covers, sorted. A font or a letter that is not
 /// found has none.
 pub(crate) fn gaps(font: &FontKey, letter: char, band: Band) -> Vec<Gap> {
-    #[allow(clippy::cast_possible_truncation, reason = "a small pixel value")]
-    let hundredths = |value: f32| (value * 100.).round() as i32;
     let key = Key {
         font: font.clone(),
         letter,
-        band: [
-            hundredths(band.font_size),
-            hundredths(band.top),
-            hundredths(band.bottom),
-        ],
+        band: [band.font_size.to_bits(), band.top.to_bits(), band.bottom.to_bits()],
     };
     if let Ok(cache) = GAPS.lock()
         && let Some(found) = cache.get(&key)

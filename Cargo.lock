@@ -3465,6 +3465,7 @@ dependencies = [
  "holm-markdown",
  "icu_segmenter",
  "imagesize 0.14.0",
+ "num-traits",
  "proptest",
  "ropey",
  "syntect",

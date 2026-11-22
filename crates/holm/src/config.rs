@@ -60,7 +60,7 @@ pub(crate) struct Settings {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SidebarSettings {
     /// In pixels.
-    pub(crate) width: u16,
+    pub(crate) width: u32,
     pub(crate) hidden: bool,
     pub(crate) view: SavedSidebarView,
 }
@@ -357,7 +357,7 @@ fn read_sidebar(table: &dyn toml_edit::TableLike, sidebar: &mut SidebarSettings)
     for (key, value) in table.iter() {
         match key {
             "width" => {
-                if let Some(width) = get(key, value, |value| u16::try_from(value.as_integer()?).ok()) {
+                if let Some(width) = get(key, value, |value| u32::try_from(value.as_integer()?).ok()) {
                     sidebar.width = width;
                 }
             }

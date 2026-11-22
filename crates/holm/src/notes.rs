@@ -119,7 +119,7 @@ impl NotesView {
             sidebar,
             pane,
             hidden: settings.sidebar.hidden,
-            width: px(f32::from(settings.sidebar.width)),
+            width: Pixels::from(settings.sidebar.width),
             resizing: false,
             dialog: None,
             picker: None,
@@ -702,7 +702,7 @@ impl NotesView {
     /// Keeps the sidebar view and the open note in the config.
     fn save_place(&mut self, cx: &mut Context<Self>) {
         let sidebar = SidebarSettings {
-            width: whole(self.width),
+            width: u32::from(self.width.round()),
             hidden: self.hidden,
             view: self.sidebar.read(cx).view(),
         };
@@ -775,13 +775,4 @@ impl Render for NotesView {
             .children(self.shortcut_list.clone())
             .child(self.app_menu.clone())
     }
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "the width stays between MIN_WIDTH and MAX_WIDTH"
-)]
-fn whole(width: Pixels) -> u16 {
-    f32::from(width).round() as u16
 }

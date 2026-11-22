@@ -11,6 +11,7 @@ use gpui_kit::{
     point, px, size,
 };
 use holm_markdown::{Alignment, CalloutKind};
+use num_traits::ToPrimitive as _;
 
 use super::flow::{ChipBox, FlowLine, Icon};
 use super::theme::{Place, Theme};
@@ -1041,13 +1042,7 @@ impl Layout {
             .reduce(Pixels::min)
             .unwrap_or(self.bounds.size.height);
         let rows = (self.bounds.size.height / line_height).floor();
-        #[allow(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "a small row count"
-        )]
-        let rows = rows.max(1.) as usize;
-        rows
+        rows.to_usize().map_or(1, |rows| rows.max(1))
     }
 
     /// The window bounds of the cursor, when its line is in this layout.

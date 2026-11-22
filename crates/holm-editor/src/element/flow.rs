@@ -636,9 +636,10 @@ impl FlowLine {
         position: Point<Pixels>,
         line_height: Pixels,
     ) -> Result<usize, usize> {
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "a row number")]
-        let ix = (position.y / line_height).floor().max(0.) as usize;
-        let Some(row) = self.rows.get(ix) else {
+        let Some((_, row)) = self
+            .rows_with_y(line_height)
+            .find(|(y, _)| position.y < *y + line_height)
+        else {
             return Err(self.text.len());
         };
         if position.x < px(0.) {

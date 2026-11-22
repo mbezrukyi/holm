@@ -12,6 +12,7 @@ gpui-kit.workspace = true
 holm-markdown.workspace = true
 icu_segmenter.workspace = true
 imagesize.workspace = true
+num-traits.workspace = true
 ropey.workspace = true
 syntect.workspace = true
 thiserror.workspace = true
