@@ -1,17 +1,15 @@
 //! The editor through its interface: keys, text input and clicks.
 
-mod common;
-
 use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use common::{LINE_HEIGHT, MARGIN, advance, app, column_x, data_folder, open};
 use gpui_kit::{
     Bounds, ClipboardItem, Entity, EntityInputHandler, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels,
     VisualTestContext, point, px,
 };
 use holm_editor::{Changed, Editor, TextWidth, UpFromStart, WritingHelp};
+use holm_editor_test::{LINE_HEIGHT, MARGIN, advance, app, column_x, data_folder, open};
 
 const WIDTH: Pixels = px(600.);
 const HEIGHT: Pixels = px(400.);

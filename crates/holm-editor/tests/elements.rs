@@ -1,16 +1,14 @@
 //! How the editor shows Markdown elements: the cursor rules of code blocks and tables, task
 //! boxes and file chips.
 
-mod common;
-
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use common::{FONT_SIZE, LINE_HEIGHT, MARGIN, advance, app, column_x, open};
 use gpui_kit::{Entity, EntityInputHandler as _, Modifiers, Pixels, Point, VisualTestContext, point, px};
 use holm_editor::{Editor, OpenFile};
+use holm_editor_test::{FONT_SIZE, LINE_HEIGHT, MARGIN, advance, app, column_x, open};
 
 const WIDTH: Pixels = px(600.);
 const HEIGHT: Pixels = px(400.);

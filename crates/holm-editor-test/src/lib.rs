@@ -1,8 +1,6 @@
 //! Test windows for the editor, with a real text system and the font from the repo.
 
-#![allow(dead_code, reason = "each test file uses only some helpers")]
-#![allow(unreachable_pub, reason = "test helpers")]
-#![allow(clippy::expect_used, reason = "tests")]
+#![expect(clippy::expect_used, reason = "test helpers")]
 
 use std::borrow::Cow;
 use std::path::PathBuf;
@@ -39,7 +37,9 @@ impl Render for Host {
 pub fn app() -> TestAppContext {
     let text_system = gpui_kit::platform::current_platform(true).text_system();
     text_system
-        .add_fonts(vec![Cow::Borrowed(include_bytes!("../fonts/FiraMono-Medium.ttf"))])
+        .add_fonts(vec![Cow::Borrowed(include_bytes!(
+            "../../holm-editor/tests/fonts/FiraMono-Medium.ttf"
+        ))])
         .expect("the repo font loads");
     let cx = TestAppContext::build_with_text_system(TestDispatcher::new(0), None, text_system);
     cx.update(holm_editor::init);
@@ -96,11 +96,11 @@ pub fn advance(cx: &VisualTestContext) -> Pixels {
 }
 
 pub fn data_folder() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../holm-editor/tests/data")
 }
 
 /// A part of a note with every element, each block closed.
-const CHUNK: &str = include_str!("../data/chunk.md");
+const CHUNK: &str = include_str!("../../holm-editor/tests/data/chunk.md");
 
 /// About 1 MB of [`CHUNK`] parts, one after another.
 pub fn one_mb_note() -> String {

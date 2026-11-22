@@ -2,15 +2,13 @@
 
 #![cfg(test)]
 
-mod common;
-
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-use common::{Folder, folder_path, note_path, tag_name};
 use holm_core::Core;
 use holm_core::model::Change;
+use holm_core_test::{Folder, folder_path, note_path, tag_name};
 
 /// Each folder and note file below `root`, by its path from `root`. A note maps to its text.
 fn files(root: &Path, dir: &Path, found: &mut BTreeMap<String, Option<String>>) {

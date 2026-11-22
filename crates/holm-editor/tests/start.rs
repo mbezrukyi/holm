@@ -1,16 +1,14 @@
 //! The view before the first line, through the editor interface.
 
-mod common;
-
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use common::{LINE_HEIGHT, app, column_x, open};
 use gpui_kit::{
     AppContext as _, Entity, FocusHandle, Focusable as _, Modifiers, Pixels, Point, ScrollDelta, ScrollEvent,
     VisualTestContext, point, px,
 };
 use holm_editor::Editor;
+use holm_editor_test::{LINE_HEIGHT, app, column_x, open};
 
 const WIDTH: Pixels = px(600.);
 const HEIGHT: Pixels = px(200.);

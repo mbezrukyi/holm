@@ -1,14 +1,10 @@
 //! Copying files into `attachments/` through `Core` on a real temp folder.
 
-#![allow(clippy::unwrap_used, reason = "tests")]
-
-mod common;
-
 use std::fs;
 use std::path::Path;
 
-use common::{Folder, note_path};
 use holm_core::Error;
+use holm_core_test::{Folder, note_path};
 
 #[test]
 fn attach_file_copies_the_file_and_returns_the_path_from_the_note() {
@@ -124,7 +120,7 @@ fn attachments_do_not_show_as_folders_or_notes() {
             .core
             .snapshot()
             .folders()
-            .map(common::path_buf)
+            .map(holm_core_test::path_buf)
             .collect::<Vec<_>>(),
         [] as [std::path::PathBuf; 0]
     );

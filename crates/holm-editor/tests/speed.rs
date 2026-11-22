@@ -2,12 +2,10 @@
 //!
 //! CI runs it with `cargo test --release -p holm-editor --test speed`.
 
-mod common;
-
 use std::time::{Duration, Instant};
 
-use common::{app, one_mb_note, open};
 use gpui_kit::px;
+use holm_editor_test::{app, one_mb_note, open};
 
 #[test]
 #[cfg_attr(debug_assertions, ignore = "speed counts only in release mode")]

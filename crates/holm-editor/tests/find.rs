@@ -1,10 +1,8 @@
 //! Find in the open note, through the editor interface.
 
-mod common;
-
-use common::{LINE_HEIGHT, app, cursor_y, open};
 use gpui_kit::{ClipboardItem, Entity, Pixels, VisualTestContext, px};
 use holm_editor::Editor;
+use holm_editor_test::{LINE_HEIGHT, app, cursor_y, open};
 
 const WIDTH: Pixels = px(600.);
 const HEIGHT: Pixels = px(400.);

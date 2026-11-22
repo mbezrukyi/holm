@@ -3,14 +3,12 @@
 
 #![cfg(test)]
 
-mod common;
-
 use std::fs;
 use std::path::PathBuf;
 
-use common::{Folder, folder_path, note_path, tag_name};
 use holm_core::Error;
 use holm_core::model::{Link, LinkTarget};
+use holm_core_test::{Folder, folder_path, note_path, tag_name};
 
 fn note(id: &str, body: &str) -> String {
     format!("---\nid: {id}\n---\n{body}")

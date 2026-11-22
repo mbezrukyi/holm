@@ -1,7 +1,6 @@
 //! A notes folder and an index folder in temp folders, with a `Core` on them.
 
-#![allow(dead_code, reason = "each test file uses only some helpers")]
-#![allow(clippy::unwrap_used, reason = "tests")]
+#![expect(clippy::unwrap_used, reason = "test helpers")]
 
 use std::fmt::Display;
 use std::fs;
@@ -11,16 +10,16 @@ use std::time::{Duration, SystemTime};
 use holm_core::{Core, Feed, FolderPath, NotePath, TagName};
 use tempfile::TempDir;
 
-pub(crate) struct Folder {
-    pub(crate) dir: TempDir,
-    pub(crate) cache: TempDir,
-    pub(crate) core: Core,
+pub struct Folder {
+    pub dir: TempDir,
+    pub cache: TempDir,
+    pub core: Core,
     /// Only for a folder from [`Folder::with_feed`].
-    pub(crate) feed: Option<Feed>,
+    pub feed: Option<Feed>,
 }
 
 impl Folder {
-    pub(crate) fn new(files: &[(&str, &str)]) -> Self {
+    pub fn new(files: &[(&str, &str)]) -> Self {
         let dir = tempfile::tempdir().unwrap();
         for (path, text) in files {
             write(dir.path(), path, text);
@@ -36,7 +35,7 @@ impl Folder {
     }
 
     /// A folder whose core sees outside changes only through [`Folder::feed`].
-    pub(crate) fn with_feed(files: &[(&str, &str)]) -> Self {
+    pub fn with_feed(files: &[(&str, &str)]) -> Self {
         let dir = tempfile::tempdir().unwrap();
         for (path, text) in files {
             write(dir.path(), path, text);
@@ -52,24 +51,24 @@ impl Folder {
     }
 
     /// Tells the core of a [`Folder::with_feed`] that `paths` changed.
-    pub(crate) fn feed<P: AsRef<Path>>(&self, paths: impl IntoIterator<Item = P>) {
+    pub fn feed<P: AsRef<Path>>(&self, paths: impl IntoIterator<Item = P>) {
         self.feed.as_ref().unwrap().changed(paths).unwrap();
     }
 
-    pub(crate) fn path(&self, path: &str) -> PathBuf {
+    pub fn path(&self, path: &str) -> PathBuf {
         self.dir.path().join(path)
     }
 
-    pub(crate) fn write(&self, path: &str, text: &str) {
+    pub fn write(&self, path: &str, text: &str) {
         write(self.dir.path(), path, text);
     }
 
-    pub(crate) fn text(&self, path: &str) -> String {
+    pub fn text(&self, path: &str) -> String {
         fs::read_to_string(self.path(path)).unwrap()
     }
 
     /// The sorted names in the folder `path`, hidden ones too.
-    pub(crate) fn names(&self, path: &str) -> Vec<String> {
+    pub fn names(&self, path: &str) -> Vec<String> {
         let mut names: Vec<String> = fs::read_dir(self.path(path))
             .unwrap()
             .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
@@ -79,7 +78,7 @@ impl Folder {
     }
 
     /// Sets the modification time to `secs` after 1970.
-    pub(crate) fn set_time(&self, path: &str, secs: u64) -> SystemTime {
+    pub fn set_time(&self, path: &str, secs: u64) -> SystemTime {
         let time = SystemTime::UNIX_EPOCH + Duration::from_secs(secs);
         fs::File::options()
             .write(true)
@@ -91,7 +90,7 @@ impl Folder {
     }
 
     /// The names in the notes folder itself.
-    pub(crate) fn files(&self) -> Vec<String> {
+    pub fn files(&self) -> Vec<String> {
         let mut names: Vec<String> = fs::read_dir(self.dir.path())
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
@@ -101,12 +100,12 @@ impl Folder {
     }
 
     /// Opens the folder again with the same index, like a new start of Holm.
-    pub(crate) fn reopen(&mut self) {
+    pub fn reopen(&mut self) {
         self.core = Core::open(self.dir.path(), self.cache.path()).unwrap();
     }
 
     /// The index file.
-    pub(crate) fn index_file(&self) -> PathBuf {
+    pub fn index_file(&self) -> PathBuf {
         self.cache.path().join("index.sqlite")
     }
 }
@@ -117,22 +116,22 @@ fn write(root: &Path, path: &str, text: &str) {
     fs::write(path, text).unwrap();
 }
 
-pub(crate) fn paths<P: Display>(items: impl IntoIterator<Item = P>) -> Vec<String> {
+pub fn paths<P: Display>(items: impl IntoIterator<Item = P>) -> Vec<String> {
     items.into_iter().map(|p| p.to_string()).collect()
 }
 
-pub(crate) fn note_path(path: &str) -> NotePath {
+pub fn note_path(path: &str) -> NotePath {
     NotePath::new(path).unwrap()
 }
 
-pub(crate) fn folder_path(path: &str) -> FolderPath {
+pub fn folder_path(path: &str) -> FolderPath {
     FolderPath::new(path).unwrap()
 }
 
-pub(crate) fn tag_name(name: &str) -> TagName {
+pub fn tag_name(name: &str) -> TagName {
     TagName::new(name).unwrap()
 }
 
-pub(crate) fn path_buf(path: impl Display) -> PathBuf {
+pub fn path_buf(path: impl Display) -> PathBuf {
     PathBuf::from(path.to_string())
 }

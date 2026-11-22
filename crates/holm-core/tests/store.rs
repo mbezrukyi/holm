@@ -1,17 +1,13 @@
 //! Reading, listing and saving notes through `Core` on a real temp folder.
 
-#![allow(clippy::unwrap_used, reason = "tests")]
-
-mod common;
-
 use std::fs;
 
-use common::{Folder, folder_path, note_path};
 use holm_core::model::{NoteSet, Order};
 use holm_core::{Core, Error, NameProblem, NotePath};
+use holm_core_test::{Folder, folder_path, note_path};
 
 fn paths<P: std::fmt::Display>(items: impl IntoIterator<Item = P>) -> Vec<String> {
-    let mut paths = common::paths(items);
+    let mut paths = holm_core_test::paths(items);
     paths.sort();
     paths
 }

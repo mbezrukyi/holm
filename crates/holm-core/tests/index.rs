@@ -2,24 +2,22 @@
 
 #![cfg(test)]
 
-mod common;
-
 use std::fs;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::PathBuf;
 
-use common::{Folder, folder_path, note_path, tag_name};
 use holm_core::model::{Link, LinkTarget, NoteInfo, NoteSet, Order, Tag};
 use holm_core::{Core, NotePath};
+use holm_core_test::{Folder, folder_path, note_path, tag_name};
 
 fn paths(notes: Vec<NoteInfo>) -> Vec<String> {
-    common::paths(notes.into_iter().map(|n| n.path))
+    holm_core_test::paths(notes.into_iter().map(|n| n.path))
 }
 
 /// The search results in the order of a list.
 fn found(folder: &Folder, text: &str) -> Vec<String> {
     let found = folder.core.search(text, Order::Title).unwrap();
-    common::paths(found.into_parts().1)
+    holm_core_test::paths(found.into_parts().1)
 }
 
 fn note(id: &str, extra: &str, body: &str) -> String {
@@ -454,7 +452,7 @@ fn a_save_stays_when_the_index_fails_and_the_next_start_reads_the_file_again() {
 
     let saved = core.save(&note_path("a.md"), "new\n", None);
     let preview = |core: &Core| core.snapshot().note(&note_path("a.md")).unwrap().preview.clone();
-    let found = |core: &Core| common::paths(core.search("new", Order::Title).unwrap().paths().to_vec());
+    let found = |core: &Core| holm_core_test::paths(core.search("new", Order::Title).unwrap().paths().to_vec());
     let during = (preview(&core), found(&core));
     drop(core);
     fs::set_permissions(cache.path(), fs::Permissions::from_mode(0o755)).unwrap();
@@ -492,7 +490,10 @@ fn search_gives_pinned_notes_first_with_the_snapshot_of_each_note() {
     ]);
     let results = folder.core.search("plan", Order::Title).unwrap();
 
-    assert_eq!(common::paths(results.paths().to_vec()), ["work/c.md", "A.md", "b.md"]);
+    assert_eq!(
+        holm_core_test::paths(results.paths().to_vec()),
+        ["work/c.md", "A.md", "b.md"]
+    );
     for path in results.paths() {
         assert!(results.snapshot().note(path).is_some());
     }

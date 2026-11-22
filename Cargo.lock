@@ -3432,6 +3432,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "holm-core",
+ "holm-core-test",
  "holm-markdown",
  "imbl",
  "notify",
@@ -3446,12 +3447,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "holm-core-test"
+version = "0.1.0"
+dependencies = [
+ "holm-core",
+ "tempfile",
+]
+
+[[package]]
 name = "holm-editor"
 version = "0.1.0"
 dependencies = [
  "divan",
  "fontdb",
  "gpui-kit",
+ "holm-editor-test",
  "holm-markdown",
  "icu_segmenter",
  "imagesize 0.14.0",
@@ -3461,6 +3471,14 @@ dependencies = [
  "thiserror 2.0.21",
  "ttf-parser",
  "two-face",
+]
+
+[[package]]
+name = "holm-editor-test"
+version = "0.1.0"
+dependencies = [
+ "gpui-kit",
+ "holm-editor",
 ]
 
 [[package]]

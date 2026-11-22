@@ -3,9 +3,7 @@
 
 #![cfg(test)]
 
-mod common;
-
-use common::{folder_path, note_path, tag_name};
+use holm_core_test::{folder_path, note_path, tag_name};
 
 use std::cell::RefCell;
 use std::fs;
@@ -188,7 +186,7 @@ fn holm_s_own_saves_and_new_notes_come_from_holm() {
     let tagged = fed.core.add_tag(&note_path("a.md"), &tag_name("work")).unwrap();
     let new = fed.core.create(&folder_path(""), "New").unwrap();
     fed.feed
-        .changed([PathBuf::from("a.md"), common::path_buf(new.info.path.clone())])
+        .changed([PathBuf::from("a.md"), holm_core_test::path_buf(new.info.path.clone())])
         .unwrap();
 
     let lists: Vec<(Source, Vec<Change>)> = fed
@@ -287,8 +285,8 @@ fn each_list_carries_the_snapshot_of_its_revision() {
         .iter()
         .map(|list| {
             let notes = list.snapshot.notes(NoteSet::All, Order::Title);
-            let folders = list.snapshot.folders().map(common::path_buf).collect();
-            let notes = notes.into_iter().map(|info| common::path_buf(info.path));
+            let folders = list.snapshot.folders().map(holm_core_test::path_buf).collect();
+            let notes = notes.into_iter().map(|info| holm_core_test::path_buf(info.path));
             (notes.collect(), folders)
         })
         .collect();
@@ -376,7 +374,11 @@ fn a_new_folder_adds_its_notes_and_changes_the_folder_list() {
         ]
     );
     assert_eq!(
-        fed.core.snapshot().folders().map(common::path_buf).collect::<Vec<_>>(),
+        fed.core
+            .snapshot()
+            .folders()
+            .map(holm_core_test::path_buf)
+            .collect::<Vec<_>>(),
         [PathBuf::from("work"), PathBuf::from("work/deep")]
     );
 }
@@ -783,7 +785,7 @@ fn the_revision_grows_with_own_writes_and_outside_changes() {
 }
 
 fn paths(core: &Core) -> Vec<String> {
-    let mut paths = common::paths(core.snapshot().paths(NoteSet::All, Order::Title));
+    let mut paths = holm_core_test::paths(core.snapshot().paths(NoteSet::All, Order::Title));
     paths.sort();
     paths
 }
@@ -840,7 +842,7 @@ fn a_note_can_become_a_folder() {
     fed.feed.changed(["x.md"]).unwrap();
 
     assert_eq!(paths(&fed.core), ["x.md/a.md"]);
-    assert_eq!(common::paths(fed.core.snapshot().folders()), ["x.md"]);
+    assert_eq!(holm_core_test::paths(fed.core.snapshot().folders()), ["x.md"]);
 }
 
 #[test]

@@ -2,14 +2,12 @@
 
 #![cfg(test)]
 
-mod common;
-
 use std::fs;
 use std::os::unix::fs::PermissionsExt as _;
 
-use common::{Folder, note_path, tag_name};
 use holm_core::model::{NoteSet, Order};
 use holm_core::{Error, TagName};
+use holm_core_test::{Folder, note_path, tag_name};
 
 fn tags(folder: &Folder, path: &str) -> Vec<TagName> {
     folder.core.read(&note_path(path)).unwrap().info.tags
@@ -20,7 +18,7 @@ fn tagged(folder: &Folder, tag: &str) -> Vec<String> {
         .core
         .snapshot()
         .notes(NoteSet::WithTag(&tag_name(tag)), Order::Title);
-    common::paths(notes.into_iter().map(|n| n.path))
+    holm_core_test::paths(notes.into_iter().map(|n| n.path))
 }
 
 #[test]

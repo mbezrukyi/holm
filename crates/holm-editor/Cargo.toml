@@ -25,6 +25,7 @@ test-support = ["gpui-kit/test-support"]
 [dev-dependencies]
 divan.workspace = true
 gpui-kit = { workspace = true, features = ["test-support"] }
+holm-editor-test.workspace = true
 proptest.workspace = true
 
 [[bench]]

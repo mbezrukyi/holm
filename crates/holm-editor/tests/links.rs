@@ -1,17 +1,15 @@
 //! Links, file paste and drop, through the editor interface.
 
-mod common;
-
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use common::{LINE_HEIGHT, app, column_x, cursor_y, data_folder, open};
 use gpui_kit::{
     ClipboardEntry, ClipboardItem, Entity, ExternalPaths, FileDropEvent, Image, ImageFormat, Modifiers, Pixels,
     VisualTestContext, point, px,
 };
 use holm_editor::{CursorLink, Editor, OpenFile, OpenLink, PasteFiles, PastedFile};
+use holm_editor_test::{LINE_HEIGHT, app, column_x, cursor_y, data_folder, open};
 use holm_markdown::Target;
 
 const WIDTH: Pixels = px(600.);

@@ -2,21 +2,19 @@
 
 #![cfg(test)]
 
-mod common;
-
 use std::fs;
 use std::path::PathBuf;
 
-use common::{Folder, folder_path, note_path};
 use holm_core::model::{DeleteCount, LinkTarget, NoteInfo, NoteSet, Order};
 use holm_core::{Error, NameProblem};
+use holm_core_test::{Folder, folder_path, note_path};
 
 fn note(id: &str, body: &str) -> String {
     format!("---\nid: {id}\n---\n{body}")
 }
 
 fn paths(notes: Vec<NoteInfo>) -> Vec<String> {
-    let mut paths = common::paths(notes.into_iter().map(|n| n.path));
+    let mut paths = holm_core_test::paths(notes.into_iter().map(|n| n.path));
     paths.sort();
     paths
 }
@@ -253,7 +251,7 @@ fn create_folder_keeps_the_typed_name_trimmed() {
         Err(Error::Write { .. })
     ));
     assert_eq!(
-        common::paths(core.snapshot().folders().collect::<Vec<_>>()),
+        holm_core_test::paths(core.snapshot().folders().collect::<Vec<_>>()),
         ["Ideas: 2026?", "Plans", "work", "work/attachments"]
     );
 }
@@ -332,7 +330,7 @@ fn rename_folder_moves_its_notes_and_keeps_links_that_still_work() {
         ["other.md"]
     );
     assert_eq!(
-        common::paths(folder.core.snapshot().folders().collect::<Vec<_>>()),
+        holm_core_test::paths(folder.core.snapshot().folders().collect::<Vec<_>>()),
         ["Job", "Job/sub"]
     );
     assert_index_matches_files(&mut folder, &["Job/a.md", "Job/b.md", "Job/sub/b.md", "other.md"]);
@@ -466,7 +464,10 @@ fn only_the_exact_attachments_folder_is_for_attachments() {
     ]);
     let core = &folder.core;
 
-    assert_eq!(common::paths(core.snapshot().folders()), ["Attachments", "work"]);
+    assert_eq!(
+        holm_core_test::paths(core.snapshot().folders()),
+        ["Attachments", "work"]
+    );
     assert!(matches!(
         core.rename_folder(&folder_path("work"), "Attachments"),
         Err(Error::BadName {
@@ -528,7 +529,7 @@ fn delete_folder_deletes_its_notes_and_their_attachments() {
             .core
             .snapshot()
             .folders()
-            .map(common::path_buf)
+            .map(holm_core_test::path_buf)
             .collect::<Vec<_>>(),
         Vec::<PathBuf>::new()
     );

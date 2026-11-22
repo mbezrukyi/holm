@@ -28,6 +28,7 @@ test-support = []
 [dev-dependencies]
 divan.workspace = true
 holm-core = { path = ".", features = ["test-support"] }
+holm-core-test.workspace = true
 proptest.workspace = true
 
 [[bench]]
