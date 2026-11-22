@@ -144,12 +144,19 @@ struct ChipPiece {
     chip: usize,
     x: Pixels,
     width: Pixels,
-    /// Whether the piece has the start of the chip, with the icon.
-    first: bool,
-    /// Whether the piece has the end of the chip, with the detail.
-    last: bool,
+    /// The start of the chip, with the icon.
+    start: ChipEnd,
+    /// The end of the chip, with the detail.
+    end: ChipEnd,
     /// The part of the name on this row.
     name: ShapedLine,
+}
+
+/// Where an end of a chip lies, for a piece of the chip. A wrap inside the name puts an end on another row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ChipEnd {
+    ThisRow,
+    OtherRow,
 }
 
 /// All points are from the top left of the line.
@@ -330,19 +337,18 @@ impl FlowLine {
             .collect();
     }
 
-    fn lead_width(&self, first: bool) -> Pixels {
+    fn lead_width(&self, start: ChipEnd) -> Pixels {
         let pad = self.font_size * CHIP_PAD;
-        if first {
-            pad + self.font_size * (CHIP_ICON + CHIP_ICON_GAP)
-        } else {
-            pad
+        match start {
+            ChipEnd::ThisRow => pad + self.font_size * (CHIP_ICON + CHIP_ICON_GAP),
+            ChipEnd::OtherRow => pad,
         }
     }
 
-    fn tail_width(&self, chip: usize, last: bool) -> Pixels {
+    fn tail_width(&self, chip: usize, end: ChipEnd) -> Pixels {
         let pad = self.font_size * CHIP_PAD;
         match &self.chips[chip].detail {
-            Some(detail) if last => self.font_size * CHIP_DETAIL_GAP + detail.width() + pad,
+            Some(detail) if end == ChipEnd::ThisRow => self.font_size * CHIP_DETAIL_GAP + detail.width() + pad,
             _ => pad,
         }
     }
@@ -362,9 +368,9 @@ impl FlowLine {
             .iter()
             .map(|segment| match segment {
                 WrapSegment::Text { display, .. } => LineFragment::text(&self.text[display.clone()]),
-                WrapSegment::Lead(_) => LineFragment::element(self.lead_width(true), 1),
+                WrapSegment::Lead(_) => LineFragment::element(self.lead_width(ChipEnd::ThisRow), 1),
                 WrapSegment::Name(chip) => LineFragment::text(&self.chips[*chip].name.text),
-                WrapSegment::Tail(chip) => LineFragment::element(self.tail_width(*chip, true), 1),
+                WrapSegment::Tail(chip) => LineFragment::element(self.tail_width(*chip, ChipEnd::ThisRow), 1),
             })
             .collect()
     }
@@ -451,7 +457,7 @@ impl FlowLine {
     fn measure(&self, segments: &[WrapSegment], range: Range<usize>) -> Pixels {
         let part = |line: &ShapedLine, low: usize, high: usize| line.x_for_index(high) - line.x_for_index(low);
         let mut width = px(0.);
-        let (mut first, mut any, mut name) = (false, false, px(0.));
+        let (mut start_row, mut any, mut name) = (ChipEnd::OtherRow, false, px(0.));
         let mut start = 0;
         for segment in segments {
             if start >= range.end && !matches!(segment, WrapSegment::Name(_) | WrapSegment::Tail(_)) {
@@ -460,15 +466,16 @@ impl FlowLine {
             let end = start + self.segment_len(segment);
             let (low, high) = (range.start.max(start), range.end.min(end));
             let inside = low < high;
+            let row = if inside { ChipEnd::ThisRow } else { ChipEnd::OtherRow };
             match segment {
                 WrapSegment::Text { line, .. } if inside => width += part(line, low - start, high - start),
-                WrapSegment::Lead(_) => (first, any, name) = (inside, inside, px(0.)),
+                WrapSegment::Lead(_) => (start_row, any, name) = (row, inside, px(0.)),
                 WrapSegment::Name(chip) if inside => {
                     any = true;
                     name = part(&self.chips[*chip].name, low - start, high - start);
                 }
                 WrapSegment::Tail(chip) if inside || any => {
-                    width += self.lead_width(first) + name + self.tail_width(*chip, inside);
+                    width += self.lead_width(start_row) + name + self.tail_width(*chip, row);
                 }
                 _ => {}
             }
@@ -528,13 +535,13 @@ impl FlowLine {
                             chip: *chip,
                             x,
                             width: px(0.),
-                            first: false,
-                            last: false,
+                            start: ChipEnd::OtherRow,
+                            end: ChipEnd::OtherRow,
                             name: ShapedLine::default(),
                         });
                         match segment {
-                            WrapSegment::Lead(_) => piece.first = true,
-                            WrapSegment::Tail(_) => piece.last = true,
+                            WrapSegment::Lead(_) => piece.start = ChipEnd::ThisRow,
+                            WrapSegment::Tail(_) => piece.end = ChipEnd::ThisRow,
                             _ => {
                                 piece.name = cutter.cut(ix, &self.chips[*chip].name, low - start..high - start);
                             }
@@ -556,7 +563,7 @@ impl FlowLine {
 
     /// Ends `piece` with its width, and adds it to `pieces`. It returns the width.
     fn close(&self, pieces: &mut Vec<Piece>, mut piece: ChipPiece) -> Pixels {
-        piece.width = self.lead_width(piece.first) + piece.name.width() + self.tail_width(piece.chip, piece.last);
+        piece.width = self.lead_width(piece.start) + piece.name.width() + self.tail_width(piece.chip, piece.end);
         let width = piece.width;
         pieces.push(Piece::Chip(piece));
         width
@@ -609,10 +616,10 @@ impl FlowLine {
                 }
                 Piece::Chip(piece) => {
                     let range = &self.chips[piece.chip].range;
-                    if piece.first && index == range.start {
+                    if piece.start == ChipEnd::ThisRow && index == range.start {
                         return piece.x;
                     }
-                    if piece.last && index == range.end {
+                    if piece.end == ChipEnd::ThisRow && index == range.end {
                         return piece.x + piece.width;
                     }
                 }
@@ -689,20 +696,24 @@ impl FlowLine {
                 );
                 let pad = font_size * CHIP_PAD;
                 let side = font_size * CHIP_ICON;
-                let icon = piece.first.then(|| {
+                let icon = (piece.start == ChipEnd::ThisRow).then(|| {
                     let at = point(piece.x + pad, y + (line_height - side) / 2.);
                     (chip.icon, Bounds::new(at, size(side, side)))
                 });
-                let name_x = piece.x + self.lead_width(piece.first);
+                let name_x = piece.x + self.lead_width(piece.start);
                 let name = (&piece.name, point(name_x, y + self.shift(&piece.name)));
-                let detail = chip.detail.as_ref().filter(|_| piece.last).map(|detail| {
-                    let x = name_x + piece.name.width() + font_size * CHIP_DETAIL_GAP;
-                    // In the middle of the row, like the name, so it sits a bit above the baseline of the name.
-                    let at = point(x, y + (line_height - detail.ascent - detail.descent) / 2.);
-                    let under = at.y + detail.ascent + detail.font_size * CHIP_UNDERLINE;
-                    let underline = Bounds::new(point(x, under), size(detail.width(), px(1.)));
-                    (detail, at, underline)
-                });
+                let detail = chip
+                    .detail
+                    .as_ref()
+                    .filter(|_| piece.end == ChipEnd::ThisRow)
+                    .map(|detail| {
+                        let x = name_x + piece.name.width() + font_size * CHIP_DETAIL_GAP;
+                        // In the middle of the row, like the name, so it sits a bit above the baseline of the name.
+                        let at = point(x, y + (line_height - detail.ascent - detail.descent) / 2.);
+                        let under = at.y + detail.ascent + detail.font_size * CHIP_UNDERLINE;
+                        let underline = Bounds::new(point(x, under), size(detail.width(), px(1.)));
+                        (detail, at, underline)
+                    });
                 paints.push(ChipPaint {
                     bounds,
                     icon,
