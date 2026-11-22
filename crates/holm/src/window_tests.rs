@@ -1702,6 +1702,7 @@ fn type_new_name(cx: &mut TestAppContext, handle: AnyWindowHandle, name: &str) {
 }
 
 /// A write that the key starts has not run yet.
+/// Presses `key` and runs no task, so a write that it starts has not run yet.
 fn press(cx: &mut TestAppContext, handle: AnyWindowHandle, key: &'static str) {
     cx.update_window(handle, |_, window, cx| {
         window.dispatch_keystroke(gpui_kit::Keystroke::parse(key).unwrap(), cx);
