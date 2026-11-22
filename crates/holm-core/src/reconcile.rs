@@ -1,7 +1,4 @@
-//! The rules that bring the facts up to date with the note files: moves, gone notes and id
-//! clashes.
-//!
-//! It does no I/O. The core lists and reads the files, and runs what it decides.
+//! Reconciling does no I/O. The core lists and reads the files, and runs what it decides.
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
@@ -14,7 +11,6 @@ use crate::paths::NotePath;
 use crate::snapshot::Snapshot;
 use crate::store::{ContentHash, Stamp};
 
-/// What brings the notes of a scope up to date: the moves, the gone notes and the files to read.
 #[derive(Debug)]
 pub(crate) struct Plan {
     moves: Vec<(NotePath, NotePath, Stamp)>,
@@ -24,7 +20,6 @@ pub(crate) struct Plan {
     found: HashSet<NotePath>,
 }
 
-/// A note file that the core read for a [`Plan`].
 #[derive(Debug)]
 pub(crate) struct Read {
     pub(crate) note: Note,
@@ -59,7 +54,6 @@ pub(crate) struct MovedNote {
     pub(crate) source: LinkSource,
 }
 
-/// A note that was read.
 #[derive(Debug)]
 pub(crate) struct Put {
     pub(crate) note: Note,
@@ -154,7 +148,6 @@ pub(crate) fn written(facts: &Facts, paths: impl IntoIterator<Item = NotePath>) 
 }
 
 impl Plan {
-    /// The files to read, in order.
     pub(crate) fn reads(&self) -> &[NotePath] {
         &self.reads
     }
@@ -317,7 +310,6 @@ mod tests {
     use crate::nodes::Node;
     use crate::paths::FolderPath;
 
-    /// The change list that `settled` makes in `before`, as a batch from outside.
     fn changes(before: &Facts, settled: Settled) -> Vec<Change> {
         let mut touched = Touched::default();
         touched.settled(&settled);
@@ -351,7 +343,6 @@ mod tests {
         }
     }
 
-    /// Facts with a note at each path, with its id and stamp.
     fn facts(notes: &[(&str, Option<&str>, Stamp)]) -> Facts {
         Facts::new(
             notes

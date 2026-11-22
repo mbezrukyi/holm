@@ -33,13 +33,12 @@ pub(crate) struct Watcher {
     _watcher: RecommendedWatcher,
 }
 
-/// The events of a [`Watcher`]. They wait in a queue until [`Events::run`].
+/// They wait in a queue until [`Events::run`].
 pub(crate) struct Events {
     root: PathBuf,
     queue: Receiver<notify::Result<notify::Event>>,
 }
 
-/// Starts to watch `root` and all its subfolders.
 pub(crate) fn start(root: &Path) -> notify::Result<(Watcher, Events)> {
     let (send, queue) = mpsc::channel();
     let mut watcher = notify::recommended_watcher(move |event| {
@@ -136,7 +135,6 @@ impl Feed {
     ///
     /// - [`Error::BadPath`] when a path is absolute or holds `..`. Then no path is checked.
     /// - [`Error::Read`] when the notes folder itself can't be read.
-    /// - [`Error::Index`] as in [`Core::open`](crate::Core::open).
     pub fn changed<P: AsRef<Path>>(&self, paths: impl IntoIterator<Item = P>) -> Result<()> {
         let mut batch = Batch::new();
         for path in paths {

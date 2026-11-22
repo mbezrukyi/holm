@@ -11,13 +11,11 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-/// The notes in the folder.
 pub const NOTES: usize = 5_000;
 /// The subfolders at the root. Each note is in one of them.
 pub const FOLDERS: usize = 50;
 /// The tags `tag<n>` and the tags `area/tag<n>`. Each note has one of each.
 pub const TAGS: usize = 100;
-/// The words of the vocabulary.
 pub const WORDS: usize = 40_000;
 
 /// Common words at the top of the vocabulary. The rest are made up.
@@ -137,10 +135,6 @@ const CODAS: &[&str] = &["", "", "", "n", "r", "s", "t", "l", "m", "nd", "st", "
 /// The note `n` is `folder <n % FOLDERS>/Note <n>.md`, with the id `N<n>` in five digits.
 /// It has two tags, note links to the next two notes, a link to a missing file, and about
 /// 2 KB of text in two paragraphs.
-///
-/// # Errors
-///
-/// Any error of a folder or file write.
 pub fn notes_folder(dir: &Path) -> io::Result<()> {
     for folder in 0..FOLDERS {
         fs::create_dir(dir.join(format!("folder {folder}")))?;

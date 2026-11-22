@@ -1,5 +1,3 @@
-//! The name of a tag and the rules of child tags.
-
 use std::fmt;
 
 use holm_markdown::normalize_tag;
@@ -15,7 +13,7 @@ use crate::error::{Error, Result};
 pub struct TagName(String);
 
 impl TagName {
-    /// The name, or `None` when it is not written as Holm writes tags.
+    /// `None` when `name` is not written as Holm writes tags.
     pub fn new(name: &str) -> Option<Self> {
         (normalize_tag(name).as_deref() == Some(name)).then(|| Self(name.into()))
     }
@@ -38,17 +36,14 @@ impl TagName {
         Self(name)
     }
 
-    /// The full name.
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
-    /// The tag one level up: `work` for `work/holm`. A top tag has none.
     pub fn parent(&self) -> Option<Self> {
         parent(&self.0).map(|parent| Self::from_written(parent.to_owned()))
     }
 
-    /// The part after the last `/`: `holm` for `work/holm`.
     pub fn last_part(&self) -> &str {
         self.0.rsplit_once('/').map_or(&self.0, |(_, last)| last)
     }
@@ -75,13 +70,11 @@ impl TagName {
         std::iter::successors(Some(self.as_str()), |name| parent(name))
     }
 
-    /// The tags of a parsed note.
     pub(crate) fn of_note(text: &holm_markdown::NoteFile) -> Vec<Self> {
         text.tags().into_iter().map(Self::from_written).collect()
     }
 }
 
-/// The name of the tag one level up from the tag `name`.
 pub(crate) fn parent(name: &str) -> Option<&str> {
     name.rsplit_once('/').map(|(parent, _)| parent)
 }

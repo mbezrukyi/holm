@@ -1,5 +1,3 @@
-//! Renaming, moving and deleting notes and folders through `Core` on a real temp folder.
-
 #![cfg(test)]
 
 use std::fs;
@@ -23,7 +21,6 @@ fn all(folder: &Folder) -> Vec<String> {
     paths(folder.core.snapshot().notes(NoteSet::All, Order::Title))
 }
 
-/// Checks that the index after the change equals an index built from the files.
 fn assert_index_matches_files(folder: &mut Folder, expected: &[&str]) {
     let before = folder.core.snapshot().notes(NoteSet::All, Order::Title);
     assert_eq!(paths(before.clone()), expected);
@@ -80,7 +77,7 @@ fn rename_note_refuses_a_taken_or_bad_title_and_moves_nothing() {
     assert_eq!(problem("  "), Some(NameProblem::Empty));
     assert_eq!(problem("a/b"), Some(NameProblem::Slash));
     assert_eq!(problem(".a"), Some(NameProblem::Dot));
-    assert_eq!(folder.files(), ["Plans.md", "a.md"]);
+    assert_eq!(folder.names(""), ["Plans.md", "a.md"]);
 }
 
 #[test]
@@ -95,7 +92,7 @@ fn rename_note_takes_its_own_name_with_other_capital_letters() {
         folder.core.rename_note(&note_path("Plans.md"), "plans").unwrap().path,
         note_path("plans.md")
     );
-    assert_eq!(folder.files(), ["plans.md"]);
+    assert_eq!(folder.names(""), ["plans.md"]);
 }
 
 #[test]
@@ -107,7 +104,7 @@ fn a_save_never_renames_the_note() {
         .save(&note_path("Plans.md"), "# Spring plans\n\nText\n", None)
         .unwrap();
 
-    assert_eq!(folder.files(), ["Plans.md"]);
+    assert_eq!(folder.names(""), ["Plans.md"]);
     assert_eq!(all(&folder), ["Plans.md"]);
 }
 

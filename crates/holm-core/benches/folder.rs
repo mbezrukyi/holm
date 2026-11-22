@@ -1,6 +1,3 @@
-//! Speed of the core in a notes folder with many notes: the start, the lists, the search, saves
-//! and a tag rename on the real disk.
-
 #![expect(clippy::unwrap_used, reason = "benches")]
 
 use std::fmt::Write as _;
@@ -17,7 +14,6 @@ fn main() {
     divan::main();
 }
 
-/// The sample notes folder of [`sample::notes_folder`].
 fn notes_folder() -> TempDir {
     let dir = tempfile::tempdir().unwrap();
     sample::notes_folder(dir.path()).unwrap();
@@ -28,7 +24,6 @@ fn open(notes: &Path, index: &Path) -> Core {
     Core::open(notes, index).unwrap()
 }
 
-/// The first start: Holm reads each note and builds the index.
 #[divan::bench(sample_count = 5)]
 fn start_with_new_index(bencher: divan::Bencher<'_, '_>) {
     let notes = notes_folder();

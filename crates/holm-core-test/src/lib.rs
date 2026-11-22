@@ -1,5 +1,3 @@
-//! A notes folder and an index folder in temp folders, with a `Core` on them.
-
 #![expect(clippy::unwrap_used, reason = "test helpers")]
 
 use std::fmt::Display;
@@ -89,22 +87,11 @@ impl Folder {
         time
     }
 
-    /// The names in the notes folder itself.
-    pub fn files(&self) -> Vec<String> {
-        let mut names: Vec<String> = fs::read_dir(self.dir.path())
-            .unwrap()
-            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-        names.sort();
-        names
-    }
-
     /// Opens the folder again with the same index, like a new start of Holm.
     pub fn reopen(&mut self) {
         self.core = Core::open(self.dir.path(), self.cache.path()).unwrap();
     }
 
-    /// The index file.
     pub fn index_file(&self) -> PathBuf {
         self.cache.path().join("index.sqlite")
     }

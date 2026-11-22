@@ -1,6 +1,4 @@
-//! The core of Holm: notes, files, links, the index and file watching.
-//!
-//! It has no UI. The app and the later manager use it through one [`Core`] handle.
+//! The core has no UI. The app and the later manager use it through one [`Core`] handle.
 
 mod changes;
 mod diff;
@@ -58,7 +56,6 @@ struct Inner {
     _watcher: Option<watch::Watcher>,
 }
 
-/// What the lock of [`Inner`] holds.
 #[derive(Debug)]
 struct Locked {
     disk: Disk,
@@ -84,9 +81,7 @@ impl Core {
     ///
     /// # Errors
     ///
-    /// - [`Error::NotesFolder`] when `notes_folder` is missing or is not a folder.
-    /// - [`Error::Read`] when the notes folder can't be read.
-    /// - [`Error::Index`] when the index can't be used, even in memory. Only a bug does this.
+    /// [`Error::Index`] only on a bug.
     pub fn open(notes_folder: impl AsRef<Path>, index_dir: impl AsRef<Path>) -> Result<Self> {
         // The watch starts before the first index sync, so no change falls between the two.
         let (core, events) = Self::build(notes_folder.as_ref(), index_dir.as_ref(), |root| {
@@ -107,10 +102,6 @@ impl Core {
     /// Opens the notes folder like [`Core::open`], but with no file watching.
     ///
     /// Changes on disk reach the core only through the [`Feed`]. Tests use it.
-    ///
-    /// # Errors
-    ///
-    /// As in [`Core::open`].
     pub fn open_with_feed(notes_folder: impl AsRef<Path>, index_dir: impl AsRef<Path>) -> Result<(Self, Feed)> {
         let (core, ()) = Self::build(notes_folder.as_ref(), index_dir.as_ref(), |_| (None, ()))?;
         let feed = Feed {
@@ -119,9 +110,7 @@ impl Core {
         Ok((core, feed))
     }
 
-    /// The facts of the notes folder now.
-    ///
-    /// It is never older than a write or a batch of outside changes that the core finished.
+    /// Never older than a write or a batch of outside changes that the core finished.
     pub fn snapshot(&self) -> Snapshot {
         self.inner.snapshot()
     }
@@ -143,10 +132,6 @@ impl Core {
     ///
     /// A word also matches longer words that start with it, so `pla` finds "plans".
     /// Capital letters and accents make no difference. With no words, the list is empty.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Index`] as in [`Core::open`].
     pub fn search(&self, text: &str, order: Order) -> Result<SearchResults> {
         self.inner.with(|locked| {
             let paths = locked.disk.search(text)?;
@@ -155,11 +140,7 @@ impl Core {
         })
     }
 
-    /// The text of each heading in the note at `path`, in order.
-    ///
-    /// # Errors
-    ///
-    /// As in [`Core::read`].
+    /// Each heading as its text, in order.
     pub fn headings(&self, path: &NotePath) -> Result<Vec<String>> {
         self.read(path).map(|note| links::headings(&note))
     }
@@ -186,11 +167,6 @@ impl Core {
         self.inner.with(|locked| locked.disk.file_link(note, file.as_ref()))
     }
 
-    /// Reads one note.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Read`] or [`Error::NotUtf8`] when the file can't be read as text.
     pub fn read(&self, path: &NotePath) -> Result<Note> {
         self.inner.with(|locked| locked.disk.read(path))
     }
@@ -213,8 +189,7 @@ impl Core {
     ///
     /// # Errors
     ///
-    /// - [`Error::Changed`] when another tool changed the file after `seen`. Nothing is written.
-    /// - [`Error::Read`] or [`Error::NotUtf8`] when the file on disk can't be read.
+    /// - [`Error::Changed`] when `seen` misses a change from another tool. Nothing is written.
     /// - [`Error::Write`] when the new file can't be written. The old file then stays.
     pub fn save(&self, path: &NotePath, body: &str, seen: Option<u64>) -> Result<Note> {
         self.inner.write(|write| write.save(path, body, seen))
@@ -239,8 +214,7 @@ impl Core {
     ///
     /// - [`Error::BadName`] when `title` is empty, holds `/`, starts with `.`, or is too long
     ///   with `.md`.
-    /// - [`Error::NameTaken`] when something in `folder` has the file name, also with other
-    ///   capital letters.
+    /// - [`Error::NameTaken`] when something in `folder` has the name.
     /// - [`Error::Write`] when the file can't be written, for example when the folder is missing.
     pub fn create(&self, folder: &FolderPath, title: &str) -> Result<Note> {
         self.inner
@@ -257,7 +231,6 @@ impl Core {
     /// # Errors
     ///
     /// - [`Error::BadName`] and [`Error::NameTaken`] as in [`Core::create`]. Nothing moves.
-    /// - [`Error::Read`] or [`Error::NotUtf8`] when the file can't be read as text.
     /// - [`Error::Write`] when the file can't be moved. The note then stays where it was.
     pub fn rename_note(&self, path: &NotePath, title: &str) -> Result<NoteInfo> {
         self.inner
@@ -271,8 +244,7 @@ impl Core {
     ///
     /// # Errors
     ///
-    /// - [`Error::NameTaken`] when something in `folder` has the file name, also with other
-    ///   capital letters. Nothing moves.
+    /// - [`Error::NameTaken`]: nothing moves.
     /// - Else as in [`Core::rename_note`].
     pub fn move_note(&self, path: &NotePath, folder: &FolderPath) -> Result<NoteInfo> {
         self.inner.write(|write| write.move_note(path, path.in_folder(folder)))
@@ -286,10 +258,9 @@ impl Core {
     ///
     /// - [`Error::BadName`] when `name` is empty, holds `/`, starts with `.`, is too long,
     ///   or is `attachments` at the root.
-    /// - [`Error::NameTaken`] when something in `parent` has the name, also with other
-    ///   capital letters.
+    /// - [`Error::NameTaken`] when something in `parent` has the name.
+    /// - [`Error::Read`] when the new folder can't be read. The folder then exists.
     /// - [`Error::Write`] when the folder can't be made, for example when `parent` is missing.
-    /// - [`Error::Read`] when the new folder can't be read.
     pub fn create_folder(&self, parent: &FolderPath, name: &str) -> Result<FolderPath> {
         self.inner
             .write(|write| write.create_folder(parent, &Name::typed(name)?))
@@ -353,10 +324,6 @@ impl Core {
     /// It also deletes each file in `attachments/` that the note links and no other note links.
     /// It never deletes a linked file outside `attachments/`.
     /// A note that is already gone is no error.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Write`] when the note can't be deleted.
     /// An attachment that can't be deleted stays, with a log line.
     pub fn delete_note(&self, path: &NotePath) -> Result<()> {
         self.inner.write(|write| write.delete_note(path))
@@ -375,51 +342,34 @@ impl Core {
         self.inner.write(|write| write.delete_folder(folder))
     }
 
-    /// The id of the note, for a link to it.
-    ///
     /// A note with no id gets one. Only the `id:` line is added, and the file keeps
     /// its modification time.
-    ///
-    /// # Errors
-    ///
-    /// - [`Error::Read`] or [`Error::NotUtf8`] when the file can't be read as text.
-    /// - [`Error::Write`] when the id can't be written.
     pub fn link_id(&self, path: &NotePath) -> Result<NoteId> {
         self.inner.write(|write| write.link_id(path))
     }
 
-    /// Adds the tag to the note and returns it. Its body, other tags and modification time stay.
+    /// Its body, other tags and modification time stay.
     ///
-    /// A note that has it already does not change.
+    /// A note that has the tag already does not change.
     ///
     /// # Errors
     ///
-    /// - [`Error::Read`] or [`Error::NotUtf8`] when the file can't be read as text.
-    /// - [`Error::Write`] when the file can't be written. The old file then stays.
+    /// [`Error::Write`] when the file can't be written. The old file then stays.
     pub fn add_tag(&self, path: &NotePath, tag: &TagName) -> Result<NoteInfo> {
         self.inner.write(|write| write.add_tag(path, tag))
     }
 
-    /// Removes the tag from the note and returns it. Its child tags, its body, other tags and
-    /// modification time stay. A note without the tag does not change.
-    ///
-    /// # Errors
-    ///
-    /// The errors of [`Core::add_tag`] for the file.
+    /// Its child tags, its body, other tags and modification time stay. A note without the tag
+    /// does not change.
     pub fn remove_tag(&self, path: &NotePath, tag: &TagName) -> Result<NoteInfo> {
         self.inner.write(|write| write.remove_tag(path, tag))
     }
 
-    /// Pins or unpins the note and returns it. Its body and modification time stay.
-    ///
-    /// # Errors
-    ///
-    /// As in [`Core::add_tag`].
+    /// Its body and modification time stay.
     pub fn set_pinned(&self, path: &NotePath, pinned: bool) -> Result<NoteInfo> {
         self.inner.write(|write| write.set_pinned(path, pinned))
     }
 
-    /// How many notes [`Core::rename_tag`] changes.
     pub fn tag_rename_count(&self, from: &TagName, to: &TagName) -> usize {
         self.tag_edit_count(&TagEdit::Rename { from, to })
     }
@@ -441,7 +391,6 @@ impl Core {
         self.inner.write(|write| write.edit_tag(&TagEdit::Rename { from, to }))
     }
 
-    /// How many notes [`Core::delete_tag`] changes.
     pub fn tag_delete_count(&self, tag: &TagName) -> usize {
         self.tag_edit_count(&TagEdit::Delete(tag))
     }
@@ -467,8 +416,7 @@ impl Core {
     ///
     /// # Errors
     ///
-    /// - [`Error::Read`] when `file` can't be read or is not a file.
-    /// - [`Error::Write`] when the copy can't be written.
+    /// [`Error::Read`] when `file` can't be read or is not a file.
     pub fn attach_file(&self, note: &NotePath, file: impl AsRef<Path>) -> Result<PathBuf> {
         self.inner.write(|write| write.attach_file(note, file.as_ref()))
     }
@@ -477,10 +425,6 @@ impl Core {
     /// of `note`, for a link. `extension` names the image format, like `png`.
     ///
     /// The name is like `Pasted image-3fa9c2e1.png`. Else it works as [`Core::attach_file`].
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Write`] when the image can't be written.
     pub fn paste_image(&self, note: &NotePath, extension: &str, bytes: &[u8]) -> Result<PathBuf> {
         self.inner.write(|write| write.paste_image(note, extension, bytes))
     }
@@ -506,8 +450,7 @@ impl Core {
         Ok((core, value))
     }
 
-    /// The target of the watch seam. It holds the core weakly, so the watch thread
-    /// does not keep the core alive.
+    /// It holds the core weakly, so the watch thread does not keep the core alive.
     fn handler(&self) -> Handler {
         let inner = Arc::downgrade(&self.inner);
         Arc::new(move |batch| inner.upgrade().map(|inner| inner.outside(batch)))
@@ -515,7 +458,6 @@ impl Core {
 }
 
 impl Inner {
-    /// Runs `op` under the lock.
     fn with<T>(&self, op: impl FnOnce(&mut Locked) -> T) -> T {
         op(&mut lock(&self.locked))
     }
@@ -531,7 +473,6 @@ impl Inner {
         self.run(Source::Holm, op)
     }
 
-    /// Runs `op` as [`Inner::write`] does, for changes from `source`.
     fn run<T>(&self, source: Source, op: impl FnOnce(&mut Write<'_>) -> Result<T>) -> Result<T> {
         self.with(|Locked { disk, facts }| {
             let (result, list) = write::run(disk, facts, source, op);

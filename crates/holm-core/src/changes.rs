@@ -1,5 +1,3 @@
-//! The streams of change lists that the core sends.
-
 use std::pin::Pin;
 use std::sync::Mutex;
 use std::task::{Context, Poll};
@@ -10,7 +8,6 @@ use futures_core::Stream;
 use crate::lock;
 use crate::model::ChangeList;
 
-/// The senders of each [`ChangeLists`] stream that is still open.
 #[derive(Debug, Default)]
 pub(crate) struct Listeners {
     senders: Mutex<Vec<UnboundedSender<ChangeList>>>,
@@ -24,8 +21,7 @@ impl Listeners {
         ChangeLists { receive }
     }
 
-    /// Sends `list` to each stream, and drops the streams that are gone. The last stream
-    /// gets `list` itself, so a long list is cloned only for the others.
+    /// The last stream gets `list` itself, so a long list is cloned only for the others.
     pub(crate) fn send(&self, list: ChangeList) {
         let mut senders = lock(&self.senders);
         senders.retain(|sender| !sender.is_closed());
@@ -39,7 +35,7 @@ impl Listeners {
     }
 }
 
-/// A stream of change lists. [`Core::follow`](crate::Core::follow) makes it.
+/// [`Core::follow`](crate::Core::follow) makes it.
 ///
 /// It ends when every [`Core`](crate::Core) handle is gone.
 #[derive(Debug)]

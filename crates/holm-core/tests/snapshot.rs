@@ -1,5 +1,3 @@
-//! The snapshot after each write and each outside change, and its revision.
-
 #![cfg(test)]
 
 use std::fs;

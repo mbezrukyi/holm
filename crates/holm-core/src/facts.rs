@@ -1,6 +1,3 @@
-//! The facts of the notes folder in memory: the snapshot, and the stamp and content hash of
-//! each note file.
-
 use std::collections::HashMap;
 
 use crate::links::LinkSource;
@@ -11,7 +8,7 @@ use crate::reconcile::Settled;
 use crate::snapshot::Snapshot;
 use crate::store::{ContentHash, Stamp};
 
-/// The snapshot, and the file facts of each of its notes. Each note of the snapshot has them.
+/// Each note of the snapshot has file facts.
 ///
 /// It is cheap to clone.
 #[derive(Clone, Debug, Default)]
@@ -20,7 +17,6 @@ pub(crate) struct Facts {
     files: imbl::HashMap<NotePath, File>,
 }
 
-/// What the facts know of one note file.
 #[derive(Clone, Copy, Debug)]
 struct File {
     stamp: Stamp,
@@ -36,7 +32,7 @@ struct File {
 pub(crate) type NoteFacts = (NoteInfo, Vec<Link>, Stamp, ContentHash, LinkSource);
 
 impl Facts {
-    /// The facts of `notes` and `folders`, with revision 0.
+    /// With revision 0.
     pub(crate) fn new(notes: Vec<NoteFacts>, folders: Vec<FolderPath>) -> Self {
         let mut facts = Self {
             snapshot: Snapshot::new(folders),
@@ -67,12 +63,10 @@ impl Facts {
         stamps
     }
 
-    /// The link source of the note at `path`.
     pub(crate) fn link_source(&self, path: &NotePath) -> Option<LinkSource> {
         self.files.get(path).map(|file| file.source)
     }
 
-    /// The content hash of the note at `path`.
     pub(crate) fn hash(&self, path: &NotePath) -> Option<ContentHash> {
         self.files.get(path).map(|file| file.hash)
     }
@@ -146,7 +140,6 @@ impl Facts {
         self.snapshot.set_folders(folder, found);
     }
 
-    /// The facts after these ones, with the next revision.
     pub(crate) fn next_revision(mut self) -> Self {
         self.snapshot = self.snapshot.next_revision();
         self

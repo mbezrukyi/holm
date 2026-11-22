@@ -16,7 +16,6 @@ use crate::tag::TagName;
 use crate::watch::Batch;
 use crate::{Error, Result};
 
-/// The next facts while one write runs, and what the write touched.
 pub(crate) struct Write<'a> {
     disk: &'a mut Disk,
     next: Facts,
@@ -43,9 +42,8 @@ pub(crate) fn run<T>(
 }
 
 impl Write<'_> {
-    /// Saves `body` as the body of the note at `path`. With `seen`, it refuses an outside
-    /// change of the note that revision `seen` does not hold: one that the facts know, or one on
-    /// disk that they do not know yet.
+    /// With `seen`, it refuses an outside change of the note that revision `seen` does not hold: one
+    /// that the facts know, or one on disk that they do not know yet.
     pub(crate) fn save(&mut self, path: &NotePath, body: &str, seen: Option<u64>) -> Result<Note> {
         let base = match seen {
             Some(seen) if self.next.changed_after(path, seen) => {
@@ -60,19 +58,17 @@ impl Write<'_> {
         self.update(note, stamp, hash)
     }
 
-    /// Writes `note` again at its path.
     pub(crate) fn restore(&mut self, note: &Note) -> Result<Note> {
         let (note, stamp, hash) = self.disk.store.restore(note)?;
         self.update(note, stamp, hash)
     }
 
-    /// Creates an empty note at `path`.
     pub(crate) fn create(&mut self, path: &NotePath) -> Result<Note> {
         let (note, stamp, hash) = self.disk.store.create(path)?;
         self.update(note, stamp, hash)
     }
 
-    /// The id of the note. A note with no id gets one.
+    /// A note with no id gets one.
     pub(crate) fn link_id(&mut self, path: &NotePath) -> Result<NoteId> {
         let note = self.edit_fields(path, |text| {
             if text.id().is_none() {
@@ -82,7 +78,6 @@ impl Write<'_> {
         note.info.id.ok_or_else(|| self.lost(&note.info.path))
     }
 
-    /// Adds the tag to the note, when it does not have it yet.
     pub(crate) fn add_tag(&mut self, path: &NotePath, tag: &TagName) -> Result<NoteInfo> {
         self.edit_fields(path, |text| {
             let mut tags = TagName::of_note(text);
@@ -94,7 +89,7 @@ impl Write<'_> {
         .map(|note| note.info)
     }
 
-    /// Removes the tag from the note, but not its child tags.
+    /// The child tags of the tag stay.
     pub(crate) fn remove_tag(&mut self, path: &NotePath, tag: &TagName) -> Result<NoteInfo> {
         self.edit_fields(path, |text| {
             let mut tags = TagName::of_note(text);
@@ -107,7 +102,6 @@ impl Write<'_> {
         .map(|note| note.info)
     }
 
-    /// Pins or unpins the note.
     pub(crate) fn set_pinned(&mut self, path: &NotePath, pinned: bool) -> Result<NoteInfo> {
         self.edit_fields(path, |text| {
             if text.pinned() != pinned {
@@ -123,8 +117,7 @@ impl Write<'_> {
         self.update(note, stamp, hash)
     }
 
-    /// Moves the note from `from` to `to`, and returns it at its new path. The note keeps its
-    /// outside revision.
+    /// The note keeps its outside revision.
     pub(crate) fn move_note(&mut self, from: &NotePath, to: NotePath) -> Result<NoteInfo> {
         let outside = self.next.outside(from);
         let to = self.disk.store.move_note(from, to)?;
@@ -138,19 +131,16 @@ impl Write<'_> {
         Ok(info)
     }
 
-    /// Creates the folder `name` in `parent`, and returns its path.
     pub(crate) fn create_folder(&mut self, parent: &FolderPath, name: &Name) -> Result<FolderPath> {
         let new = self.disk.store.create_folder(parent, name)?;
         self.folders(&new)?;
         Ok(new)
     }
 
-    /// Renames the folder to `name` in its parent, and returns its new path.
     pub(crate) fn rename_folder(&mut self, folder: &FolderPath, name: &Name) -> Result<FolderPath> {
         self.move_folder_to(folder, &folder.folder().unwrap_or_default(), name)
     }
 
-    /// Moves the folder into `parent` with its name, and returns its new path.
     pub(crate) fn move_folder(&mut self, folder: &FolderPath, parent: &FolderPath) -> Result<FolderPath> {
         let Some((_, name)) = folder.split() else {
             return Err(Error::BadPath {
@@ -160,7 +150,6 @@ impl Write<'_> {
         self.move_folder_to(folder, parent, &name)
     }
 
-    /// Moves the folder into `parent` as `name`, and returns its new path.
     fn move_folder_to(&mut self, folder: &FolderPath, parent: &FolderPath, name: &Name) -> Result<FolderPath> {
         let new = self.disk.store.move_folder(folder, parent, name)?;
         if new != *folder {
@@ -186,7 +175,7 @@ impl Write<'_> {
         self.delete(&Node::Folder(folder.clone()), |store| store.delete_folder(folder))
     }
 
-    /// Runs `edit` on the tags of each note with its tag, and returns how many notes changed.
+    /// Returns how many notes changed.
     pub(crate) fn edit_tag(&mut self, edit: &TagEdit<'_>) -> Result<usize> {
         let paths = self.next.snapshot().paths(NoteSet::WithTag(edit.tag()), Order::Title);
         let store = &self.disk.store;
@@ -236,7 +225,6 @@ impl Write<'_> {
         self.disk.store.paste_image(note, extension, bytes)
     }
 
-    /// Checks the disk at each path of `batch` after a change from another tool.
     pub(crate) fn outside(&mut self, batch: Batch) -> Result<()> {
         let nodes = outside::nodes(&self.disk.store, self.next.snapshot(), batch);
         if nodes.is_empty() {
@@ -307,8 +295,7 @@ impl Write<'_> {
         Ok(())
     }
 
-    /// Writes the rows of `settled` into the index and puts it in the next facts. It returns the
-    /// notes that were read.
+    /// Returns the notes that were read.
     fn take(&mut self, settled: Settled) -> Vec<Note> {
         self.disk.write_rows(&settled);
         self.touched.settled(&settled);

@@ -1,5 +1,3 @@
-//! Changing tags and pins through `Core` on a real temp folder.
-
 #![cfg(test)]
 
 use std::fs;

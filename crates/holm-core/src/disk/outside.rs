@@ -13,8 +13,7 @@ pub(super) fn nodes(store: &Store, before: &Snapshot, paths: impl IntoIterator<I
     Nodes::new(paths.into_iter().flat_map(|path| at(store, before, &path)))
 }
 
-/// The nodes for an outside change at the raw path `path`. The empty path is the whole notes
-/// folder.
+/// The empty path is the whole notes folder.
 ///
 /// A path that is gone, and that `before` knows as no note, may have been a folder that
 /// `before` does not list, like the attachment folder. So it gives a folder node.

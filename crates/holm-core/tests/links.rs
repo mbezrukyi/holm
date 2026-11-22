@@ -1,6 +1,3 @@
-//! Link targets through `Core` on a real temp folder: notes by id, headings, broken links and
-//! file link paths.
-
 #![cfg(test)]
 
 use std::fs;

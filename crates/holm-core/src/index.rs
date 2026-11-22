@@ -1,5 +1,3 @@
-//! The SQLite index of notes, tags and links, with full-text search.
-//!
 //! The index is a copy of the files, for a fast start and for search. It never reads or
 //! writes a note file. When SQLite fails on it or its shape is old, it starts again empty.
 //! When a new file fails too, the index lives in memory until Holm ends.
@@ -73,14 +71,12 @@ const NOTE_INFO: &str = "
 path, id, title, pinned, modified, preview,
     (SELECT group_concat(tag, char(10) ORDER BY pos) FROM tags WHERE note = notes.key)";
 
-/// The index file and one connection to it.
 #[derive(Debug)]
 pub(crate) struct Index {
     path: PathBuf,
     conn: Connection,
 }
 
-/// The rows of one note.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct NoteRows<'a> {
     pub(crate) note: &'a Note,
@@ -90,10 +86,8 @@ pub(crate) struct NoteRows<'a> {
     pub(crate) source: LinkSource,
 }
 
-/// The rows that one write changes.
 #[derive(Debug)]
 pub(crate) struct Rows<'a> {
-    /// The notes that are gone.
     pub(crate) removed: &'a [NotePath],
     /// The notes at a new path with no other change, as old path and new path.
     pub(crate) moved: Vec<(&'a NotePath, &'a NotePath)>,
@@ -101,7 +95,7 @@ pub(crate) struct Rows<'a> {
 }
 
 impl Index {
-    /// Opens the index in `dir`. When SQLite fails on it, the index starts empty.
+    /// When SQLite fails on the index, it starts empty.
     pub(crate) fn open(dir: &Path) -> Result<Self> {
         let path = dir.join(FILE);
         let opened = fs::create_dir_all(dir).map_err(Fail::Io).and_then(|()| connect(&path));
@@ -115,7 +109,7 @@ impl Index {
         Ok(Self { path, conn })
     }
 
-    /// Drops every row and writes `put`, which holds every note file.
+    /// Drops every row and writes `put`, which must hold every note file.
     /// The rows go into a new file, or into memory when the new file fails.
     pub(crate) fn rebuild(&mut self, put: &[NoteRows<'_>]) -> Result<()> {
         self.conn = fresh(&self.path, put).map_err(|fail| fail.into_error(&self.path))?;
@@ -127,7 +121,6 @@ impl Index {
         self.run(|conn| Ok(search::find(conn, text)?))
     }
 
-    /// Every note with its links, its stamp, its content hash and its link source, in no order.
     pub(crate) fn entries(&mut self) -> Result<Vec<NoteFacts>> {
         self.run(|conn| {
             let mut reader = NoteReader::default();
@@ -183,7 +176,6 @@ impl Index {
     }
 }
 
-/// An error inside this module. Only [`Fail::into_error`] turns it into an [`Error`].
 enum Fail {
     Sql(rusqlite::Error),
     Io(io::Error),
@@ -234,7 +226,7 @@ fn fresh(path: &Path, put: &[NoteRows<'_>]) -> Result<Connection, Fail> {
     })
 }
 
-/// Opens the index file. A new file gets the schema. A file with another shape is deleted first.
+/// A new file gets the schema. A file with another shape is deleted first.
 fn connect(path: &Path) -> Result<Connection, Fail> {
     let mut conn = Connection::open(path)?;
     conn.query_row("PRAGMA journal_mode = WAL", [], |_| Ok(()))?;
@@ -300,15 +292,13 @@ fn put_rows(conn: &Connection, put: &[NoteRows<'_>]) -> Result<(), Fail> {
     Ok(())
 }
 
-/// Moves the row of the note at `from` to `to`. Its key stays, so its text, tags and links
-/// stay too.
+/// The key of the row stays, so the text, tags and links of the note stay too.
 fn shift(conn: &Connection, from: &NotePath, to: &NotePath) -> Result<(), Fail> {
     conn.prepare_cached("UPDATE notes SET path = ?2, folder = ?3 WHERE path = ?1")?
         .execute(params![bytes(from), bytes(to), bytes(to.folder())])?;
     Ok(())
 }
 
-/// Writes the rows of one note. When its links stay, the stored link rows stay.
 fn write(conn: &Connection, row: &NoteRows<'_>) -> Result<(), Fail> {
     let NoteRows {
         note,
@@ -320,7 +310,7 @@ fn write(conn: &Connection, row: &NoteRows<'_>) -> Result<(), Fail> {
     let info = &note.info;
     let folder = info.path.folder();
     let links_hash = hash(links);
-    let old_links: Option<i64> = conn
+    let old_links_hash: Option<i64> = conn
         .prepare_cached("SELECT links_hash FROM notes WHERE path = ?1")?
         .query_row([bytes(&info.path)], |row| row.get(0))
         .optional()?;
@@ -358,14 +348,13 @@ fn write(conn: &Connection, row: &NoteRows<'_>) -> Result<(), Fail> {
     for (pos, tag) in (0_i64..).zip(&info.tags) {
         add_tag.execute(params![key, pos, tag.as_str()])?;
     }
-    if old_links != Some(links_hash) {
+    if old_links_hash != Some(links_hash) {
         write_links(conn, key, links)?;
     }
     search::put(conn, key, &info.title, &note.body, &info.tags)?;
     Ok(())
 }
 
-/// Replaces the link rows of the note with `key`.
 fn write_links(conn: &Connection, key: i64, links: &[Link]) -> Result<(), Fail> {
     conn.prepare_cached("DELETE FROM links WHERE note = ?1")?
         .execute([key])?;
@@ -385,7 +374,7 @@ fn write_links(conn: &Connection, key: i64, links: &[Link]) -> Result<(), Fail> 
     Ok(())
 }
 
-/// A hash of `value`. Two values with the same hash count as the same.
+/// Two values with the same hash count as the same.
 ///
 /// The hash may change with the `foldhash` version. Then the index writes the rows of each
 /// note once more.
@@ -394,11 +383,10 @@ fn hash(value: impl Hash) -> i64 {
     i64::from_ne_bytes(hash.to_ne_bytes())
 }
 
-/// Removes the note at `rel` from the index.
-fn delete(conn: &Connection, rel: &NotePath) -> Result<(), Fail> {
+fn delete(conn: &Connection, path: &NotePath) -> Result<(), Fail> {
     let key: Option<i64> = conn
         .prepare_cached("SELECT key FROM notes WHERE path = ?1")?
-        .query_row([bytes(rel)], |row| row.get(0))
+        .query_row([bytes(path)], |row| row.get(0))
         .optional()?;
     let Some(key) = key else {
         return Ok(());
@@ -463,10 +451,9 @@ fn path(bytes: Vec<u8>) -> PathBuf {
     PathBuf::from(OsString::from_vec(bytes))
 }
 
-/// The note path in column `index`. A path that is not a note path fails like a broken row, so
-/// the index gets rebuilt.
-fn note_path(reader: &mut NoteReader, row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<NotePath> {
-    let fail = |error| rusqlite::Error::FromSqlConversionFailure(index, Type::Blob, error);
-    let bytes = row.get_ref(index)?.as_blob().map_err(|e| fail(e.into()))?;
+/// A path that is not a note path fails like a broken row, so the index gets rebuilt.
+fn note_path(reader: &mut NoteReader, row: &rusqlite::Row<'_>, column: usize) -> rusqlite::Result<NotePath> {
+    let fail = |error| rusqlite::Error::FromSqlConversionFailure(column, Type::Blob, error);
+    let bytes = row.get_ref(column)?.as_blob().map_err(|e| fail(e.into()))?;
     reader.note(bytes).ok_or_else(|| fail("not a note path".into()))
 }

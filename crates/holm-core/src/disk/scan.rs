@@ -46,8 +46,6 @@ pub(super) fn wrote(store: &Store, facts: &Facts, notes: Vec<(Note, Stamp, Conte
     decide_with_ids(store, facts, plan, reads)
 }
 
-/// The read of `note`. Its links come from `facts` when its link source stays, else from
-/// its body.
 fn read(store: &Store, facts: &Facts, note: Note, stamp: Stamp, hash: ContentHash) -> Read {
     let owner_on_disk = note
         .info
@@ -73,7 +71,7 @@ fn read(store: &Store, facts: &Facts, note: Note, stamp: Stamp, hash: ContentHas
     }
 }
 
-/// Settles `plan`, then writes a new id into each copy. A copy whose write fails stays
+/// Writes a new id into each copy. A copy whose write fails stays
 /// without an id, with a log line.
 fn decide_with_ids(store: &Store, facts: &Facts, plan: Plan, reads: Vec<Read>) -> Settled {
     let mut settled = plan.decide(facts, reads);

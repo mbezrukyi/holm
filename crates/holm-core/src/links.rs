@@ -1,6 +1,3 @@
-//! The links of a note and what they come from, and file link paths: where they point, and
-//! how to write them after a note moves.
-
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::hash::BuildHasher as _;
@@ -25,7 +22,6 @@ impl LinkSource {
         Self(i64::from_ne_bytes(hash.to_ne_bytes()))
     }
 
-    /// The hash from its stored form, [`LinkSource::stored`].
     pub(crate) fn from_stored(stored: i64) -> Self {
         Self(stored)
     }
@@ -35,7 +31,6 @@ impl LinkSource {
     }
 }
 
-/// The links of the note, with file paths from the notes folder `root`.
 pub(crate) fn links(root: &Path, note: &Note) -> Vec<Link> {
     let folder = note.info.path.folder();
     Body::parse(&note.body)
@@ -56,7 +51,6 @@ pub(crate) fn links(root: &Path, note: &Note) -> Vec<Link> {
         .collect()
 }
 
-/// The text of each heading in the note, in order.
 pub(crate) fn headings(note: &Note) -> Vec<String> {
     Body::parse(&note.body)
         .headings()
@@ -126,7 +120,7 @@ pub(crate) fn link(root: &Path, note: &NotePath, file: &Path) -> PathBuf {
     }
 }
 
-/// A folder move: its old path and its new path, relative to the notes folder.
+/// Both paths are relative to the notes folder.
 #[derive(Clone, Copy)]
 pub(crate) struct FolderMove<'a> {
     pub(crate) from: &'a FolderPath,
@@ -220,7 +214,6 @@ fn relative(base: &Path, target: &Path) -> PathBuf {
     out
 }
 
-/// A link destination for `path`. A path with spaces or brackets goes in `< >`.
 fn destination(path: &str) -> String {
     let angle = path.contains(|c: char| c.is_whitespace() || matches!(c, '(' | ')' | '<' | '>'));
     let mut out = String::with_capacity(path.len() + 2);

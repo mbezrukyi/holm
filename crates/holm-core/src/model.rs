@@ -1,5 +1,3 @@
-//! The types that the [`Core`](crate::Core) handle takes and gives.
-
 use std::fmt;
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -13,7 +11,6 @@ use crate::{FolderPath, NotePath, Snapshot, TagName};
 pub struct NoteId(String);
 
 impl NoteId {
-    /// Makes a new id from a fresh ULID.
     pub(crate) fn generate() -> Self {
         Self(ulid::Ulid::generate().to_string())
     }
@@ -22,7 +19,6 @@ impl NoteId {
         Self(id)
     }
 
-    /// The id as text, like in `holm:<id>` links.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -34,7 +30,7 @@ impl fmt::Display for NoteId {
     }
 }
 
-/// What a list of notes shows about one note. It has no body.
+/// What a list of notes shows about one note.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NoteInfo {
     /// The path of the file, like `work/Plans.md`.
@@ -49,20 +45,17 @@ pub struct NoteInfo {
     pub tags: Vec<TagName>,
     /// Whether the frontmatter has `pinned: true`.
     pub pinned: bool,
-    /// The modification time of the file.
     pub modified: SystemTime,
 }
 
-/// A whole note: its info and its body.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Note {
-    /// The info about the note.
     pub info: NoteInfo,
     /// The text after the frontmatter, with the line endings of the file.
     pub body: String,
 }
 
-/// The order of a list of notes. Pinned notes are always on top.
+/// Pinned notes are always on top.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Order {
     /// The last changed note first.
@@ -72,10 +65,8 @@ pub enum Order {
     Title,
 }
 
-/// Which notes of a [`Snapshot`] a list holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NoteSet<'a> {
-    /// Every note.
     All,
     /// The notes right in a folder, without the notes of its subfolders.
     In(&'a FolderPath),
@@ -84,12 +75,11 @@ pub enum NoteSet<'a> {
 }
 
 impl NoteSet<'_> {
-    /// Whether the set holds `note`.
     pub fn holds(self, note: &NoteInfo) -> bool {
         self.holds_at(&note.path, || Some(note))
     }
 
-    /// Whether the set holds the note at `path`. It calls `note` only when the path can't tell.
+    /// It calls `note` only when the path can't tell.
     pub(crate) fn holds_at<'n>(self, path: &NotePath, note: impl FnOnce() -> Option<&'n NoteInfo>) -> bool {
         match self {
             Self::All => true,
@@ -99,7 +89,6 @@ impl NoteSet<'_> {
     }
 }
 
-/// One tag of the nested tags.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tag {
     /// The full name, like `work/holm`.
@@ -130,25 +119,17 @@ impl Tag {
     }
 }
 
-/// A link or an embedded file in a note.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Link {
-    /// Where the link points.
     pub target: LinkTarget,
     /// Whether it is `![..](..)`: an image or a file chip.
     pub embedded: bool,
 }
 
-/// Where a link points.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum LinkTarget {
     /// Another note, or a heading in it: `holm:<id>` or `holm:<id>#<heading>`.
-    Note {
-        /// The id of the note.
-        id: NoteId,
-        /// The heading text after `#`.
-        heading: Option<String>,
-    },
+    Note { id: NoteId, heading: Option<String> },
     /// A heading in the same note: `#<heading>`.
     Heading(String),
     /// A file. The path is relative to the notes folder when the file is inside it.
@@ -161,7 +142,6 @@ pub enum LinkTarget {
 /// What a delete removes, for the delete dialog.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DeleteCount {
-    /// How many notes.
     pub notes: usize,
     /// How many files in `attachments/` that no other note links.
     pub attachments: usize,
@@ -179,31 +159,24 @@ pub struct DeleteCount {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Change {
-    /// A new note file.
     Added(NotePath),
     /// A note file whose text, info or links changed.
     Changed(NotePath),
-    /// A note file that is gone. The path is where it was.
+    /// The path is where it was.
     Removed(NotePath),
-    /// A note that is now at another path. From another tool, only a note with an id moves.
+    /// From another tool, only a note with an id moves.
     Moved {
-        /// The old path.
         from: NotePath,
-        /// The new path.
         to: NotePath,
     },
     /// A folder that Holm moved, with everything below it.
     FolderMoved {
-        /// The old path.
         from: FolderPath,
-        /// The new path.
         to: FolderPath,
     },
     /// A tag that Holm renamed, with its child tags.
     TagMoved {
-        /// The old name.
         from: TagName,
-        /// The new name.
         to: TagName,
     },
     /// The list from [`Snapshot::folders`](crate::Snapshot::folders) changed.
@@ -213,8 +186,6 @@ pub enum Change {
 }
 
 impl Change {
-    /// Where the note at `path` is after this change, or `None` when the change does not move
-    /// it.
     pub fn note_after(&self, path: &NotePath) -> Option<NotePath> {
         match self {
             Self::Moved { from, to } if from == path => Some(to.clone()),
@@ -223,8 +194,6 @@ impl Change {
         }
     }
 
-    /// Where the folder at `path` is after this change, or `None` when the change does not move
-    /// it.
     pub fn folder_after(&self, path: &FolderPath) -> Option<FolderPath> {
         match self {
             Self::FolderMoved { from, to } => path.moved(from, to),
@@ -266,13 +235,11 @@ impl SearchResults {
         &self.paths
     }
 
-    /// The snapshot and the paths, to keep them apart.
     pub fn into_parts(self) -> (Snapshot, Vec<NotePath>) {
         (self.snapshot, self.paths)
     }
 }
 
-/// Who made the changes of a [`ChangeList`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Source {
     /// A write through [`Core`](crate::Core).
@@ -284,7 +251,6 @@ pub enum Source {
 /// The changes that made one revision of the snapshot, from [`ChangeLists`](crate::ChangeLists).
 #[derive(Clone, Debug)]
 pub struct ChangeList {
-    /// Who made the changes.
     pub source: Source,
     /// The first snapshot that shows the changes.
     pub snapshot: Snapshot,

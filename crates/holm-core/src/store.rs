@@ -1,5 +1,3 @@
-//! Note files on disk: listing, reading, safe writes and new ids.
-
 use std::ffi::OsStr;
 use std::fs::{self, File, Metadata, Permissions};
 use std::io;
@@ -25,13 +23,12 @@ const NEW_FILE_MODE: u32 = 0o666;
 const TEMP_PREFIX: &str = ".holm-";
 const TEMP_SUFFIX: &str = ".tmp";
 
-/// The note files in one notes folder.
 #[derive(Debug, Clone)]
 pub(crate) struct Store {
     root: PathBuf,
 }
 
-/// What tells two versions of a file apart without a read: times and size.
+/// Tells two versions of a file apart without a read.
 ///
 /// The change time moves on every write, also when Holm keeps the old modification time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -41,8 +38,8 @@ pub(crate) struct Stamp {
     pub(crate) size: i64,
 }
 
-/// A hash of the bytes of a note file. Two versions of a note with the same hash have the same
-/// content, also when their stamps are the same.
+/// Two versions of a note with the same hash have the same
+/// content, also when their stamps differ.
 ///
 /// The hash may change with the `foldhash` version. Then each note counts as changed once.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -55,12 +52,10 @@ impl ContentHash {
         Self(i64::from_ne_bytes(hash.to_ne_bytes()))
     }
 
-    /// The hash from its stored form, [`ContentHash::stored`].
     pub(crate) fn from_stored(stored: i64) -> Self {
         Self(stored)
     }
 
-    /// The hash as a number to store.
     pub(crate) fn stored(self) -> i64 {
         self.0
     }
@@ -77,7 +72,7 @@ impl Stamp {
 }
 
 impl Store {
-    /// Opens the notes folder and deletes the temp files that a crash left in it.
+    /// Also deletes the temp files that a crash left in the notes folder.
     pub(crate) fn open(root: &Path) -> Result<Self> {
         let fail = |source| Error::NotesFolder {
             path: root.to_owned(),
@@ -98,7 +93,7 @@ impl Store {
         Ok(store)
     }
 
-    /// The notes folder, as an absolute path with no symlinks.
+    /// An absolute path with no symlinks.
     pub(crate) fn root(&self) -> &Path {
         &self.root
     }
@@ -113,7 +108,7 @@ impl Store {
         Ok(crate::links::link(&self.root, note, &file))
     }
 
-    /// Every note file at `node` or below it, with its stamp.
+    /// Every note file at `node` or below it.
     /// A subfolder or a file that can't be read is left out with a log line.
     ///
     /// # Errors
@@ -144,8 +139,6 @@ impl Store {
         Ok(files)
     }
 
-    /// What is at `name` in `folder` now.
-    ///
     /// Like the folder walk, it does not follow symlinks.
     pub(crate) fn at(&self, folder: &FolderPath, name: &Name) -> AtPath {
         let real_dir = |dir: FolderPath| fs::symlink_metadata(self.root.join(dir)).is_ok_and(|meta| meta.is_dir());
@@ -163,8 +156,7 @@ impl Store {
         }
     }
 
-    /// What is at `folder` now. The root is always a folder, so a walk of a missing notes
-    /// folder fails.
+    /// The root is always a folder, so a walk of a missing notes folder fails.
     fn folder_at(&self, folder: &FolderPath) -> AtPath {
         match folder.split() {
             Some((parent, name)) => self.at(&parent, &name),
@@ -172,7 +164,6 @@ impl Store {
         }
     }
 
-    /// Whether a note file is at `rel`.
     pub(crate) fn exists(&self, rel: &NotePath) -> bool {
         self.root.join(rel).is_file()
     }
@@ -203,14 +194,13 @@ impl Store {
         Ok(folders)
     }
 
-    /// Reads the note at `rel`, with the stamp and the content hash of its file.
     pub(crate) fn read(&self, rel: &NotePath) -> Result<(Note, Stamp, ContentHash)> {
         let (text, stamp) = read_text(&self.root.join(rel))?;
         let note = note(rel, &NoteFile::parse(&text), stamp);
         Ok((note, stamp, ContentHash::of(&text)))
     }
 
-    /// Changes the frontmatter of the note with `edit` and keeps its modification time.
+    /// The note keeps its modification time.
     pub(crate) fn edit_fields(
         &self,
         rel: &NotePath,
@@ -224,7 +214,7 @@ impl Store {
         self.read(rel)
     }
 
-    /// Writes the new text of many notes. `edit` gets the path and the text of each note,
+    /// `edit` gets the path and the text of each note,
     /// and returns its new text, or `None` to keep it. Each note keeps its modification
     /// time and permissions.
     ///
@@ -261,7 +251,7 @@ impl Store {
         if temps.is_empty() {
             return done;
         }
-        if let Err(errno) = self.sync_all_files() {
+        if let Err(errno) = self.sync_file_system() {
             done.extend(
                 temps
                     .into_iter()
@@ -276,7 +266,7 @@ impl Store {
                 Err(e) => done.push((rel, Err(write_error(&path, e.error)))),
             }
         }
-        let synced = self.sync_all_files();
+        let synced = self.sync_file_system();
         done.extend(renamed.into_iter().map(|(rel, path)| {
             let result = synced.map_err(|errno| write_error(&path, errno.into()));
             (rel, result)
@@ -284,13 +274,12 @@ impl Store {
         done
     }
 
-    /// Flushes every write on the file system of the notes folder to the disk.
-    fn sync_all_files(&self) -> rustix::io::Result<()> {
+    fn sync_file_system(&self) -> rustix::io::Result<()> {
         let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC;
         rustix::fs::syncfs(rustix::fs::open(&self.root, flags, Mode::empty())?)
     }
 
-    /// Writes `body` over the body of the note at `rel`. The frontmatter stays.
+    /// The frontmatter stays.
     ///
     /// It adds an id when the file has none. When the body stays the same,
     /// the file keeps its old modification time.
@@ -342,7 +331,7 @@ impl Store {
         self.save(&note.info.path, &note.body, None)
     }
 
-    /// Creates an empty note with a new id at `rel`.
+    /// The note gets a new id.
     ///
     /// It fails with [`Error::NameTaken`] when something in its folder has the name.
     pub(crate) fn create(&self, rel: &NotePath) -> Result<(Note, Stamp, ContentHash)> {
@@ -364,8 +353,7 @@ impl Store {
         self.read(rel)
     }
 
-    /// Moves the note at `from` to `to`, and returns `to`. It fixes the relative file links in
-    /// the note.
+    /// It fixes the relative file links in the note.
     ///
     /// The note keeps its modification time and permissions. When `to` is `from`, the note
     /// stays where it is. It fails with [`Error::NameTaken`] when something in the folder of
@@ -402,8 +390,6 @@ impl Store {
         }
     }
 
-    /// Creates the folder `name` in `parent`, and returns its path.
-    ///
     /// It fails with [`Error::BadName`] when `name` is [reserved](attachment::reserves), and with
     /// [`Error::NameTaken`] when something in `parent` has the name.
     pub(crate) fn create_folder(&self, parent: &FolderPath, name: &Name) -> Result<FolderPath> {
@@ -420,8 +406,6 @@ impl Store {
         }
     }
 
-    /// Moves the folder `from` to `parent` as `name`, and returns its new path.
-    ///
     /// Names work as in [`Store::create_folder`]. The folder may take its own name with other
     /// capital letters. It fixes the relative file links in the notes inside. A note that can't
     /// be fixed keeps its links, with a log line.
@@ -477,14 +461,14 @@ impl Store {
         Ok(())
     }
 
-    /// Deletes the note file at `rel`. A note that is already gone is no error.
+    /// A note that is already gone is no error.
     pub(crate) fn delete_note(&self, rel: &NotePath) -> Result<()> {
         let path = self.root.join(rel);
         remove(&path)?;
         sync_dir(folder_abs(&path)).map_err(|e| write_error(&path, e))
     }
 
-    /// Deletes the folder `rel` with everything in it. A folder that is already gone is no error.
+    /// A folder that is already gone is no error.
     pub(crate) fn delete_folder(&self, rel: &FolderPath) -> Result<()> {
         if self.folder_at(rel) == AtPath::Missing {
             return Ok(());
@@ -495,8 +479,6 @@ impl Store {
         sync_dir(folder_abs(&path)).map_err(|e| write_error(&path, e))
     }
 
-    /// Checks that `rel` is a folder that the user may move or delete:
-    /// a real folder that is not the root and not the [attachment folder](attachment).
     fn check_user_folder(&self, rel: &FolderPath) -> Result<()> {
         if rel.is_root() || attachment::is(rel) {
             return Err(bad_path(rel.as_ref()));
@@ -514,7 +496,6 @@ impl Store {
         }
     }
 
-    /// Fixes the relative file links of each note inside a folder that moved.
     fn relink_folder(&self, moved: FolderMove<'_>) -> Result<()> {
         let paths: Vec<NotePath> = self
             .files(&Node::Folder(moved.to.clone()))?
@@ -534,8 +515,7 @@ impl Store {
         Ok(())
     }
 
-    /// Calls `visit` with each note, subfolder and Holm temp file below the folder `start`.
-    /// It skips other hidden entries and symlinks, so it can't loop.
+    /// It skips symlinks, so it can't loop, and hidden entries other than Holm temp files.
     fn walk(&self, start: &FolderPath, visit: &mut dyn FnMut(Found)) -> Result<()> {
         let mut dirs = vec![start.clone()];
         while let Some(dir) = dirs.pop() {
@@ -575,7 +555,6 @@ impl Store {
     }
 }
 
-/// What is at a path in the notes folder.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum AtPath {
     Note(NotePath, Stamp),
@@ -585,11 +564,10 @@ pub(crate) enum AtPath {
     Missing,
 }
 
-/// What the folder walk finds.
 enum Found {
     Note(NotePath),
     Folder(FolderPath),
-    /// The absolute path of a Holm temp file.
+    /// An absolute path.
     Temp(PathBuf),
 }
 
@@ -608,8 +586,6 @@ fn note(rel: &NotePath, text: &NoteFile, stamp: Stamp) -> Note {
     }
 }
 
-/// The path of the new folder `name` in `parent`, unless the name is
-/// [reserved](attachment::reserves).
 fn new_folder(parent: &FolderPath, name: &Name) -> Result<FolderPath> {
     if attachment::reserves(parent, name) {
         return Err(Error::BadName {
@@ -624,7 +600,6 @@ fn folder_abs(path: &Path) -> &Path {
     path.parent().unwrap_or(Path::new("/"))
 }
 
-/// Deletes the file at `path`. A file that is already gone is no error.
 fn remove(path: &Path) -> Result<()> {
     match fs::remove_file(path) {
         Err(e) if e.kind() != io::ErrorKind::NotFound => Err(write_error(path, e)),
@@ -658,8 +633,6 @@ pub(crate) fn time(nanos: i64) -> SystemTime {
     }
 }
 
-/// Replaces `old` with `new` at `path`, when they differ.
-/// With `keep`, the file keeps that stamp's modification time.
 fn write(path: &Path, old: &str, new: &str, keep: Option<Stamp>) -> Result<()> {
     if new == old {
         return Ok(());
@@ -680,7 +653,6 @@ fn replace(path: &Path, text: &str, permissions: Permissions, modified: Option<S
     sync_dir(dir)
 }
 
-/// Writes `content` to a hidden temp file in `dir` and flushes it to the disk.
 fn temp_file(
     dir: &Path,
     content: impl io::Read,
@@ -692,7 +664,6 @@ fn temp_file(
     Ok(file)
 }
 
-/// Writes `content` to a hidden temp file in `dir`, with no flush to the disk.
 fn unsynced_temp_file(
     dir: &Path,
     mut content: impl io::Read,

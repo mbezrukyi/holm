@@ -1,5 +1,3 @@
-//! Tag changes in many notes: a rename or a delete of a tag with its child tags.
-
 use crate::Snapshot;
 use crate::model::NoteSet;
 use crate::tag::TagName;
@@ -13,7 +11,6 @@ pub(crate) enum TagEdit<'a> {
 }
 
 impl TagEdit<'_> {
-    /// The tag that the edit changes.
     pub(crate) fn tag(&self) -> &TagName {
         match self {
             Self::Rename { from, .. } => from,
@@ -29,7 +26,7 @@ impl TagEdit<'_> {
             .count()
     }
 
-    /// The tags of a note after the edit. A rename to a tag that the note has merges the two.
+    /// A rename to a tag that the note has merges the two.
     pub(crate) fn retag(&self, tags: &[TagName]) -> Vec<TagName> {
         unique(tags.iter().filter_map(|tag| match self {
             Self::Rename { from, to } => Some(tag.moved(from, to).unwrap_or_else(|| tag.clone())),

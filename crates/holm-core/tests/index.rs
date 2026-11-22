@@ -1,5 +1,3 @@
-//! Lists, tags, search and links through `Core` on a real temp folder and a real index.
-
 #![cfg(test)]
 
 use std::fs;
@@ -14,7 +12,6 @@ fn paths(notes: Vec<NoteInfo>) -> Vec<String> {
     holm_core_test::paths(notes.into_iter().map(|n| n.path))
 }
 
-/// The search results in the order of a list.
 fn found(folder: &Folder, text: &str) -> Vec<String> {
     let found = folder.core.search(text, Order::Title).unwrap();
     holm_core_test::paths(found.into_parts().1)

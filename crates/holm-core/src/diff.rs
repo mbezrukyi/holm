@@ -1,6 +1,3 @@
-//! The change list of a write: a diff of the facts before and after it, plus the moves of
-//! the write.
-
 use std::collections::HashMap;
 
 use crate::facts::Facts;
@@ -22,7 +19,6 @@ pub(crate) struct Touched {
 }
 
 impl Touched {
-    /// Adds every path that `settled` changes.
     pub(crate) fn settled(&mut self, settled: &Settled) {
         self.notes.extend(settled.removed.iter().cloned());
         for moved in &settled.moved {
@@ -154,7 +150,7 @@ impl Touched {
     }
 }
 
-/// Whether both notes have the same tags, in any order. A note has few tags.
+/// In any order. A note has few tags.
 fn same_tags(a: &NoteInfo, b: &NoteInfo) -> bool {
     a.tags == b.tags || (a.tags.iter().all(|tag| b.tags.contains(tag)) && b.tags.iter().all(|tag| a.tags.contains(tag)))
 }
@@ -227,7 +223,6 @@ mod tests {
         )
     }
 
-    /// The changes from `before` to `after` at `notes` and `folders`, with `moves`.
     fn changes(before: &Facts, after: Facts, notes: &[&str], folders: &[&str], moves: Vec<Change>) -> Vec<Change> {
         let touched = Touched {
             notes: notes.iter().map(|at| path(at)).collect(),

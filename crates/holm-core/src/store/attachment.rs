@@ -17,26 +17,23 @@ use crate::error::{Error, Result};
 use crate::paths::{FolderPath, Name, NotePath};
 
 const ATTACHMENTS: &str = "attachments";
-/// The stem of a pasted image before its hash.
 const PASTED_IMAGE: &str = "Pasted image";
 
-/// Longest file stem in bytes. It leaves room for the hash and the extension of an
+/// It leaves room for the hash and the extension of an
 /// attachment under [`MAX_NAME_BYTES`](crate::paths::MAX_NAME_BYTES).
 const MAX_STEM_BYTES: usize = 240;
 /// The bytes of the content hash in an attachment name: 8 hex digits.
 const HASH_BYTES: usize = 4;
 
-/// The attachments folder. It is always `Some`.
+/// It is always `Some`.
 fn folder() -> Option<FolderPath> {
     FolderPath::new(ATTACHMENTS)
 }
 
-/// Whether `folder` is the attachments folder itself.
 pub(crate) fn is(folder: &FolderPath) -> bool {
     folder.as_ref() == Path::new(ATTACHMENTS)
 }
 
-/// Whether a new folder `name` in `parent` takes the name of the attachments folder.
 pub(crate) fn reserves(parent: &FolderPath, name: &Name) -> bool {
     parent.is_root() && name.as_os_str().eq_ignore_ascii_case(ATTACHMENTS)
 }
@@ -47,8 +44,7 @@ fn holds(folder: &FolderPath) -> bool {
 }
 
 impl Store {
-    /// Copies the file at `file` into the attachment folder, and returns its path from the
-    /// folder of `note`, for a link.
+    /// The path it returns is from the folder of `note`, for a link.
     pub(crate) fn attach_file(&self, note: &NotePath, file: &Path) -> Result<PathBuf> {
         let read_error = |source| Error::Read {
             path: file.to_owned(),
@@ -63,8 +59,7 @@ impl Store {
         self.attach(note, &stem, ext.as_deref(), source)
     }
 
-    /// Saves a pasted image in the format `extension` into the attachment folder, and returns
-    /// its path from the folder of `note`, for a link.
+    /// The path it returns is from the folder of `note`, for a link.
     pub(crate) fn paste_image(&self, note: &NotePath, extension: &str, bytes: &[u8]) -> Result<PathBuf> {
         self.attach(note, PASTED_IMAGE, Some(extension), bytes)
     }
@@ -77,9 +72,6 @@ impl Store {
     /// Copies `content` into the attachment folder as `<stem>-<hash>.<ext>`, and returns its
     /// absolute path. The hash is a short hash of the content, so a name never clashes.
     /// With no `ext`, the name has no `.` either.
-    ///
-    /// The stem and the extension keep their text, but `/` and a leading `.` become `-`.
-    /// A very long stem or extension stops at [`MAX_STEM_BYTES`].
     ///
     /// When a file with that name is there, it keeps that file and drops the new copy.
     /// It makes the folder when it is missing.
@@ -103,7 +95,7 @@ impl Store {
                 return Err(write_error(&dir, io::ErrorKind::NotADirectory.into()));
             }
         }
-        let mut hashed = Hashed {
+        let mut hashed = HashingReader {
             inner: content,
             hash: Sha256::new(),
         };
@@ -127,7 +119,6 @@ impl Store {
         Ok(path)
     }
 
-    /// The paths in `targets` that are attachments, in their order.
     /// Each path is relative to the notes folder.
     pub(crate) fn attachments(&self, targets: impl IntoIterator<Item = PathBuf>) -> Vec<PathBuf> {
         targets
@@ -136,7 +127,6 @@ impl Store {
             .collect()
     }
 
-    /// Deletes the file at `rel` when it is an attachment.
     pub(crate) fn delete_attachment(&self, rel: &Path) -> Result<()> {
         if self.is_attachment(rel) {
             remove(&self.root.join(rel))?;
@@ -156,10 +146,6 @@ impl Store {
     }
 }
 
-/// A file stem from any text, like the name of a pasted file.
-///
-/// It keeps the text as it is, but replaces `/` and a leading `.` with `-`.
-/// It also cuts a very long text to [`MAX_STEM_BYTES`].
 fn file_stem(text: &str) -> String {
     let mut stem = text.replace('/', "-");
     if stem.starts_with('.') {
@@ -175,13 +161,12 @@ fn file_stem(text: &str) -> String {
     stem
 }
 
-/// A reader that hashes what it reads.
-struct Hashed<R> {
+struct HashingReader<R> {
     inner: R,
     hash: Sha256,
 }
 
-impl<R: io::Read> io::Read for Hashed<R> {
+impl<R: io::Read> io::Read for HashingReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let read = self.inner.read(buf)?;
         self.hash.update(&buf[..read]);

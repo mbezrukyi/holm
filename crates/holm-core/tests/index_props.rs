@@ -65,7 +65,6 @@ fn edit() -> impl Strategy<Value = Edit> {
     ]
 }
 
-/// Everything the snapshot and the search answer about the notes folder.
 #[derive(Debug, PartialEq)]
 struct Answers {
     notes: Vec<NoteInfo>,

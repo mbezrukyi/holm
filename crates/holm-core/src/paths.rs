@@ -1,5 +1,3 @@
-//! The paths of notes and folders in the notes folder, and the names they are made of.
-//!
 //! Each path is relative to the notes folder and plain: each part is a [`Name`]. So a path has
 //! no `.` or `..` part, no hidden part, no `//` and no `/` at the end. The root folder is the
 //! empty path.
@@ -20,17 +18,16 @@ const NOTE_EXT: &str = ".md";
 /// The longest file name that Linux file systems take.
 pub(crate) const MAX_NAME_BYTES: usize = 255;
 
-/// The path of a note: a plain path that ends in `.md`, like `work/Plans.md`.
+/// A plain path that ends in `.md`, like `work/Plans.md`.
 ///
-/// It holds its whole path and its folder. Notes of one folder can share the folder.
-/// Its order is the order of [`Path::cmp`].
+/// Notes of one folder can share the folder. Its order is the order of [`Path::cmp`].
 #[derive(Clone)]
 pub struct NotePath {
     path: Arc<[u8]>,
     folder: FolderPath,
 }
 
-/// The path of a folder: any plain path, like `work/2026`. The root folder is the empty path.
+/// Any plain path, like `work/2026`. The root folder is the empty path.
 ///
 /// A clone is cheap. Its order is the order of [`Path::cmp`].
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
@@ -42,27 +39,18 @@ pub struct FolderPath(Plain);
 pub(crate) struct Name(Arc<[u8]>);
 
 impl Name {
-    /// The name that a person typed, with no spaces around it.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::BadName`] when the name is empty, holds `/` or a zero byte, starts with `.`,
-    /// or is too long.
+    /// The typed `text` with no spaces around it.
     pub(crate) fn typed(text: &str) -> Result<Self> {
         Self::checked(text.trim(), 0)
     }
 
-    /// The name of a note with the typed `title`: the title with no spaces around it. Its file
-    /// name adds `.md`.
-    ///
-    /// # Errors
-    ///
-    /// As in [`Name::typed`], and also when the title is too long with `.md`.
+    /// The typed note title `text` with no spaces around it. [`NameProblem::TooLong`] when its file
+    /// name with `.md` is too long.
     pub(crate) fn title(text: &str) -> Result<Self> {
         Self::checked(text.trim(), NOTE_EXT.len())
     }
 
-    /// A name from the disk, or `None` when it is no part of a plain path, like a hidden name.
+    /// `None` when `name` is no part of a plain path, like a hidden name.
     pub(crate) fn from_disk(name: &OsStr) -> Option<Self> {
         let name = name.as_bytes();
         is_part(name).then(|| Self(name.into()))
@@ -72,8 +60,8 @@ impl Name {
         OsStr::from_bytes(&self.0)
     }
 
-    /// Checks a trimmed typed name. `more` is the count of bytes that its file name adds.
-    fn checked(typed: &str, more: usize) -> Result<Self> {
+    /// `typed` must be trimmed.
+    fn checked(typed: &str, file_name_extra_bytes: usize) -> Result<Self> {
         let problem = if typed.is_empty() {
             NameProblem::Empty
         } else if typed.contains('/') {
@@ -82,7 +70,7 @@ impl Name {
             NameProblem::Dot
         } else if typed.contains('\0') {
             NameProblem::ZeroByte
-        } else if typed.len() + more > MAX_NAME_BYTES {
+        } else if typed.len() + file_name_extra_bytes > MAX_NAME_BYTES {
             NameProblem::TooLong
         } else {
             return Ok(Self(typed.as_bytes().into()));
@@ -95,14 +83,12 @@ impl Name {
 }
 
 impl NotePath {
-    /// The path, or `None` when it is not a plain path that ends in `.md`.
     pub fn new(path: impl AsRef<Path>) -> Option<Self> {
         let bytes = path.as_ref().as_os_str().as_bytes();
         let (folder, _) = split(bytes)?;
         Self::from_bytes(FolderPath(Plain::from(folder)), bytes)
     }
 
-    /// The folder that holds the note.
     pub fn folder(&self) -> &FolderPath {
         &self.folder
     }
@@ -118,18 +104,17 @@ impl NotePath {
         OsStr::from_bytes(self.name_bytes())
     }
 
-    /// The note with the same name in `folder`.
     #[must_use]
     pub fn in_folder(&self, folder: &FolderPath) -> Self {
         Self::joined(folder, self.name_bytes())
     }
 
-    /// Whether the note is right in `folder`, not in one of its subfolders.
+    /// Right in `folder`, not in one of its subfolders.
     pub fn is_in(&self, folder: &FolderPath) -> bool {
         self.folder == *folder
     }
 
-    /// Whether the note is in `folder` or in one of its subfolders.
+    /// In `folder` or in one of its subfolders.
     pub fn is_below(&self, folder: &FolderPath) -> bool {
         self.folder == *folder || self.folder.is_below(folder)
     }
@@ -140,7 +125,7 @@ impl NotePath {
         self.folder.moved(from, to).map(|folder| self.in_folder(&folder))
     }
 
-    /// The folders that hold the note, the nearest first. The root is last.
+    /// The nearest first. The root is last.
     pub fn parents(&self) -> impl Iterator<Item = FolderPath> + use<> {
         std::iter::once(self.folder.clone()).chain(self.folder.parents())
     }
@@ -155,7 +140,7 @@ impl NotePath {
         &self.path[if folder == 0 { 0 } else { folder + 1 }..]
     }
 
-    /// The note at `bytes`, a plain path in `folder`, or `None` when it does not end in `.md`.
+    /// `bytes` must be a plain path in `folder`. `None` when it does not end in `.md`.
     fn from_bytes(folder: FolderPath, bytes: &[u8]) -> Option<Self> {
         is_note_name(&bytes[folder.0.bytes().len()..]).then(|| Self {
             path: bytes.into(),
@@ -163,7 +148,7 @@ impl NotePath {
         })
     }
 
-    /// The note `name` in `folder`. `name` must be a note name.
+    /// `name` must be a note name.
     fn joined(folder: &FolderPath, name: &[u8]) -> Self {
         Self {
             path: folder.0.join(name).0,
@@ -172,24 +157,21 @@ impl NotePath {
     }
 }
 
-/// Whether the last part of a path is the file name of a note. It may start with `/`.
+/// `name` is the last part of a path, and may start with `/`.
 fn is_note_name(name: &[u8]) -> bool {
     let name = name.strip_prefix(b"/").unwrap_or(name);
     name.len() > NOTE_EXT.len() && name.ends_with(NOTE_EXT.as_bytes())
 }
 
 impl FolderPath {
-    /// The root folder.
     pub fn root() -> Self {
         Self::default()
     }
 
-    /// The path, or `None` when it is not a plain path.
     pub fn new(path: impl AsRef<Path>) -> Option<Self> {
         Plain::new(path.as_ref()).map(Self)
     }
 
-    /// Whether this is the root folder.
     pub fn is_root(&self) -> bool {
         self.0.bytes().is_empty()
     }
@@ -204,7 +186,7 @@ impl FolderPath {
         (!self.is_root()).then(|| OsStr::from_bytes(self.0.name()))
     }
 
-    /// The last part of the path as text: `2026` for `work/2026`. The root gives an empty text.
+    /// `2026` for `work/2026`. The root gives an empty text.
     pub fn last_part(&self) -> Cow<'_, str> {
         String::from_utf8_lossy(if self.is_root() { b"" } else { self.0.name() })
     }
@@ -218,18 +200,17 @@ impl FolderPath {
         }
     }
 
-    /// Whether this folder is right in `folder`.
+    /// Right in `folder`, not in one of its subfolders.
     pub fn is_in(&self, folder: &Self) -> bool {
         self.0.is_in(&folder.0)
     }
 
-    /// Whether this folder is inside `folder`, at any depth. A folder is not below itself.
+    /// At any depth. A folder is not below itself.
     pub fn is_below(&self, folder: &Self) -> bool {
         self.0.is_below(&folder.0)
     }
 
-    /// Whether this folder can move into `parent`. The root can't move, and no folder can move
-    /// into itself or a folder below it.
+    /// The root can't move, and no folder can move into itself or a folder below it.
     pub fn can_move_into(&self, parent: &Self) -> bool {
         !self.is_root() && parent != self && !parent.is_below(self)
     }
@@ -240,25 +221,23 @@ impl FolderPath {
         self.0.moved(&from.0, &to.0).map(Self)
     }
 
-    /// The folders that hold this folder, the nearest first. The root is last, and has none.
+    /// The nearest first. The root is last, and has none.
     pub fn parents(&self) -> impl Iterator<Item = Self> + use<> {
         self.0.parents().map(Self)
     }
 
-    /// The note with the title `title` in this folder: `<title>.md`.
+    /// `<title>.md` in this folder.
     pub(crate) fn note(&self, title: &Name) -> NotePath {
         let mut name = title.0.to_vec();
         name.extend_from_slice(NOTE_EXT.as_bytes());
         NotePath::joined(self, &name)
     }
 
-    /// The note with the file name `name` in this folder, or `None` when `name` does not
-    /// end in `.md`.
+    /// `None` when `name` does not end in `.md`.
     pub(crate) fn note_file(&self, name: &Name) -> Option<NotePath> {
         is_note_name(&name.0).then(|| NotePath::joined(self, &name.0))
     }
 
-    /// The folder `name` in this folder.
     pub(crate) fn child(&self, name: &Name) -> Self {
         Self(self.0.join(&name.0))
     }
@@ -283,7 +262,7 @@ pub(crate) struct NoteReader {
 }
 
 impl NoteReader {
-    /// The note path in `bytes`, or `None` as in [`NotePath::new`].
+    /// `None` when `bytes` is not a plain path that ends in `.md`.
     pub(crate) fn note(&mut self, bytes: &[u8]) -> Option<NotePath> {
         let (folder, _) = split(bytes)?;
         let folder = if let Some(known) = self.folders.get(folder) {
@@ -309,7 +288,7 @@ fn split(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
     })
 }
 
-/// Whether `name` can be one part of a plain path. A zero byte would break the order.
+/// A zero byte would break the order.
 fn is_part(name: &[u8]) -> bool {
     name.first().is_some_and(|&first| first != b'.')
         && name.len() <= MAX_NAME_BYTES
@@ -317,7 +296,7 @@ fn is_part(name: &[u8]) -> bool {
         && !name.contains(&0)
 }
 
-/// Whether `bytes` is a plain path: the root, or names split by `/` that follow [`is_part`].
+/// The root, or names split by `/` that follow [`is_part`].
 fn is_plain(bytes: &[u8]) -> bool {
     let mut start = 0;
     for (at, &byte) in bytes.iter().enumerate() {
@@ -334,7 +313,7 @@ fn is_plain(bytes: &[u8]) -> bool {
     bytes.is_empty() || start < bytes.len()
 }
 
-/// The bytes of a plain path. A clone is cheap.
+/// The bytes of a plain path.
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct Plain(Arc<[u8]>);
 
@@ -348,7 +327,7 @@ impl Plain {
         &self.0
     }
 
-    /// The path with one more part. `name` must follow [`is_part`].
+    /// `name` must follow [`is_part`].
     fn join(&self, name: &[u8]) -> Self {
         if self.0.is_empty() {
             return Self::from(name);
@@ -381,19 +360,16 @@ impl Plain {
         std::iter::successors(start, |plain| (!plain.0.is_empty()).then(|| plain.parent()))
     }
 
-    /// Whether the path is right in `folder`.
     fn is_in(&self, folder: &Self) -> bool {
-        let rest = self.rest(folder);
+        let rest = self.part_below(folder);
         rest.is_some_and(|rest| !rest.contains(&b'/'))
     }
 
-    /// Whether the path is inside `folder`, at any depth.
     fn is_below(&self, folder: &Self) -> bool {
-        self.rest(folder).is_some()
+        self.part_below(folder).is_some()
     }
 
-    /// The part of the path below `folder`, or `None` when it is not below it.
-    fn rest(&self, folder: &Self) -> Option<&[u8]> {
+    fn part_below(&self, folder: &Self) -> Option<&[u8]> {
         let (path, folder) = (self.bytes(), folder.bytes());
         if folder.is_empty() {
             return (!path.is_empty()).then_some(path);
@@ -405,7 +381,7 @@ impl Plain {
         if self == from {
             return Some(to.clone());
         }
-        self.rest(from).map(|rest| to.join(rest))
+        self.part_below(from).map(|rest| to.join(rest))
     }
 }
 
@@ -421,19 +397,18 @@ impl From<&[u8]> for Plain {
     }
 }
 
-/// The key of a byte in the order of [`Path::cmp`] for plain paths: `/` is the lowest byte.
+/// In the order of [`Path::cmp`] for plain paths, `/` is the lowest byte.
 fn key(byte: u8) -> u8 {
     if byte == b'/' { 0 } else { byte }
 }
 
-/// Where `a` and `b` differ first, within the shorter of them.
-fn mismatch(a: &[u8], b: &[u8]) -> Option<usize> {
+fn first_difference(a: &[u8], b: &[u8]) -> Option<usize> {
     a.iter().zip(b).position(|(x, y)| x != y)
 }
 
 /// The order of [`Path::cmp`] for plain paths.
 fn compare(a: &[u8], b: &[u8]) -> Ordering {
-    match mismatch(a, b) {
+    match first_difference(a, b) {
         Some(at) => key(a[at]).cmp(&key(b[at])),
         None => a.len().cmp(&b.len()),
     }
@@ -533,7 +508,6 @@ mod tests {
 
     use super::*;
 
-    /// A plain path with 1 to 3 parts.
     fn plain() -> impl Strategy<Value = String> {
         let part = "[ !#+,.a-bA-Bé-]{1,4}".prop_filter("not hidden", |part| !part.starts_with('.'));
         prop::collection::vec(part, 1..4).prop_map(|parts| parts.join("/"))

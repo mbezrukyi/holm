@@ -30,7 +30,6 @@ fn disk(folder: &Folder) -> BTreeMap<String, Option<String>> {
     found
 }
 
-/// Whether `change` names the note at `path`.
 fn names(change: &Change, path: &str) -> bool {
     let below = |folder: &dyn std::fmt::Display| path.starts_with(&format!("{folder}/"));
     match change {

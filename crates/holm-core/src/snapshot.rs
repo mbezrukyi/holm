@@ -1,5 +1,3 @@
-//! The facts of the notes folder in memory: note infos, folders, tags and links.
-
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ffi::OsStr;
@@ -26,10 +24,8 @@ pub struct Snapshot {
 /// The paths come from file names on disk, so the hasher has a random seed.
 type Map<K, V> = imbl::GenericHashMap<K, V, foldhash::fast::RandomState, imbl::shared_ptr::DefaultSharedPtr>;
 
-/// What a delete of a node removes, from [`Snapshot::removal`].
 #[derive(Debug)]
 pub(crate) struct Removal {
-    /// How many notes the delete removes.
     pub(crate) notes: usize,
     /// The file link targets that the removed notes link and no other note links,
     /// relative to the notes folder, in byte order. They are outside input.
@@ -50,7 +46,7 @@ impl Snapshot {
         self.revision
     }
 
-    /// The notes of `set`, in `order`. Pinned notes are on top.
+    /// Pinned notes are on top.
     ///
     /// Only `*.md` files are notes. Hidden files and folders, and symlinks, are skipped.
     /// A note that can't be read is left out.
@@ -60,21 +56,21 @@ impl Snapshot {
         notes.into_iter().cloned().collect()
     }
 
-    /// The notes of `set`, the newest change first. Pins have no effect.
+    /// The newest change first. Pins have no effect.
     pub fn newest(&self, set: NoteSet<'_>) -> Vec<NoteInfo> {
         let mut notes: Vec<&NoteInfo> = self.matching(set).collect();
         notes.sort_unstable_by(|a, b| newest(a, b));
         notes.into_iter().cloned().collect()
     }
 
-    /// The paths of the notes of `set`, in `order`. Pinned notes are on top.
+    /// Pinned notes are on top.
     pub fn paths(&self, set: NoteSet<'_>, order: Order) -> Vec<NotePath> {
         let mut notes: Vec<&NoteInfo> = self.matching(set).collect();
         sort(&mut notes, order);
         notes.into_iter().map(|note| note.path.clone()).collect()
     }
 
-    /// The notes of `set`, in no fixed order.
+    /// In no fixed order.
     pub fn matching<'s, 'a>(&'s self, set: NoteSet<'a>) -> impl Iterator<Item = &'s NoteInfo> + use<'s, 'a> {
         self.notes
             .values()
@@ -82,7 +78,6 @@ impl Snapshot {
             .map(|entry| &entry.info)
     }
 
-    /// The first note of `set` in `order`, or `None` when `set` has no notes.
     pub fn first(&self, set: NoteSet<'_>, order: Order) -> Option<&NoteInfo> {
         match order {
             Order::LastChange => self.matching(set).min_by(|a, b| last_change(a, b)),
@@ -94,14 +89,12 @@ impl Snapshot {
         }
     }
 
-    /// The note at `path` while it exists, or else the first note in `order`. With no notes, it
-    /// is `None`.
     pub fn note_or_first(&self, path: Option<&NotePath>, order: Order) -> Option<&NoteInfo> {
         path.and_then(|path| self.note(path))
             .or_else(|| self.first(NoteSet::All, order))
     }
 
-    /// Every tag as nested tags. `work` holds `work/holm`.
+    /// Nested: `work` holds `work/holm`.
     ///
     /// A parent tag shows even when no note has it, only its children.
     pub fn tags(&self) -> Vec<Tag> {
@@ -131,7 +124,7 @@ impl Snapshot {
         counts
     }
 
-    /// The links and embedded files in the note at `path`, in the order of its text.
+    /// In the order of the text of the note.
     ///
     /// A note that the snapshot does not know has no links.
     pub fn links(&self, path: &NotePath) -> &[Link] {
@@ -162,10 +155,7 @@ impl Snapshot {
         notes.into_iter().cloned().collect()
     }
 
-    /// What a delete of `node` removes: a note, or a folder with all its notes.
-    ///
-    /// The files are the file link targets that the notes in `node` link and no note outside
-    /// `node` links. They may be missing on disk.
+    /// The files may be missing on disk.
     pub(crate) fn removal(&self, node: &Node) -> Removal {
         let mut notes = 0;
         let mut inside = BTreeSet::new();
@@ -191,31 +181,27 @@ impl Snapshot {
         Removal { notes, files }
     }
 
-    /// The note at `path` and its links, or `None` when no note is there.
     pub(crate) fn note_and_links(&self, path: &NotePath) -> Option<(&NoteInfo, &[Link])> {
         self.notes.get(path).map(|entry| (&entry.info, entry.links.as_slice()))
     }
 
-    /// The note at `path`, or `None` when no note is there.
     pub fn note(&self, path: &NotePath) -> Option<&NoteInfo> {
         self.notes.get(path).map(|entry| &entry.info)
     }
 
-    /// The note with `id`, or `None` when no note has it.
     pub fn note_with_id(&self, id: &str) -> Option<&NoteInfo> {
         let path = self.ids.get(id)?;
         self.notes.get(path).map(|entry| &entry.info)
     }
 
-    /// The paths of `paths` that the snapshot has a note at, in `order`. Pinned notes are on
-    /// top. The others are left out.
+    /// Pinned notes are on top. A path with no note is left out.
     pub(crate) fn sorted(&self, paths: impl IntoIterator<Item = NotePath>, order: Order) -> Vec<NotePath> {
         let mut notes: Vec<&NoteInfo> = paths.into_iter().filter_map(|path| self.note(&path)).collect();
         sort(&mut notes, order);
         notes.into_iter().map(|note| note.path.clone()).collect()
     }
 
-    /// The paths of `paths` in `set`, in the same order. The paths come from this snapshot.
+    /// In the same order. The paths come from this snapshot.
     pub fn keep(&self, paths: &[NotePath], set: NoteSet<'_>) -> Vec<NotePath> {
         paths
             .iter()
@@ -231,12 +217,10 @@ impl Snapshot {
         self.folders.iter()
     }
 
-    /// Whether the snapshot knows the folder.
     pub(crate) fn has_folder(&self, folder: &FolderPath) -> bool {
         self.folders.contains(folder)
     }
 
-    /// A snapshot that holds `folders` and no notes, with revision 0.
     pub(crate) fn new(folders: Vec<FolderPath>) -> Self {
         Self {
             folders: folders.into_iter().collect(),
@@ -280,7 +264,6 @@ impl Snapshot {
         self.folders.extend(found);
     }
 
-    /// The snapshot after this one, with the next revision.
     pub(crate) fn next_revision(mut self) -> Self {
         self.revision += 1;
         self
@@ -329,8 +312,7 @@ fn by_title(a: &((bool, String), &NoteInfo), b: &((bool, String), &NoteInfo)) ->
     a.0.cmp(&b.0).then_with(|| a.1.path.cmp(&b.1.path))
 }
 
-/// Builds the nested tags from the count of notes of each tag. A parent tag counts the notes of its
-/// children.
+/// A parent tag counts the notes of its children.
 fn nested_tags(counts: &BTreeMap<&str, usize>) -> Vec<Tag> {
     let mut children: HashMap<Option<&str>, Vec<&str>> = HashMap::new();
     for name in counts.keys() {
@@ -339,7 +321,6 @@ fn nested_tags(counts: &BTreeMap<&str, usize>) -> Vec<Tag> {
     tag_children(None, counts, &children)
 }
 
-/// The tags under `parent`, with their children.
 fn tag_children(
     parent: Option<&str>,
     counts: &BTreeMap<&str, usize>,

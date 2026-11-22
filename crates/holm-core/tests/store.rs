@@ -1,5 +1,3 @@
-//! Reading, listing and saving notes through `Core` on a real temp folder.
-
 use std::fs;
 
 use holm_core::model::{NoteSet, Order};
@@ -34,7 +32,7 @@ fn open_deletes_temp_files_that_a_crash_left() {
 
     folder.reopen();
 
-    assert_eq!(folder.files(), ["a.md", "work"]);
+    assert_eq!(folder.names(""), ["a.md", "work"]);
     assert_eq!(folder.names("work"), [".other.tmp", "b.md"]);
 }
 
@@ -243,7 +241,7 @@ fn save_keeps_the_permissions_and_leaves_no_temp_file() {
 
     let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o640);
-    assert_eq!(folder.files(), ["a.md"]);
+    assert_eq!(folder.names(""), ["a.md"]);
 }
 
 #[test]
@@ -255,7 +253,7 @@ fn save_fails_on_a_missing_note() {
         folder.core.save(&note_path("a.md"), "New\n", None),
         Err(Error::Read { .. })
     ));
-    assert_eq!(folder.files(), Vec::<String>::new());
+    assert_eq!(folder.names(""), Vec::<String>::new());
 }
 
 #[test]
@@ -271,7 +269,7 @@ fn restore_writes_a_deleted_note_again_with_its_id_tags_and_pin() {
     assert_eq!(restored.info.tags, ["work"]);
     assert!(restored.info.pinned);
     assert_eq!(restored.body, "# A\n\nMine.\n");
-    assert_eq!(folder.files(), ["a.md"]);
+    assert_eq!(folder.names(""), ["a.md"]);
 }
 
 #[test]
@@ -318,7 +316,7 @@ fn create_refuses_a_taken_or_bad_title_and_writes_nothing() {
     assert_eq!(problem("a/b"), Some(NameProblem::Slash));
     assert_eq!(problem(".hidden"), Some(NameProblem::Dot));
     assert_eq!(problem(&"x".repeat(253)), Some(NameProblem::TooLong));
-    assert_eq!(folder.files(), ["Plans.md"]);
+    assert_eq!(folder.names(""), ["Plans.md"]);
     assert!(folder.core.create(&folder_path(""), &"x".repeat(252)).is_ok());
 }
 

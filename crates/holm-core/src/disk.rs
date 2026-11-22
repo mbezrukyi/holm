@@ -1,5 +1,3 @@
-//! The note files and the index rows, kept in step.
-
 mod outside;
 mod scan;
 pub(crate) mod write;
@@ -16,7 +14,7 @@ use crate::reconcile::Settled;
 use crate::snapshot::Snapshot;
 use crate::store::Store;
 
-/// The note files and the index rows. Only a [`write::Write`] changes them.
+/// Keeps the note files and the index rows in step. Only a [`write::Write`] changes them.
 #[derive(Debug)]
 pub(crate) struct Disk {
     store: Store,
@@ -45,7 +43,6 @@ impl Disk {
         Ok((disk, facts, before))
     }
 
-    /// Reads one note.
     pub(crate) fn read(&self, path: &NotePath) -> Result<Note> {
         self.store.read(path).map(|(note, ..)| note)
     }
@@ -84,8 +81,7 @@ impl Disk {
         Ok(facts)
     }
 
-    /// Writes the rows of `settled` into the index. When SQLite fails, it rebuilds the index,
-    /// so it never fails.
+    /// When SQLite fails, it rebuilds the index, so it never fails.
     pub(crate) fn write_rows(&mut self, settled: &Settled) {
         let rows = Rows {
             removed: &settled.removed,
@@ -111,7 +107,7 @@ impl Disk {
         }
     }
 
-    /// Rebuilds the index with the rows of `settled`, which holds every note file.
+    /// `settled` must hold every note file.
     fn rebuild_from(&mut self, settled: &Settled) {
         if let Err(error) = self.index.rebuild(&put_rows(settled)) {
             tracing::warn!(%error, "cannot rebuild the index");
@@ -130,7 +126,6 @@ impl Disk {
     }
 }
 
-/// The index rows of each put note of `settled`.
 fn put_rows(settled: &Settled) -> Vec<NoteRows<'_>> {
     settled
         .put

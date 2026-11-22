@@ -1,6 +1,3 @@
-//! Outside changes to the notes folder, pushed by hand through the `Feed`,
-//! and a few through real file events.
-
 #![cfg(test)]
 
 use holm_core_test::{folder_path, note_path, tag_name};
@@ -53,7 +50,6 @@ impl Fed {
         write(&self.path(path), text);
     }
 
-    /// Every change that is waiting now, from all change lists.
     fn take(&self) -> Vec<Change> {
         self.lists().into_iter().flat_map(|list| list.changes).collect()
     }
@@ -673,8 +669,6 @@ fn a_stream_ends_when_the_core_is_gone() {
 }
 
 mod real_events {
-    //! These tests use real `notify` events on a temp folder.
-
     use super::*;
 
     /// Long enough for a slow CI machine. A passing test does not wait this long.
@@ -691,7 +685,6 @@ mod real_events {
         (dir, cache, core, changes)
     }
 
-    /// Waits up to [`WAIT`] for the next change list, and gives its changes.
     fn next(changes: &mut ChangeLists) -> Vec<Change> {
         next_list(changes).changes
     }

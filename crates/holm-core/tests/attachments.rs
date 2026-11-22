@@ -1,5 +1,3 @@
-//! Copying files into `attachments/` through `Core` on a real temp folder.
-
 use std::fs;
 use std::path::Path;
 

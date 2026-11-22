@@ -1,5 +1,3 @@
-//! Full-text search over the titles, texts and tags of the notes in the index.
-//!
 //! The text of a note and its tags have their own word tables. The tag words are kept once
 //! per tag name, not per note. So a change of tags never parses the text of a note again,
 //! and a tag rename on many notes adds one row.
@@ -16,7 +14,7 @@ use crate::paths::NotePath;
 use crate::paths::NoteReader;
 use crate::tag::TagName;
 
-/// The tables of this module. `tags` and `notes` belong to the index.
+/// `tags` and `notes` belong to the index.
 pub(super) const SCHEMA: &str = "
 CREATE TABLE text_hashes (
     note INTEGER PRIMARY KEY REFERENCES notes ON DELETE CASCADE,
@@ -38,11 +36,9 @@ CREATE VIRTUAL TABLE tag_words USING fts5 (
 );
 ";
 
-/// The most words a search uses. Later words are left out.
+/// Later words of a search are left out.
 const MAX_WORDS: usize = 64;
 
-/// Makes the note with `key` findable by its title, its body and its tags.
-///
 /// The note's rows in the `tags` table must be written already.
 pub(super) fn put(conn: &Connection, key: i64, title: &str, body: &str, tags: &[TagName]) -> rusqlite::Result<()> {
     let hash = hash((title, body));
@@ -73,7 +69,7 @@ pub(super) fn put(conn: &Connection, key: i64, title: &str, body: &str, tags: &[
     Ok(())
 }
 
-/// Removes the words of the note with `key`. Call it before the note leaves `notes`.
+/// Call it before the note leaves `notes`.
 ///
 /// Its tag names stay. A name with no note finds nothing.
 pub(super) fn remove(conn: &Connection, key: i64) -> rusqlite::Result<()> {
@@ -125,14 +121,13 @@ pub(super) fn find(conn: &Connection, text: &str) -> rusqlite::Result<Vec<NotePa
     Ok(found.into_iter().map(|(_, path)| path).collect())
 }
 
-/// The key and path of each note whose title or text matches the FTS5 `query`.
-fn text_matches(conn: &Connection, query: &str) -> rusqlite::Result<Vec<(i64, NotePath)>> {
+fn text_matches(conn: &Connection, fts5_query: &str) -> rusqlite::Result<Vec<(i64, NotePath)>> {
     let mut statement = conn.prepare_cached(
         "SELECT key, path FROM notes
         WHERE key IN (SELECT rowid FROM text_words WHERE text_words MATCH ?1)",
     )?;
     let mut reader = NoteReader::default();
-    let rows = statement.query_map([query], |row| Ok((row.get(0)?, note_path(&mut reader, row, 1)?)))?;
+    let rows = statement.query_map([fts5_query], |row| Ok((row.get(0)?, note_path(&mut reader, row, 1)?)))?;
     rows.collect()
 }
 
@@ -164,7 +159,7 @@ fn tag_matches(conn: &Connection, words: &[String]) -> rusqlite::Result<HashMap<
     Ok(tagged)
 }
 
-/// The words the user typed as FTS5 phrases. Each word matches as a prefix.
+/// Each word becomes an FTS5 phrase that matches as a prefix.
 fn words(text: &str) -> Vec<String> {
     text.split_whitespace()
         .filter(|word| word.chars().any(char::is_alphanumeric))

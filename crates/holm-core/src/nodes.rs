@@ -1,5 +1,3 @@
-//! The notes and folders that the core brings up to date with the disk.
-
 use crate::paths::{FolderPath, NotePath};
 
 /// A note or a folder that the core brings up to date with the disk. A folder node holds
@@ -15,7 +13,6 @@ pub(crate) enum Node {
 pub(crate) struct Nodes(Vec<Node>);
 
 impl Node {
-    /// Whether `other` is this node or below it.
     pub(crate) fn holds(&self, other: &Self) -> bool {
         match (self, other) {
             (_, Self::Note(note)) => self.holds_note(note),
@@ -24,7 +21,6 @@ impl Node {
         }
     }
 
-    /// Whether the note at `path` is this node or below it.
     pub(crate) fn holds_note(&self, path: &NotePath) -> bool {
         match self {
             Self::Note(note) => note == path,
@@ -34,7 +30,6 @@ impl Node {
 }
 
 impl Nodes {
-    /// The nodes of `nodes` that no other of them holds.
     pub(crate) fn new(nodes: impl IntoIterator<Item = Node>) -> Self {
         let mut nodes: Vec<Node> = nodes.into_iter().collect();
         nodes.sort();
@@ -44,7 +39,6 @@ impl Nodes {
         Self(nodes)
     }
 
-    /// The whole notes folder.
     pub(crate) fn root() -> Self {
         Self(vec![Node::Folder(FolderPath::root())])
     }
