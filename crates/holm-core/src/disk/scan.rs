@@ -6,7 +6,7 @@ use crate::facts::Facts;
 use crate::links::{self, LinkSource};
 use crate::model::{Note, NoteId};
 use crate::nodes::Nodes;
-use crate::reconcile::{self, Plan, Read, Settled};
+use crate::reconcile::{self, Owner, Plan, Read, Settled};
 use crate::store::{ContentHash, Stamp, Store};
 
 /// Brings the notes at or below each of `nodes` up to date with the files, from `facts`. It reads only the files whose
@@ -46,13 +46,13 @@ pub(super) fn wrote(store: &Store, facts: &Facts, notes: Vec<(Note, Stamp, Conte
 }
 
 fn read(store: &Store, facts: &Facts, note: Note, stamp: Stamp, hash: ContentHash) -> Read {
-    let owner_on_disk = note
+    let owner = note
         .info
         .id
         .as_ref()
         .and_then(|id| facts.snapshot().note_with_id(id.as_str()))
-        .filter(|owner| owner.path != note.info.path)
-        .is_some_and(|owner| store.exists(&owner.path));
+        .filter(|owner| owner.path != note.info.path && store.exists(&owner.path))
+        .map_or(Owner::Absent, |_| Owner::OnDisk);
     let source = LinkSource::of(&note);
     let path = &note.info.path;
     let links = if facts.link_source(path) == Some(source) {
@@ -66,7 +66,7 @@ fn read(store: &Store, facts: &Facts, note: Note, stamp: Stamp, hash: ContentHas
         stamp,
         hash,
         source,
-        owner_on_disk,
+        owner,
     }
 }
 

@@ -27,8 +27,15 @@ pub(crate) struct Read {
     pub(crate) stamp: Stamp,
     pub(crate) hash: ContentHash,
     pub(crate) source: LinkSource,
-    /// Whether a note file is at the path where the facts keep the id of the note, when that path is another one.
-    pub(crate) owner_on_disk: bool,
+    pub(crate) owner: Owner,
+}
+
+/// Whether a note file is at the path where the facts keep the id of a read note, when that path is another one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Owner {
+    OnDisk,
+    /// No other path keeps the id, or no file is there.
+    Absent,
 }
 
 /// What a [`Plan`] changes in the facts.
@@ -197,7 +204,7 @@ impl Plan {
                 stamp,
                 hash,
                 source,
-                owner_on_disk,
+                owner: id_owner,
             }) = reads.remove(&path)
             else {
                 if known {
@@ -210,7 +217,7 @@ impl Plan {
                 && let Some((owner, claimed)) = owners.owner(id)
                 && owner != path
             {
-                if claimed || self.found.contains(&owner) || owner_on_disk {
+                if claimed || self.found.contains(&owner) || id_owner == Owner::OnDisk {
                     copy = true;
                 } else {
                     owners.free(&owner);
@@ -352,7 +359,7 @@ mod tests {
         )
     }
 
-    fn read(at: &str, id: Option<&str>, stamp: Stamp, owner_on_disk: bool) -> Read {
+    fn read(at: &str, id: Option<&str>, stamp: Stamp, owner: Owner) -> Read {
         Read {
             note: Note {
                 info: info(at, id),
@@ -362,7 +369,7 @@ mod tests {
             stamp,
             hash: ContentHash::default(),
             source: LinkSource::default(),
-            owner_on_disk,
+            owner,
         }
     }
 
@@ -409,7 +416,7 @@ mod tests {
         let plan = plan(&facts, &Nodes::root(), vec![(path("z/a.md"), stamp(5))]);
         assert_eq!(plan.reads(), [path("z/a.md")]);
 
-        let settled = plan.decide(&facts, vec![read("z/a.md", None, stamp(5), false)]);
+        let settled = plan.decide(&facts, vec![read("z/a.md", None, stamp(5), Owner::Absent)]);
         assert!(settled.moved.is_empty());
         assert_eq!(sorted(&settled.removed), ["x/a.md", "y/a.md"]);
         assert_eq!(put_ids(&settled), [("z/a.md".to_owned(), None, false)]);
@@ -434,7 +441,7 @@ mod tests {
         let plan = plan(&facts, &Nodes::root(), vec![(path("work/a.md"), stamp(5))]);
         assert_eq!(plan.reads(), [path("work/a.md")]);
 
-        let settled = plan.decide(&facts, vec![read("work/a.md", Some("A"), stamp(5), false)]);
+        let settled = plan.decide(&facts, vec![read("work/a.md", Some("A"), stamp(5), Owner::Absent)]);
         assert_eq!(settled.removed, [path("a.md")]);
         assert_eq!(put_ids(&settled), [("work/a.md".to_owned(), Some("A"), false)]);
         assert_eq!(
@@ -456,8 +463,8 @@ mod tests {
         let settled = plan.decide(
             &facts,
             vec![
-                read("a.md", Some("A"), stamp(7), true),
-                read("z.md", Some("A"), stamp(6), false),
+                read("a.md", Some("A"), stamp(7), Owner::OnDisk),
+                read("z.md", Some("A"), stamp(6), Owner::Absent),
             ],
         );
         assert_eq!(settled.removed, Vec::<NotePath>::new());
@@ -473,7 +480,7 @@ mod tests {
         let nodes = Nodes::new([Node::Note(path("new.md"))]);
         let plan = plan(&facts, &nodes, vec![(path("new.md"), stamp(6))]);
 
-        let settled = plan.decide(&facts, vec![read("new.md", Some("A"), stamp(6), false)]);
+        let settled = plan.decide(&facts, vec![read("new.md", Some("A"), stamp(6), Owner::Absent)]);
         assert_eq!(settled.removed, [path("old.md")]);
         assert_eq!(put_ids(&settled), [("new.md".to_owned(), Some("A"), false)]);
         assert_eq!(
