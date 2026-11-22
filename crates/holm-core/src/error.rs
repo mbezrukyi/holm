@@ -1,16 +1,25 @@
 use std::io;
 use std::path::PathBuf;
 
-/// Each path is absolute.
+/// A path that Holm builds from the notes folder is absolute. A path that the caller gave stays as given, so it can be
+/// relative. The fields of such paths say so.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
     /// The notes folder is missing, or it is not a folder.
     #[error("cannot open the notes folder {path}")]
-    NotesFolder { path: PathBuf, source: io::Error },
+    NotesFolder {
+        /// The notes folder as the caller gave it.
+        path: PathBuf,
+        source: io::Error,
+    },
     /// A file or a folder could not be read.
     #[error("cannot read {path}")]
-    Read { path: PathBuf, source: io::Error },
+    Read {
+        /// Absolute, but a file to attach is as the caller gave it.
+        path: PathBuf,
+        source: io::Error,
+    },
     #[error("{path} is not UTF-8 text")]
     NotUtf8 { path: PathBuf, source: std::str::Utf8Error },
     /// A file or a folder could not be written, moved or deleted.
@@ -19,6 +28,7 @@ pub enum Error {
     /// The index can't be used, even in memory.
     #[error("cannot use the index {path}")]
     Index {
+        /// The index file in the index folder as the caller gave it.
         path: PathBuf,
         source: Box<dyn std::error::Error + Send + Sync>,
     },
