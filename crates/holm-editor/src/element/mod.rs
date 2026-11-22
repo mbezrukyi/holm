@@ -13,7 +13,7 @@ use gpui_kit::{
 };
 
 use holm_markdown::TaskState;
-pub(crate) use layout::{Layout, Reveal, Scroll};
+pub(crate) use layout::{Edge, Layout, Reveal, Scroll};
 use theme::Place;
 pub(crate) use theme::Theme;
 

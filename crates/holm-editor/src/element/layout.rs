@@ -48,6 +48,13 @@ pub(crate) struct Scroll {
     pub(crate) offset: Pixels,
 }
 
+/// Of a screen row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Edge {
+    Start,
+    End,
+}
+
 /// Where Up or Down puts the cursor.
 pub(crate) struct Vertical {
     pub(crate) offset: usize,
@@ -1013,19 +1020,26 @@ impl Layout {
         Some((offset, line.affinity_at(offset, row_y + line.line_height * 0.5)))
     }
 
-    /// The source offset at the start or the end of the screen row with the cursor. It returns `None` when that row is
+    /// The source offset at `edge` of the screen row with the cursor. It returns `None` when that row is
     /// not in this layout. It also returns the affinity of the offset, as in [`LaidLine::caret`].
-    pub(crate) fn row_edge(&self, cursor: usize, affinity: Affinity, end: bool) -> Option<(usize, Affinity)> {
+    pub(crate) fn row_edge(&self, cursor: usize, affinity: Affinity, edge: Edge) -> Option<(usize, Affinity)> {
         let line = self
             .lines
             .iter()
             .find(|line| contains_with_end(&line.display.source(), cursor))?;
         let Some(text) = line.text() else {
             let source = line.display.source();
-            return Some((if end { source.end } else { source.start }, Affinity::RowEnd));
+            let offset = match edge {
+                Edge::Start => source.start,
+                Edge::End => source.end,
+            };
+            return Some((offset, Affinity::RowEnd));
         };
         let at = line.caret(cursor, affinity)?;
-        let x = if end { self.bounds.size.width } else { px(0.) };
+        let x = match edge {
+            Edge::Start => px(0.),
+            Edge::End => self.bounds.size.width,
+        };
         let index = text
             .closest_index_for_position(point(x, at.y), line.line_height)
             .unwrap_or_else(|index| index);

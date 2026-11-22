@@ -13,7 +13,7 @@ use gpui_kit::{
 use holm_markdown::{Color, LinkKind, Target};
 
 use crate::color::{self, ColorWindow, KeyResult, Paint};
-use crate::element::{EditorElement, Layout, Reveal, Scroll, Theme};
+use crate::element::{Edge, EditorElement, Layout, Reveal, Scroll, Theme};
 use crate::files::{FileKind, LinkedFiles};
 use crate::find::Find;
 use crate::highlight::{self, Highlighter};
@@ -688,20 +688,8 @@ impl Editor {
             "down" => self.move_vertical(Direction::Down, selection),
             "pageup" => self.move_page(Direction::Up, selection),
             "pagedown" => self.move_page(Direction::Down, selection),
-            "home" | "end" => {
-                let cursor = self.model.cursor();
-                let end = key == "end";
-                let affinity = self.model.caret().affinity();
-                let (offset, affinity) = self
-                    .current_layout()
-                    .and_then(|layout| layout.row_edge(cursor, affinity, end))
-                    .unwrap_or_else(|| {
-                        let line = self.model.line_range(self.model.line_of(cursor));
-                        (if end { line.end } else { line.start }, Affinity::RowEnd)
-                    });
-                let caret = Caret::at(offset).with_affinity(affinity);
-                self.model.set_caret(caret, selection);
-            }
+            "home" => self.move_to_row_edge(Edge::Start, selection),
+            "end" => self.move_to_row_edge(Edge::End, selection),
             "backspace" | "delete" => {
                 let changed = if key == "backspace" {
                     self.model.backspace(false, now)
@@ -733,6 +721,25 @@ impl Editor {
         if !text.is_empty() {
             cx.write_to_clipboard(ClipboardItem::new_string(text.to_owned()));
         }
+    }
+
+    /// Home or End.
+    fn move_to_row_edge(&mut self, edge: Edge, selection: Selection) {
+        let cursor = self.model.cursor();
+        let affinity = self.model.caret().affinity();
+        let (offset, affinity) = self
+            .current_layout()
+            .and_then(|layout| layout.row_edge(cursor, affinity, edge))
+            .unwrap_or_else(|| {
+                let line = self.model.line_range(self.model.line_of(cursor));
+                let offset = match edge {
+                    Edge::Start => line.start,
+                    Edge::End => line.end,
+                };
+                (offset, Affinity::RowEnd)
+            });
+        let caret = Caret::at(offset).with_affinity(affinity);
+        self.model.set_caret(caret, selection);
     }
 
     fn move_page(&mut self, direction: Direction, selection: Selection) {
