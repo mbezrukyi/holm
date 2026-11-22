@@ -161,6 +161,15 @@ impl Content {
     }
 }
 
+/// How [`NotePane::show`] puts a note into the editor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Load {
+    /// A new note, with its own view.
+    Open,
+    /// The open note again from the disk: it keeps the view and is one undo step.
+    Reload,
+}
+
 pub(crate) struct NotePane {
     core_door: Entity<CoreDoor>,
     message_line: Entity<MessageLine>,
@@ -271,33 +280,37 @@ impl NotePane {
             _subscriptions: subscriptions,
         };
         if let Some(note) = note {
-            pane.show(note, false, cx);
+            pane.show(note, Load::Open, cx);
         }
         pane
     }
 
-    /// Puts `note` from the disk into the editor. A reload keeps the view and is one undo step.
-    fn show(&mut self, note: Note, reload: bool, cx: &mut Context<Self>) {
+    /// Puts `note` from the disk into the editor.
+    fn show(&mut self, note: Note, load: Load, cx: &mut Context<Self>) {
         self.ending = LineEnding::of(&note.body);
         let folder = Some(self.core_door.read(cx).root().join(note.info.path.folder()));
-        self.editor.update(cx, |editor, cx| {
-            if reload {
-                editor.reload_text(&note.body, cx);
-            } else {
+        self.editor.update(cx, |editor, cx| match load {
+            Load::Open => {
                 editor.set_text(&note.body, cx);
                 editor.set_folder(folder, cx);
             }
+            Load::Reload => editor.reload_text(&note.body, cx),
         });
         let path = note.info.path.clone();
-        if !reload {
-            self.content = Content::Note(path.clone());
-        } else if let Some(open) = self.content.editor_mut() {
-            open.clone_from(&path);
+        match load {
+            Load::Open => self.content = Content::Note(path.clone()),
+            Load::Reload => {
+                if let Some(open) = self.content.editor_mut() {
+                    open.clone_from(&path);
+                }
+            }
         }
         self.last_info = Some(note.info);
         self.show_fields(cx);
         self.set_disk(None, cx);
-        if !reload && let Some(heading) = self.open_heading.take() {
+        if load == Load::Open
+            && let Some(heading) = self.open_heading.take()
+        {
             self.editor.update(cx, |editor, cx| editor.show_heading(&heading, cx));
         }
         self.links.update(cx, |links, cx| links.show(Some(path), cx));
@@ -591,7 +604,7 @@ impl NotePane {
             return;
         };
         let open = self.opens.current();
-        let done = Done::value(open.step(cx, |pane, note, cx| pane.show(note, true, cx)));
+        let done = Done::value(open.step(cx, |pane, note, cx| pane.show(note, Load::Reload, cx)));
         self.core_door.update(cx, |core_door, cx| {
             core_door.read_and_drop_text(path, done, cx);
         });
@@ -686,7 +699,7 @@ impl NotePane {
     fn opened(&mut self, note: Note, cx: &mut Context<Self>) {
         let path = note.info.path.clone();
         self.next = None;
-        self.show(note, false, cx);
+        self.show(note, Load::Open, cx);
         cx.emit(PaneEvent::Opened(path));
     }
 
