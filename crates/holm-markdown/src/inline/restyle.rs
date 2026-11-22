@@ -663,7 +663,7 @@ fn write_region(
         if out == work.joined[region.clone()] {
             return Some(Rewrite::Unchanged);
         }
-        let exact = !policy.escape;
+        let exact = policy.escape == Escape::None;
         let change = source_change(text, work, &region, &out, &pieces, &at, exact);
         if !keeps_blocks(text, body, &join(text, std::slice::from_ref(&change), 0..0)) {
             continue;
@@ -971,41 +971,78 @@ fn same_looks(a: &[Look], b: &[Look]) -> bool {
 
 /// How a try writes the markers.
 #[derive(Clone, Copy, Debug)]
-#[allow(clippy::struct_excessive_bools, reason = "each bool is one choice of a try")]
 struct Policy {
-    /// The style that may become an HTML tag, or every style when `all_html`.
-    html: Option<Look>,
-    all_html: bool,
-    /// When two runs cross, cut the new or changed one, not the old one.
-    cut_changed: bool,
-    /// For runs of the same length, put the inner style outside.
-    reverse: bool,
-    swap_emphasis: bool,
-    swap_strong: bool,
-    /// Put a backslash before each marker char in the text, so that it cannot pair.
-    escape: bool,
+    html: Html,
+    cut: Cut,
+    tie: Tie,
+    emphasis: Spell,
+    strong: Spell,
+    escape: Escape,
+}
+
+/// Which runs a try writes as HTML tags.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Html {
+    Never,
+    /// The changed runs of one style.
+    Changed(Look),
+    Always,
+}
+
+/// Which of two crossing runs a try cuts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Cut {
+    /// The new or changed run.
+    Changed,
+    Old,
+}
+
+/// Which style a try puts outside, for runs of the same length.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Tie {
+    OuterFirst,
+    InnerFirst,
+}
+
+/// How a try spells the markers of a changed run of one style.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Spell {
+    Keep,
+    /// `*` for `_`, and `_` for `*`.
+    Swap,
+}
+
+/// Whether a try puts a backslash before each marker char in the text, so that it cannot pair.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Escape {
+    None,
+    Markers,
 }
 
 impl Policy {
     fn all(target: Option<Look>) -> Vec<Self> {
         let mut all = Vec::new();
-        for (html, all_html, escape) in [
-            (None, false, false),
-            (target, false, false),
-            (None, true, false),
-            (None, false, true),
-            (None, true, true),
+        for (html, escape) in [
+            (Html::Never, Escape::None),
+            (target.map_or(Html::Never, Html::Changed), Escape::None),
+            (Html::Always, Escape::None),
+            (Html::Never, Escape::Markers),
+            (Html::Always, Escape::Markers),
         ] {
-            for cut_changed in [true, false] {
-                for reverse in [false, true] {
-                    for (swap_emphasis, swap_strong) in [(false, false), (true, false), (false, true), (true, true)] {
+            for cut in [Cut::Changed, Cut::Old] {
+                for tie in [Tie::OuterFirst, Tie::InnerFirst] {
+                    for (emphasis, strong) in [
+                        (Spell::Keep, Spell::Keep),
+                        (Spell::Swap, Spell::Keep),
+                        (Spell::Keep, Spell::Swap),
+                        (Spell::Swap, Spell::Swap),
+                    ] {
                         all.push(Self {
                             html,
-                            all_html,
-                            cut_changed,
-                            reverse,
-                            swap_emphasis,
-                            swap_strong,
+                            cut,
+                            tie,
+                            emphasis,
+                            strong,
                             escape,
                         });
                     }
@@ -1042,19 +1079,19 @@ impl Writer<'_> {
                 .map(|(k, m)| (k, m.look))
                 .collect();
             let best = candidates.iter().max_by_key(|(k, look)| {
-                let order = if self.policy.reverse {
-                    k.cast_signed()
-                } else {
-                    -k.cast_signed()
+                let order = match self.policy.tie {
+                    Tie::OuterFirst => -k.cast_signed(),
+                    Tie::InnerFirst => k.cast_signed(),
                 };
                 (self.run_end(i, *look, b), order)
             });
             let Some(&(_, look)) = best else {
                 let start = self.out.len();
                 let source = piece.source(self.joined);
-                if self.policy.escape && piece.class == Class::Punct && piece.text.is_none() {
+                let escape = self.policy.escape == Escape::Markers;
+                if escape && piece.class == Class::Punct && piece.text.is_none() {
                     escape_markers(source, &mut self.out);
-                } else if self.policy.escape && piece.class == Class::Html && html_tag::read(source).is_some() {
+                } else if escape && piece.class == Class::Html && html_tag::read(source).is_some() {
                     // A lone Holm tag could pair with a new one.
                     self.out.push('\\');
                     self.out.push_str(source);
@@ -1067,7 +1104,7 @@ impl Writer<'_> {
             };
             let mut end = self.run_end(i, look, b);
             let changed = self.changed(i, end, look);
-            if self.policy.cut_changed
+            if self.policy.cut == Cut::Changed
                 && changed
                 && let Some(cut) = self.crossing(i, end, look, open, b)
             {
@@ -1116,7 +1153,7 @@ impl Writer<'_> {
             .map_or_else(|| look.default_spelling(), |m| m.spelling.clone());
         let policy = self.policy;
         if matches!(old, Spelling::Delim(_))
-            && (policy.all_html || (changed && policy.html == Some(look)))
+            && (policy.html == Html::Always || (changed && policy.html == Html::Changed(look)))
             && let Some(html) = look.html()
         {
             return html;
@@ -1125,8 +1162,8 @@ impl Writer<'_> {
             return old;
         }
         match look {
-            Look::Emphasis if policy.swap_emphasis => old.swapped(),
-            Look::Strong if policy.swap_strong => old.swapped(),
+            Look::Emphasis if policy.emphasis == Spell::Swap => old.swapped(),
+            Look::Strong if policy.strong == Spell::Swap => old.swapped(),
             _ => old,
         }
     }
