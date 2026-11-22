@@ -57,6 +57,14 @@ pub(crate) enum Edge {
     End,
 }
 
+/// Which lines [`Layout::text_bounds`] covers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Lines {
+    All,
+    /// Only the lines that show their syntax.
+    SyntaxShown,
+}
+
 /// Where Up or Down puts the cursor.
 pub(crate) struct Vertical {
     pub(crate) offset: usize,
@@ -1083,7 +1091,7 @@ impl Layout {
 
     /// The window rectangles that cover `selection`.
     pub(crate) fn selection_bounds(&self, selection: &Range<usize>) -> Vec<Bounds<Pixels>> {
-        self.text_bounds(selection, true)
+        self.text_bounds(selection, Lines::SyntaxShown)
     }
 
     /// The rects of the find matches in this layout.
@@ -1094,17 +1102,16 @@ impl Layout {
         let (start, end) = (first.display.source().start, last.display.source().end);
         matches[matches.partition_point(|m| m.end < start)..matches.partition_point(|m| m.start <= end)]
             .iter()
-            .flat_map(|m| self.text_bounds(m, false))
+            .flat_map(|m| self.text_bounds(m, Lines::All))
             .collect()
     }
 
-    /// With `raw_only`, only lines that show their syntax.
-    fn text_bounds(&self, selection: &Range<usize>, raw_only: bool) -> Vec<Bounds<Pixels>> {
+    fn text_bounds(&self, selection: &Range<usize>, lines: Lines) -> Vec<Bounds<Pixels>> {
         let mut rects = Vec::new();
         for line in self
             .lines
             .iter()
-            .filter(|line| line.display.syntax == Syntax::Shown || !raw_only)
+            .filter(|line| lines == Lines::All || line.display.syntax == Syntax::Shown)
         {
             let Some(text) = line.text() else { continue };
             let source = line.display.source();
