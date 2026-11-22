@@ -782,8 +782,6 @@ fn first_note(core: &Core, last: Option<&NotePath>, order: Order) -> holm_core::
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, reason = "tests")]
-
     use std::cell::RefCell;
     use std::fs;
     use std::rc::Rc;

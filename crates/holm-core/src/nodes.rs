@@ -65,8 +65,6 @@ impl<'a> IntoIterator for &'a Nodes {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, reason = "tests")]
-
     use super::*;
 
     fn note(path: &str) -> Node {

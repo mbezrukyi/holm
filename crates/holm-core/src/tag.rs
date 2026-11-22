@@ -125,8 +125,6 @@ impl fmt::Debug for TagName {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, reason = "tests")]
-
     use super::*;
 
     fn tag(name: &str) -> TagName {

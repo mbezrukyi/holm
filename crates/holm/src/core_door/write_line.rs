@@ -236,8 +236,6 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, reason = "tests")]
-
     use std::cell::Cell;
     use std::rc::Rc;
     use std::task::Waker;

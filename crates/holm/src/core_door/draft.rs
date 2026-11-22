@@ -357,8 +357,6 @@ impl Draft {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, reason = "tests")]
-
     use super::*;
     use crate::test_paths::note_path;
 

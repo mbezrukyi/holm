@@ -821,8 +821,6 @@ fn fragments_from<'a>(fragments: &[LineFragment<'a>], skip: usize) -> Vec<LineFr
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::expect_used, reason = "tests")]
-
     use std::borrow::Cow;
 
     use gpui_kit::{TestAppContext, TestDispatcher, black, font};

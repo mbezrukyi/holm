@@ -110,7 +110,6 @@ enum Unit {
 
 /// The writing helps that the user can turn off. All are on by default.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(clippy::struct_excessive_bools)]
 pub struct WritingHelp {
     /// The keys that add or remove Markdown syntax, like Ctrl+B, and the color window.
     pub format_keys: bool,

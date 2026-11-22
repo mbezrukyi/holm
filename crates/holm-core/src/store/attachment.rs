@@ -191,8 +191,6 @@ impl<R: io::Read> io::Read for Hashed<R> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, reason = "tests")]
-
     use super::*;
 
     fn folder_path(path: &str) -> FolderPath {

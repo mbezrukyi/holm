@@ -527,8 +527,6 @@ impl fmt::Debug for FolderPath {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, reason = "tests")]
-
     use std::path::Path;
 
     use proptest::prelude::*;

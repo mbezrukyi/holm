@@ -75,8 +75,6 @@ impl AssetSource for Icons {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, reason = "tests")]
-
     use super::*;
 
     #[test]

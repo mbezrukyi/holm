@@ -737,8 +737,6 @@ fn write_error(path: &Path, source: io::Error) -> Error {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, reason = "tests")]
-
     use std::time::Duration;
 
     use super::*;

@@ -308,8 +308,6 @@ fn pairs<'a>(left: &[(&'a NotePath, Stamp)], joined: &[(&'a NotePath, Stamp)]) -
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, reason = "tests")]
-
     use std::path::PathBuf;
     use std::time::SystemTime;
 

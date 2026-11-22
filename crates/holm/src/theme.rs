@@ -86,8 +86,6 @@ pub(crate) fn appearance(cx: &App) -> Appearance {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, reason = "tests")]
-
     use gpui_kit::{FontWeight, font};
 
     use super::*;

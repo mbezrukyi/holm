@@ -1,7 +1,5 @@
 //! One test for each flow of the main window, with a real core on a temp folder.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, reason = "tests")]
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

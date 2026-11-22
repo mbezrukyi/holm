@@ -176,8 +176,6 @@ fn note_path(change: &Change) -> Option<&NotePath> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, reason = "tests")]
-
     use std::time::SystemTime;
 
     use super::*;
