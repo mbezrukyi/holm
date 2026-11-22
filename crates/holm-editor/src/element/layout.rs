@@ -333,7 +333,7 @@ impl Shaper<'_> {
             }
             LineKind::Row { head, table, cells } => {
                 let columns = self.columns(model, table, width, font_size, window);
-                return self.row(cells, *head, &columns, font_size, line_height, window);
+                return self.row(cells, cell_place(*head), &columns, font_size, line_height, window);
             }
             LineKind::Code {
                 language,
@@ -465,7 +465,7 @@ impl Shaper<'_> {
                 continue;
             };
             for (ix, cell) in cells.iter().enumerate() {
-                let runs = self.cell_runs(&cell.shown.runs, *head);
+                let runs = self.text_runs(&cell.shown.runs, cell_place(*head));
                 let chips = self.chip_boxes(&cell.shown.chips, &runs, font_size, window);
                 let (min, max) = FlowLine::widths(
                     cell.shown.text.clone().into(),
@@ -492,7 +492,7 @@ impl Shaper<'_> {
     fn row(
         &mut self,
         cells: &[Cell],
-        head: bool,
+        place: Place,
         columns: &[Pixels],
         font_size: Pixels,
         line_height: Pixels,
@@ -505,7 +505,7 @@ impl Shaper<'_> {
         for (ix, cell) in cells.iter().enumerate() {
             let width = columns.get(ix).copied().unwrap_or(pad * 4.);
             let inner = (width - pad * 2.).max(px(1.));
-            let display_runs = self.cell_runs(&cell.shown.runs, head);
+            let display_runs = self.text_runs(&cell.shown.runs, place);
             let chips = self.chip_boxes(&cell.shown.chips, &display_runs, font_size, window);
             let text = FlowLine::new(
                 cell.shown.text.clone().into(),
@@ -534,16 +534,11 @@ impl Shaper<'_> {
                 x,
                 width,
                 inset: pad + shift,
-                place: cell_place(head),
+                place,
             });
             x += width;
         }
         (Content::Cells(laid), height + line_height * 0.3)
-    }
-
-    /// A head cell is bold.
-    fn cell_runs(&self, runs: &[Run], head: bool) -> Vec<TextRun> {
-        self.text_runs(runs, cell_place(head))
     }
 
     fn mark(
@@ -679,6 +674,7 @@ fn line_place(display: &DisplayLine) -> Place {
     }
 }
 
+/// A head cell is bold.
 fn cell_place(head: bool) -> Place {
     Place {
         bold: head,
