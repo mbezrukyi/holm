@@ -1208,10 +1208,17 @@ mod tests {
         source.tree(&blocks).ok_or_else(|| "no tree".to_owned())
     }
 
+    /// Where parts stand in the tree.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Level {
+        Top,
+        Nested,
+    }
+
     /// Whether a list after the first starts with an empty item. Markdown cannot write it, since such an item cannot
     /// start a list after a paragraph. The parser lets an empty bullet through one level down, but no deeper. The key
     /// writes it anyway, and it becomes a list once the item has text.
-    fn has_empty_head(text: &str, parts: &[Part], top: bool) -> bool {
+    fn has_empty_head(text: &str, parts: &[Part], level: Level) -> bool {
         parts.iter().enumerate().any(|(k, part)| {
             let Part::List(list) = part else {
                 return false;
@@ -1219,8 +1226,12 @@ mod tests {
             let head = &list.items[0];
             let empty = matches!(&head.kept, Src::Old(r) if text[r.clone()].trim().is_empty())
                 || matches!(&head.kept, Src::New(new) if new.trim().is_empty());
-            let empty_head = empty && !(top && k == 0);
-            empty_head || list.items.iter().any(|item| has_empty_head(text, &item.parts, false))
+            let empty_head = empty && !(level == Level::Top && k == 0);
+            empty_head
+                || list
+                    .items
+                    .iter()
+                    .any(|item| has_empty_head(text, &item.parts, Level::Nested))
         })
     }
 
@@ -1311,7 +1322,7 @@ mod tests {
             let Some(planned) = plan.tree else {
                 return Ok(());
             };
-            if has_empty_head(&text, &planned.parts, true) {
+            if has_empty_head(&text, &planned.parts, Level::Top) {
                 return Ok(());
             }
             let after = parsed(&new, &planned.new, planned.quotes);
