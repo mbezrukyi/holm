@@ -1,12 +1,10 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::ffi::OsStr;
-use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::model::{Link, LinkTarget, NoteId, NoteInfo, NoteSet, Order, Tag};
+use crate::model::{FileTarget, Link, LinkTarget, NoteId, NoteInfo, NoteSet, Order, Tag};
 use crate::nodes::Node;
-use crate::paths::{FolderPath, NotePath};
+use crate::paths::{FolderPath, NotePath, RawPath};
 use crate::tag::{self, TagName};
 
 /// The facts of the notes folder at one moment, from [`Core::snapshot`](crate::Core::snapshot). It never changes.
@@ -40,9 +38,9 @@ type Map<K, V> = imbl::GenericHashMap<K, V, foldhash::fast::RandomState, imbl::s
 #[derive(Debug)]
 pub(crate) struct Removal {
     pub(crate) notes: usize,
-    /// The file link targets that the removed notes link and no other note links, relative to the notes folder, in
-    /// byte order. They are outside input.
-    pub(crate) files: Vec<PathBuf>,
+    /// The files inside the notes folder that the removed notes link and no other note links, in the order of
+    /// [`Path::cmp`](std::path::Path::cmp). They are outside input.
+    pub(crate) files: Vec<RawPath>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -155,8 +153,8 @@ impl Snapshot {
                 entry.info.path != *path
                     && entry.links.iter().any(|link| match &link.target {
                         LinkTarget::Note { id: to, .. } => Some(to) == id,
-                        LinkTarget::File(file) => path.as_ref().as_os_str() == file.as_os_str(),
-                        LinkTarget::Heading(_) | LinkTarget::Web(_) => false,
+                        LinkTarget::File(FileTarget::Inside(file)) => path.as_ref() == file.as_ref(),
+                        LinkTarget::File(FileTarget::Outside(_)) | LinkTarget::Heading(_) | LinkTarget::Web(_) => false,
                     })
             })
             .map(|entry| &entry.info)
@@ -174,8 +172,11 @@ impl Snapshot {
             let held = node.holds_note(&entry.info.path);
             notes += usize::from(held);
             let files = entry.links.iter().filter_map(|link| match &link.target {
-                LinkTarget::File(file) => Some(file.as_os_str()),
-                LinkTarget::Note { .. } | LinkTarget::Heading(_) | LinkTarget::Web(_) => None,
+                LinkTarget::File(FileTarget::Inside(file)) => Some(file),
+                LinkTarget::File(FileTarget::Outside(_))
+                | LinkTarget::Note { .. }
+                | LinkTarget::Heading(_)
+                | LinkTarget::Web(_) => None,
             });
             if held {
                 inside.extend(files);
@@ -186,7 +187,7 @@ impl Snapshot {
         let files = inside
             .into_iter()
             .filter(|file| !outside.contains(file))
-            .map(|file: &OsStr| PathBuf::from(file))
+            .cloned()
             .collect();
         Removal { notes, files }
     }

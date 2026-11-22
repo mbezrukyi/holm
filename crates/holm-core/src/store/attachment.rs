@@ -7,13 +7,13 @@ use std::ffi::OsStr;
 use std::fmt::Write as _;
 use std::fs::{self, File};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use sha2::{Digest as _, Sha256};
 
 use super::{AtPath, Store, remove, sync_dir, temp_file, write_error};
 use crate::error::{Error, Result};
-use crate::paths::{FolderPath, Name, NotePath};
+use crate::paths::{AbsolutePath, FolderPath, LinkPath, Name, NotePath, RawPath};
 
 const ATTACHMENTS: &str = "attachments";
 const PASTED_IMAGE: &str = "Pasted image";
@@ -43,8 +43,7 @@ fn holds(folder: &FolderPath) -> bool {
 }
 
 impl Store {
-    /// The path it returns is from the folder of `note`, for a link.
-    pub(crate) fn attach_file(&self, note: &NotePath, file: &Path) -> Result<PathBuf> {
+    pub(crate) fn attach_file(&self, note: &NotePath, file: &Path) -> Result<LinkPath> {
         let read_error = |source| Error::Read {
             path: file.to_owned(),
             source,
@@ -58,22 +57,21 @@ impl Store {
         self.attach(note, &stem, ext.as_deref(), source)
     }
 
-    /// The path it returns is from the folder of `note`, for a link.
-    pub(crate) fn paste_image(&self, note: &NotePath, extension: &str, bytes: &[u8]) -> Result<PathBuf> {
+    pub(crate) fn paste_image(&self, note: &NotePath, extension: &str, bytes: &[u8]) -> Result<LinkPath> {
         self.attach(note, PASTED_IMAGE, Some(extension), bytes)
     }
 
-    fn attach(&self, note: &NotePath, stem: &str, ext: Option<&str>, content: impl io::Read) -> Result<PathBuf> {
+    fn attach(&self, note: &NotePath, stem: &str, ext: Option<&str>, content: impl io::Read) -> Result<LinkPath> {
         let file = self.add_attachment(stem, ext, content)?;
         Ok(crate::links::link(&self.root, note, &file))
     }
 
-    /// Copies `content` into the attachment folder as `<stem>-<hash>.<ext>`, and returns its absolute path. The hash is
+    /// Copies `content` into the attachment folder as `<stem>-<hash>.<ext>`, and returns its path. The hash is
     /// a short hash of the content, so a name never clashes. With no `ext`, the name has no `.` either.
     ///
     /// When a file with that name is there, it keeps that file and drops the new copy. It makes the folder when it is
     /// missing.
-    fn add_attachment(&self, stem: &str, ext: Option<&str>, content: impl io::Read) -> Result<PathBuf> {
+    fn add_attachment(&self, stem: &str, ext: Option<&str>, content: impl io::Read) -> Result<AbsolutePath> {
         let Some(folder) = folder() else {
             return Err(write_error(&self.root, io::ErrorKind::InvalidInput.into()));
         };
@@ -117,24 +115,23 @@ impl Store {
         Ok(path)
     }
 
-    /// Each path is relative to the notes folder.
-    pub(crate) fn attachments(&self, targets: impl IntoIterator<Item = PathBuf>) -> Vec<PathBuf> {
+    pub(crate) fn attachments(&self, targets: impl IntoIterator<Item = RawPath>) -> Vec<RawPath> {
         targets
             .into_iter()
             .filter(|target| self.is_attachment(target))
             .collect()
     }
 
-    pub(crate) fn delete_attachment(&self, rel: &Path) -> Result<()> {
+    pub(crate) fn delete_attachment(&self, rel: &RawPath) -> Result<()> {
         if self.is_attachment(rel) {
             remove(&self.root.join(rel))?;
         }
         Ok(())
     }
 
-    /// Whether `rel`, a path relative to the notes folder, is a file in the attachment folder that is not a note. A
-    /// symlink counts as a file. No folder on the way may be a symlink.
-    fn is_attachment(&self, rel: &Path) -> bool {
+    /// Whether `rel` is a file in the attachment folder that is not a note. A symlink counts as a file. No folder on
+    /// the way may be a symlink.
+    fn is_attachment(&self, rel: &RawPath) -> bool {
         let Some((folder, name)) = FolderPath::split_raw(rel) else {
             return false;
         };

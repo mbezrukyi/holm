@@ -304,14 +304,13 @@ fn pairs<'a>(left: &[(&'a NotePath, Stamp)], joined: &[(&'a NotePath, Stamp)]) -
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
     use std::time::SystemTime;
 
     use super::*;
     use crate::diff::Touched;
-    use crate::model::{Change, Source};
+    use crate::model::{Change, FileTarget, Source};
     use crate::nodes::Node;
-    use crate::paths::FolderPath;
+    use crate::paths::{FolderPath, RawPath};
 
     fn changes(before: &Facts, settled: Settled) -> Vec<Change> {
         let mut touched = Touched::default();
@@ -425,7 +424,7 @@ mod tests {
     #[test]
     fn a_note_with_a_file_link_is_read_at_its_new_path() {
         let link = Link {
-            target: LinkTarget::File(PathBuf::from("b.png")),
+            target: LinkTarget::File(FileTarget::Inside(RawPath::new("b.png").unwrap())),
         };
         let facts = Facts::new(
             vec![(

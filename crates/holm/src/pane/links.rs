@@ -7,11 +7,11 @@
 //! It also runs the link picker flow. Ctrl+K gives the start of the picker, and the pick puts a link at the cursor.
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use gpui_kit::{App, Context, Entity, EventEmitter, PathPromptOptions, Subscription, Task};
-use holm_core::NotePath;
 use holm_core::model::{LinkTarget, NoteId};
+use holm_core::{LinkPath, NotePath};
 use holm_editor::{Editor, OpenFile, OpenLink, PasteFiles, PastedFile};
 use holm_markdown::{LinkKind, Target};
 
@@ -282,12 +282,12 @@ impl Links {
 
     /// Embeds a link to each file at the cursor, as `![name](..)`. It shows an image or a file chip. A file with no
     /// link gets none.
-    fn insert_file_links(&mut self, names: Vec<String>, files: Vec<Option<PathBuf>>, cx: &mut Context<Self>) {
+    fn insert_file_links(&mut self, names: Vec<String>, files: Vec<Option<LinkPath>>, cx: &mut Context<Self>) {
         for (name, path) in names.into_iter().zip(files) {
             let Some(path) = path else {
                 continue;
             };
-            let target = Target::File(path.to_string_lossy().into_owned());
+            let target = Target::File(path.as_ref().to_string_lossy().into_owned());
             self.editor.update(cx, |editor, cx| {
                 editor.insert_link(&name, &target, LinkKind::Embedded, cx);
             });

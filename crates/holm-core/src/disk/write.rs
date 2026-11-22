@@ -4,7 +4,7 @@
 use super::{Disk, outside, scan};
 use crate::diff::Touched;
 use crate::facts::Facts;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::model::{Change, ChangeList, Note, NoteId, NoteInfo, NoteSet, Order, Source};
 use crate::nodes::{Node, Nodes};
@@ -14,7 +14,7 @@ use crate::retag::TagEdit;
 use crate::store::{ContentHash, Stamp, Store};
 use crate::tag::TagName;
 use crate::watch::Batch;
-use crate::{Error, Result, Revision};
+use crate::{Error, LinkPath, Result, Revision};
 
 pub(crate) struct Write<'a> {
     disk: &'a mut Disk,
@@ -48,7 +48,7 @@ impl Write<'_> {
         let base = match seen {
             Some(seen) if self.next.changed_after(path, seen) => {
                 return Err(Error::Changed {
-                    path: self.disk.store.root().join(path),
+                    path: self.disk.store.root().join(path).into(),
                 });
             }
             Some(_) => self.next.hash(path),
@@ -215,13 +215,13 @@ impl Write<'_> {
         first_error.map_or(Ok(changed), Err)
     }
 
-    /// Copies `file` into `attachments/`, and returns its path from the folder of `note`.
-    pub(crate) fn attach_file(&mut self, note: &NotePath, file: &Path) -> Result<PathBuf> {
+    /// Copies `file` into `attachments/`, and returns the path for a link to it from `note`.
+    pub(crate) fn attach_file(&mut self, note: &NotePath, file: &Path) -> Result<LinkPath> {
         self.disk.store.attach_file(note, file)
     }
 
-    /// Saves a pasted image into `attachments/`, and returns its path from the folder of `note`.
-    pub(crate) fn paste_image(&mut self, note: &NotePath, extension: &str, bytes: &[u8]) -> Result<PathBuf> {
+    /// Saves a pasted image into `attachments/`, and returns the path for a link to it from `note`.
+    pub(crate) fn paste_image(&mut self, note: &NotePath, extension: &str, bytes: &[u8]) -> Result<LinkPath> {
         self.disk.store.paste_image(note, extension, bytes)
     }
 
@@ -258,7 +258,7 @@ impl Write<'_> {
     /// The error when the note that Holm just wrote at `path` does not read back as written.
     fn lost(&self, path: &NotePath) -> Error {
         Error::Write {
-            path: self.disk.store.root().join(path),
+            path: self.disk.store.root().join(path).into(),
             source: std::io::ErrorKind::InvalidData.into(),
         }
     }

@@ -13,7 +13,7 @@ fn attach_file_copies_the_file_and_returns_the_path_from_the_note() {
 
     let path = folder.core.attach_file(&note_path("work/b.md"), &file).unwrap();
 
-    assert_eq!(path, Path::new("../attachments/photo-f8146b6c.jpg"));
+    assert_eq!(path.as_ref(), Path::new("../attachments/photo-f8146b6c.jpg"));
     assert_eq!(fs::read(folder.path("attachments/photo-f8146b6c.jpg")).unwrap(), b"jpg");
     assert_eq!(fs::read(&file).unwrap(), b"jpg");
     assert_eq!(folder.text("work/b.md"), "# B\n");
@@ -33,9 +33,9 @@ fn the_same_file_twice_is_one_copy_and_two_files_are_two() {
     let again = folder.core.attach_file(&note_path("a.md"), &file).unwrap();
     let second = folder.core.attach_file(&note_path("a.md"), &other).unwrap();
 
-    assert_eq!(first, Path::new("attachments/photo-f8146b6c.jpg"));
-    assert_eq!(again, first);
-    assert_eq!(second, Path::new("attachments/photo-6abacb38.jpg"));
+    assert_eq!(first.as_ref(), Path::new("attachments/photo-f8146b6c.jpg"));
+    assert_eq!(again.as_ref(), first.as_ref());
+    assert_eq!(second.as_ref(), Path::new("attachments/photo-6abacb38.jpg"));
     let mut names: Vec<_> = fs::read_dir(folder.path("attachments"))
         .unwrap()
         .map(|entry| entry.unwrap().file_name())
@@ -54,11 +54,11 @@ fn attach_file_names_a_hidden_file_and_a_file_with_no_extension() {
     fs::write(&plain, "").unwrap();
 
     assert_eq!(
-        folder.core.attach_file(&note_path("a.md"), &hidden).unwrap(),
+        folder.core.attach_file(&note_path("a.md"), &hidden).unwrap().as_ref(),
         Path::new("attachments/-config-e3b0c442")
     );
     assert_eq!(
-        folder.core.attach_file(&note_path("a.md"), &plain).unwrap(),
+        folder.core.attach_file(&note_path("a.md"), &plain).unwrap().as_ref(),
         Path::new("attachments/README-e3b0c442")
     );
 }
@@ -100,7 +100,7 @@ fn paste_image_names_the_file_by_its_content() {
 
     let path = folder.core.paste_image(&note_path("work/a.md"), "png", b"png").unwrap();
 
-    assert_eq!(path, Path::new("../attachments/Pasted image-8f8cbb7d.png"));
+    assert_eq!(path.as_ref(), Path::new("../attachments/Pasted image-8f8cbb7d.png"));
     assert_eq!(
         fs::read(folder.path("attachments/Pasted image-8f8cbb7d.png")).unwrap(),
         b"png"

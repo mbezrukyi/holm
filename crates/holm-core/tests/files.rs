@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use holm_core::model::{DeleteCount, LinkTarget, NoteInfo, NoteSet, Order};
+use holm_core::model::{DeleteCount, FileTarget, LinkTarget, NoteInfo, NoteSet, Order};
 use holm_core::{Error, NameProblem};
 use holm_core_test::{Folder, folder_path, note_path};
 
@@ -29,7 +29,7 @@ fn assert_index_matches_files(folder: &mut Folder, expected: &[&str]) {
     assert_eq!(folder.core.snapshot().notes(NoteSet::All, Order::Title), before);
 }
 
-fn file_links(folder: &Folder, path: &str) -> Vec<PathBuf> {
+fn file_links(folder: &Folder, path: &str) -> Vec<FileTarget> {
     folder
         .core
         .snapshot()

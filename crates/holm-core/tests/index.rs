@@ -2,10 +2,9 @@
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt as _;
-use std::path::PathBuf;
 
-use holm_core::model::{Link, LinkTarget, NoteInfo, NoteSet, Order, Tag};
-use holm_core::{Core, NotePath};
+use holm_core::model::{FileTarget, Link, LinkTarget, NoteInfo, NoteSet, Order, Tag};
+use holm_core::{AbsolutePath, Core, NotePath, RawPath};
 use holm_core_test::{Folder, folder_path, note_path, tag_name};
 
 fn paths(notes: Vec<NoteInfo>) -> Vec<String> {
@@ -220,7 +219,8 @@ fn links_give_every_link_of_a_note_in_order() {
 ";
     let folder = Folder::new(&[("work/a.md", body)]);
     let link = |target| Link { target };
-    let file = |path: &str| LinkTarget::File(PathBuf::from(path));
+    let inside = |path: &str| LinkTarget::File(FileTarget::Inside(RawPath::new(path).unwrap()));
+    let outside = |path: &str| LinkTarget::File(FileTarget::Outside(AbsolutePath::new(path).unwrap()));
 
     let links = folder.core.snapshot().links(&note_path("work/a.md")).to_vec();
 
@@ -236,9 +236,9 @@ fn links_give_every_link_of_a_note_in_order() {
         links[2..],
         [
             link(LinkTarget::Heading("Top".to_owned())),
-            link(file("work/attachments/a.png")),
-            link(file("x.pdf")),
-            link(file("/etc/hosts")),
+            link(inside("work/attachments/a.png")),
+            link(inside("x.pdf")),
+            link(outside("/etc/hosts")),
             link(LinkTarget::Web("https://example.com".to_owned())),
         ]
     );

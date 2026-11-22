@@ -4,7 +4,7 @@
 //! paths, which it checks against the disk.
 
 use std::collections::BTreeSet;
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
@@ -14,10 +14,10 @@ use notify::event::{AccessKind, AccessMode};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher as _};
 
 use crate::error::{Error, Result};
+use crate::paths::{AbsolutePath, RawPath};
 
-/// Paths relative to the notes folder where something may have changed. The empty path stands for the whole notes
-/// folder.
-pub(crate) type Batch = BTreeSet<PathBuf>;
+/// Where something may have changed.
+pub(crate) type Batch = BTreeSet<RawPath>;
 
 /// Gives a batch to the core. It returns `None` when the core is gone.
 pub(crate) type Handler = Arc<dyn Fn(Batch) -> Option<Result<()>> + Send + Sync>;
@@ -35,11 +35,11 @@ pub(crate) struct Watcher {
 
 /// They wait in a queue until [`Events::run`].
 pub(crate) struct Events {
-    root: PathBuf,
+    root: AbsolutePath,
     queue: Receiver<notify::Result<notify::Event>>,
 }
 
-pub(crate) fn start(root: &Path) -> notify::Result<(Watcher, Events)> {
+pub(crate) fn start(root: &AbsolutePath) -> notify::Result<(Watcher, Events)> {
     let (send, queue) = mpsc::channel();
     let mut watcher = notify::recommended_watcher(move |event| {
         // The receiver is gone only when the core is gone.
@@ -47,7 +47,7 @@ pub(crate) fn start(root: &Path) -> notify::Result<(Watcher, Events)> {
     })?;
     watcher.watch(root, RecursiveMode::Recursive)?;
     let events = Events {
-        root: root.to_owned(),
+        root: root.clone(),
         queue,
     };
     Ok((Watcher { _watcher: watcher }, events))
@@ -94,18 +94,20 @@ impl Events {
             }) => return,
             Ok(event) if !event.need_rescan() => event,
             Ok(_) => {
-                batch.insert(PathBuf::new());
+                batch.insert(RawPath::root());
                 return;
             }
             Err(error) => {
                 tracing::warn!(%error, "lost file events, so Holm checks the whole notes folder");
-                batch.insert(PathBuf::new());
+                batch.insert(RawPath::root());
                 return;
             }
         };
         for path in event.paths {
-            if let Ok(rel) = path.strip_prefix(&self.root) {
-                batch.insert(rel.to_owned());
+            if let Ok(rel) = path.strip_prefix(&self.root)
+                && let Some(rel) = RawPath::new(rel)
+            {
+                batch.insert(rel);
             }
         }
     }
@@ -137,10 +139,8 @@ impl Feed {
         let mut batch = Batch::new();
         for path in paths {
             let path = path.as_ref();
-            if !path.components().all(|part| matches!(part, Component::Normal(_))) {
-                return Err(Error::BadPath { path: path.to_owned() });
-            }
-            batch.insert(path.to_owned());
+            let raw = RawPath::new(path).ok_or_else(|| Error::BadPath { path: path.to_owned() })?;
+            batch.insert(raw);
         }
         (self.handler)(batch).unwrap_or(Ok(()))
     }

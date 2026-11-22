@@ -17,8 +17,8 @@ use rusqlite::{Connection, OptionalExtension as _, params};
 use crate::error::{Error, Result};
 use crate::facts::NoteFacts;
 use crate::links::LinkSource;
-use crate::model::{Link, LinkTarget, Note, NoteId, NoteInfo};
-use crate::paths::{NotePath, NoteReader};
+use crate::model::{FileTarget, Link, LinkTarget, Note, NoteId, NoteInfo};
+use crate::paths::{AbsolutePath, NotePath, NoteReader, RawPath};
 use crate::store::{ContentHash, Stamp, time};
 use crate::tag::TagName;
 
@@ -363,7 +363,8 @@ fn write_links(conn: &Connection, key: i64, links: &[Link]) -> Result<(), Fail> 
         let (kind, target, heading) = match &link.target {
             LinkTarget::Note { id, heading } => ("note", Value::Text(id.as_str().to_owned()), heading.as_deref()),
             LinkTarget::Heading(heading) => ("heading", Value::Text(heading.clone()), None),
-            LinkTarget::File(file) => ("file", bytes(file), None),
+            LinkTarget::File(FileTarget::Inside(file)) => ("file", bytes(file), None),
+            LinkTarget::File(FileTarget::Outside(file)) => ("file", bytes(file), None),
             LinkTarget::Web(address) => ("web", Value::Text(address.clone()), None),
         };
         add_link.execute(params![key, pos, kind, target, heading])?;
@@ -430,7 +431,7 @@ fn link(row: &rusqlite::Row<'_>) -> rusqlite::Result<Link> {
             heading: row.get(2)?,
         },
         "heading" => LinkTarget::Heading(text()?),
-        "file" => LinkTarget::File(path(row.get(1)?)),
+        "file" => LinkTarget::File(file_target(row, 1)?),
         _ => LinkTarget::Web(text()?),
     };
     Ok(Link { target })
@@ -440,8 +441,13 @@ fn bytes(path: impl AsRef<Path>) -> Value {
     Value::Blob(path.as_ref().as_os_str().as_bytes().to_vec())
 }
 
-fn path(bytes: Vec<u8>) -> PathBuf {
-    PathBuf::from(OsString::from_vec(bytes))
+/// A path that is neither raw nor absolute fails like a broken row, so the index gets rebuilt.
+fn file_target(row: &rusqlite::Row<'_>, column: usize) -> rusqlite::Result<FileTarget> {
+    let path = PathBuf::from(OsString::from_vec(row.get(column)?));
+    RawPath::new(path.as_path())
+        .map(FileTarget::Inside)
+        .or_else(|| AbsolutePath::new(path).map(FileTarget::Outside))
+        .ok_or_else(|| rusqlite::Error::FromSqlConversionFailure(column, Type::Blob, "not a file path".into()))
 }
 
 /// A path that is not a note path fails like a broken row, so the index gets rebuilt.

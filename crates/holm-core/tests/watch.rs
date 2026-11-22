@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 
 use futures_core::Stream;
 
-use holm_core::model::{Change, ChangeList, LinkTarget, NoteId, NoteInfo, NoteSet, Order, Source};
-use holm_core::{ChangeLists, Core, Error, Feed, FolderPath, NotePath, Revision};
+use holm_core::model::{Change, ChangeList, FileTarget, LinkTarget, NoteId, NoteInfo, NoteSet, Order, Source};
+use holm_core::{ChangeLists, Core, Error, Feed, FolderPath, NotePath, RawPath, Revision};
 use tempfile::TempDir;
 
 /// A notes folder with a core that sees changes only through its feed.
@@ -207,7 +207,11 @@ fn a_pin_comes_as_a_change_and_an_attachment_not_at_all() {
     let pinned = fed.core.set_pinned(&note_path("a.md"), true).unwrap();
     let image = fed.core.paste_image(&note_path("a.md"), "png", b"png").unwrap();
     fed.feed
-        .changed([PathBuf::from("a.md"), PathBuf::from("attachments"), image])
+        .changed([
+            PathBuf::from("a.md"),
+            PathBuf::from("attachments"),
+            image.as_ref().to_owned(),
+        ])
         .unwrap();
 
     assert_eq!(fed.take(), [Change::Changed(pinned.path)]);
@@ -446,7 +450,7 @@ fn a_renamed_folder_keeps_search_links_and_file_links_of_its_notes() {
     assert_eq!(back(&note_path("c.md")), [note_path("job/a.md")]);
     assert_eq!(
         snapshot.links(&note_path("job/pic.md"))[0].target,
-        LinkTarget::File("job/pic.png".into())
+        LinkTarget::File(FileTarget::Inside(RawPath::new("job/pic.png").unwrap()))
     );
     assert_eq!(
         snapshot.notes(NoteSet::WithTag(&tag_name("food")), Order::Title)[0].path,

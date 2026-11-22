@@ -1,8 +1,7 @@
 use std::fmt;
-use std::path::PathBuf;
 use std::time::SystemTime;
 
-use crate::{FolderPath, NotePath, Snapshot, TagName};
+use crate::{AbsolutePath, FolderPath, NotePath, RawPath, Snapshot, TagName};
 
 /// The stable id of a note. It lives in the `id:` field of the frontmatter.
 ///
@@ -127,14 +126,22 @@ pub struct Link {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum LinkTarget {
     /// Another note, or a heading in it: `holm:<id>` or `holm:<id>#<heading>`.
-    Note { id: NoteId, heading: Option<String> },
+    Note {
+        id: NoteId,
+        heading: Option<String>,
+    },
     /// A heading in the same note: `#<heading>`.
     Heading(String),
-    /// A file. The path is relative to the notes folder when the file is inside it. It is absolute when the file is
-    /// outside.
-    File(PathBuf),
+    File(FileTarget),
     /// A web address, like `https://...` or `mailto:...`.
     Web(String),
+}
+
+/// A linked file, inside the notes folder or outside it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum FileTarget {
+    Inside(RawPath),
+    Outside(AbsolutePath),
 }
 
 /// What a delete removes, for the delete dialog.

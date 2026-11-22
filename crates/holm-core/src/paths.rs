@@ -1,5 +1,7 @@
-//! Each path is relative to the notes folder and plain: each part is a [`Name`]. So a path has no `.` or `..` part, no
-//! hidden part, no `//` and no `/` at the end. The root folder is the empty path.
+//! A [`NotePath`] or a [`FolderPath`] is relative to the notes folder and plain: each part is a [`Name`]. So it has
+//! no `.` or `..` part, no hidden part, no `//` and no `/` at the end. The root folder is the empty path.
+//!
+//! Paths of other files are an [`AbsolutePath`], a [`RawPath`] or a [`LinkPath`].
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -7,8 +9,10 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fmt;
 use std::hash::{Hash, Hasher};
+use std::io;
+use std::ops::Deref;
 use std::os::unix::ffi::OsStrExt as _;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use crate::error::{Error, NameProblem, Result};
@@ -244,10 +248,136 @@ impl FolderPath {
         (!self.is_root()).then(|| (Self(self.0.parent()), Name(self.0.name().into())))
     }
 
-    /// The folder and the last part of the raw relative path `path`, or `None` when `path` is empty or not plain.
-    pub(crate) fn split_raw(path: &Path) -> Option<(Self, Name)> {
-        let (folder, name) = split(path.as_os_str().as_bytes())?;
+    /// The folder and the last part of `path`, or `None` when `path` is empty or not plain.
+    pub(crate) fn split_raw(path: &RawPath) -> Option<(Self, Name)> {
+        let (folder, name) = split(path.0.as_os_str().as_bytes())?;
         Some((Self(Plain::from(folder)), Name(name.into())))
+    }
+}
+
+/// An absolute path, like the notes folder or a linked file outside it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct AbsolutePath(PathBuf);
+
+/// A path from the notes folder that is not checked to be plain like a [`FolderPath`], like the target of a file link
+/// or a path from the watch. Each part is a normal part, so it has no `.` or `..` part and no `/` at the start. The empty path
+/// is the notes folder.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct RawPath(PathBuf);
+
+/// The path that a file link in a note holds: from the folder of the note, or absolute.
+#[derive(Debug)]
+pub struct LinkPath(PathBuf);
+
+impl AbsolutePath {
+    /// `None` when `path` is relative.
+    pub fn new(path: impl Into<PathBuf>) -> Option<Self> {
+        let path = path.into();
+        path.is_absolute().then_some(Self(path))
+    }
+
+    /// The path with no symlinks and no `.` and `..` parts. The file must exist.
+    pub(crate) fn canonical(path: &Path) -> io::Result<Self> {
+        std::fs::canonicalize(path).map(Self)
+    }
+
+    #[must_use]
+    pub(crate) fn join(&self, path: impl AsRef<Path>) -> Self {
+        Self(self.0.join(path))
+    }
+
+    /// The path with no `.` and `..` parts. It does not look at the disk.
+    #[must_use]
+    pub(crate) fn clean(&self) -> Self {
+        let mut clean = PathBuf::new();
+        for part in self.0.components() {
+            match part {
+                Component::ParentDir => {
+                    clean.pop();
+                }
+                Component::CurDir => {}
+                part => clean.push(part),
+            }
+        }
+        Self(clean)
+    }
+
+    /// The path from the folder at this path to `target`. Both are clean.
+    pub(crate) fn link_to(&self, target: &Self) -> LinkPath {
+        let base: Vec<_> = self.0.components().collect();
+        let target: Vec<_> = target.0.components().collect();
+        let common = base.iter().zip(&target).take_while(|(a, b)| a == b).count();
+        let mut out = PathBuf::new();
+        for _ in common..base.len() {
+            out.push("..");
+        }
+        out.extend(&target[common..]);
+        if out.as_os_str().is_empty() {
+            out.push(".");
+        }
+        LinkPath(out)
+    }
+
+    /// The path from `folder` to this path, when this path is inside it.
+    pub(crate) fn inside(&self, folder: &Self) -> Option<RawPath> {
+        self.0.strip_prefix(&folder.0).ok().and_then(RawPath::new)
+    }
+}
+
+impl RawPath {
+    /// `None` when a part of `path` is not a normal part, as in an absolute path or a path with `..`.
+    pub fn new(path: impl Into<PathBuf>) -> Option<Self> {
+        let path = path.into();
+        path.components()
+            .all(|part| matches!(part, Component::Normal(_)))
+            .then_some(Self(path))
+    }
+
+    /// The notes folder.
+    pub(crate) fn root() -> Self {
+        Self(PathBuf::new())
+    }
+
+    pub(crate) fn is_root(&self) -> bool {
+        self.0.as_os_str().is_empty()
+    }
+}
+
+impl From<AbsolutePath> for LinkPath {
+    fn from(path: AbsolutePath) -> Self {
+        Self(path.0)
+    }
+}
+
+impl From<AbsolutePath> for PathBuf {
+    fn from(path: AbsolutePath) -> Self {
+        path.0
+    }
+}
+
+impl Deref for AbsolutePath {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for AbsolutePath {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for RawPath {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for LinkPath {
+    fn as_ref(&self) -> &Path {
+        &self.0
     }
 }
 
@@ -719,7 +849,9 @@ mod tests {
     #[test]
     fn a_raw_path_splits_only_when_it_is_plain() {
         let split = |path: &str| {
-            FolderPath::split_raw(Path::new(path)).map(|(folder, name)| (folder, name.as_os_str().to_owned()))
+            RawPath::new(path)
+                .and_then(|path| FolderPath::split_raw(&path))
+                .map(|(folder, name)| (folder, name.as_os_str().to_owned()))
         };
         assert_eq!(split("work/a.png"), Some((folder("work"), "a.png".into())));
         assert_eq!(split("a.md"), Some((FolderPath::root(), "a.md".into())));

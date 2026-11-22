@@ -33,7 +33,7 @@ use std::time::Duration;
 use futures_channel::oneshot;
 use gpui_kit::{App, AppContext as _, Context, EventEmitter, Subscription, Task, Window};
 use holm_core::model::{Change, ChangeList, DeleteCount, LinkTarget, Note, Order, SearchResults, Source};
-use holm_core::{Core, FolderPath, NotePath, Snapshot, TagName};
+use holm_core::{Core, FolderPath, LinkPath, NotePath, Snapshot, TagName};
 use holm_editor::PastedFile;
 
 use crate::error::AppError;
@@ -446,7 +446,7 @@ impl CoreDoor {
         &mut self,
         note: NotePath,
         files: Vec<PastedFile>,
-        done: impl FnOnce(Vec<Option<PathBuf>>, &mut App) + 'static,
+        done: impl FnOnce(Vec<Option<LinkPath>>, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
         self.own_job(
@@ -473,7 +473,7 @@ impl CoreDoor {
         note: NotePath,
         files: Vec<PathBuf>,
         cx: &mut Context<Self>,
-    ) -> Task<Vec<Option<PathBuf>>> {
+    ) -> Task<Vec<Option<LinkPath>>> {
         let job = self.look(
             move |core| files.iter().map(|file| core.file_link(&note, file)).collect(),
             cx,

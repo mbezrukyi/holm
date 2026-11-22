@@ -2,9 +2,8 @@ mod outside;
 mod scan;
 pub(crate) mod write;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use crate::Result;
 use crate::facts::Facts;
 use crate::index::{Index, NoteRows, Rows};
 use crate::model::{DeleteCount, Note};
@@ -13,6 +12,7 @@ use crate::paths::{FolderPath, NotePath};
 use crate::reconcile::Settled;
 use crate::snapshot::Snapshot;
 use crate::store::Store;
+use crate::{AbsolutePath, LinkPath, RawPath, Result};
 
 /// Keeps the note files and the index rows in step. Only a [`write::Write`] changes them.
 #[derive(Debug)]
@@ -26,12 +26,12 @@ impl Disk {
     /// rows and the files. It brings the rows up to date. When the rows can't be read, it starts from no facts and
     /// rebuilds the index.
     ///
-    /// It gives the notes folder, as an absolute path with no symlinks, to `before_read`. That runs before the first
-    /// read of a file, and its result comes back.
+    /// It gives the notes folder, with no symlinks, to `before_read`. That runs before the first read of a file, and
+    /// its result comes back.
     pub(crate) fn open<T>(
         notes_folder: &Path,
         index_dir: &Path,
-        before_read: impl FnOnce(&Path) -> T,
+        before_read: impl FnOnce(&AbsolutePath) -> T,
     ) -> Result<(Self, Facts, T)> {
         let store = Store::open(notes_folder)?;
         let before = before_read(store.root());
@@ -47,8 +47,8 @@ impl Disk {
         self.store.read(path).map(|(note, ..)| note)
     }
 
-    /// The path for a link from the note at `note` to the absolute path `file`, with no copy.
-    pub(crate) fn file_link(&self, note: &NotePath, file: &Path) -> Result<PathBuf> {
+    /// The path for a link from the note at `note` to `file`, with no copy.
+    pub(crate) fn file_link(&self, note: &NotePath, file: &AbsolutePath) -> LinkPath {
         self.store.file_link(note, file)
     }
 
@@ -114,7 +114,7 @@ impl Disk {
     }
 
     /// The count of a delete of `node` in `snapshot`, and the attachment files it removes.
-    pub(crate) fn removal(&self, snapshot: &Snapshot, node: &Node) -> (DeleteCount, Vec<PathBuf>) {
+    pub(crate) fn removal(&self, snapshot: &Snapshot, node: &Node) -> (DeleteCount, Vec<RawPath>) {
         let removal = snapshot.removal(node);
         let files = self.store.attachments(removal.files);
         let count = DeleteCount {

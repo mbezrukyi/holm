@@ -19,12 +19,12 @@ mod store;
 mod tag;
 mod watch;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 pub use changes::ChangeLists;
 pub use error::{Error, NameProblem, Result};
-pub use paths::{FolderPath, NotePath};
+pub use paths::{AbsolutePath, FolderPath, LinkPath, NotePath, RawPath};
 pub use snapshot::{Revision, Snapshot};
 pub use tag::TagName;
 pub use watch::Feed;
@@ -160,8 +160,10 @@ impl Core {
     /// # Errors
     ///
     /// [`Error::BadPath`] when `file` is not absolute.
-    pub fn file_link(&self, note: &NotePath, file: impl AsRef<Path>) -> Result<PathBuf> {
-        self.inner.with(|locked| locked.disk.file_link(note, file.as_ref()))
+    pub fn file_link(&self, note: &NotePath, file: impl AsRef<Path>) -> Result<LinkPath> {
+        let file = file.as_ref();
+        let file = AbsolutePath::new(file).ok_or_else(|| Error::BadPath { path: file.to_owned() })?;
+        Ok(self.inner.with(|locked| locked.disk.file_link(note, &file)))
     }
 
     pub fn read(&self, path: &NotePath) -> Result<Note> {
@@ -404,15 +406,15 @@ impl Core {
     /// # Errors
     ///
     /// [`Error::Read`] when `file` can't be read or is not a file.
-    pub fn attach_file(&self, note: &NotePath, file: impl AsRef<Path>) -> Result<PathBuf> {
+    pub fn attach_file(&self, note: &NotePath, file: impl AsRef<Path>) -> Result<LinkPath> {
         self.inner.write(|write| write.attach_file(note, file.as_ref()))
     }
 
-    /// Saves a pasted image into `attachments/`, and returns its path from the folder of `note`, for a link.
-    /// `extension` names the image format, like `png`.
+    /// Saves a pasted image into `attachments/`, and returns the path for a link to it from `note`. `extension` names
+    /// the image format, like `png`.
     ///
     /// The name is like `Pasted image-3fa9c2e1.png`. Else it works as [`Core::attach_file`].
-    pub fn paste_image(&self, note: &NotePath, extension: &str, bytes: &[u8]) -> Result<PathBuf> {
+    pub fn paste_image(&self, note: &NotePath, extension: &str, bytes: &[u8]) -> Result<LinkPath> {
         self.inner.write(|write| write.paste_image(note, extension, bytes))
     }
 
@@ -425,7 +427,7 @@ impl Core {
     fn build<T>(
         notes_folder: &Path,
         index_dir: &Path,
-        before_read: impl FnOnce(&Path) -> (Option<watch::Watcher>, T),
+        before_read: impl FnOnce(&AbsolutePath) -> (Option<watch::Watcher>, T),
     ) -> Result<(Self, T)> {
         let (disk, facts, (watcher, value)) = Disk::open(notes_folder, index_dir, before_read)?;
         let inner = Inner {

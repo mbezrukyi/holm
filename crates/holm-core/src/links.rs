@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::hash::BuildHasher as _;
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 
 use holm_markdown::{Body, NoteFile, Target};
 
-use crate::model::{Link, LinkTarget, Note, NoteId};
-use crate::{FolderPath, NotePath, Result, Snapshot};
+use crate::model::{FileTarget, Link, LinkTarget, Note, NoteId};
+use crate::{AbsolutePath, FolderPath, LinkPath, NotePath, Result, Snapshot};
 
 /// A hash of what the links of a note come from: its body and its folder. Two notes with the same hash have the same
 /// links.
@@ -31,7 +31,7 @@ impl LinkSource {
     }
 }
 
-pub(crate) fn links(root: &Path, note: &Note) -> Vec<Link> {
+pub(crate) fn links(root: &AbsolutePath, note: &Note) -> Vec<Link> {
     let folder = note.info.path.folder();
     Body::parse(&note.body)
         .links()
@@ -90,27 +90,25 @@ pub(crate) fn broken(
     Ok(broken)
 }
 
-/// The path of a file that a note in `folder` links as `file`.
-///
-/// It is relative to the notes folder `root` when the file is inside it, else absolute.
-pub(crate) fn resolve(root: &Path, folder: &FolderPath, file: &str) -> PathBuf {
-    let full = clean(&root.join(folder).join(file));
-    match full.strip_prefix(root) {
-        Ok(rel) => rel.to_owned(),
-        Err(_) => full,
+/// The file that a note in `folder` links as `file`, with the notes folder at `root`.
+pub(crate) fn resolve(root: &AbsolutePath, folder: &FolderPath, file: &str) -> FileTarget {
+    let full = root.join(folder).join(file).clean();
+    match full.inside(root) {
+        Some(inside) => FileTarget::Inside(inside),
+        None => FileTarget::Outside(full),
     }
 }
 
-/// The path for a link from the note `note` to the absolute path `file`.
+/// The path for a link from the note `note` to `file`.
 ///
 /// A file inside the notes folder `root` gets a path from the folder of the note. A file outside gets its absolute
 /// path. The path has no `.` and `..` parts. It does not look at the disk.
-pub(crate) fn link(root: &Path, note: &NotePath, file: &Path) -> PathBuf {
-    let file = clean(file);
+pub(crate) fn link(root: &AbsolutePath, note: &NotePath, file: &AbsolutePath) -> LinkPath {
+    let file = file.clean();
     if file.starts_with(root) {
-        relative(&root.join(note.folder()), &file)
+        root.join(note.folder()).link_to(&file)
     } else {
-        file
+        LinkPath::from(file)
     }
 }
 
@@ -127,7 +125,7 @@ pub(crate) struct FolderMove<'a> {
 /// returns `None` when no link changes.
 pub(crate) fn relink(
     text: &str,
-    root: &Path,
+    root: &AbsolutePath,
     from: &FolderPath,
     to: &FolderPath,
     moved: Option<FolderMove<'_>>,
@@ -142,16 +140,17 @@ pub(crate) fn relink(
         if Path::new(file).is_absolute() {
             continue;
         }
-        let mut target = clean(&root.join(from).join(file));
+        let mut target = root.join(from).join(file).clean();
         if let Some(moved) = moved
             && let Ok(rest) = target.strip_prefix(root.join(moved.from))
         {
             target = root.join(moved.to).join(rest);
         }
-        if clean(&root.join(to).join(file)) == target {
+        if root.join(to).join(file).clean() == target {
             continue;
         }
-        let path = relative(&root.join(to), &target);
+        let path = root.join(to).link_to(&target);
+        let path = path.as_ref();
         let Some(path) = path.to_str() else {
             tracing::warn!(path = %path.display(), "kept a file link that is not UTF-8");
             continue;
@@ -173,37 +172,6 @@ pub(crate) fn relink(
     out.push_str(&body[last..]);
     note.set_body(&out);
     Some(note.to_string())
-}
-
-/// The path with no `.` and `..` parts. It does not look at the disk.
-fn clean(path: &Path) -> PathBuf {
-    let mut clean = PathBuf::new();
-    for part in path.components() {
-        match part {
-            Component::ParentDir => {
-                clean.pop();
-            }
-            Component::CurDir => {}
-            part => clean.push(part),
-        }
-    }
-    clean
-}
-
-/// The path from the folder `base` to `target`. Both are absolute and clean.
-fn relative(base: &Path, target: &Path) -> PathBuf {
-    let base: Vec<_> = base.components().collect();
-    let target: Vec<_> = target.components().collect();
-    let common = base.iter().zip(&target).take_while(|(a, b)| a == b).count();
-    let mut out = PathBuf::new();
-    for _ in common..base.len() {
-        out.push("..");
-    }
-    out.extend(&target[common..]);
-    if out.as_os_str().is_empty() {
-        out.push(".");
-    }
-    out
 }
 
 fn destination(path: &str) -> String {

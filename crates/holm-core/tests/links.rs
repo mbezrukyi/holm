@@ -1,10 +1,10 @@
 #![cfg(test)]
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use holm_core::Error;
-use holm_core::model::{Link, LinkTarget, NoteId};
+use holm_core::model::{FileTarget, Link, LinkTarget, NoteId};
+use holm_core::{Error, RawPath};
 use holm_core_test::{Folder, folder_path, note_path, tag_name};
 
 fn note(id: &str, body: &str) -> String {
@@ -24,7 +24,7 @@ fn links_everywhere(folder: &mut Folder, path: &str) -> Vec<Link> {
 
 fn file(path: &str) -> Link {
     Link {
-        target: LinkTarget::File(PathBuf::from(path)),
+        target: LinkTarget::File(FileTarget::Inside(RawPath::new(path).unwrap())),
     }
 }
 
@@ -160,8 +160,8 @@ fn file_link_is_relative_inside_and_absolute_outside() {
         .unwrap();
     let out = folder.core.file_link(&note_path("a.md"), &away).unwrap();
 
-    assert_eq!(inside, PathBuf::from("../docs/plan.pdf"));
-    assert_eq!(out, std::fs::canonicalize(&away).unwrap());
+    assert_eq!(inside.as_ref(), PathBuf::from("../docs/plan.pdf"));
+    assert_eq!(out.as_ref(), std::fs::canonicalize(&away).unwrap());
     assert!(matches!(
         folder.core.file_link(&note_path("a.md"), "x.pdf"),
         Err(Error::BadPath { .. })
@@ -178,7 +178,7 @@ fn file_link_to_a_missing_file_outside_is_clean_and_absolute() {
         .file_link(&note_path("work/a.md"), root.join("x/../../away/missing.pdf"))
         .unwrap();
 
-    assert_eq!(link, root.parent().unwrap().join("away/missing.pdf"));
+    assert_eq!(link.as_ref(), root.parent().unwrap().join("away/missing.pdf"));
 }
 
 #[test]
@@ -186,6 +186,7 @@ fn paste_image_keeps_the_format() {
     let folder = Folder::new(&[("a.md", "")]);
 
     let path = folder.core.paste_image(&note_path("a.md"), "jpg", b"jpg").unwrap();
+    let path: &Path = path.as_ref();
 
     assert!(path.starts_with("attachments"));
     assert_eq!(path.extension().unwrap(), "jpg");

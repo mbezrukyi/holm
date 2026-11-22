@@ -2,7 +2,7 @@ use std::ffi::OsStr;
 use std::fs::{self, File, Metadata, Permissions};
 use std::io;
 use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::SystemTime;
 
 use holm_markdown::NoteFile;
@@ -13,7 +13,7 @@ use crate::error::{Error, NameProblem, Result};
 use crate::links::{FolderMove, relink};
 use crate::model::{Note, NoteId, NoteInfo};
 use crate::nodes::Node;
-use crate::paths::{FolderPath, Name, NotePath};
+use crate::paths::{AbsolutePath, FolderPath, LinkPath, Name, NotePath};
 use crate::tag::TagName;
 
 pub(crate) mod attachment;
@@ -25,7 +25,7 @@ const TEMP_SUFFIX: &str = ".tmp";
 
 #[derive(Debug, Clone)]
 pub(crate) struct Store {
-    root: PathBuf,
+    root: AbsolutePath,
 }
 
 /// Tells two versions of a file apart without a read.
@@ -77,7 +77,7 @@ impl Store {
             path: root.to_owned(),
             source,
         };
-        let root = fs::canonicalize(root).map_err(fail)?;
+        let root = AbsolutePath::canonical(root).map_err(fail)?;
         if !root.is_dir() {
             return Err(fail(io::ErrorKind::NotADirectory.into()));
         }
@@ -92,19 +92,16 @@ impl Store {
         Ok(store)
     }
 
-    /// An absolute path with no symlinks.
-    pub(crate) fn root(&self) -> &Path {
+    /// With no symlinks.
+    pub(crate) fn root(&self) -> &AbsolutePath {
         &self.root
     }
 
-    /// The path for a link from the note at `note` to the absolute path `file`, with no copy. It follows the symlinks
-    /// in `file` when it can.
-    pub(crate) fn file_link(&self, note: &NotePath, file: &Path) -> Result<PathBuf> {
-        if !file.is_absolute() {
-            return Err(Error::BadPath { path: file.to_owned() });
-        }
-        let file = fs::canonicalize(file).unwrap_or_else(|_| file.to_owned());
-        Ok(crate::links::link(&self.root, note, &file))
+    /// The path for a link from the note at `note` to `file`, with no copy. It follows the symlinks in `file` when it
+    /// can.
+    pub(crate) fn file_link(&self, note: &NotePath, file: &AbsolutePath) -> LinkPath {
+        let file = AbsolutePath::canonical(file).unwrap_or_else(|_| file.clone());
+        crate::links::link(&self.root, note, &file)
     }
 
     /// Every note file at `node` or below it. A subfolder or a file that can't be read is left out with a log line.
@@ -272,7 +269,7 @@ impl Store {
 
     fn sync_file_system(&self) -> rustix::io::Result<()> {
         let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC;
-        rustix::fs::syncfs(rustix::fs::open(&self.root, flags, Mode::empty())?)
+        rustix::fs::syncfs(rustix::fs::open(&*self.root, flags, Mode::empty())?)
     }
 
     /// The frontmatter stays.
@@ -289,7 +286,7 @@ impl Store {
         let path = self.root.join(rel);
         let (old, stamp) = read_text(&path)?;
         if base.is_some_and(|base| base != ContentHash::of(&old)) {
-            return Err(Error::Changed { path });
+            return Err(Error::Changed { path: path.into() });
         }
         let mut text = NoteFile::parse(&old);
         let mut body = body.to_owned();
@@ -340,7 +337,7 @@ impl Store {
         match file.persist_noclobber(&path) {
             Ok(_) => sync_dir(&dir).map_err(|source| write_error(&path, source))?,
             Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => {
-                return Err(Error::NameTaken { path });
+                return Err(Error::NameTaken { path: path.into() });
             }
             Err(e) => return Err(write_error(&path, e.error)),
         }
@@ -363,7 +360,7 @@ impl Store {
         let text = relink(&old, &self.root, old_folder, folder, None).unwrap_or(old);
         let permissions = fs::metadata(&source)
             .map_err(|e| Error::Read {
-                path: source.clone(),
+                path: source.clone().into(),
                 source: e,
             })?
             .permissions();
@@ -378,7 +375,7 @@ impl Store {
                 sync_dir(folder_abs(&source)).map_err(|e| write_error(&source, e))?;
                 Ok(to)
             }
-            Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => Err(Error::NameTaken { path }),
+            Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => Err(Error::NameTaken { path: path.into() }),
             Err(e) => Err(write_error(&path, e.error)),
         }
     }
@@ -394,7 +391,7 @@ impl Store {
                 sync_dir(folder_abs(&path)).map_err(|e| write_error(&path, e))?;
                 Ok(rel)
             }
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Err(Error::NameTaken { path }),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Err(Error::NameTaken { path: path.into() }),
             Err(e) => Err(write_error(&path, e)),
         }
     }
@@ -419,7 +416,7 @@ impl Store {
         match fs::create_dir(&path) {
             Ok(()) => {}
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                return Err(Error::NameTaken { path });
+                return Err(Error::NameTaken { path: path.into() });
             }
             Err(e) => return Err(write_error(&path, e)),
         }
@@ -446,7 +443,9 @@ impl Store {
         for entry in entries.flatten() {
             let found = entry.file_name();
             if found.to_string_lossy().to_lowercase() == wanted && own != Some(found.as_os_str()) {
-                return Err(Error::NameTaken { path: dir.join(name) });
+                return Err(Error::NameTaken {
+                    path: dir.join(name).into(),
+                });
             }
         }
         Ok(())
@@ -477,11 +476,11 @@ impl Store {
         match self.folder_at(rel) {
             AtPath::Folder(_) => Ok(()),
             AtPath::Missing => Err(Error::Read {
-                path: self.root.join(rel),
+                path: self.root.join(rel).into(),
                 source: io::ErrorKind::NotFound.into(),
             }),
             AtPath::Note(..) | AtPath::Other => Err(Error::Read {
-                path: self.root.join(rel),
+                path: self.root.join(rel).into(),
                 source: io::ErrorKind::NotADirectory.into(),
             }),
         }
@@ -514,7 +513,10 @@ impl Store {
             let entries = match fs::read_dir(&path) {
                 Ok(entries) => entries,
                 Err(source) if dir.is_root() => {
-                    return Err(Error::Read { path, source });
+                    return Err(Error::Read {
+                        path: path.into(),
+                        source,
+                    });
                 }
                 Err(error) => {
                     tracing::warn!(%error, path = %path.display(), "skipped a folder");
@@ -558,8 +560,7 @@ pub(crate) enum AtPath {
 enum Found {
     Note(NotePath),
     Folder(FolderPath),
-    /// An absolute path.
-    Temp(PathBuf),
+    Temp(AbsolutePath),
 }
 
 fn note(rel: &NotePath, text: &NoteFile, stamp: Stamp) -> Note {
