@@ -20,7 +20,7 @@ use gpui_kit::{
 use holm_core::model::Note;
 use holm_core::{FolderPath, NotePath, TagName};
 
-use crate::app_menu::{AppMenu, Picked, Spot};
+use crate::app_menu::{AppMenu, OpenNote, Picked, Spot};
 use crate::config::{Config, SidebarSettings};
 use crate::core_door::{CoreDoor, Done, JobFailed, NotSaved, Then};
 use crate::dialog::{self, Answer, Ask, Dialog};
@@ -403,9 +403,12 @@ impl NotesView {
     /// stays hidden.
     fn toggle_app_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let spot = if self.hidden { Spot::Corner } else { Spot::Button };
-        let has_open_note = self.pane.read(cx).path().is_some();
+        let open_note = match self.pane.read(cx).path() {
+            Some(_) => OpenNote::Present,
+            None => OpenNote::Absent,
+        };
         self.app_menu
-            .update(cx, |menu, cx| menu.toggle(spot, has_open_note, window, cx));
+            .update(cx, |menu, cx| menu.toggle(spot, open_note, window, cx));
     }
 
     /// Ctrl+K.

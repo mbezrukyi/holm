@@ -42,10 +42,16 @@ pub(crate) enum Spot {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Picked(pub(crate) Command);
 
+/// Whether the pane shows a note when the menu opens. Pin note works only with [`OpenNote::Present`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OpenNote {
+    Present,
+    Absent,
+}
+
 struct Open {
     spot: Spot,
-    /// Pin note works only then.
-    has_open_note: bool,
+    note: OpenNote,
     /// The part that had the focus before the menu.
     back: Option<FocusHandle>,
 }
@@ -75,8 +81,8 @@ impl AppMenu {
         }
     }
 
-    /// Opens the menu at `spot`, or closes it when it is open. Pin note is off unless `has_open_note`.
-    pub(crate) fn toggle(&mut self, spot: Spot, has_open_note: bool, window: &mut Window, cx: &mut Context<Self>) {
+    /// Opens the menu at `spot`, or closes it when it is open.
+    pub(crate) fn toggle(&mut self, spot: Spot, open_note: OpenNote, window: &mut Window, cx: &mut Context<Self>) {
         if self.open.is_some() {
             self.leave(window, cx);
             return;
@@ -87,7 +93,7 @@ impl AppMenu {
         }
         self.open = Some(Open {
             spot,
-            has_open_note,
+            note: open_note,
             back: window.focused(cx),
         });
         self.cursor = 0;
@@ -113,7 +119,7 @@ impl AppMenu {
 
     fn works(&self, at: usize) -> bool {
         match ITEMS.get(at) {
-            Some(Command::Pin) => self.open.as_ref().is_some_and(|open| open.has_open_note),
+            Some(Command::Pin) => self.open.as_ref().is_some_and(|open| open.note == OpenNote::Present),
             Some(_) => true,
             None => false,
         }
