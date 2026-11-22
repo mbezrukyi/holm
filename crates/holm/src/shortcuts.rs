@@ -504,24 +504,24 @@ pub(crate) fn bind(cx: &mut App) {
         .iter()
         .flat_map(|row| {
             let command = row.command;
-            row.keys.bindings(row.place.key_context(), |_| Run(command), cx)
+            row.keys.bindings(row.place.key_context(), || Run(command), cx)
         })
         .collect();
     for (place, keys, command) in second_keys() {
-        bindings.extend(keys.bindings(place.key_context(), |_| Run(command), cx));
+        bindings.extend(keys.bindings(place.key_context(), || Run(command), cx));
     }
     for shortcut in text_keys() {
         let command = Command::Text(shortcut.command);
-        bindings.extend(shortcut.keys.bindings(text_field, |_| Run(command), cx));
+        bindings.extend(shortcut.keys.bindings(text_field, || Run(command), cx));
     }
     for keys in typed_keys() {
-        bindings.extend(keys.bindings(INPUT, |_| NoAction, cx));
+        bindings.extend(keys.bindings(INPUT, || NoAction, cx));
     }
     for keys in kept_by_text_fields() {
-        bindings.extend(keys.bindings(text_field, |_| NoAction, cx));
+        bindings.extend(keys.bindings(text_field, || NoAction, cx));
     }
     for keys in [Keys::plain("tab"), Keys::plain("tab").shift(Shift::Down)] {
-        bindings.extend(keys.bindings(ROOT, |_| NoAction, cx));
+        bindings.extend(keys.bindings(ROOT, || NoAction, cx));
     }
     cx.bind_keys(bindings);
 }
@@ -622,7 +622,7 @@ mod tests {
         cx.update(|cx| {
             for row in ROWS {
                 let context = row.place.key_context();
-                let bindings = row.keys.bindings(context, |_| Run(row.command), cx);
+                let bindings = row.keys.bindings(context, || Run(row.command), cx);
                 let count = if row.keys.shift == Shift::Either { 2 } else { 1 };
                 assert_eq!(bindings.len(), count, "{:?} {:?}", row.place, row.keys);
             }

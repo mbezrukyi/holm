@@ -70,25 +70,31 @@ impl Keys {
         shift && (keystroke.key == self.key || keystroke.key_char.as_deref() == Some(self.key))
     }
 
-    /// `context` is a key context predicate. `action` makes the action of each binding from whether its keystroke has
-    /// Shift, so [`Shift::Either`] makes two bindings. A keystroke that GPUI cannot parse makes none.
-    pub fn bindings<A: Action>(self, context: &str, action: impl Fn(bool) -> A, cx: &App) -> Vec<KeyBinding> {
-        let predicate = KeyBindingContextPredicate::parse(context).ok().map(Rc::new);
-        let shifts: &[bool] = match self.shift {
-            Shift::Up => &[false],
-            Shift::Down => &[true],
-            Shift::Either => &[false, true],
+    /// [`Shift::Either`] splits into Shift up and Shift down.
+    pub(crate) fn each_shift(self) -> impl Iterator<Item = Keys> {
+        let shifts: &[Shift] = match self.shift {
+            Shift::Up => &[Shift::Up],
+            Shift::Down => &[Shift::Down],
+            Shift::Either => &[Shift::Up, Shift::Down],
         };
-        shifts
-            .iter()
-            .filter_map(|&shift| {
-                let ctrl = if self.ctrl { "ctrl-" } else { "" };
-                let shift_down = if shift { "shift-" } else { "" };
-                let keystroke = format!("{ctrl}{shift_down}{}", self.key);
-                let action = Box::new(action(shift));
-                KeyBinding::load(&keystroke, action, predicate.clone(), false, None, cx).ok()
-            })
+        shifts.iter().map(move |&shift| self.shift(shift))
+    }
+
+    /// `context` is a key context predicate. [`Shift::Either`] makes two bindings. A keystroke that GPUI cannot parse
+    /// makes none.
+    pub fn bindings<A: Action>(self, context: &str, action: impl Fn() -> A, cx: &App) -> Vec<KeyBinding> {
+        self.each_shift()
+            .filter_map(|keys| keys.binding(context, action(), cx))
             .collect()
+    }
+
+    /// For Keys with Shift up or down.
+    fn binding<A: Action>(self, context: &str, action: A, cx: &App) -> Option<KeyBinding> {
+        let predicate = KeyBindingContextPredicate::parse(context).ok().map(Rc::new);
+        let ctrl = if self.ctrl { "ctrl-" } else { "" };
+        let shift = if self.shift == Shift::Down { "shift-" } else { "" };
+        let keystroke = format!("{ctrl}{shift}{}", self.key);
+        KeyBinding::load(&keystroke, Box::new(action), predicate, false, None, cx).ok()
     }
 
     pub fn overlaps(&self, other: &Keys) -> bool {
@@ -441,16 +447,22 @@ const SHORTCUTS: &[Shortcut] = &[
 ];
 
 pub(crate) fn bind(cx: &mut App) {
+    let app: &App = cx;
     let bindings: Vec<KeyBinding> = SHORTCUTS
         .iter()
         .flat_map(|shortcut| {
-            let command = shortcut.command;
             let context = shortcut.place.binding_context();
-            let run = |shift| Run {
-                command,
-                selection: if shift { Selection::Extend } else { Selection::Collapse },
-            };
-            shortcut.keys.bindings(context, run, cx)
+            shortcut.keys.each_shift().filter_map(move |keys| {
+                let selection = match keys.shift {
+                    Shift::Down => Selection::Extend,
+                    Shift::Up | Shift::Either => Selection::Collapse,
+                };
+                let run = Run {
+                    command: shortcut.command,
+                    selection,
+                };
+                keys.binding(context, run, app)
+            })
         })
         .collect();
     cx.bind_keys(bindings);
@@ -487,7 +499,7 @@ mod tests {
                 let command = shortcut.command;
                 let bindings = shortcut.keys.bindings(
                     shortcut.place.binding_context(),
-                    |_| Run {
+                    || Run {
                         command,
                         selection: Selection::Collapse,
                     },

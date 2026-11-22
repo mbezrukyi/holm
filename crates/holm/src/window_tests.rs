@@ -1158,7 +1158,7 @@ fn space_types_a_space_in_the_rename_field_of_the_tree(cx: &mut TestAppContext) 
     cx.update(|cx| {
         let bindings = holm_editor::shortcuts::Keys::plain("space").bindings(
             crate::shortcuts::Place::Tree.key_context(),
-            |_| crate::shortcuts::Run(crate::shortcuts::Command::ShowNotes),
+            || crate::shortcuts::Run(crate::shortcuts::Command::ShowNotes),
             cx,
         );
         cx.bind_keys(bindings);
@@ -1175,7 +1175,7 @@ fn space_types_a_space_in_an_input_inside_a_place_that_binds_it(cx: &mut TestApp
     cx.update(|cx| {
         let bindings = holm_editor::shortcuts::Keys::plain("space").bindings(
             crate::shortcuts::Place::Window.key_context(),
-            |_| crate::shortcuts::Run(crate::shortcuts::Command::NewNote),
+            || crate::shortcuts::Run(crate::shortcuts::Command::NewNote),
             cx,
         );
         cx.bind_keys(bindings);
