@@ -284,8 +284,7 @@ impl gpui_kit::Element for EditorElement {
         let matches = editor
             .find
             .as_ref()
-            .map(|find| layout.match_bounds(&find.matches))
-            .unwrap_or_default();
+            .map_or_default(|find| layout.match_bounds(&find.matches));
         window.handle_input(&focus, ElementInputHandler::new(bounds, self.editor.clone()), cx);
         window.paint_quad(fill(bounds, theme.background));
         window.with_content_mask(Some(ContentMask { bounds }), |window| {

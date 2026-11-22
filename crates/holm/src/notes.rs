@@ -518,8 +518,7 @@ impl NotesView {
                         .read(cx)
                         .snapshot()
                         .note(path)
-                        .map(|note| note.title.clone())
-                        .unwrap_or_default(),
+                        .map_or_default(|note| note.title.clone()),
                     Target::Folder(path) => path.last_part().into_owned(),
                 };
                 this.ask(

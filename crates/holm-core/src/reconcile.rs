@@ -318,7 +318,7 @@ mod tests {
         let mut after = before.clone();
         after.apply(settled);
         let (_, list) = touched.list(Source::Outside, before, after);
-        list.map(|list| list.changes).unwrap_or_default()
+        list.map_or_default(|list| list.changes)
     }
 
     fn path(path: &str) -> NotePath {

@@ -230,7 +230,7 @@ mod tests {
             moves,
         };
         let (_, list) = touched.list(Source::Holm, before, after);
-        list.map(|list| list.changes).unwrap_or_default()
+        list.map_or_default(|list| list.changes)
     }
 
     #[test]

@@ -9,8 +9,7 @@ pub(crate) fn preview(body: &str) -> String {
         .filter(|line| !line.trim().is_empty())
         .map(line_text)
         .find(|text| !text.is_empty())
-        .map(|text| cut(text, MAX_PREVIEW_CHARS))
-        .unwrap_or_default()
+        .map_or_default(|text| cut(text, MAX_PREVIEW_CHARS))
 }
 
 /// Parsed alone, without its Markdown syntax.

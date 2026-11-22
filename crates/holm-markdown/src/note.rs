@@ -78,7 +78,7 @@ impl NoteFile {
     ///
     /// It reads a block list, a flow list like `[a, b]`, and a single tag.
     pub fn tags(&self) -> Vec<String> {
-        self.frontmatter.as_ref().map(Frontmatter::tags).unwrap_or_default()
+        self.frontmatter.as_ref().map_or_default(Frontmatter::tags)
     }
 
     pub fn pinned(&self) -> bool {

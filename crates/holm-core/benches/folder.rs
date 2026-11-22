@@ -155,8 +155,7 @@ fn rename_tag_on_disk(bencher: divan::Bencher<'_, '_>) {
         .args(["-f", "-c", "%T"])
         .arg(notes.path())
         .output()
-        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned())
-        .unwrap_or_default();
+        .map_or_default(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned());
     eprintln!("rename_tag_on_disk: {disk} is {file_system}");
     for folder in 0..10 {
         fs::create_dir(notes.path().join(format!("folder {folder}"))).unwrap();
