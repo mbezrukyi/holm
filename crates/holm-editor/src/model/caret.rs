@@ -1,11 +1,12 @@
 use gpui_kit::Pixels;
+use holm_markdown::SourceOffset;
 
 /// The cursor offset, with what Up, Down, Home and End know about its screen row.
 ///
 /// [`super::Model::set_cursor`] makes a plain caret. So any other cursor change drops the affinity and the goals.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct Caret {
-    offset: usize,
+    offset: SourceOffset,
     affinity: Affinity,
     /// The x that Up and Down keep.
     goal_x: Option<Pixels>,
@@ -47,7 +48,7 @@ pub(crate) enum Selection {
 }
 
 impl Caret {
-    pub(crate) fn at(offset: usize) -> Self {
+    pub(crate) fn at(offset: SourceOffset) -> Self {
         Self {
             offset,
             ..Self::default()
@@ -69,7 +70,7 @@ impl Caret {
         Self { goal_row, ..self }
     }
 
-    pub(crate) fn offset(&self) -> usize {
+    pub(crate) fn offset(&self) -> SourceOffset {
         self.offset
     }
 

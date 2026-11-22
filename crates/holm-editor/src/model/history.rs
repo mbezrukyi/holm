@@ -1,22 +1,24 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
+use holm_markdown::SourceOffset;
+
 /// Typing after a pause this long starts a new undo step.
 const PAUSE: Duration = Duration::from_secs(1);
 
 /// The oldest steps go when the stack grows past this.
 const MAX_STEPS: usize = 1000;
 
-/// One replaced range. `start` is a byte offset in the text right before this change.
+/// One replaced range. `start` is in the text right before this change.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct TextChange {
-    pub(super) start: usize,
+    pub(super) start: SourceOffset,
     pub(super) removed: String,
     pub(super) inserted: String,
 }
 
 /// The anchor and the cursor.
-pub(super) type Ends = (usize, usize);
+pub(super) type Ends = (SourceOffset, SourceOffset);
 
 /// How a step can join the step before it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

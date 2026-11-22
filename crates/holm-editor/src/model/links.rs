@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::ops::Range;
 
-use holm_markdown::{Link, LinkKind, OffsetRange, Target, escape_text};
+use holm_markdown::{Link, LinkKind, OffsetRange, SourceOffset, Target, escape_text};
 
 use super::{Group, Model, map_offset};
 
@@ -35,34 +35,34 @@ impl Model {
         }
     }
 
-    pub(crate) fn heading_start(&self, name: &str) -> Option<usize> {
+    pub(crate) fn heading_start(&self, name: &str) -> Option<SourceOffset> {
         self.body
             .headings()
             .iter()
             .find(|heading| heading.text == name)
-            .map(|heading| heading.range.start.get())
+            .map(|heading| heading.range.start)
     }
 
     /// The innermost link whose source holds `offset`. With none, a link that ends at `offset`.
-    pub(crate) fn link_at(&self, offset: usize) -> Option<&Link> {
+    pub(crate) fn link_at(&self, offset: SourceOffset) -> Option<&Link> {
         let links = self.body.links();
-        let before = &links[..links.partition_point(|l| l.range.start.get() <= offset)];
+        let before = &links[..links.partition_point(|l| l.range.start <= offset)];
         // Links are in order of their start, so the innermost one comes first from the back.
         before
             .iter()
             .rev()
-            .find(|l| offset < l.range.end.get())
-            .or_else(|| before.iter().rev().find(|l| l.range.end.get() == offset))
+            .find(|l| offset < l.range.end)
+            .or_else(|| before.iter().rev().find(|l| l.range.end == offset))
     }
 
     /// The link that holds the link text `piece` of a line that starts at `line_start`.
-    pub(super) fn link_over(&self, piece: &Range<usize>, line_start: usize) -> Option<&Link> {
+    pub(super) fn link_over(&self, piece: &Range<SourceOffset>, line_start: SourceOffset) -> Option<&Link> {
         let links = self.body.links();
-        links[..links.partition_point(|l| l.range.start.get() <= piece.start)]
+        links[..links.partition_point(|l| l.range.start <= piece.start)]
             .iter()
             .rev()
-            .take_while(|l| l.range.end.get() >= line_start)
-            .find(|l| l.kind == LinkKind::Plain && piece.end <= l.range.end.get())
+            .take_while(|l| l.range.end >= line_start)
+            .find(|l| l.kind == LinkKind::Plain && piece.end <= l.range.end)
     }
 
     /// The selected source becomes the link text. With no selection, the link text is `text`.
@@ -71,12 +71,12 @@ impl Model {
         let label = if range.is_empty() {
             escape_text(text)
         } else {
-            self.text[range.clone()].to_owned()
+            self.text[range.bytes()].to_owned()
         };
         let bang = if form == LinkForm::Text { "" } else { "!" };
         let link = format!("{bang}[{label}]({})", target.to_destination());
-        let before = self.text[..range.start].chars().next_back();
-        let after = self.text[range.end..].chars().next();
+        let before = self.text[..range.start.get()].chars().next_back();
+        let after = self.text[range.end.get()..].chars().next();
         let (start, end, cursor_after) = match form {
             LinkForm::Text => ("", "", 0),
             LinkForm::Inline => (
@@ -110,10 +110,7 @@ impl Model {
     /// Writes `target` in place of the target of the link at the cursor. The link text stays. It does nothing for a
     /// reference link, whose target is in its definition.
     pub(crate) fn set_link_target(&mut self, target: &Target) -> bool {
-        let Some(range) = self
-            .link_at(self.cursor())
-            .and_then(|link| link.target_range.as_ref().map(OffsetRange::bytes))
-        else {
+        let Some(range) = self.link_at(self.cursor()).and_then(|link| link.target_range.clone()) else {
             return false;
         };
         let edits = vec![(range, target.to_destination())];
@@ -123,7 +120,7 @@ impl Model {
     }
 
     /// Each place where `query` is in the text, in order and apart. Case does not matter.
-    pub(crate) fn find_all(&self, query: &str) -> Vec<Range<usize>> {
+    pub(crate) fn find_all(&self, query: &str) -> Vec<Range<SourceOffset>> {
         let query: Vec<char> = query.chars().flat_map(char::to_lowercase).collect();
         let Some(&first) = query.first() else {
             return Vec::new();
@@ -135,7 +132,7 @@ impl Model {
                 continue;
             }
             if let Some(end) = self.match_at(at, &query) {
-                found.push(at..end);
+                found.push(SourceOffset::range(at..end));
                 next = end;
             }
         }
@@ -167,7 +164,7 @@ mod tests {
 
     fn model(text: &str, selection: Range<usize>) -> Model {
         let mut model = Model::new(text);
-        model.select(selection);
+        model.select(SourceOffset::range(selection));
         model
     }
 
@@ -182,12 +179,24 @@ mod tests {
     fn the_link_at_an_offset_is_the_innermost_one() {
         let text = "a [![img](i.png) b](holm:X) [c](d.md)";
         let model = Model::new(text);
-        assert_eq!(model.link_at(0), None);
-        assert_eq!(model.link_at(5).map(|l| &l.target), Some(&Target::File("i.png".into())));
-        assert_eq!(model.link_at(18).map(|l| &l.target), Some(&note("X", None)));
+        assert_eq!(model.link_at(SourceOffset::new(0)), None);
+        assert_eq!(
+            model.link_at(SourceOffset::new(5)).map(|l| &l.target),
+            Some(&Target::File("i.png".into()))
+        );
+        assert_eq!(
+            model.link_at(SourceOffset::new(18)).map(|l| &l.target),
+            Some(&note("X", None))
+        );
         // The end of a link counts when no other link starts there.
-        assert_eq!(model.link_at(27).map(|l| &l.target), Some(&note("X", None)));
-        assert_eq!(model.link_at(28).map(|l| &l.target), Some(&Target::File("d.md".into())));
+        assert_eq!(
+            model.link_at(SourceOffset::new(27)).map(|l| &l.target),
+            Some(&note("X", None))
+        );
+        assert_eq!(
+            model.link_at(SourceOffset::new(28)).map(|l| &l.target),
+            Some(&Target::File("d.md".into()))
+        );
     }
 
     #[test]
@@ -195,7 +204,7 @@ mod tests {
         let mut m = model("see plans here", 4..9);
         assert!(m.insert_link("Plans", &note("X", Some("Bug list")), LinkForm::Text));
         assert_eq!(m.text(), "see [plans](<holm:X#Bug list>) here");
-        assert_eq!(m.selection(), 30..30);
+        assert_eq!(m.selection(), SourceOffset::range(30..30));
     }
 
     #[test]
@@ -207,7 +216,7 @@ mod tests {
         let photo = Target::File("attachments/a b.png".into());
         assert!(m.insert_link("photo", &photo, LinkForm::Block));
         assert_eq!(m.text(), "![photo](<attachments/a b.png>)\n");
-        assert_eq!(m.selection(), 32..32);
+        assert_eq!(m.selection(), SourceOffset::range(32..32));
         assert!(m.undo());
         assert_eq!(m.text(), "");
     }
@@ -219,7 +228,7 @@ mod tests {
         assert!(m.insert_link("a", &file("a.pdf"), LinkForm::Inline));
         assert!(m.insert_link("b", &file("b.pdf"), LinkForm::Inline));
         assert_eq!(m.text(), "see ![a](a.pdf) ![b](b.pdf) now");
-        assert_eq!(m.cursor(), 27);
+        assert_eq!(m.cursor(), SourceOffset::new(27));
         let mut m = model("one two.", 7..7);
         assert!(m.insert_link("a", &file("a.pdf"), LinkForm::Inline));
         assert_eq!(m.text(), "one two ![a](a.pdf).");
@@ -233,7 +242,7 @@ mod tests {
         let mut m = model("go [there](https://a.org) now", 6..6);
         assert!(m.set_link_target(&note("X", None)));
         assert_eq!(m.text(), "go [there](holm:X) now");
-        assert_eq!(m.cursor(), 6);
+        assert_eq!(m.cursor(), SourceOffset::new(6));
         let mut m = model("[a][ref]\n\n[ref]: b.md\n", 1..1);
         assert!(!m.set_link_target(&note("X", None)));
         let mut m = model("no link", 1..1);
@@ -248,7 +257,7 @@ mod tests {
         assert!(!m.is_broken(&note("X", Some("a"))));
         m.set_broken(HashSet::from([note("X", Some("a"))]));
         assert!(m.is_broken(&note("X", Some("a"))));
-        assert_eq!(m.heading_start("Bug list"), Some(9));
+        assert_eq!(m.heading_start("Bug list"), Some(SourceOffset::new(9)));
     }
 
     #[test]
@@ -269,9 +278,15 @@ mod tests {
     #[test]
     fn find_ignores_case_and_gives_separate_matches() {
         let m = Model::new("Aaa ÄB äb aaa");
-        assert_eq!(m.find_all("aa"), vec![0..2, 12..14]);
-        assert_eq!(m.find_all("äb"), vec![4..7, 8..11]);
-        assert_eq!(m.find_all(""), Vec::<Range<usize>>::new());
-        assert_eq!(m.find_all("zz"), Vec::<Range<usize>>::new());
+        assert_eq!(
+            m.find_all("aa"),
+            vec![SourceOffset::range(0..2), SourceOffset::range(12..14)]
+        );
+        assert_eq!(
+            m.find_all("äb"),
+            vec![SourceOffset::range(4..7), SourceOffset::range(8..11)]
+        );
+        assert_eq!(m.find_all(""), Vec::<Range<SourceOffset>>::new());
+        assert_eq!(m.find_all("zz"), Vec::<Range<SourceOffset>>::new());
     }
 }

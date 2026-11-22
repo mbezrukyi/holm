@@ -2,6 +2,8 @@ use std::ops::Range;
 
 use gpui_kit::{InteractiveElement, IntoElement, MouseButton, ParentElement, Styled, div, px, rems};
 
+use holm_markdown::SourceOffset;
+
 use crate::element::Theme;
 use crate::model::Model;
 
@@ -23,13 +25,13 @@ pub(crate) enum Erase {
 pub(crate) struct Find {
     query: String,
     /// Where the search starts: the selection start when find opened.
-    origin: usize,
-    pub(crate) matches: Vec<Range<usize>>,
+    origin: SourceOffset,
+    pub(crate) matches: Vec<Range<SourceOffset>>,
     current: Option<usize>,
 }
 
 impl Find {
-    pub(crate) fn new(query: String, origin: usize) -> Self {
+    pub(crate) fn new(query: String, origin: SourceOffset) -> Self {
         Self {
             query,
             origin,

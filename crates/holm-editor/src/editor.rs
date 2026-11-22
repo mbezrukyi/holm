@@ -11,7 +11,7 @@ use gpui_kit::{
     UTF16Selection, Window, div, px,
 };
 use holm_markdown::list::Move;
-use holm_markdown::{Color, LinkKind, Target};
+use holm_markdown::{Color, LinkKind, OffsetRange, SourceOffset, Target};
 
 use crate::color::{self, ColorWindow, KeyResult, Paint};
 use crate::element::{Edge, EditorElement, Layout, Reveal, Scroll, Theme};
@@ -90,7 +90,7 @@ pub struct Editor {
 #[derive(Clone, Debug)]
 struct Drag {
     unit: Unit,
-    origin: Range<usize>,
+    origin: Range<SourceOffset>,
     down: Point<Pixels>,
     moving: bool,
 }
@@ -535,8 +535,8 @@ impl Editor {
         match command {
             Command::WordLeft => self.model.move_word_left(selection),
             Command::WordRight => self.model.move_word_right(selection),
-            Command::NoteStart => self.model.set_cursor(0, selection),
-            Command::NoteEnd => self.model.set_cursor(self.model.text().len(), selection),
+            Command::NoteStart => self.model.set_cursor(SourceOffset::default(), selection),
+            Command::NoteEnd => self.model.set_cursor(self.model.end(), selection),
             Command::SelectAll => self.model.select_all(),
             Command::OpenLink => {
                 let Some(link) = self.model.link_at(self.model.cursor()) else {
@@ -710,7 +710,9 @@ impl Editor {
         match key {
             "left" => self.model.move_left(selection),
             "right" => self.model.move_right(selection),
-            "up" if selection == Selection::Collapse && self.model.selection() == (0..0) => {
+            "up" if selection == Selection::Collapse
+                && self.model.selection() == (SourceOffset::default()..SourceOffset::default()) =>
+            {
                 cx.emit(UpFromStart);
                 return true;
             }
@@ -805,14 +807,14 @@ impl Editor {
         let target = match direction {
             Direction::Down => {
                 if line + 1 == self.model.line_count() {
-                    self.model.set_cursor(self.model.text().len(), selection);
+                    self.model.set_cursor(self.model.end(), selection);
                     return;
                 }
                 line + 1
             }
             Direction::Up => {
                 let Some(line) = line.checked_sub(1) else {
-                    self.model.set_cursor(0, selection);
+                    self.model.set_cursor(SourceOffset::default(), selection);
                     return;
                 };
                 line
@@ -822,7 +824,7 @@ impl Editor {
         self.model.set_cursor((range.start + column).min(range.end), selection);
     }
 
-    fn offset_at(&self, position: Point<Pixels>) -> Option<usize> {
+    fn offset_at(&self, position: Point<Pixels>) -> Option<SourceOffset> {
         self.current_layout()?.offset_at(position)
     }
 
@@ -903,7 +905,7 @@ impl Editor {
         }
     }
 
-    fn drag_to(&mut self, offset: usize) {
+    fn drag_to(&mut self, offset: SourceOffset) {
         let Some(drag) = &self.drag else { return };
         let target = match drag.unit {
             Unit::Char => offset..offset,
@@ -941,11 +943,11 @@ impl Editor {
         cx.notify();
     }
 
-    fn utf16_range(&self, range: &Range<usize>) -> Range<Utf16Offset> {
+    fn utf16_range(&self, range: &Range<SourceOffset>) -> Range<Utf16Offset> {
         self.model.offset_to_utf16(range.start)..self.model.offset_to_utf16(range.end)
     }
 
-    fn range_from_utf16(&self, range: Range<Utf16Offset>) -> Range<usize> {
+    fn range_from_utf16(&self, range: Range<Utf16Offset>) -> Range<SourceOffset> {
         self.model.utf16_to_offset(range.start)..self.model.utf16_to_offset(range.end)
     }
 }
@@ -1009,7 +1011,7 @@ impl EntityInputHandler for Editor {
     ) -> Option<String> {
         let bytes = self.range_from_utf16(Utf16Offset::range_from_platform(range));
         adjusted_range.replace(Utf16Offset::range_to_platform(self.utf16_range(&bytes)));
-        Some(self.model.text()[bytes].to_owned())
+        Some(self.model.text()[bytes.bytes()].to_owned())
     }
 
     fn selected_text_range(
@@ -1096,7 +1098,7 @@ impl EntityInputHandler for Editor {
     }
 
     fn text_length_utf16(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> Option<usize> {
-        Some(self.model.offset_to_utf16(self.model.text().len()).to_platform())
+        Some(self.model.offset_to_utf16(self.model.end()).to_platform())
     }
 }
 

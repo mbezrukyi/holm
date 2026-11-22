@@ -3,14 +3,14 @@ use std::ops::Range;
 pub(crate) use holm_markdown::inline::Format;
 use holm_markdown::inline::{Edit as MarkdownEdit, restyle};
 use holm_markdown::list::{Move, relist};
-use holm_markdown::{Block, BlockKind, OffsetRange, SourceOffset};
+use holm_markdown::{Block, BlockKind, NewOffset, OffsetRange, SourceOffset};
 
 use super::{Edit, Group, Model, map_offset};
 
 impl Model {
     /// With no selection, it works at the cursor. A color key sets its color. Returns whether the text changed.
     pub(crate) fn toggle_format(&mut self, format: Format) -> bool {
-        let Some(edit) = restyle(&self.text, &self.body, SourceOffset::range(self.selection()), format) else {
+        let Some(edit) = restyle(&self.text, &self.body, self.selection(), format) else {
             return false;
         };
         self.apply(edit)
@@ -19,11 +19,14 @@ impl Model {
     /// The selection keeps its direction.
     fn apply(&mut self, edit: MarkdownEdit) -> bool {
         let ends = if self.is_reversed() {
-            (edit.selection.end.get(), edit.selection.start.get())
+            (edit.selection.end, edit.selection.start)
         } else {
-            (edit.selection.start.get(), edit.selection.end.get())
+            (edit.selection.start, edit.selection.end)
         };
-        self.edit(vec![(edit.range.bytes(), edit.text)], ends, Group::Alone, None)
+        // Once the edit is made, the new text is the source.
+        let in_source = |offset: NewOffset| SourceOffset::new(offset.get());
+        let ends = (in_source(ends.0), in_source(ends.1));
+        self.edit(vec![(edit.range, edit.text)], ends, Group::Alone, None)
     }
 }
 
@@ -52,7 +55,7 @@ impl Model {
             .map(|line| self.line_range(line))
             .filter(|line| first == last || !line.is_empty())
             .map(|line| {
-                let prefix = heading_prefix(&self.text[line.clone()]);
+                let prefix = heading_prefix(&self.text[line.bytes()]);
                 (line, prefix)
             })
             .collect();
@@ -68,7 +71,7 @@ impl Model {
         };
         let edits: Vec<Edit> = lines
             .iter()
-            .map(|(line, (_, len))| (line.start..line.start + len, prefix.clone()))
+            .map(|(line, (_, len))| (line.start..line.start + *len, prefix.clone()))
             .collect();
         let anchor = map_offset(&edits, self.anchor);
         let cursor = map_offset(&edits, self.cursor());
@@ -84,12 +87,12 @@ impl Model {
     /// A list key, as [`Move`] tells. It counts the lists it changes again. Returns `None` when the selection touches
     /// no list item.
     pub(crate) fn relist(&mut self, key: Move) -> Option<bool> {
-        let edit = relist(&self.text, &self.body, SourceOffset::range(self.selection()), key)?;
+        let edit = relist(&self.text, &self.body, self.selection(), key)?;
         Some(self.apply(edit))
     }
 
     /// `range` is the source of the `[ ]`. The cursor stays. Returns whether the text changed.
-    pub(crate) fn toggle_task(&mut self, range: &Range<usize>) -> bool {
+    pub(crate) fn toggle_task(&mut self, range: &Range<SourceOffset>) -> bool {
         self.toggle_task_boxes(std::slice::from_ref(range))
     }
 
@@ -103,12 +106,14 @@ impl Model {
         self.toggle_task_boxes(&boxes)
     }
 
-    fn toggle_task_boxes(&mut self, boxes: &[Range<usize>]) -> bool {
+    fn toggle_task_boxes(&mut self, boxes: &[Range<SourceOffset>]) -> bool {
         let edits: Vec<Edit> = boxes
             .iter()
-            .filter(|range| range.len() == 3 && self.text.get(range.start..range.start + 1) == Some("["))
+            .filter(|range| {
+                range.end - range.start == 3 && self.text.get((range.start..range.start + 1).bytes()) == Some("[")
+            })
             .map(|range| {
-                let mark = &self.text[range.start + 1..range.start + 2];
+                let mark = &self.text[(range.start + 1..range.start + 2).bytes()];
                 let new = if mark == " " { "x" } else { " " };
                 (range.start + 1..range.start + 2, new.to_owned())
             })
@@ -118,16 +123,16 @@ impl Model {
 }
 
 /// The `[ ]` sources of the task items that start in `lines`, in order.
-fn collect_tasks(blocks: &[Block], lines: &Range<usize>, boxes: &mut Vec<Range<usize>>) {
+fn collect_tasks(blocks: &[Block], lines: &Range<SourceOffset>, boxes: &mut Vec<Range<SourceOffset>>) {
     for block in blocks
         .iter()
-        .filter(|b| b.range.start.get() <= lines.end && lines.start <= b.range.end.get())
+        .filter(|b| b.range.start <= lines.end && lines.start <= b.range.end)
     {
         if let BlockKind::Item { task: Some(task) } = &block.kind
-            && lines.start <= task.range.start.get()
-            && task.range.start.get() <= lines.end
+            && lines.start <= task.range.start
+            && task.range.start <= lines.end
         {
-            boxes.push(task.range.bytes());
+            boxes.push(task.range.clone());
         }
         collect_tasks(&block.children, lines, boxes);
     }
@@ -142,25 +147,28 @@ mod tests {
 
     fn model_with(text: &str, selection: Range<usize>) -> Model {
         let mut model = Model::new(text);
-        model.select(selection);
+        model.select(SourceOffset::range(selection));
         model
     }
 
     fn toggled(text: &str, selection: Range<usize>, format: Format) -> (String, Range<usize>) {
         let mut model = model_with(text, selection);
         model.toggle_format(format);
-        (model.text().to_owned(), model.selection())
+        (model.text().to_owned(), model.selection().bytes())
     }
 
     #[test]
     fn a_format_key_wraps_the_selection_as_one_undo_step() {
         assert_eq!(toggled("a word", 2..6, Format::Bold), ("a **word**".into(), 4..8));
         let mut model = Model::new("a word");
-        model.set_cursor(6, Selection::Collapse);
-        model.set_cursor(2, Selection::Extend);
+        model.set_cursor(SourceOffset::new(6), Selection::Collapse);
+        model.set_cursor(SourceOffset::new(2), Selection::Extend);
         model.toggle_format(Format::Underline);
         assert_eq!(model.text(), "a <u>word</u>");
-        assert_eq!((model.cursor(), model.selection()), (5, 5..9));
+        assert_eq!(
+            (model.cursor(), model.selection()),
+            (SourceOffset::new(5), SourceOffset::range(5..9))
+        );
         model.undo();
         assert_eq!(model.text(), "a word");
     }
@@ -181,10 +189,10 @@ mod tests {
     fn a_format_key_with_no_selection_takes_the_word_or_adds_a_pair() {
         let mut model = model_with("one two", 1..1);
         model.toggle_format(Format::Bold);
-        assert_eq!((model.text(), model.cursor()), ("**one** two", 3));
+        assert_eq!((model.text(), model.cursor()), ("**one** two", SourceOffset::new(3)));
         let mut model = model_with("one ", 4..4);
         model.toggle_format(Format::Highlight);
-        assert_eq!((model.text(), model.cursor()), ("one ====", 6));
+        assert_eq!((model.text(), model.cursor()), ("one ====", SourceOffset::new(6)));
     }
 
     #[test]
@@ -192,12 +200,12 @@ mod tests {
         let mut model = model_with("Plans", 2..2);
         model.toggle_heading(2);
         assert_eq!(model.text(), "## Plans");
-        assert_eq!(model.cursor(), 5);
+        assert_eq!(model.cursor(), SourceOffset::new(5));
         model.toggle_heading(1);
         assert_eq!(model.text(), "# Plans");
         model.toggle_heading(1);
         assert_eq!(model.text(), "Plans");
-        assert_eq!(model.cursor(), 2);
+        assert_eq!(model.cursor(), SourceOffset::new(2));
         let mut model = model_with("a\n\n# b", 0..6);
         model.toggle_heading(3);
         assert_eq!(model.text(), "### a\n\n### b");
@@ -206,7 +214,7 @@ mod tests {
     fn enter(text: &str, at: usize) -> (String, usize) {
         let mut model = model_with(text, at..at);
         model.newline(Instant::now());
-        (model.text().to_owned(), model.cursor())
+        (model.text().to_owned(), model.cursor().get())
     }
 
     #[test]
@@ -268,10 +276,10 @@ mod tests {
         let mut model = model_with("1. Milk\n2. Eggs\n3. Bread", 13..13);
         model.relist(Move::In);
         assert_eq!(model.text(), "1. Milk\n   1. Eggs\n2. Bread");
-        assert_eq!(model.cursor(), 16);
+        assert_eq!(model.cursor(), SourceOffset::new(16));
         model.relist(Move::Out);
         assert_eq!(model.text(), "1. Milk\n2. Eggs\n3. Bread");
-        assert_eq!(model.cursor(), 13);
+        assert_eq!(model.cursor(), SourceOffset::new(13));
     }
 
     #[test]
@@ -286,18 +294,18 @@ mod tests {
         model.relist(Move::In);
         assert_eq!(model.text(), "1. a\n   1. b\n2. c\n3. d");
         model.undo();
-        assert_eq!((model.text(), model.cursor()), (text, 9));
+        assert_eq!((model.text(), model.cursor()), (text, SourceOffset::new(9)));
         model.newline(Instant::now());
         assert_eq!(model.text(), "1. a\n2. b\n3. \n4. c\n5. d");
         model.undo();
-        assert_eq!((model.text(), model.cursor()), (text, 9));
+        assert_eq!((model.text(), model.cursor()), (text, SourceOffset::new(9)));
     }
 
     #[test]
     fn the_cursor_stays_on_its_item_when_the_number_grows() {
         let mut model = model_with("9. a\n   1. bc", 12..12);
         model.relist(Move::Out);
-        assert_eq!((model.text(), model.cursor()), ("9. a\n10. bc", 10));
+        assert_eq!((model.text(), model.cursor()), ("9. a\n10. bc", SourceOffset::new(10)));
     }
 
     #[test]

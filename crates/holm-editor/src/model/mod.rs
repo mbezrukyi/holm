@@ -1,5 +1,4 @@
-//! This module has no GPUI. Every offset is a byte offset in the source text, on a char boundary. The text has only LF
-//! line breaks.
+//! This module has no GPUI. Every [`SourceOffset`] is on a char boundary. The text has only LF line breaks.
 
 mod caret;
 mod display;
@@ -12,7 +11,7 @@ use std::collections::HashSet;
 use std::ops::Range;
 use std::time::Instant;
 
-use holm_markdown::{Body, SourceOffset, Target};
+use holm_markdown::{Body, OffsetRange, SourceOffset, Target};
 use ropey::{LineType, Rope};
 
 pub(crate) use caret::{Affinity, Caret, Direction, GoalRow, Selection};
@@ -33,16 +32,16 @@ pub(crate) struct Model {
     text: String,
     body: Body,
     /// What the splices since the last parse changed: a range of the old text, and the end of its new text.
-    changed: Option<(Range<usize>, usize)>,
+    changed: Option<(Range<SourceOffset>, SourceOffset)>,
     caret: Caret,
-    anchor: usize,
+    anchor: SourceOffset,
     history: History,
     /// The link targets that the app knows are broken.
     broken: HashSet<Target>,
 }
 
 /// A range of the current text and its new text.
-type Edit = (Range<usize>, String);
+type Edit = (Range<SourceOffset>, String);
 
 /// How far Backspace or Delete reaches with no selection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,7 +82,7 @@ fn lf_only(text: &str) -> Cow<'_, str> {
 
 /// `edits` are in order and apart. An offset inside a replaced range lands at the end of its new text, and an offset on
 /// an insert lands after it.
-fn map_offset(edits: &[Edit], offset: usize) -> usize {
+fn map_offset(edits: &[Edit], offset: SourceOffset) -> SourceOffset {
     let mut mapped = offset;
     for (range, text) in edits {
         let past = if range.is_empty() {
@@ -92,7 +91,7 @@ fn map_offset(edits: &[Edit], offset: usize) -> usize {
             range.end <= offset
         };
         if past {
-            mapped = mapped + text.len() - range.len();
+            mapped = mapped + text.len() - range.bytes().len();
         } else if range.start <= offset && offset < range.end {
             return mapped - (offset - range.start) + text.len();
         } else {
@@ -111,7 +110,7 @@ impl Model {
             changed: None,
             text,
             caret: Caret::default(),
-            anchor: 0,
+            anchor: SourceOffset::default(),
             history: History::default(),
             broken: HashSet::new(),
         }
@@ -121,7 +120,7 @@ impl Model {
         &self.text
     }
 
-    pub(crate) fn cursor(&self) -> usize {
+    pub(crate) fn cursor(&self) -> SourceOffset {
         self.caret.offset()
     }
 
@@ -129,12 +128,12 @@ impl Model {
         self.caret
     }
 
-    pub(crate) fn selection(&self) -> Range<usize> {
+    pub(crate) fn selection(&self) -> Range<SourceOffset> {
         self.cursor().min(self.anchor)..self.cursor().max(self.anchor)
     }
 
     pub(crate) fn selected_text(&self) -> &str {
-        &self.text[self.selection()]
+        &self.text[self.selection().bytes()]
     }
 
     pub(crate) fn is_reversed(&self) -> bool {
@@ -142,7 +141,7 @@ impl Model {
     }
 
     /// Rounds `offset` down to a char boundary. With [`Selection::Extend`], the selection keeps its other end.
-    pub(crate) fn set_cursor(&mut self, offset: usize, selection: Selection) {
+    pub(crate) fn set_cursor(&mut self, offset: SourceOffset, selection: Selection) {
         self.set_caret(Caret::at(offset), selection);
     }
 
@@ -166,13 +165,18 @@ impl Model {
         goal
     }
 
-    pub(crate) fn select(&mut self, range: Range<usize>) {
+    pub(crate) fn select(&mut self, range: Range<SourceOffset>) {
         self.set_cursor(range.start, Selection::Collapse);
         self.set_cursor(range.end, Selection::Extend);
     }
 
     pub(crate) fn select_all(&mut self) {
-        self.select(0..self.text.len());
+        self.select(SourceOffset::default()..self.end());
+    }
+
+    /// The offset after the last byte of the text.
+    pub(crate) fn end(&self) -> SourceOffset {
+        SourceOffset::new(self.text.len())
     }
 
     fn ends(&self) -> Ends {
@@ -184,23 +188,23 @@ impl Model {
         self.set_cursor(cursor, Selection::Extend);
     }
 
-    fn floor(&self, offset: usize) -> usize {
-        self.rope.floor_char_boundary(offset.min(self.text.len()))
+    fn floor(&self, offset: SourceOffset) -> SourceOffset {
+        SourceOffset::new(self.rope.floor_char_boundary(offset.min(self.end()).get()))
     }
 
     /// Makes no parse and no undo step.
-    fn splice(&mut self, range: Range<usize>, text: &str) {
-        self.rope.remove(range.clone());
-        self.rope.insert(range.start, text);
-        self.text.replace_range(range.clone(), text);
+    fn splice(&mut self, range: Range<SourceOffset>, text: &str) {
+        self.rope.remove(range.bytes());
+        self.rope.insert(range.start.get(), text);
+        self.text.replace_range(range.bytes(), text);
         self.changed = Some(match self.changed.take() {
             None => (range.clone(), range.start + text.len()),
             Some((old, new_end)) => {
                 // `end` is after both changes, so the old text has it `new_end - old.end` earlier.
                 let end = new_end.max(range.end);
                 (
-                    old.start.min(range.start)..end + old.end - new_end,
-                    end + text.len() - range.len(),
+                    old.start.min(range.start)..old.end + (end - new_end),
+                    end + text.len() - range.bytes().len(),
                 )
             }
         });
@@ -208,8 +212,7 @@ impl Model {
 
     fn reparse(&mut self) {
         if let Some((old, new_end)) = self.changed.take() {
-            self.body
-                .reparse(&self.text, SourceOffset::range(old.clone()), new_end - old.start);
+            self.body.reparse(&self.text, old.clone(), new_end - old.start);
         }
     }
 
@@ -221,12 +224,12 @@ impl Model {
         for (range, text) in edits.into_iter().rev() {
             let end = self.floor(range.end);
             let start = self.floor(range.start.min(end));
-            if self.text[start..end] == text {
+            if self.text[(start..end).bytes()] == text {
                 continue;
             }
             changes.push(TextChange {
                 start,
-                removed: self.text[start..end].to_owned(),
+                removed: self.text[(start..end).bytes()].to_owned(),
                 inserted: text.clone(),
             });
             self.splice(start..end, &text);
@@ -246,7 +249,7 @@ impl Model {
         true
     }
 
-    pub(crate) fn type_in(&mut self, range: Range<usize>, text: &str, now: Instant) -> bool {
+    pub(crate) fn type_in(&mut self, range: Range<SourceOffset>, text: &str, now: Instant) -> bool {
         let text = lf_only(text);
         let end = self.floor(range.end);
         let start = self.floor(range.start.min(end));
@@ -291,7 +294,10 @@ impl Model {
         while !self.text.is_char_boundary(old.len() - suffix) || !text.is_char_boundary(new.len() - suffix) {
             suffix -= 1;
         }
-        let edits = vec![(prefix..old.len() - suffix, text[prefix..new.len() - suffix].to_owned())];
+        let edits = vec![(
+            SourceOffset::range(prefix..old.len() - suffix),
+            text[prefix..new.len() - suffix].to_owned(),
+        )];
         let ends = (map_offset(&edits, self.anchor), map_offset(&edits, self.cursor()));
         self.edit(edits, ends, Group::Alone, None)
     }
@@ -361,7 +367,7 @@ impl Model {
         )
     }
 
-    fn remove(&mut self, range: Range<usize>, now: Instant) -> bool {
+    fn remove(&mut self, range: Range<SourceOffset>, now: Instant) -> bool {
         if range.is_empty() {
             return false;
         }
@@ -401,19 +407,19 @@ impl Model {
 
     /// The offset before the spaces and then the run of one kind of chars before `offset`. A line break is a run of its
     /// own.
-    fn word_left(&self, offset: usize) -> usize {
+    fn word_left(&self, offset: SourceOffset) -> SourceOffset {
         let mut start = offset;
-        let mut chars = self.text[..offset].char_indices().rev().peekable();
+        let mut chars = self.text[..offset.get()].char_indices().rev().peekable();
         while let Some(&(at, c)) = chars.peek()
             && char_kind(c) == CharKind::Space
         {
-            start = at;
+            start = SourceOffset::new(at);
             chars.next();
         }
         let Some((at, first)) = chars.next() else {
             return start;
         };
-        start = at;
+        start = SourceOffset::new(at);
         let kind = char_kind(first);
         if kind == CharKind::Break {
             return start;
@@ -422,16 +428,16 @@ impl Model {
             if char_kind(c) != kind {
                 break;
             }
-            start = at;
+            start = SourceOffset::new(at);
         }
         start
     }
 
     /// The offset after the spaces and then the run of one kind of chars after `offset`. A line break is a run of its
     /// own.
-    fn word_right(&self, offset: usize) -> usize {
+    fn word_right(&self, offset: SourceOffset) -> SourceOffset {
         let mut end = offset;
-        let mut chars = self.text[offset..].chars().peekable();
+        let mut chars = self.text[offset.get()..].chars().peekable();
         while let Some(&c) = chars.peek()
             && char_kind(c) == CharKind::Space
         {
@@ -456,21 +462,21 @@ impl Model {
     }
 
     /// The run of one kind of chars at `offset`, for a double click. A line break is never part of it.
-    pub(crate) fn word_at(&self, offset: usize) -> Range<usize> {
+    pub(crate) fn word_at(&self, offset: SourceOffset) -> Range<SourceOffset> {
         let offset = self.floor(offset);
-        let after = self.text[offset..].chars().next();
-        let before = self.text[..offset].chars().next_back();
+        let after = self.text[offset.get()..].chars().next();
+        let before = self.text[..offset.get()].chars().next_back();
         let kind = match (before.map(char_kind), after.map(char_kind)) {
             (_, Some(kind)) | (Some(kind), _) if kind != CharKind::Break => kind,
             _ => return offset..offset,
         };
-        let start = self.text[..offset]
+        let start = self.text[..offset.get()]
             .char_indices()
             .rev()
             .take_while(|(_, c)| char_kind(*c) == kind)
             .last()
-            .map_or(offset, |(at, _)| at);
-        let end = self.text[offset..]
+            .map_or(offset, |(at, _)| SourceOffset::new(at));
+        let end = self.text[offset.get()..]
             .char_indices()
             .take_while(|(_, c)| char_kind(*c) == kind)
             .last()
@@ -479,9 +485,9 @@ impl Model {
     }
 
     /// With its line break, for a triple click.
-    pub(crate) fn line_at(&self, offset: usize) -> Range<usize> {
+    pub(crate) fn line_at(&self, offset: SourceOffset) -> Range<SourceOffset> {
         let range = self.line_range(self.line_of(offset));
-        let end = if range.end < self.text.len() {
+        let end = if range.end < self.end() {
             range.end + 1
         } else {
             range.end
@@ -489,19 +495,18 @@ impl Model {
         range.start..end
     }
 
-    fn prev_char(&self, offset: usize) -> usize {
-        if offset == 0 {
-            0
-        } else {
-            self.rope.floor_char_boundary(offset - 1)
+    fn prev_char(&self, offset: SourceOffset) -> SourceOffset {
+        match offset.get().checked_sub(1) {
+            Some(before) => SourceOffset::new(self.rope.floor_char_boundary(before)),
+            None => offset,
         }
     }
 
-    fn next_char(&self, offset: usize) -> usize {
-        if offset >= self.text.len() {
-            self.text.len()
+    fn next_char(&self, offset: SourceOffset) -> SourceOffset {
+        if offset >= self.end() {
+            self.end()
         } else {
-            self.rope.ceil_char_boundary(offset + 1)
+            SourceOffset::new(self.rope.ceil_char_boundary(offset.get() + 1))
         }
     }
 
@@ -510,22 +515,22 @@ impl Model {
         self.rope.len_lines(LF)
     }
 
-    pub(crate) fn line_of(&self, offset: usize) -> usize {
-        self.rope.byte_to_line_idx(offset.min(self.text.len()), LF)
+    pub(crate) fn line_of(&self, offset: SourceOffset) -> usize {
+        self.rope.byte_to_line_idx(offset.min(self.end()).get(), LF)
     }
 
     /// Without its line break.
-    pub(crate) fn line_range(&self, line: usize) -> Range<usize> {
-        let start = self.rope.line_to_byte_idx(line, LF);
+    pub(crate) fn line_range(&self, line: usize) -> Range<SourceOffset> {
+        let start = SourceOffset::new(self.rope.line_to_byte_idx(line, LF));
         let end = if line + 1 < self.line_count() {
-            self.rope.line_to_byte_idx(line + 1, LF) - 1
+            SourceOffset::new(self.rope.line_to_byte_idx(line + 1, LF) - 1)
         } else {
-            self.text.len()
+            self.end()
         };
         start..end
     }
 
-    fn syntax_of(&self, range: &Range<usize>) -> Syntax {
+    fn syntax_of(&self, range: &Range<SourceOffset>) -> Syntax {
         let selection = self.selection();
         if range.start <= selection.end && selection.start <= range.end {
             Syntax::Shown
@@ -534,12 +539,12 @@ impl Model {
         }
     }
 
-    pub(crate) fn offset_to_utf16(&self, offset: usize) -> Utf16Offset {
-        Utf16Offset(self.rope.byte_to_utf16_idx(offset.min(self.text.len())))
+    pub(crate) fn offset_to_utf16(&self, offset: SourceOffset) -> Utf16Offset {
+        Utf16Offset(self.rope.byte_to_utf16_idx(offset.min(self.end()).get()))
     }
 
-    pub(crate) fn utf16_to_offset(&self, utf16: Utf16Offset) -> usize {
-        self.rope.utf16_to_byte_idx(utf16.0.min(self.rope.len_utf16()))
+    pub(crate) fn utf16_to_offset(&self, utf16: Utf16Offset) -> SourceOffset {
+        SourceOffset::new(self.rope.utf16_to_byte_idx(utf16.0.min(self.rope.len_utf16())))
     }
 }
 
@@ -577,7 +582,7 @@ mod tests {
 
     fn model_at(text: &str, cursor: usize) -> Model {
         let mut model = Model::new(text);
-        model.set_cursor(cursor, Selection::Collapse);
+        model.set_cursor(SourceOffset::new(cursor), Selection::Collapse);
         model
     }
 
@@ -586,7 +591,7 @@ mod tests {
             direction: Direction::Down,
             selection: Selection::Collapse,
         };
-        Caret::at(offset)
+        Caret::at(SourceOffset::new(offset))
             .with_affinity(Affinity::RowStart)
             .with_goal_x(px(40.))
             .with_goal_row(Some(goal_row))
@@ -604,22 +609,22 @@ mod tests {
         let mut model = Model::new("one two three");
         model.set_caret(row_caret(4), Selection::Collapse);
         model.move_right(Selection::Collapse);
-        assert_eq!(model.caret(), Caret::at(5));
+        assert_eq!(model.caret(), Caret::at(SourceOffset::new(5)));
 
         model.set_caret(row_caret(4), Selection::Collapse);
         model.type_text("x", now());
-        assert_eq!(model.caret(), Caret::at(5));
+        assert_eq!(model.caret(), Caret::at(SourceOffset::new(5)));
 
         model.set_caret(row_caret(4), Selection::Collapse);
         model.undo();
-        assert_eq!(model.caret(), Caret::at(4));
+        assert_eq!(model.caret(), Caret::at(SourceOffset::new(4)));
     }
 
     #[test]
     fn a_caret_off_a_char_boundary_drops_the_affinity_and_the_goals() {
         let mut model = Model::new("aé");
         model.set_caret(row_caret(2), Selection::Collapse);
-        assert_eq!(model.caret(), Caret::at(1));
+        assert_eq!(model.caret(), Caret::at(SourceOffset::new(1)));
     }
 
     #[test]
@@ -635,10 +640,10 @@ mod tests {
     #[test]
     fn typing_replaces_the_selection() {
         let mut model = Model::new("one two");
-        model.select(4..7);
+        model.select(SourceOffset::range(4..7));
         model.type_text("three", now());
         assert_eq!(model.text(), "one three");
-        assert_eq!(model.cursor(), 9);
+        assert_eq!(model.cursor(), SourceOffset::new(9));
         assert!(model.selection().is_empty());
     }
 
@@ -647,44 +652,44 @@ mod tests {
         let mut model = model_at("aé🙂b", 7);
         assert!(model.backspace(Step::Char, now()));
         assert_eq!(model.text(), "aéb");
-        assert_eq!(model.cursor(), 3);
+        assert_eq!(model.cursor(), SourceOffset::new(3));
         assert!(model.backspace(Step::Char, now()));
         assert_eq!(model.text(), "ab");
         assert!(model.delete(Step::Char, now()));
         assert_eq!(model.text(), "a");
         assert!(!model.delete(Step::Char, now()));
-        model.set_cursor(0, Selection::Collapse);
+        model.set_cursor(SourceOffset::new(0), Selection::Collapse);
         assert!(!model.backspace(Step::Char, now()));
     }
 
     #[test]
     fn arrows_collapse_a_selection() {
         let mut model = Model::new("abcdef");
-        model.select(2..4);
+        model.select(SourceOffset::range(2..4));
         model.move_left(Selection::Collapse);
-        assert_eq!(model.selection(), 2..2);
+        assert_eq!(model.selection(), SourceOffset::range(2..2));
         model.move_right(Selection::Extend);
         model.move_right(Selection::Extend);
-        assert_eq!(model.selection(), 2..4);
+        assert_eq!(model.selection(), SourceOffset::range(2..4));
         model.move_right(Selection::Collapse);
-        assert_eq!(model.selection(), 4..4);
+        assert_eq!(model.selection(), SourceOffset::range(4..4));
     }
 
     #[test]
     fn word_moves_skip_spaces_and_one_run_of_chars() {
         let mut model = Model::new("one, two\nthree");
         model.move_word_right(Selection::Collapse);
-        assert_eq!(model.cursor(), 3);
+        assert_eq!(model.cursor(), SourceOffset::new(3));
         model.move_word_right(Selection::Collapse);
-        assert_eq!(model.cursor(), 4);
+        assert_eq!(model.cursor(), SourceOffset::new(4));
         model.move_word_right(Selection::Collapse);
-        assert_eq!(model.cursor(), 8);
+        assert_eq!(model.cursor(), SourceOffset::new(8));
         model.move_word_right(Selection::Collapse);
-        assert_eq!(model.cursor(), 9);
+        assert_eq!(model.cursor(), SourceOffset::new(9));
         model.move_word_left(Selection::Extend);
-        assert_eq!(model.selection(), 8..9);
+        assert_eq!(model.selection(), SourceOffset::range(8..9));
         model.move_word_left(Selection::Collapse);
-        assert_eq!(model.cursor(), 5);
+        assert_eq!(model.cursor(), SourceOffset::new(5));
     }
 
     #[test]
@@ -692,7 +697,7 @@ mod tests {
         let mut model = model_at("one two", 7);
         assert!(model.backspace(Step::Word, now()));
         assert_eq!(model.text(), "one ");
-        model.set_cursor(0, Selection::Collapse);
+        model.set_cursor(SourceOffset::new(0), Selection::Collapse);
         assert!(model.delete(Step::Word, now()));
         assert_eq!(model.text(), " ");
     }
@@ -700,20 +705,23 @@ mod tests {
     #[test]
     fn a_double_click_picks_a_word_and_a_triple_click_a_line() {
         let model = Model::new("say héllo!\nnext");
-        assert_eq!(model.word_at(6), 4..10);
-        assert_eq!(model.word_at(4), 4..10);
-        assert_eq!(model.word_at(11), 10..11);
-        assert_eq!(model.word_at(3), 3..4);
-        assert_eq!(model.line_at(2), 0..12);
-        assert_eq!(model.line_at(13), 12..16);
-        assert_eq!(Model::new("a\n\nb").word_at(2), 2..2);
+        assert_eq!(model.word_at(SourceOffset::new(6)), SourceOffset::range(4..10));
+        assert_eq!(model.word_at(SourceOffset::new(4)), SourceOffset::range(4..10));
+        assert_eq!(model.word_at(SourceOffset::new(11)), SourceOffset::range(10..11));
+        assert_eq!(model.word_at(SourceOffset::new(3)), SourceOffset::range(3..4));
+        assert_eq!(model.line_at(SourceOffset::new(2)), SourceOffset::range(0..12));
+        assert_eq!(model.line_at(SourceOffset::new(13)), SourceOffset::range(12..16));
+        assert_eq!(
+            Model::new("a\n\nb").word_at(SourceOffset::new(2)),
+            SourceOffset::range(2..2)
+        );
     }
 
     #[test]
     fn the_text_has_only_lf_line_breaks() {
         let mut model = Model::new("a\r\nb\rc");
         assert_eq!(model.text(), "a\nb\nc");
-        model.set_cursor(5, Selection::Collapse);
+        model.set_cursor(SourceOffset::new(5), Selection::Collapse);
         model.insert("\r\nd");
         assert_eq!(model.text(), "a\nb\nc\nd");
     }
@@ -727,14 +735,14 @@ mod tests {
         }
         assert!(model.undo());
         assert_eq!(model.text(), "one ");
-        assert_eq!(model.cursor(), 4);
+        assert_eq!(model.cursor(), SourceOffset::new(4));
         assert!(model.undo());
         assert_eq!(model.text(), "");
         assert!(!model.undo());
         assert!(model.redo());
         assert!(model.redo());
         assert_eq!(model.text(), "one two");
-        assert_eq!(model.cursor(), 7);
+        assert_eq!(model.cursor(), SourceOffset::new(7));
         assert!(!model.redo());
     }
 
@@ -759,18 +767,18 @@ mod tests {
         assert_eq!(model.text(), "d");
         model.undo();
         assert_eq!(model.text(), "abcd");
-        assert_eq!(model.cursor(), 2);
+        assert_eq!(model.cursor(), SourceOffset::new(2));
     }
 
     #[test]
     fn undo_puts_back_the_cursor_and_the_selection() {
         let mut model = Model::new("one two");
-        model.select(4..7);
+        model.select(SourceOffset::range(4..7));
         model.toggle_format(Format::Bold);
-        model.set_cursor(0, Selection::Collapse);
+        model.set_cursor(SourceOffset::new(0), Selection::Collapse);
         model.undo();
         assert_eq!(model.text(), "one two");
-        assert_eq!(model.selection(), 4..7);
+        assert_eq!(model.selection(), SourceOffset::range(4..7));
     }
 
     #[test]
@@ -787,11 +795,11 @@ mod tests {
     fn a_reload_is_one_undo_step_and_keeps_the_cursor_near() {
         let mut model = model_at("one two three", 10);
         assert!(model.reload("one 2 three"));
-        assert_eq!(model.cursor(), 8);
+        assert_eq!(model.cursor(), SourceOffset::new(8));
         assert!(!model.reload("one 2 three"));
         model.undo();
         assert_eq!(model.text(), "one two three");
-        assert_eq!(model.cursor(), 10);
+        assert_eq!(model.cursor(), SourceOffset::new(10));
         assert!(model.reload("é"));
         assert!(model.reload("è"));
         assert_eq!(model.text(), "è");
@@ -801,11 +809,11 @@ mod tests {
     fn lines_have_no_line_break() {
         let model = Model::new("one\ntwo\n");
         assert_eq!(model.line_count(), 3);
-        assert_eq!(model.line_range(0), 0..3);
-        assert_eq!(model.line_range(1), 4..7);
-        assert_eq!(model.line_range(2), 8..8);
-        assert_eq!(model.line_of(3), 0);
-        assert_eq!(model.line_of(4), 1);
+        assert_eq!(model.line_range(0), SourceOffset::range(0..3));
+        assert_eq!(model.line_range(1), SourceOffset::range(4..7));
+        assert_eq!(model.line_range(2), SourceOffset::range(8..8));
+        assert_eq!(model.line_of(SourceOffset::new(3)), 0);
+        assert_eq!(model.line_of(SourceOffset::new(4)), 1);
     }
 
     #[test]
@@ -816,10 +824,10 @@ mod tests {
         assert_eq!(line.shown.text, "a b c");
         assert_eq!(line.shown.runs.len(), 3);
         assert!(line.shown.runs[1].look.styles.contains(Styles::STRONG));
-        assert_eq!(line.to_source(2), 4);
-        assert_eq!(line.to_source(3), 7);
-        assert_eq!(line.to_display(4), 2);
-        assert_eq!(line.to_display(2), 2);
+        assert_eq!(line.to_source(2), SourceOffset::new(4));
+        assert_eq!(line.to_source(3), SourceOffset::new(7));
+        assert_eq!(line.to_display(SourceOffset::new(4)), 2);
+        assert_eq!(line.to_display(SourceOffset::new(2)), 2);
     }
 
     #[test]
@@ -829,13 +837,13 @@ mod tests {
         assert_eq!(line.syntax, Syntax::Shown);
         assert_eq!(line.shown.text, "a **b** c");
         assert_eq!(line.shown.runs[1].look.kind, TextKind::Syntax);
-        assert_eq!(line.to_source(5), 5);
+        assert_eq!(line.to_source(5), SourceOffset::new(5));
     }
 
     #[test]
     fn a_selection_shows_syntax_on_each_line_it_touches() {
         let mut model = Model::new("**a**\n**b**\n**c**");
-        model.select(2..8);
+        model.select(SourceOffset::range(2..8));
         assert_eq!(model.display_line(0, &mut plain_chip).syntax, Syntax::Shown);
         assert_eq!(model.display_line(1, &mut plain_chip).syntax, Syntax::Shown);
         assert_eq!(model.display_line(2, &mut plain_chip).syntax, Syntax::Hidden);
@@ -865,9 +873,12 @@ mod tests {
         assert_eq!(&line.shown.text[..chip.range.start], "See ");
         assert_eq!(&line.shown.text[chip.range.end..], " now");
         let bang = text.find('!').unwrap_or_default();
-        assert_eq!(line.to_source(chip.range.start), bang);
-        assert_eq!(line.to_display(bang + 3), chip.range.start);
-        assert_eq!(line.to_source(chip.range.end), text.find(" now").unwrap_or_default());
+        assert_eq!(line.to_source(chip.range.start), SourceOffset::new(bang));
+        assert_eq!(line.to_display(SourceOffset::new(bang + 3)), chip.range.start);
+        assert_eq!(
+            line.to_source(chip.range.end),
+            SourceOffset::new(text.find(" now").unwrap_or_default())
+        );
     }
 
     #[test]
@@ -883,8 +894,8 @@ mod tests {
             assert_eq!(line.to_source(chip.range.end), end, "{text:?}");
             assert_eq!(line.to_display(end), chip.range.end, "{text:?}");
             let bang = text.find('!').unwrap_or_default();
-            assert_eq!(line.to_source(chip.range.start), bang, "{text:?}");
-            assert_eq!(line.to_display(bang), chip.range.start, "{text:?}");
+            assert_eq!(line.to_source(chip.range.start), SourceOffset::new(bang), "{text:?}");
+            assert_eq!(line.to_display(SourceOffset::new(bang)), chip.range.start, "{text:?}");
         }
     }
 
@@ -907,10 +918,10 @@ mod tests {
     #[test]
     fn splices_join_into_one_changed_range() {
         let mut model = Model::new("abcdefgh");
-        model.splice(6..7, "XYZ");
-        model.splice(1..3, "");
+        model.splice(SourceOffset::range(6..7), "XYZ");
+        model.splice(SourceOffset::range(1..3), "");
         assert_eq!(model.text(), "adefXYZh");
-        assert_eq!(model.changed, Some((1..7, 7)));
+        assert_eq!(model.changed, Some((SourceOffset::range(1..7), SourceOffset::new(7))));
         model.reparse();
         assert_eq!(model.changed, None);
     }
@@ -918,8 +929,8 @@ mod tests {
     #[test]
     fn utf16_offsets_round_trip() {
         let model = Model::new("a🙂b");
-        assert_eq!(model.offset_to_utf16(5), Utf16Offset(3));
-        assert_eq!(model.utf16_to_offset(Utf16Offset(3)), 5);
+        assert_eq!(model.offset_to_utf16(SourceOffset::new(5)), Utf16Offset(3));
+        assert_eq!(model.utf16_to_offset(Utf16Offset(3)), SourceOffset::new(5));
     }
 
     fn text() -> impl Strategy<Value = String> {
@@ -996,7 +1007,7 @@ mod tests {
             }
             Op::Left(selection) => model.move_left(selection),
             Op::Right(selection) => model.move_right(selection),
-            Op::Cursor(at, selection) => model.set_cursor(at, selection),
+            Op::Cursor(at, selection) => model.set_cursor(SourceOffset::new(at), selection),
             Op::Format(ix) => {
                 model.toggle_format(FORMATS[ix]);
             }
@@ -1025,8 +1036,8 @@ mod tests {
             let mut clock = now();
             for op in ops {
                 run(&mut model, op, &mut clock);
-                prop_assert!(model.text().is_char_boundary(model.cursor()));
-                prop_assert!(model.text().is_char_boundary(model.selection().start));
+                prop_assert!(model.text().is_char_boundary(model.cursor().get()));
+                prop_assert!(model.text().is_char_boundary(model.selection().start.get()));
                 prop_assert_eq!(model.rope.to_string(), model.text());
             }
         }
@@ -1057,7 +1068,7 @@ mod tests {
             let mut steps = 0;
             while model.undo() {
                 steps += 1;
-                prop_assert!(model.text().is_char_boundary(model.cursor()));
+                prop_assert!(model.text().is_char_boundary(model.cursor().get()));
             }
             let start = lf_only(&start).into_owned();
             prop_assert_eq!(model.text(), start);
@@ -1079,7 +1090,7 @@ mod tests {
                 for offset in (0..=display.shown.text.len()).filter(|o| display.shown.text.is_char_boundary(*o)) {
                     let mapped = display.to_source(offset);
                     prop_assert!(source.start <= mapped && mapped <= source.end);
-                    prop_assert!(model.text().is_char_boundary(mapped));
+                    prop_assert!(model.text().is_char_boundary(mapped.get()));
                     prop_assert_eq!(display.to_display(mapped), offset);
                 }
             }

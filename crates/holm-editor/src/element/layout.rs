@@ -9,7 +9,7 @@ use gpui_kit::{
     Bounds, Font, FontStyle, FontWeight, Pixels, Point, ShapedLine, StrikethroughStyle, TextRun, TextStyle, Window,
     point, px, size,
 };
-use holm_markdown::{Alignment, CalloutKind, TablePart, TaskState};
+use holm_markdown::{Alignment, CalloutKind, OffsetRange, SourceOffset, TablePart, TaskState};
 use num_traits::ToPrimitive as _;
 
 use super::flow::{ChipBox, FlowLine, Icon};
@@ -67,7 +67,7 @@ enum Lines {
 
 /// Where Up or Down puts the cursor.
 pub(crate) struct Vertical {
-    pub(crate) offset: usize,
+    pub(crate) offset: SourceOffset,
     /// The goal x for the next Up or Down.
     pub(crate) x: Pixels,
     /// As in [`LaidLine::caret`].
@@ -173,7 +173,7 @@ pub(crate) struct Shaper<'a> {
     highlighter: &'a mut Highlighter,
     theme: &'a Theme,
     /// The column widths of the tables in this frame, by the start of each table.
-    tables: HashMap<usize, Rc<[Pixels]>>,
+    tables: HashMap<SourceOffset, Rc<[Pixels]>>,
 }
 
 impl<'a> Shaper<'a> {
@@ -225,7 +225,7 @@ impl Shaper<'_> {
             block_left + base * 0.75
         } else if let Some(prefix) = display.prefix.as_ref().filter(|_| display.syntax == Syntax::Shown) {
             // The marker hangs to the left, so the text stays where the preview shows it.
-            (block_left - self.plain_text_width(&model.text()[prefix.clone()], font_size, window)).max(quote_left)
+            (block_left - self.plain_text_width(&model.text()[prefix.bytes()], font_size, window)).max(quote_left)
         } else {
             block_left
         };
@@ -378,7 +378,13 @@ impl Shaper<'_> {
     }
 
     /// Colored by the tokens of the block.
-    fn code_runs(&mut self, model: &Model, display: &DisplayLine, language: &str, code: &Range<usize>) -> Vec<TextRun> {
+    fn code_runs(
+        &mut self,
+        model: &Model,
+        display: &DisplayLine,
+        language: &str,
+        code: &Range<SourceOffset>,
+    ) -> Vec<TextRun> {
         let source = display.source();
         let text = &display.shown.text;
         let mut font = self.style.font();
@@ -392,14 +398,14 @@ impl Shaper<'_> {
             strikethrough: None,
         };
         let plain = self.theme.text;
-        if text.len() != source.len() || source.start < code.start || source.end > code.end {
+        if text.len() != source.end - source.start || source.start < code.start || source.end > code.end {
             let color = match display.syntax {
                 Syntax::Shown => self.theme.muted,
                 Syntax::Hidden => plain,
             };
             return vec![run(text.len(), color)];
         }
-        let tokens: Tokens = self.highlighter.tokens(language, &model.text()[code.clone()]);
+        let tokens: Tokens = self.highlighter.tokens(language, &model.text()[code.bytes()]);
         let start = source.start - code.start;
         let end = source.end - code.start;
         let first = tokens.partition_point(|(range, _)| range.end <= start);
@@ -452,7 +458,7 @@ impl Shaper<'_> {
     fn columns(
         &mut self,
         model: &Model,
-        table: &Range<usize>,
+        table: &Range<SourceOffset>,
         room: Pixels,
         font_size: Pixels,
         window: &Window,
@@ -864,7 +870,7 @@ impl LaidLine {
 
     /// The top and the height of the row that shows `offset`, from the top of the line. A line with no text row gives
     /// its whole text. `affinity` is as in [`Self::caret`].
-    fn row_of(&self, offset: usize, affinity: Affinity) -> (Pixels, Pixels) {
+    fn row_of(&self, offset: SourceOffset, affinity: Affinity) -> (Pixels, Pixels) {
         match self.caret(offset, affinity) {
             Some(at) => (self.pad + at.y, self.line_height),
             None => (self.pad, self.text_height),
@@ -877,7 +883,7 @@ impl LaidLine {
     }
 
     /// Where `offset` shows, from the top left of the text. `affinity` picks the row at a wrap inside a word.
-    fn caret(&self, offset: usize, affinity: Affinity) -> Option<Point<Pixels>> {
+    fn caret(&self, offset: SourceOffset, affinity: Affinity) -> Option<Point<Pixels>> {
         let text = self.text()?;
         let index = self.display.to_display(offset);
         let at = text.position_for_index(index, self.line_height)?;
@@ -891,7 +897,7 @@ impl LaidLine {
     }
 
     /// The affinity that keeps `offset`, which a point on the row at `row_y` gave, on that row.
-    fn affinity_at(&self, offset: usize, row_y: Pixels) -> Affinity {
+    fn affinity_at(&self, offset: SourceOffset, row_y: Pixels) -> Affinity {
         let shows_above = self
             .caret(offset, Affinity::RowEnd)
             .is_some_and(|at| at.y + self.line_height <= row_y);
@@ -910,7 +916,7 @@ impl Layout {
     }
 
     /// The source offset under a window point. Image space maps to the last text row above it.
-    pub(crate) fn offset_at(&self, position: Point<Pixels>) -> Option<usize> {
+    pub(crate) fn offset_at(&self, position: Point<Pixels>) -> Option<SourceOffset> {
         let local = position - self.bounds.origin;
         let line = self
             .lines
@@ -942,7 +948,7 @@ impl Layout {
     }
 
     /// The source of the `[ ]` of the task box under a window point.
-    pub(crate) fn task_at(&self, position: Point<Pixels>) -> Option<Range<usize>> {
+    pub(crate) fn task_at(&self, position: Point<Pixels>) -> Option<Range<SourceOffset>> {
         let local = position - self.bounds.origin;
         let line = self
             .lines
@@ -962,7 +968,7 @@ impl Layout {
     /// not in this layout.
     pub(crate) fn vertical(
         &self,
-        cursor: usize,
+        cursor: SourceOffset,
         affinity: Affinity,
         goal_x: Option<Pixels>,
         direction: Direction,
@@ -1019,7 +1025,12 @@ impl Layout {
 
     /// The source offset at `x` on the row of the line with the cursor where a move in `direction` enters it, and
     /// its affinity, as in [`LaidLine::caret`].
-    pub(crate) fn row_at(&self, cursor: usize, x: Pixels, direction: Direction) -> Option<(usize, Affinity)> {
+    pub(crate) fn row_at(
+        &self,
+        cursor: SourceOffset,
+        x: Pixels,
+        direction: Direction,
+    ) -> Option<(SourceOffset, Affinity)> {
         let line = self
             .lines
             .iter()
@@ -1036,7 +1047,12 @@ impl Layout {
 
     /// The source offset at `edge` of the screen row with the cursor. It returns `None` when that row is
     /// not in this layout. It also returns the affinity of the offset, as in [`LaidLine::caret`].
-    pub(crate) fn row_edge(&self, cursor: usize, affinity: Affinity, edge: Edge) -> Option<(usize, Affinity)> {
+    pub(crate) fn row_edge(
+        &self,
+        cursor: SourceOffset,
+        affinity: Affinity,
+        edge: Edge,
+    ) -> Option<(SourceOffset, Affinity)> {
         let line = self
             .lines
             .iter()
@@ -1074,7 +1090,7 @@ impl Layout {
     }
 
     /// The window bounds of the cursor, when its line is in this layout. `affinity` is as in [`LaidLine::caret`].
-    pub(crate) fn cursor_bounds(&self, cursor: usize, affinity: Affinity) -> Option<Bounds<Pixels>> {
+    pub(crate) fn cursor_bounds(&self, cursor: SourceOffset, affinity: Affinity) -> Option<Bounds<Pixels>> {
         let line = self
             .lines
             .iter()
@@ -1090,12 +1106,12 @@ impl Layout {
     }
 
     /// The window rectangles that cover `selection`.
-    pub(crate) fn selection_bounds(&self, selection: &Range<usize>) -> Vec<Bounds<Pixels>> {
+    pub(crate) fn selection_bounds(&self, selection: &Range<SourceOffset>) -> Vec<Bounds<Pixels>> {
         self.text_bounds(selection, Lines::SyntaxShown)
     }
 
     /// The rects of the find matches in this layout.
-    pub(crate) fn match_bounds(&self, matches: &[Range<usize>]) -> Vec<Bounds<Pixels>> {
+    pub(crate) fn match_bounds(&self, matches: &[Range<SourceOffset>]) -> Vec<Bounds<Pixels>> {
         let (Some(first), Some(last)) = (self.lines.first(), self.lines.last()) else {
             return Vec::new();
         };
@@ -1106,7 +1122,7 @@ impl Layout {
             .collect()
     }
 
-    fn text_bounds(&self, selection: &Range<usize>, lines: Lines) -> Vec<Bounds<Pixels>> {
+    fn text_bounds(&self, selection: &Range<SourceOffset>, lines: Lines) -> Vec<Bounds<Pixels>> {
         let mut rects = Vec::new();
         for line in self
             .lines
@@ -1172,7 +1188,7 @@ fn split(columns: &[(Pixels, Pixels)], room: Pixels, floor: Pixels) -> Vec<Pixel
     }
 }
 
-fn contains_with_end(range: &Range<usize>, offset: usize) -> bool {
+fn contains_with_end(range: &Range<SourceOffset>, offset: SourceOffset) -> bool {
     range.start <= offset && offset <= range.end
 }
 

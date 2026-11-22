@@ -84,7 +84,7 @@ pub trait OffsetRange {
 
 offset! {
     /// A byte offset into the parsed text, the body of a note.
-    #[derive(Default)]
+    #[derive(Default, Hash)]
     pub struct SourceOffset;
 }
 
