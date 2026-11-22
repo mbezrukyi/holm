@@ -232,8 +232,7 @@ impl Shaper<'_> {
                 continue;
             };
             let path = self.files.path(file);
-            #[allow(clippy::cast_precision_loss)]
-            let image_size = size(px(found.width as f32), px(found.height as f32));
+            let image_size = found.map(Pixels::from);
             let fit = (width / image_size.width).min(1.);
             let bounds = Bounds::new(
                 point(left, height + IMAGE_MARGIN),

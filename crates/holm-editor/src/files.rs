@@ -9,7 +9,7 @@ use gpui_kit::Size;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FileKind {
     /// An image, with its size in pixels.
-    Image(Size<u32>),
+    Image(Size<usize>),
     Folder,
     /// Any other file, with its size in bytes.
     File(u64),
@@ -27,8 +27,8 @@ impl FileKind {
         }
         imagesize::size(path).map_or(Self::File(meta.len()), |found| {
             Self::Image(Size {
-                width: u32::try_from(found.width).unwrap_or(u32::MAX),
-                height: u32::try_from(found.height).unwrap_or(u32::MAX),
+                width: found.width,
+                height: found.height,
             })
         })
     }
