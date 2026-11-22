@@ -401,13 +401,11 @@ fn note_info(reader: &mut NoteReader, row: &rusqlite::Row<'_>) -> rusqlite::Resu
         id: row.get::<_, Option<String>>(1)?.map(NoteId::new),
         title: row.get(2)?,
         preview: row.get(5)?,
-        tags: tags
-            .map(|tags| {
-                tags.split('\n')
-                    .map(|tag| TagName::from_written(tag.to_owned()))
-                    .collect()
-            })
-            .unwrap_or_default(),
+        tags: tags.map_or_default(|tags| {
+            tags.split('\n')
+                .map(|tag| TagName::from_written(tag.to_owned()))
+                .collect()
+        }),
         pinned: row.get(3)?,
         modified: time(row.get(4)?),
     })

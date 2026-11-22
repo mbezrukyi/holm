@@ -95,7 +95,7 @@ impl Frontmatter {
     }
 
     pub(crate) fn tags(&self) -> Vec<String> {
-        self.raw(Key::Tags).map(read_tags).unwrap_or_default()
+        self.raw(Key::Tags).map_or_default(read_tags)
     }
 
     /// `None` removes the field. The new field takes the place of the old one. A field that was not there goes after

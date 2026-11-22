@@ -309,11 +309,7 @@ impl SettingsDialog {
     fn control(&self, row: Row, settings: &Settings, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         match row {
             Row::Folder => {
-                let folder = settings
-                    .notes_folder
-                    .as_deref()
-                    .map(text::home_path)
-                    .unwrap_or_default();
+                let folder = settings.notes_folder.as_deref().map_or_default(text::home_path);
                 let theme = cx.theme();
                 let (muted, mono) = (theme.muted_foreground, theme.mono_font_family.clone());
                 // The button shrinks below the width of its path, so a long path ends in "…".

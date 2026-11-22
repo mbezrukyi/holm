@@ -74,7 +74,7 @@ mod tests {
     fn the_kind_of_a_path_comes_from_the_disk() {
         assert_eq!(FileKind::of(&data("data")), FileKind::Folder);
         let path = data("data/chunk.md");
-        let size = path.metadata().map(|meta| meta.len()).unwrap_or_default();
+        let size = path.metadata().map_or_default(|meta| meta.len());
         assert_eq!(FileKind::of(&path), FileKind::File(size));
         assert_eq!(FileKind::of(&data("data/gone.pdf")), FileKind::Missing);
         assert!(matches!(FileKind::of(&data("data/cat.png")), FileKind::Image(_)));

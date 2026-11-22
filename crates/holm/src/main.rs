@@ -59,7 +59,10 @@ use window::Startup;
 fn main() -> ExitCode {
     let startup = match start() {
         Ok(startup) => startup,
-        Err(error) => return fail(&error),
+        Err(error) => {
+            fail(&error);
+            return ExitCode::FAILURE;
+        }
     };
     let failed = Rc::new(Cell::new(false));
     gpui_kit::application().with_assets(icons::Icons).run({
@@ -83,10 +86,9 @@ fn main() -> ExitCode {
     }
 }
 
-fn fail(error: &AppError) -> ExitCode {
+fn fail(error: &AppError) {
     tracing::error!(error = %chain(error), "Holm cannot start");
     eprintln!("{}", error.message());
-    ExitCode::FAILURE
 }
 
 fn start() -> Result<Startup, AppError> {

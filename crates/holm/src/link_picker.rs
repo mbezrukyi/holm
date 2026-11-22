@@ -34,8 +34,7 @@ impl LinkStart {
         let query = match target {
             Some(Target::Note { id, heading }) => snapshot
                 .note_with_id(&NoteId::new(id.clone()))
-                .map(|note| Query::text(Some(&note.title), heading.as_deref()))
-                .unwrap_or_default(),
+                .map_or_default(|note| Query::text(Some(&note.title), heading.as_deref())),
             Some(Target::Heading(heading)) => Query::text(None, Some(heading)),
             _ => String::new(),
         };

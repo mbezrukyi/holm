@@ -667,7 +667,7 @@ impl Editor {
 
     fn paste(&mut self, cx: &mut Context<Self>) {
         let item = cx.read_from_clipboard();
-        let files = item.as_ref().map(pasted_files).unwrap_or_default();
+        let files = item.as_ref().map_or_default(pasted_files);
         if !files.is_empty() {
             cx.emit(PasteFiles { files });
             return;

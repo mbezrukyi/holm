@@ -300,8 +300,7 @@ impl EventEmitter<LinksEvent> for Links {}
 /// For the text of a link to it.
 fn file_name(path: &Path) -> String {
     path.file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default()
+        .map_or_default(|name| name.to_string_lossy().into_owned())
 }
 
 /// The editor target of a broken link from the core.

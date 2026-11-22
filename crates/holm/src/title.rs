@@ -57,10 +57,7 @@ impl<T: Clone + 'static> TitleField<T> {
     }
 
     fn title(&self) -> String {
-        self.path
-            .as_ref()
-            .map(|path| path.title().into_owned())
-            .unwrap_or_default()
+        self.path.as_ref().map_or_default(|path| path.title().into_owned())
     }
 
     /// Opens the field with the title, selected, and gives it the focus. An open field only gets the focus.
@@ -103,17 +100,13 @@ impl<T: 'static> EventEmitter<NameEvent<T>> for TitleField<T> {}
 impl<T: Clone + 'static> Render for TitleField<T> {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
-        let folders: Vec<String> = self
-            .path
-            .as_ref()
-            .map(|path| {
-                let folder = path.folder();
-                Path::new(folder.as_ref())
-                    .iter()
-                    .map(|part| part.to_string_lossy().into_owned())
-                    .collect()
-            })
-            .unwrap_or_default();
+        let folders: Vec<String> = self.path.as_ref().map_or_default(|path| {
+            let folder = path.folder();
+            Path::new(folder.as_ref())
+                .iter()
+                .map(|part| part.to_string_lossy().into_owned())
+                .collect()
+        });
         let title = self.title();
         let label = folders
             .iter()
