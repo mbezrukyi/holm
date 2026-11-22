@@ -33,16 +33,15 @@ impl Model {
 /// The ATX heading level of `line`, and the length of its `#`s and the spaces after them.
 fn heading_prefix(line: &str) -> (u8, usize) {
     let hashes = line.bytes().take_while(|b| *b == b'#').count();
-    if !(1..=6).contains(&hashes) {
+    let Ok(level @ 1..=6) = u8::try_from(hashes) else {
         return (0, 0);
-    }
+    };
     let rest = &line[hashes..];
     if !rest.is_empty() && !rest.starts_with(' ') {
         return (0, 0);
     }
     let spaces = rest.bytes().take_while(|b| *b == b' ').count();
-    #[allow(clippy::cast_possible_truncation, reason = "at most 6")]
-    (hashes as u8, hashes + spaces)
+    (level, hashes + spaces)
 }
 
 impl Model {
