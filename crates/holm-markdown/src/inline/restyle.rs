@@ -556,17 +556,21 @@ fn change(text: &str, body: &Body, selection: &Range<usize>, format: Format) -> 
     };
     let mut changes = Vec::with_capacity(works.len());
     for work in &works {
-        if let Some(change) = leaf_change(text, work, body, action)? {
+        if let Rewrite::Changed(change) = leaf_change(text, work, body, action)? {
             changes.push(change);
         }
     }
     (!changes.is_empty()).then_some(changes)
 }
 
-/// The change to one leaf. It is `None` when no valid Markdown gives the wanted styles. It is
-/// `Some(None)` when the leaf stays as it is.
-#[allow(clippy::option_option, reason = "the two kinds of nothing differ")]
-fn leaf_change(text: &str, work: &Work<'_>, body: &Body, action: Action) -> Option<Option<Change>> {
+/// A leaf written again with the wanted styles.
+enum Rewrite {
+    Unchanged,
+    Changed(Change),
+}
+
+/// The change to one leaf. It is `None` when no valid Markdown gives the wanted styles.
+fn leaf_change(text: &str, work: &Work<'_>, body: &Body, action: Action) -> Option<Rewrite> {
     let (path, range) = region(&work.nodes, &work.selection, action)?;
     let whole = path.is_empty() && range == (0..work.nodes.len());
     write_region(text, work, body, action, &path, range).or_else(|| {
@@ -580,7 +584,6 @@ fn leaf_change(text: &str, work: &Work<'_>, body: &Body, action: Action) -> Opti
 }
 
 /// The change from writing `range` of the node list at `path` again.
-#[allow(clippy::option_option, reason = "the two kinds of nothing differ")]
 fn write_region(
     text: &str,
     work: &Work<'_>,
@@ -588,7 +591,7 @@ fn write_region(
     action: Action,
     path: &[usize],
     range: Range<usize>,
-) -> Option<Option<Change>> {
+) -> Option<Rewrite> {
     let mut list = work.nodes.as_slice();
     let mut outer = Vec::new();
     for &k in path {
@@ -658,14 +661,14 @@ fn write_region(
             continue;
         }
         if out == work.joined[region.clone()] {
-            return Some(None);
+            return Some(Rewrite::Unchanged);
         }
         let exact = !policy.escape;
         let change = source_change(text, work, &region, &out, &pieces, &at, exact);
         if !keeps_blocks(text, body, &join(text, std::slice::from_ref(&change), 0..0)) {
             continue;
         }
-        return Some(Some(change));
+        return Some(Rewrite::Changed(change));
     }
     None
 }
