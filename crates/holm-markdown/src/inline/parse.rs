@@ -7,6 +7,7 @@ use std::ops::Range;
 use super::html_tag::{self, HtmlTag};
 use super::scan::{self, Autolink, InlineLink};
 use super::{Destination, Kind, Node};
+use crate::LinkKind;
 use crate::body::link;
 
 /// The link reference definitions of a note: each normalized label with its destination.
@@ -122,13 +123,6 @@ struct Delim {
     dead: bool,
 }
 
-/// What a bracket opens: `[` a link, `![` an image.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum BracketKind {
-    Link,
-    Image,
-}
-
 /// Which side of a style a delimiter stands on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Side {
@@ -137,20 +131,18 @@ enum Side {
 }
 
 struct Bracket {
-    kind: BracketKind,
+    kind: LinkKind,
     start: usize,
     active: bool,
     /// How many delimiters stood before it.
     delims: usize,
 }
 
-impl BracketKind {
-    /// The length of the opener in bytes.
-    fn len(self) -> usize {
-        match self {
-            Self::Link => 1,
-            Self::Image => 2,
-        }
+/// The length of `[` or `![`.
+fn opener_len(kind: LinkKind) -> usize {
+    match kind {
+        LinkKind::Plain => 1,
+        LinkKind::Embedded => 2,
     }
 }
 
@@ -218,13 +210,13 @@ impl Parser<'_> {
                 }
                 b'[' => {
                     self.flush(text_start..p);
-                    self.push_bracket(BracketKind::Link, p);
+                    self.push_bracket(LinkKind::Plain, p);
                     p += 1;
                     text_start = p;
                 }
                 b'!' if b.get(p + 1) == Some(&b'[') => {
                     self.flush(text_start..p);
-                    self.push_bracket(BracketKind::Image, p);
+                    self.push_bracket(LinkKind::Embedded, p);
                     p += 2;
                     text_start = p;
                 }
@@ -317,7 +309,7 @@ impl Parser<'_> {
         self.delims.push(at);
     }
 
-    fn push_bracket(&mut self, kind: BracketKind, start: usize) {
+    fn push_bracket(&mut self, kind: LinkKind, start: usize) {
         let delims = self.delims.len();
         let at = self.push(Item::Bracket(Bracket {
             kind,
@@ -381,12 +373,12 @@ impl Parser<'_> {
             self.brackets.pop();
             return None;
         };
-        let (bracket_kind, start, active, delims) = (bracket.kind, bracket.start, bracket.active, bracket.delims);
+        let (link_kind, start, active, delims) = (bracket.kind, bracket.start, bracket.active, bracket.delims);
         if !active {
             self.brackets.pop();
             return None;
         }
-        let content = start + bracket_kind.len()..p;
+        let content = start + opener_len(link_kind)..p;
         let Some((end, destination)) = self.link_after(content.clone(), p) else {
             self.brackets.pop();
             return None;
@@ -394,9 +386,9 @@ impl Parser<'_> {
         self.flush(text_start..p);
         self.process_emphasis(delims);
         let children = finish(self.text, self.take_after(at, NONE));
-        let kind = match bracket_kind {
-            BracketKind::Image => Kind::Image(Box::new(destination)),
-            BracketKind::Link => Kind::Link(Box::new(destination)),
+        let kind = match link_kind {
+            LinkKind::Embedded => Kind::Image(Box::new(destination)),
+            LinkKind::Plain => Kind::Link(Box::new(destination)),
         };
         self.slots[at].item = Item::Node(Node {
             kind,
@@ -405,10 +397,10 @@ impl Parser<'_> {
             children,
         });
         self.brackets.pop();
-        if bracket_kind == BracketKind::Link {
+        if link_kind == LinkKind::Plain {
             for &earlier in &self.brackets {
                 if let Item::Bracket(b) = &mut self.slots[earlier].item
-                    && b.kind == BracketKind::Link
+                    && b.kind == LinkKind::Plain
                 {
                     b.active = false;
                 }
@@ -591,7 +583,7 @@ impl Parser<'_> {
                 Item::Node(node) => nodes.push(node),
                 Item::Delim(d) if !d.range.is_empty() => nodes.push(text_node(d.range)),
                 Item::Bracket(b) => {
-                    nodes.push(text_node(b.start..b.start + b.kind.len()));
+                    nodes.push(text_node(b.start..b.start + opener_len(b.kind)));
                 }
                 Item::Delim(_) | Item::Gone => {}
             }
