@@ -18,10 +18,17 @@ const CHIP_RADIUS: Pixels = px(4.);
 const CHIP_FONT_SIZE: Pixels = px(12.5);
 const ELLIPSIS: &str = "…";
 
+/// A path shows in a chip.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind {
+    Plain,
+    Path,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum Part {
-    Plain(String),
-    Path(String),
+struct Part {
+    text: String,
+    kind: Kind,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -33,8 +40,14 @@ pub(crate) struct PathText {
 impl PathText {
     pub(crate) fn plain(mut self, text: &str) -> Self {
         match self.parts.last_mut() {
-            Some(Part::Plain(last)) => last.push_str(text),
-            _ => self.parts.push(Part::Plain(text.to_owned())),
+            Some(Part {
+                text: last,
+                kind: Kind::Plain,
+            }) => last.push_str(text),
+            _ => self.parts.push(Part {
+                text: text.to_owned(),
+                kind: Kind::Plain,
+            }),
         }
         self.plain = format!("{}{text}", self.plain).into();
         self
@@ -42,7 +55,10 @@ impl PathText {
 
     pub(crate) fn path(mut self, path: String) -> Self {
         self.plain = format!("{}{path}", self.plain).into();
-        self.parts.push(Part::Path(path));
+        self.parts.push(Part {
+            text: path,
+            kind: Kind::Path,
+        });
         self
     }
 
@@ -101,7 +117,7 @@ enum Mode {
 struct Piece {
     x: Pixels,
     text: String,
-    chip: bool,
+    kind: Kind,
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -110,15 +126,15 @@ struct WrapRow {
     width: Pixels,
 }
 
-/// The width of a text, in the chip font when `chip` is true.
-type Measure<'a> = &'a dyn Fn(&str, bool) -> Pixels;
+/// The width of a text in the font of its kind.
+type Measure<'a> = &'a dyn Fn(&str, Kind) -> Pixels;
 
 /// With the padding of a chip.
-fn piece_width(text: &str, chip: bool, measure: Measure<'_>) -> Pixels {
-    if chip {
-        measure(text, true) + CHIP_PAD_X * 2.
-    } else {
-        measure(text, false)
+fn piece_width(text: &str, kind: Kind, measure: Measure<'_>) -> Pixels {
+    let width = measure(text, kind);
+    match kind {
+        Kind::Plain => width,
+        Kind::Path => width + CHIP_PAD_X * 2.,
     }
 }
 
@@ -126,14 +142,10 @@ fn piece_width(text: &str, chip: bool, measure: Measure<'_>) -> Pixels {
 fn lay_out(parts: &[Part], mode: Mode, width: Option<Pixels>, measure: Measure<'_>) -> Vec<WrapRow> {
     let segs: Vec<Piece> = parts
         .iter()
-        .map(|part| match part {
-            Part::Plain(text) => (text.as_str(), false),
-            Part::Path(path) => (path.as_str(), true),
-        })
-        .map(|(text, chip)| Piece {
+        .map(|part| Piece {
             x: px(0.),
-            text: text.to_owned(),
-            chip,
+            text: part.text.clone(),
+            kind: part.kind,
         })
         .collect();
     match (mode, width) {
@@ -146,7 +158,7 @@ fn lay_out(parts: &[Part], mode: Mode, width: Option<Pixels>, measure: Measure<'
 /// A plain piece joins a plain piece before it.
 fn push(row: &mut WrapRow, piece: Piece, measure: Measure<'_>) {
     let piece = match row.pieces.pop() {
-        Some(mut last) if !last.chip && !piece.chip => {
+        Some(mut last) if last.kind == Kind::Plain && piece.kind == Kind::Plain => {
             last.text.push_str(&piece.text);
             last
         }
@@ -155,7 +167,7 @@ fn push(row: &mut WrapRow, piece: Piece, measure: Measure<'_>) {
             Piece { x: row.width, ..piece }
         }
     };
-    row.width = piece.x + piece_width(&piece.text, piece.chip, measure);
+    row.width = piece.x + piece_width(&piece.text, piece.kind, measure);
     row.pieces.push(piece);
 }
 
@@ -165,9 +177,9 @@ fn atoms(segs: Vec<Piece>, width: Pixels, measure: Measure<'_>) -> Vec<Vec<Piece
     let mut atoms = Vec::new();
     let mut atom = Vec::new();
     for seg in segs {
-        if seg.chip {
-            let text = if piece_width(&seg.text, true, measure) > width {
-                cut(&seg.text, |text| piece_width(text, true, measure) <= width)
+        if seg.kind == Kind::Path {
+            let text = if piece_width(&seg.text, Kind::Path, measure) > width {
+                cut(&seg.text, |text| piece_width(text, Kind::Path, measure) <= width)
             } else {
                 seg.text
             };
@@ -204,7 +216,7 @@ fn wrap(segs: Vec<Piece>, width: Pixels, measure: Measure<'_>) -> Vec<WrapRow> {
                 } else {
                     &piece.text
                 };
-                piece_width(text, piece.chip, measure)
+                piece_width(text, piece.kind, measure)
             })
             .fold(px(0.), |sum, width| sum + width);
         if !row.pieces.is_empty() && row.width + shown > width {
@@ -222,7 +234,7 @@ fn one_line(segs: Vec<Piece>, width: Pixels, measure: Measure<'_>) -> WrapRow {
     let mut row = WrapRow::default();
     let total = segs
         .iter()
-        .map(|seg| piece_width(&seg.text, seg.chip, measure))
+        .map(|seg| piece_width(&seg.text, seg.kind, measure))
         .fold(px(0.), |sum, width| sum + width);
     if total <= width {
         for seg in segs {
@@ -230,15 +242,15 @@ fn one_line(segs: Vec<Piece>, width: Pixels, measure: Measure<'_>) -> WrapRow {
         }
         return row;
     }
-    let ellipsis = measure(ELLIPSIS, false);
+    let ellipsis = measure(ELLIPSIS, Kind::Plain);
     for seg in segs {
-        let whole = piece_width(&seg.text, seg.chip, measure);
+        let whole = piece_width(&seg.text, seg.kind, measure);
         if row.width + whole + ellipsis <= width {
             push(&mut row, seg, measure);
             continue;
         }
         let room = width - row.width;
-        let text = cut(&seg.text, |text| piece_width(text, seg.chip, measure) <= room);
+        let text = cut(&seg.text, |text| piece_width(text, seg.kind, measure) <= room);
         push(&mut row, Piece { text, ..seg }, measure);
         break;
     }
@@ -287,11 +299,10 @@ impl PathTextStyle {
         }
     }
 
-    fn shape(&self, text: &str, chip: bool, window: &Window) -> ShapedLine {
-        let (font, font_size) = if chip {
-            (&self.chip_font, CHIP_FONT_SIZE)
-        } else {
-            (&self.font, self.font_size)
+    fn shape(&self, text: &str, kind: Kind, window: &Window) -> ShapedLine {
+        let (font, font_size) = match kind {
+            Kind::Plain => (&self.font, self.font_size),
+            Kind::Path => (&self.chip_font, CHIP_FONT_SIZE),
         };
         let run = TextRun {
             len: text.len(),
@@ -307,7 +318,7 @@ impl PathTextStyle {
     }
 
     fn lay_out(&self, text: &PathText, mode: Mode, width: Option<Pixels>, window: &Window) -> Vec<WrapRow> {
-        let measure = |text: &str, chip: bool| self.shape(text, chip, window).width();
+        let measure = |text: &str, kind: Kind| self.shape(text, kind, window).width();
         lay_out(&text.parts, mode, width, &measure)
     }
 }
@@ -325,7 +336,7 @@ impl IntoElement for PathTextElement {
     }
 }
 
-pub(crate) struct ShapedRow(Vec<(Pixels, ShapedLine, bool)>);
+pub(crate) struct ShapedRow(Vec<(Pixels, ShapedLine, Kind)>);
 
 impl Element for PathTextElement {
     type RequestLayoutState = ();
@@ -387,7 +398,7 @@ impl Element for PathTextElement {
                 ShapedRow(
                     row.pieces
                         .into_iter()
-                        .map(|piece| (piece.x, path_style.shape(&piece.text, piece.chip, window), piece.chip))
+                        .map(|piece| (piece.x, path_style.shape(&piece.text, piece.kind, window), piece.kind))
                         .collect(),
                 )
             })
@@ -406,17 +417,17 @@ impl Element for PathTextElement {
         cx: &mut App,
     ) {
         // Plain text paints with the metrics of its shaped line, so the chip uses them too.
-        let plain = path_style.shape(" ", false, window);
+        let plain = path_style.shape(" ", Kind::Plain, window);
         let (ascent, descent) = (plain.ascent, plain.descent);
         let background = cx.theme().accent;
         let line_height = path_style.line_height;
         for (ix, ShapedRow(pieces)) in rows.iter().enumerate() {
             let top = bounds.origin.y + line_height * ix;
             let baseline = top + (line_height - ascent - descent) / 2. + ascent;
-            for (x, line, chip) in pieces {
+            for (x, line, kind) in pieces {
                 let left = bounds.origin.x + *x;
                 // A failed paint only loses glyphs in this frame.
-                if *chip {
+                if *kind == Kind::Path {
                     let shift = ((ascent - descent) - (line.ascent - line.descent)) / 2.;
                     let chip_bounds = Bounds::new(
                         point(left, baseline - line.ascent - CHIP_PAD_Y),
@@ -442,7 +453,7 @@ mod tests {
     use super::*;
 
     /// 10 px for each char, in both fonts.
-    fn measure(text: &str, _chip: bool) -> Pixels {
+    fn measure(text: &str, _kind: Kind) -> Pixels {
         px(10.) * text.chars().count()
     }
 
@@ -453,11 +464,11 @@ mod tests {
             .collect()
     }
 
-    fn piece(x: f32, text: &str, chip: bool) -> Piece {
+    fn piece(x: f32, text: &str, kind: Kind) -> Piece {
         Piece {
             x: px(x),
             text: text.to_owned(),
-            chip,
+            kind,
         }
     }
 
@@ -479,9 +490,9 @@ mod tests {
         assert_eq!(
             rows(&missing(), Mode::Wrap, 1000.),
             vec![vec![
-                piece(0., "Not at ", false),
-                piece(70., "~/Gone", true),
-                piece(140., ". Pick one.", false),
+                piece(0., "Not at ", Kind::Plain),
+                piece(70., "~/Gone", Kind::Path),
+                piece(140., ". Pick one.", Kind::Plain),
             ]]
         );
     }
@@ -492,9 +503,9 @@ mod tests {
         assert_eq!(
             rows(&missing(), Mode::Wrap, 145.),
             vec![
-                vec![piece(0., "Not at ", false)],
-                vec![piece(0., "~/Gone", true), piece(70., ". Pick ", false)],
-                vec![piece(0., "one.", false)],
+                vec![piece(0., "Not at ", Kind::Plain)],
+                vec![piece(0., "~/Gone", Kind::Path), piece(70., ". Pick ", Kind::Plain)],
+                vec![piece(0., "one.", Kind::Plain)],
             ]
         );
     }
@@ -504,10 +515,10 @@ mod tests {
         assert_eq!(
             rows(&missing(), Mode::Wrap, 60.),
             vec![
-                vec![piece(0., "Not at ", false)],
-                vec![piece(0., "~/Go…", true), piece(60., ". ", false)],
-                vec![piece(0., "Pick ", false)],
-                vec![piece(0., "one.", false)],
+                vec![piece(0., "Not at ", Kind::Plain)],
+                vec![piece(0., "~/Go…", Kind::Path), piece(60., ". ", Kind::Plain)],
+                vec![piece(0., "Pick ", Kind::Plain)],
+                vec![piece(0., "one.", Kind::Plain)],
             ]
         );
     }
@@ -517,9 +528,9 @@ mod tests {
         assert_eq!(
             rows(&missing(), Mode::OneLine, 200.),
             vec![vec![
-                piece(0., "Not at ", false),
-                piece(70., "~/Gone", true),
-                piece(140., ". Pic…", false),
+                piece(0., "Not at ", Kind::Plain),
+                piece(70., "~/Gone", Kind::Path),
+                piece(140., ". Pic…", Kind::Plain),
             ]]
         );
     }
@@ -528,7 +539,7 @@ mod tests {
     fn a_cut_inside_the_path_keeps_the_chip() {
         assert_eq!(
             rows(&missing(), Mode::OneLine, 120.),
-            vec![vec![piece(0., "Not at ", false), piece(70., "~/G…", true)]]
+            vec![vec![piece(0., "Not at ", Kind::Plain), piece(70., "~/G…", Kind::Path)]]
         );
     }
 }
