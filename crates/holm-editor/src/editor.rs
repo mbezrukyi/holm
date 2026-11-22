@@ -18,7 +18,7 @@ use crate::files::{FileKind, LinkedFiles};
 use crate::find::Find;
 use crate::highlight::{self, Highlighter};
 use crate::ink;
-use crate::model::{Caret, Direction, Format, GoalRow, LinkForm, Model, Selection};
+use crate::model::{Affinity, Caret, Direction, Format, GoalRow, LinkForm, Model, Selection};
 use crate::shortcuts::{Command, Place, Run};
 
 /// Spaces that Tab types outside a list.
@@ -408,8 +408,8 @@ impl Editor {
         let Some(x) = caret.goal_x() else {
             return;
         };
-        if let Some((offset, row_start)) = layout.row_at(caret.offset(), px(x), goal.direction) {
-            let caret = Caret::at(offset).with_row_start(row_start).with_goal_x(x);
+        if let Some((offset, affinity)) = layout.row_at(caret.offset(), px(x), goal.direction) {
+            let caret = Caret::at(offset).with_affinity(affinity).with_goal_x(x);
             self.model.set_caret(caret, goal.selection);
         }
     }
@@ -691,15 +691,15 @@ impl Editor {
             "home" | "end" => {
                 let cursor = self.model.cursor();
                 let end = key == "end";
-                let row_start = self.model.caret().row_start();
-                let (offset, row_start) = self
+                let affinity = self.model.caret().affinity();
+                let (offset, affinity) = self
                     .current_layout()
-                    .and_then(|layout| layout.row_edge(cursor, row_start, end))
+                    .and_then(|layout| layout.row_edge(cursor, affinity, end))
                     .unwrap_or_else(|| {
                         let line = self.model.line_range(self.model.line_of(cursor));
-                        (if end { line.end } else { line.start }, false)
+                        (if end { line.end } else { line.start }, Affinity::RowEnd)
                     });
-                let caret = Caret::at(offset).with_row_start(row_start);
+                let caret = Caret::at(offset).with_affinity(affinity);
                 self.model.set_caret(caret, selection);
             }
             "backspace" | "delete" => {
@@ -748,11 +748,11 @@ impl Editor {
         let goal_x = caret.goal_x().map(px);
         if let Some(to) = self
             .current_layout()
-            .and_then(|layout| layout.vertical(cursor, caret.row_start(), goal_x, direction))
+            .and_then(|layout| layout.vertical(cursor, caret.affinity(), goal_x, direction))
         {
             let goal_row = to.hidden.then_some(GoalRow { direction, selection });
             let caret = Caret::at(to.offset)
-                .with_row_start(to.row_start)
+                .with_affinity(to.affinity)
                 .with_goal_x(f32::from(to.x))
                 .with_goal_row(goal_row);
             self.model.set_caret(caret, selection);
@@ -921,7 +921,7 @@ impl Render for Editor {
             // Below the cursor, or at the top of the text column when the cursor is not laid out.
             let at = self.current_layout().and_then(|layout| {
                 layout
-                    .cursor_bounds(self.model.cursor(), self.model.caret().row_start())
+                    .cursor_bounds(self.model.cursor(), self.model.caret().affinity())
                     .map(|cursor| cursor.bottom_left() + Point::new(px(0.), px(4.)))
                     .or(Some(layout.bounds.origin))
             });
@@ -1031,7 +1031,7 @@ impl EntityInputHandler for Editor {
         _cx: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
         self.current_layout()?
-            .cursor_bounds(self.model.cursor(), self.model.caret().row_start())
+            .cursor_bounds(self.model.cursor(), self.model.caret().affinity())
     }
 
     fn character_index_for_point(

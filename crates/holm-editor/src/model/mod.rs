@@ -15,7 +15,7 @@ use std::time::Instant;
 use holm_markdown::{Body, Target};
 use ropey::{LineType, Rope};
 
-pub(crate) use caret::{Caret, Direction, GoalRow, Selection};
+pub(crate) use caret::{Affinity, Caret, Direction, GoalRow, Selection};
 pub(crate) use display::{
     Cell, Chip, DisplayLine, Embed, Highlight, LineKind, LinkTarget, Look, Mark, Quote, Run, Styles, TextKind,
 };
@@ -137,7 +137,7 @@ impl Model {
         self.set_caret(Caret::at(offset), selection);
     }
 
-    /// Moves the cursor like [`Self::set_cursor`], and keeps the row start and the goals of `caret` while its offset is
+    /// Moves the cursor like [`Self::set_cursor`], and keeps the affinity and the goals of `caret` while its offset is
     /// on a char boundary.
     pub(crate) fn set_caret(&mut self, caret: Caret, selection: Selection) {
         let offset = self.floor(caret.offset());
@@ -558,20 +558,20 @@ mod tests {
             selection: Selection::Collapse,
         };
         Caret::at(offset)
-            .with_row_start(true)
+            .with_affinity(Affinity::RowStart)
             .with_goal_x(40.)
             .with_goal_row(Some(goal_row))
     }
 
     #[test]
-    fn a_row_move_keeps_the_row_start_and_the_goals() {
+    fn a_row_move_keeps_the_affinity_and_the_goals() {
         let mut model = Model::new("one two three");
         model.set_caret(row_caret(4), Selection::Collapse);
         assert_eq!(model.caret(), row_caret(4));
     }
 
     #[test]
-    fn any_other_cursor_change_drops_the_row_start_and_the_goals() {
+    fn any_other_cursor_change_drops_the_affinity_and_the_goals() {
         let mut model = Model::new("one two three");
         model.set_caret(row_caret(4), Selection::Collapse);
         model.move_right(Selection::Collapse);
@@ -587,7 +587,7 @@ mod tests {
     }
 
     #[test]
-    fn a_caret_off_a_char_boundary_drops_the_row_start_and_the_goals() {
+    fn a_caret_off_a_char_boundary_drops_the_affinity_and_the_goals() {
         let mut model = Model::new("aé");
         model.set_caret(row_caret(2), Selection::Collapse);
         assert_eq!(model.caret(), Caret::at(1));
@@ -600,7 +600,7 @@ mod tests {
         assert!(model.take_goal_row().is_some());
         assert_eq!(model.take_goal_row(), None);
         assert_eq!(model.caret().goal_x(), Some(40.));
-        assert!(model.caret().row_start());
+        assert_eq!(model.caret().affinity(), Affinity::RowStart);
     }
 
     #[test]
