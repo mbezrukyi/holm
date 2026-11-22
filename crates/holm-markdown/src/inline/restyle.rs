@@ -654,8 +654,7 @@ fn write_region(
         if out == work.joined[region.clone()] {
             return Some(Rewrite::Unchanged);
         }
-        let exact = policy.escape == Escape::None;
-        let change = source_change(text, work, &region, &out, &pieces, &at, exact);
+        let change = source_change(text, work, &region, &out, &pieces, &at, policy.escape);
         if !keeps_blocks(text, body, &join(text, std::slice::from_ref(&change), 0..0)) {
             continue;
         }
@@ -1185,7 +1184,7 @@ fn source_change(
     out: &str,
     pieces: &[Piece],
     at: &[Range<usize>],
-    exact: bool,
+    escape: Escape,
 ) -> Change {
     let leaf = work.leaf;
     let mut line = work.joined[..region.start].matches('\n').count();
@@ -1207,7 +1206,7 @@ fn source_change(
         .zip(at)
         .map(|(p, at)| {
             // A piece written as it was keeps the offsets inside it.
-            let text = exact && p.text.is_none();
+            let text = escape == Escape::None && p.text.is_none();
             (p.src.clone(), offsets[at.start]..offsets[at.end], text)
         })
         .collect();
