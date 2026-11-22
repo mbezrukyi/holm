@@ -1,3 +1,5 @@
+use gpui_kit::Pixels;
+
 /// The cursor offset, with what Up, Down, Home and End know about its screen row.
 ///
 /// [`super::Model::set_cursor`] makes a plain caret. So any other cursor change drops the affinity and the goals.
@@ -5,8 +7,8 @@
 pub(crate) struct Caret {
     offset: usize,
     affinity: Affinity,
-    /// The x that Up and Down keep, in pixels.
-    goal_x: Option<f32>,
+    /// The x that Up and Down keep.
+    goal_x: Option<Pixels>,
     goal_row: Option<GoalRow>,
 }
 
@@ -56,7 +58,7 @@ impl Caret {
         Self { affinity, ..self }
     }
 
-    pub(crate) fn with_goal_x(self, goal_x: f32) -> Self {
+    pub(crate) fn with_goal_x(self, goal_x: Pixels) -> Self {
         Self {
             goal_x: Some(goal_x),
             ..self
@@ -75,7 +77,7 @@ impl Caret {
         self.affinity
     }
 
-    pub(crate) fn goal_x(&self) -> Option<f32> {
+    pub(crate) fn goal_x(&self) -> Option<Pixels> {
         self.goal_x
     }
 

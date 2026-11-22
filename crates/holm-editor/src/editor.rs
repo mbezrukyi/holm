@@ -424,7 +424,7 @@ impl Editor {
         let Some(x) = caret.goal_x() else {
             return;
         };
-        if let Some((offset, affinity)) = layout.row_at(caret.offset(), px(x), goal.direction) {
+        if let Some((offset, affinity)) = layout.row_at(caret.offset(), x, goal.direction) {
             let caret = Caret::at(offset).with_affinity(affinity).with_goal_x(x);
             self.model.set_caret(caret, goal.selection);
         }
@@ -787,15 +787,14 @@ impl Editor {
     fn move_vertical(&mut self, direction: Direction, selection: Selection) {
         let caret = self.model.caret();
         let cursor = caret.offset();
-        let goal_x = caret.goal_x().map(px);
         if let Some(to) = self
             .current_layout()
-            .and_then(|layout| layout.vertical(cursor, caret.affinity(), goal_x, direction))
+            .and_then(|layout| layout.vertical(cursor, caret.affinity(), caret.goal_x(), direction))
         {
             let goal_row = to.hidden.then_some(GoalRow { direction, selection });
             let caret = Caret::at(to.offset)
                 .with_affinity(to.affinity)
-                .with_goal_x(f32::from(to.x))
+                .with_goal_x(to.x)
                 .with_goal_row(goal_row);
             self.model.set_caret(caret, selection);
             return;

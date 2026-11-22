@@ -549,6 +549,7 @@ mod tests {
 
     use super::*;
     use display::plain_chip;
+    use gpui_kit::px;
     use holm_markdown::list::Move;
     use proptest::prelude::*;
 
@@ -569,7 +570,7 @@ mod tests {
         };
         Caret::at(offset)
             .with_affinity(Affinity::RowStart)
-            .with_goal_x(40.)
+            .with_goal_x(px(40.))
             .with_goal_row(Some(goal_row))
     }
 
@@ -609,7 +610,7 @@ mod tests {
         model.set_caret(row_caret(4), Selection::Collapse);
         assert!(model.take_goal_row().is_some());
         assert_eq!(model.take_goal_row(), None);
-        assert_eq!(model.caret().goal_x(), Some(40.));
+        assert_eq!(model.caret().goal_x(), Some(px(40.)));
         assert_eq!(model.caret().affinity(), Affinity::RowStart);
     }
 
