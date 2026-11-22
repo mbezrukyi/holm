@@ -25,7 +25,7 @@ use holm_editor::shortcuts::{self as editor, Keys};
 
 use crate::config::{AppearanceSetting, Config, Settings};
 use crate::icons::Icon;
-use crate::list_cursor;
+use crate::list_cursor::{self, Toward};
 use crate::scale::Scale;
 use crate::shortcuts::{self, Command, Place, Run};
 use crate::{popup, text, text_field, window};
@@ -109,9 +109,9 @@ impl Row {
 }
 
 /// It wraps at the ends.
-fn next_option<T: Copy + PartialEq>(options: &[(T, &str)], current: T, forward: bool) -> T {
+fn next_option<T: Copy + PartialEq>(options: &[(T, &str)], current: T, toward: Toward) -> T {
     let at = options.iter().position(|(option, _)| *option == current);
-    let at = list_cursor::step(at, options.len(), forward, |_| true).unwrap_or(0);
+    let at = list_cursor::step(at, options.len(), toward, |_| true).unwrap_or(0);
     options[at].0
 }
 
@@ -233,8 +233,8 @@ impl SettingsDialog {
     }
 
     /// The width shows the settings again.
-    fn move_cursor(&mut self, forward: bool, cx: &mut Context<Self>) {
-        if let Some(at) = list_cursor::step(Some(self.cursor), ROWS.len(), forward, |_| true) {
+    fn move_cursor(&mut self, toward: Toward, cx: &mut Context<Self>) {
+        if let Some(at) = list_cursor::step(Some(self.cursor), ROWS.len(), toward, |_| true) {
             self.cursor = at;
             self.reset_chars(cx);
             cx.notify();
@@ -242,15 +242,15 @@ impl SettingsDialog {
     }
 
     /// The options wrap.
-    fn pick_option(&mut self, forward: bool, cx: &mut App) {
+    fn pick_option(&mut self, toward: Toward, cx: &mut App) {
         match self.row() {
             Row::Theme => self.change(
-                |settings| settings.theme = next_option(&THEMES, settings.theme, forward),
+                |settings| settings.theme = next_option(&THEMES, settings.theme, toward),
                 cx,
             ),
             Row::Scale => self.change(
                 |settings| {
-                    settings.scale = next_option(Scale::options(), settings.scale, forward);
+                    settings.scale = next_option(Scale::options(), settings.scale, toward);
                 },
                 cx,
             ),
@@ -258,14 +258,14 @@ impl SettingsDialog {
                 self.change(
                     |settings| {
                         let width = &mut settings.text_width;
-                        width.limited = next_option(&WIDTHS, width.limited, forward);
+                        width.limited = next_option(&WIDTHS, width.limited, toward);
                     },
                     cx,
                 );
                 self.reset_chars(cx);
             }
             Row::Order => self.change(
-                |settings| settings.note_order = next_option(&ORDERS, settings.note_order, forward),
+                |settings| settings.note_order = next_option(&ORDERS, settings.note_order, toward),
                 cx,
             ),
             _ => {}
@@ -286,16 +286,16 @@ impl SettingsDialog {
     fn run(&mut self, Run(command): &Run, _window: &mut Window, cx: &mut Context<Self>) {
         let row = self.row();
         match command {
-            Command::Next => self.move_cursor(true, cx),
-            Command::Previous => self.move_cursor(false, cx),
+            Command::Next => self.move_cursor(Toward::Next, cx),
+            Command::Previous => self.move_cursor(Toward::Previous, cx),
             Command::Switch => match row {
                 Row::Folder => self.pick_folder(cx),
                 Row::Theme | Row::Scale | Row::TextWidth | Row::Order => {
-                    self.pick_option(true, cx);
+                    self.pick_option(Toward::Next, cx);
                 }
                 Row::FormatKeys | Row::ContinueLists | Row::IndentLists => self.toggle(row, cx),
             },
-            Command::SwitchBack => self.pick_option(false, cx),
+            Command::SwitchBack => self.pick_option(Toward::Previous, cx),
             Command::ChangeFolder => {
                 if row == Row::Folder {
                     self.pick_folder(cx);

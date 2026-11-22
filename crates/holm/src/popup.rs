@@ -18,7 +18,7 @@ use holm_core::NotePath;
 use holm_core::model::NoteInfo;
 
 use crate::icons::Icon;
-use crate::list_cursor;
+use crate::list_cursor::{self, Toward};
 use crate::shortcuts::{Command, Place, Run};
 use crate::text;
 
@@ -189,8 +189,8 @@ impl PickList {
         (self.cursor < self.rows.len()).then_some(self.cursor)
     }
 
-    fn step(&mut self, forward: bool, cx: &mut Context<Self>) {
-        if let Some(at) = list_cursor::step(self.cursor(), self.rows.len(), forward, |_| true) {
+    fn step(&mut self, toward: Toward, cx: &mut Context<Self>) {
+        if let Some(at) = list_cursor::step(self.cursor(), self.rows.len(), toward, |_| true) {
             self.cursor = at;
             self.scroll.scroll_to_item(at, ScrollStrategy::Nearest);
             cx.notify();
@@ -199,8 +199,8 @@ impl PickList {
 
     fn run(&mut self, Run(command): &Run, _: &mut Window, cx: &mut Context<Self>) {
         match command {
-            Command::Previous => self.step(false, cx),
-            Command::Next => self.step(true, cx),
+            Command::Previous => self.step(Toward::Previous, cx),
+            Command::Next => self.step(Toward::Next, cx),
             Command::Pick => {
                 if let Some(at) = self.cursor() {
                     cx.emit(PickEvent::Pick(at));

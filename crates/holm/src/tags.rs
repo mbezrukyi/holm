@@ -38,7 +38,7 @@ use holm_core::{NotePath, TagName};
 use crate::backlinks::{self, Backlinks};
 use crate::core_door::CoreDoor;
 use crate::fold::Fold;
-use crate::list_cursor;
+use crate::list_cursor::{self, Toward};
 use crate::lowercase::Lowercase;
 use crate::popup::{self, Dropdown};
 use crate::shortcuts::{Command, Place, Run};
@@ -204,8 +204,8 @@ impl TagRow {
         lines
     }
 
-    fn move_cursor(&mut self, forward: bool, cx: &mut Context<Self>) {
-        if let Some(at) = list_cursor::step(self.cursor, self.lines().len(), forward, |_| true) {
+    fn move_cursor(&mut self, toward: Toward, cx: &mut Context<Self>) {
+        if let Some(at) = list_cursor::step(self.cursor, self.lines().len(), toward, |_| true) {
             self.cursor = Some(at);
             cx.notify();
         }
@@ -240,8 +240,8 @@ impl TagRow {
         match command {
             Command::Pick => self.choose(window, cx),
             Command::Close => self.close(window, cx),
-            Command::Previous => self.move_cursor(false, cx),
-            Command::Next => self.move_cursor(true, cx),
+            Command::Previous => self.move_cursor(Toward::Previous, cx),
+            Command::Next => self.move_cursor(Toward::Next, cx),
             Command::Rename => self.rename(window, cx),
             _ => cx.propagate(),
         }

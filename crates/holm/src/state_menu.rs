@@ -16,7 +16,7 @@ use gpui_kit::{
     Window, anchored, deferred, div, point, px,
 };
 
-use crate::list_cursor;
+use crate::list_cursor::{self, Toward};
 use crate::popup::{self, Dropdown};
 use crate::shortcuts::{Command, Place, Run};
 
@@ -112,9 +112,13 @@ impl StateMenu {
             Command::Pick => self.pick(self.cursor, window, cx),
             Command::Close => self.close(window, cx),
             Command::Next | Command::Previous => {
-                let forward = *command == Command::Next;
+                let toward = if *command == Command::Next {
+                    Toward::Next
+                } else {
+                    Toward::Previous
+                };
                 let len = self.choices();
-                if let Some(at) = list_cursor::step(Some(self.cursor), len, forward, |_| true) {
+                if let Some(at) = list_cursor::step(Some(self.cursor), len, toward, |_| true) {
                     self.cursor = at;
                 }
             }

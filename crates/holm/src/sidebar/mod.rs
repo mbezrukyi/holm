@@ -33,7 +33,7 @@ use crate::config::{Config, SavedSidebarView};
 use crate::core_door::{CoreDoor, Done, DoorEvent, Then};
 use crate::error::AppError;
 use crate::icons::Icon;
-use crate::list_cursor;
+use crate::list_cursor::{self, Toward};
 use crate::name_field::{NameEvent, NameField, NameWrite, Wording};
 use crate::pane::{NotePane, PaneEvent};
 use crate::shortcuts::{Command, Place, Run};
@@ -647,8 +647,12 @@ impl Sidebar {
             Command::Next | Command::Previous => {
                 let at = self.tree.row_of(&item);
                 let len = self.tree.rows.len();
-                let forward = command == Command::Next;
-                if let Some(next) = list_cursor::step(at, len, forward, |_| true) {
+                let toward = if command == Command::Next {
+                    Toward::Next
+                } else {
+                    Toward::Previous
+                };
+                if let Some(next) = list_cursor::step(at, len, toward, |_| true) {
                     let item = self.tree.rows[next].item.clone();
                     self.set_view(SidebarView::Tree(item), cx);
                 }
@@ -684,8 +688,12 @@ impl Sidebar {
     fn list_command(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) -> bool {
         match command {
             Command::Next | Command::Previous => {
-                let forward = command == Command::Next;
-                let next = list_cursor::step(self.selected_note(cx), self.list.len(), forward, |_| true);
+                let toward = if command == Command::Next {
+                    Toward::Next
+                } else {
+                    Toward::Previous
+                };
+                let next = list_cursor::step(self.selected_note(cx), self.list.len(), toward, |_| true);
                 if let Some(path) = next.and_then(|next| self.list.path(next)) {
                     let path = path.to_owned();
                     cx.emit(SidebarEvent::Open(path));

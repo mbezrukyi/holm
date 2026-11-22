@@ -18,7 +18,7 @@ use gpui_kit::{
 use holm_core::NotePath;
 use holm_core::model::NoteInfo;
 
-use crate::list_cursor;
+use crate::list_cursor::{self, Toward};
 use crate::popup::{self, Dropdown};
 use crate::shortcuts::{Command, Place, Run};
 use crate::text;
@@ -103,9 +103,13 @@ impl Backlinks {
             Command::Pick => self.pick(self.cursor, cx),
             Command::Close => self.close(cx),
             Command::Next | Command::Previous => {
-                let forward = *command == Command::Next;
+                let toward = if *command == Command::Next {
+                    Toward::Next
+                } else {
+                    Toward::Previous
+                };
                 let len = self.notes.len();
-                if let Some(at) = list_cursor::step(Some(self.cursor), len, forward, |_| true) {
+                if let Some(at) = list_cursor::step(Some(self.cursor), len, toward, |_| true) {
                     self.cursor = at;
                     self.scroll.scroll_to_item(at);
                 }
