@@ -2,11 +2,13 @@
 
 use holm_core::{FolderPath, Snapshot, TagName};
 use std::collections::HashSet;
+use std::ops::Range;
 
 use holm_core::model::{Change, NoteSet, Order, Tag};
 
 use super::list::NoteList;
 use crate::config::{SavedSidebarView, SidebarItem};
+use crate::list_cursor::{self, Toward};
 use crate::text;
 
 /// Each item has a note list.
@@ -134,26 +136,68 @@ pub(crate) enum Label {
     Tags,
 }
 
+/// A place in the rows of a [`Tree`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RowIndex(usize);
+
+impl RowIndex {
+    /// For an element id.
+    pub(crate) fn get(self) -> usize {
+        self.0
+    }
+}
+
+/// A place in the lines of a [`Tree`], which is the place in its uniform list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct EntryIndex(usize);
+
+impl EntryIndex {
+    /// For the uniform list.
+    pub(crate) fn get(self) -> usize {
+        self.0
+    }
+}
+
 /// One line of the tree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Entry {
     Label(Label),
-    /// The row at this place in [`Tree::rows`].
-    Row(usize),
-    /// The name field of a new folder, at this depth.
-    NewFolder(usize),
+    Row(RowIndex),
+    /// The name field of a new folder.
+    NewFolder {
+        depth: usize,
+    },
 }
 
 /// The visible tree: its rows, and its lines with the group labels between the rows.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Tree {
-    pub(crate) rows: Vec<TreeRow>,
-    pub(crate) entries: Vec<Entry>,
+    rows: Vec<TreeRow>,
+    entries: Vec<Entry>,
 }
 
 impl Tree {
-    pub(crate) fn row_of(&self, item: &Item) -> Option<usize> {
-        self.rows.iter().position(|row| row.item == *item)
+    pub(crate) fn row(&self, at: RowIndex) -> &TreeRow {
+        &self.rows[at.0]
+    }
+
+    pub(crate) fn row_of(&self, item: &Item) -> Option<RowIndex> {
+        self.rows.iter().position(|row| row.item == *item).map(RowIndex)
+    }
+
+    /// The row after `at`, or before it toward [`Toward::Previous`], and wrapping.
+    pub(crate) fn step(&self, at: Option<RowIndex>, toward: Toward) -> Option<RowIndex> {
+        list_cursor::step(at.map(|at| at.0), self.rows.len(), toward, |_| true).map(RowIndex)
+    }
+
+    /// The count of lines.
+    pub(crate) fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// The lines at the places `range` of the uniform list.
+    pub(crate) fn entries_in(&self, range: Range<usize>) -> impl Iterator<Item = Entry> {
+        range.filter_map(|at| self.entries.get(at).copied())
     }
 
     fn add_new_folder(&mut self, parent: &FolderPath) {
@@ -162,22 +206,24 @@ impl Tree {
             self.entries
                 .iter()
                 .position(|entry| *entry == Entry::Label(Label::Folders))
+                .map(EntryIndex)
         } else {
             self.entry_of(&Item::Folder(parent.clone()))
         };
         if let Some(at) = at {
-            self.entries.insert(at + 1, Entry::NewFolder(depth));
+            self.entries.insert(at.0 + 1, Entry::NewFolder { depth });
         } else {
             // With no folders, the label comes after "All notes".
-            self.entries.insert(1, Entry::NewFolder(depth));
+            self.entries.insert(1, Entry::NewFolder { depth });
             self.entries.insert(1, Entry::Label(Label::Folders));
         }
     }
 
-    pub(crate) fn entry_of(&self, item: &Item) -> Option<usize> {
+    pub(crate) fn entry_of(&self, item: &Item) -> Option<EntryIndex> {
         self.entries
             .iter()
-            .position(|entry| matches!(entry, Entry::Row(at) if self.rows[*at].item == *item))
+            .position(|entry| matches!(entry, Entry::Row(at) if self.row(*at).item == *item))
+            .map(EntryIndex)
     }
 }
 
@@ -264,7 +310,7 @@ impl Lists {
                 }
                 _ => {}
             }
-            entries.push(Entry::Row(at));
+            entries.push(Entry::Row(RowIndex(at)));
         }
         let mut tree = Tree { rows, entries };
         if let Some(parent) = new_folder {
@@ -417,28 +463,34 @@ mod tests {
         assert_eq!(
             tree.entries,
             [
-                Entry::Row(0),
+                Entry::Row(RowIndex(0)),
                 Entry::Label(Label::Folders),
-                Entry::Row(1),
-                Entry::Row(2),
+                Entry::Row(RowIndex(1)),
+                Entry::Row(RowIndex(2)),
                 Entry::Label(Label::Tags),
-                Entry::Row(3),
-                Entry::Row(4),
+                Entry::Row(RowIndex(3)),
+                Entry::Row(RowIndex(4)),
             ]
         );
-        assert_eq!(tree.entry_of(&Item::Tag(tag_name("work"))), Some(5));
-        assert_eq!(tree.row_of(&Item::Tag(tag_name("work"))), Some(3));
+        assert_eq!(tree.entry_of(&Item::Tag(tag_name("work"))), Some(EntryIndex(5)));
+        assert_eq!(tree.row_of(&Item::Tag(tag_name("work"))), Some(RowIndex(3)));
     }
 
     #[test]
     fn a_new_folder_is_the_first_child_line_of_its_parent() {
         let root = lists().tree(&HashSet::new(), Some(&FolderPath::root()));
-        assert_eq!(&root.entries[1..3], [Entry::Label(Label::Folders), Entry::NewFolder(0)]);
-        assert_eq!(root.entries[3], Entry::Row(1));
+        assert_eq!(
+            &root.entries[1..3],
+            [Entry::Label(Label::Folders), Entry::NewFolder { depth: 0 }]
+        );
+        assert_eq!(root.entries[3], Entry::Row(RowIndex(1)));
 
         let open = HashSet::from([Item::Folder(folder_path("home"))]);
         let home = lists().tree(&open, Some(&folder_path("home")));
-        assert_eq!(&home.entries[2..4], [Entry::Row(1), Entry::NewFolder(1)]);
+        assert_eq!(
+            &home.entries[2..4],
+            [Entry::Row(RowIndex(1)), Entry::NewFolder { depth: 1 }]
+        );
         assert!(home.rows[1].open);
     }
 
@@ -447,7 +499,11 @@ mod tests {
         let tree = Lists::default().tree(&HashSet::new(), Some(&FolderPath::root()));
         assert_eq!(
             tree.entries,
-            [Entry::Row(0), Entry::Label(Label::Folders), Entry::NewFolder(0)]
+            [
+                Entry::Row(RowIndex(0)),
+                Entry::Label(Label::Folders),
+                Entry::NewFolder { depth: 0 }
+            ]
         );
     }
 

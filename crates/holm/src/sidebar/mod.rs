@@ -33,15 +33,15 @@ use crate::config::{Config, SavedSidebarView};
 use crate::core_door::{CoreDoor, Done, DoorEvent, Then};
 use crate::error::AppError;
 use crate::icons::Icon;
-use crate::list_cursor::{self, Toward};
+use crate::list_cursor::Toward;
 use crate::name_field::{NameEvent, NameField, NameWrite, Wording};
 use crate::pane::{NotePane, PaneEvent};
 use crate::shortcuts::{Command, Place, Run};
 use crate::text;
 
-use list::NoteList;
+use list::{NoteIndex, NoteList};
 pub(crate) use tree::Item;
-use tree::{Entry, Label, Lists, SidebarView, Tree};
+use tree::{Entry, EntryIndex, Label, Lists, RowIndex, SidebarView, Tree};
 
 const TREE_ROW: f32 = 28.;
 const NOTE_ROW: f32 = 52.;
@@ -319,7 +319,7 @@ impl Sidebar {
     /// `Enter` in the search field: the first result opens, and the list gets the focus.
     fn enter_results(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
-        if let Some(path) = self.list.path(0) {
+        if let Some(path) = self.list.first() {
             let path = path.to_owned();
             cx.emit(SidebarEvent::Open(path));
         }
@@ -399,8 +399,8 @@ impl Sidebar {
                 .map(|(_, next)| next.clone());
         };
         self.list
-            .path(at + 1)
-            .or_else(|| at.checked_sub(1).and_then(|before| self.list.path(before)))
+            .path(at.next())
+            .or_else(|| at.previous().and_then(|before| self.list.path(before)))
             .cloned()
     }
 
@@ -436,16 +436,16 @@ impl Sidebar {
 
     fn scroll_to_selection(&self, cx: &App) {
         let at = match &self.view {
-            _ if self.shows_list() => self.selected_note(cx),
-            SidebarView::Tree(item) => self.tree.entry_of(item),
-            SidebarView::List(_) => self.selected_note(cx),
+            _ if self.shows_list() => self.selected_note(cx).map(NoteIndex::get),
+            SidebarView::Tree(item) => self.tree.entry_of(item).map(EntryIndex::get),
+            SidebarView::List(_) => self.selected_note(cx).map(NoteIndex::get),
         };
         if let Some(at) = at {
             self.scroll.scroll_to_item(at, ScrollStrategy::Nearest);
         }
     }
 
-    fn selected_note(&self, cx: &App) -> Option<usize> {
+    fn selected_note(&self, cx: &App) -> Option<NoteIndex> {
         self.list.position(self.open_note(cx)?)
     }
 
@@ -646,19 +646,18 @@ impl Sidebar {
         match command {
             Command::Next | Command::Previous => {
                 let at = self.tree.row_of(&item);
-                let len = self.tree.rows.len();
                 let toward = if command == Command::Next {
                     Toward::Next
                 } else {
                     Toward::Previous
                 };
-                if let Some(next) = list_cursor::step(at, len, toward, |_| true) {
-                    let item = self.tree.rows[next].item.clone();
+                if let Some(next) = self.tree.step(at, toward) {
+                    let item = self.tree.row(next).item.clone();
                     self.set_view(SidebarView::Tree(item), cx);
                 }
             }
             Command::Switch => {
-                let row = self.tree.row_of(&item).map(|at| &self.tree.rows[at]);
+                let row = self.tree.row_of(&item).map(|at| self.tree.row(at));
                 let (open, has_children) = row.map_or((false, false), |row| (row.open, row.has_children));
                 if open {
                     self.open.remove(&item);
@@ -693,7 +692,7 @@ impl Sidebar {
                 } else {
                     Toward::Previous
                 };
-                let next = list_cursor::step(self.selected_note(cx), self.list.len(), toward, |_| true);
+                let next = self.list.step(self.selected_note(cx), toward);
                 if let Some(path) = next.and_then(|next| self.list.path(next)) {
                     let path = path.to_owned();
                     cx.emit(SidebarEvent::Open(path));
@@ -788,7 +787,7 @@ impl Sidebar {
     }
 
     fn tree_rows(&mut self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let entries: Vec<Entry> = range.filter_map(|at| self.tree.entries.get(at).copied()).collect();
+        let entries: Vec<Entry> = self.tree.entries_in(range).collect();
         entries
             .into_iter()
             .map(|entry| match entry {
@@ -807,14 +806,14 @@ impl Sidebar {
                     })
                     .into_any_element(),
                 Entry::Row(at) => self.tree_row(at, cx),
-                Entry::NewFolder(depth) => self.new_folder_row(depth, cx),
+                Entry::NewFolder { depth } => self.new_folder_row(depth, cx),
             })
             .collect()
     }
 
-    fn tree_row(&mut self, at: usize, cx: &mut Context<Self>) -> AnyElement {
+    fn tree_row(&mut self, at: RowIndex, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
-        let row = &self.tree.rows[at];
+        let row = self.tree.row(at);
         let selected = matches!(&self.view, SidebarView::Tree(item) if item == &row.item);
         let icon = match &row.item {
             Item::All => Icon::All,
@@ -838,7 +837,7 @@ impl Sidebar {
         let item = row.item.clone();
         let has_children = row.has_children;
         let toggle = div()
-            .id(ElementId::NamedInteger("toggle".into(), at as u64))
+            .id(ElementId::NamedInteger("toggle".into(), at.get() as u64))
             .flex_none()
             .child(Icon::view(icon, theme.muted_foreground))
             .on_click(cx.listener(move |sidebar, _: &ClickEvent, _, cx| {
@@ -853,7 +852,7 @@ impl Sidebar {
             }));
         let item = row.item.clone();
         row_frame(row.depth, field, cx)
-            .id(ElementId::NamedInteger("tree-row".into(), at as u64))
+            .id(ElementId::NamedInteger("tree-row".into(), at.get() as u64))
             .role(Role::TreeItem)
             .aria_label(aria)
             .aria_selected(selected)
@@ -929,8 +928,8 @@ impl Sidebar {
     fn note_rows(&mut self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let theme = cx.theme();
         let selected = self.selected_note(cx);
-        range
-            .filter_map(|at| self.list.note(at).map(|note| (at, note)))
+        self.list
+            .notes_in(range)
             .map(|(at, note)| {
                 let path = note.path.clone();
                 let title = h_flex()
@@ -946,7 +945,7 @@ impl Sidebar {
                     format!("{} · {}", when(note.modified), note.preview)
                 };
                 v_flex()
-                    .id(ElementId::NamedInteger("note-row".into(), at as u64))
+                    .id(ElementId::NamedInteger("note-row".into(), at.get() as u64))
                     .role(Role::ListItem)
                     .aria_label(note.title.clone())
                     .aria_selected(selected == Some(at))
@@ -1070,7 +1069,7 @@ impl Render for Sidebar {
         } else {
             uniform_list(
                 "tree",
-                self.tree.entries.len(),
+                self.tree.len(),
                 cx.processor(|sidebar, range, _, cx| sidebar.tree_rows(range, cx)),
             )
         };

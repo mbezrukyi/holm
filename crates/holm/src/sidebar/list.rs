@@ -1,9 +1,33 @@
 //! A note list of the sidebar: the paths of its notes, and the snapshot that knows each one.
 
+use std::ops::Range;
 use std::sync::Arc;
 
 use holm_core::model::{NoteInfo, NoteSet, Order, SearchResults};
 use holm_core::{NotePath, Snapshot};
+
+use crate::list_cursor::{self, Toward};
+
+/// A place in a [`NoteList`], which is the place in its uniform list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct NoteIndex(usize);
+
+impl NoteIndex {
+    /// For the uniform list and an element id.
+    pub(crate) fn get(self) -> usize {
+        self.0
+    }
+
+    #[must_use]
+    pub(crate) fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
+
+    /// `None` for the first place.
+    pub(crate) fn previous(self) -> Option<Self> {
+        self.0.checked_sub(1).map(Self)
+    }
+}
 
 /// The notes of one list, in the order of the list. Each path has a note in the snapshot.
 ///
@@ -46,16 +70,26 @@ impl NoteList {
         self.paths.is_empty()
     }
 
-    pub(crate) fn path(&self, at: usize) -> Option<&NotePath> {
-        self.paths.get(at)
+    pub(crate) fn first(&self) -> Option<&NotePath> {
+        self.paths.first()
     }
 
-    pub(crate) fn note(&self, at: usize) -> Option<&NoteInfo> {
-        self.snapshot.note(self.paths.get(at)?)
+    pub(crate) fn path(&self, at: NoteIndex) -> Option<&NotePath> {
+        self.paths.get(at.0)
     }
 
-    pub(crate) fn position(&self, path: &NotePath) -> Option<usize> {
-        self.paths.iter().position(|known| known == path)
+    /// The notes at the places `range` of the uniform list.
+    pub(crate) fn notes_in(&self, range: Range<usize>) -> impl Iterator<Item = (NoteIndex, &NoteInfo)> {
+        range.filter_map(|at| Some((NoteIndex(at), self.snapshot.note(self.paths.get(at)?)?)))
+    }
+
+    pub(crate) fn position(&self, path: &NotePath) -> Option<NoteIndex> {
+        self.paths.iter().position(|known| known == path).map(NoteIndex)
+    }
+
+    /// The note after `at`, or before it toward [`Toward::Previous`], and wrapping.
+    pub(crate) fn step(&self, at: Option<NoteIndex>, toward: Toward) -> Option<NoteIndex> {
+        list_cursor::step(at.map(|at| at.0), self.len(), toward, |_| true).map(NoteIndex)
     }
 
     pub(crate) fn notes(&self) -> impl Iterator<Item = &NoteInfo> {
