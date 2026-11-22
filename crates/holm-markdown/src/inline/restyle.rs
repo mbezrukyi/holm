@@ -979,6 +979,13 @@ struct Policy {
     escape: Escape,
 }
 
+/// Whether a run of one style is exactly the pieces of one old node.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Run {
+    Old,
+    Changed,
+}
+
 /// Which runs a try writes as HTML tags.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Html {
@@ -1101,9 +1108,9 @@ impl Writer<'_> {
                 continue;
             };
             let mut end = self.run_end(i, look, b);
-            let changed = self.changed(i, end, look);
+            let run = self.run(i, end, look);
             if self.policy.cut == Cut::Changed
-                && changed
+                && run == Run::Changed
                 && let Some(cut) = self.crossing(i, end, look, open, b)
             {
                 end = cut;
@@ -1111,7 +1118,7 @@ impl Writer<'_> {
                     end -= 1;
                 }
             }
-            let spelling = self.spelling(i, end, look, changed);
+            let spelling = self.spelling(i, end, look, run);
             self.out.push_str(spelling.open());
             open.push(look);
             self.write(i, end, open);
@@ -1125,8 +1132,12 @@ impl Writer<'_> {
         (from..b).find(|&k| !self.pieces[k].has(look)).unwrap_or(b)
     }
 
-    fn changed(&self, a: usize, b: usize, look: Look) -> bool {
-        !is_old_node(self.pieces, a, b, look)
+    fn run(&self, a: usize, b: usize, look: Look) -> Run {
+        if is_old_node(self.pieces, a, b, look) {
+            Run::Old
+        } else {
+            Run::Changed
+        }
     }
 
     /// The first piece in `a..b` where a run of another style starts and goes on past `b`.
@@ -1141,7 +1152,7 @@ impl Writer<'_> {
         })
     }
 
-    fn spelling(&self, a: usize, b: usize, look: Look, changed: bool) -> Spelling {
+    fn spelling(&self, a: usize, b: usize, look: Look, run: Run) -> Spelling {
         let old = self.pieces[a..b]
             .iter()
             .filter_map(|p| p.mark(look))
@@ -1150,12 +1161,12 @@ impl Writer<'_> {
             .map_or_else(|| look.default_spelling(), |m| m.spelling.clone());
         let policy = self.policy;
         if matches!(old, Spelling::Delim(_))
-            && (policy.html == Html::Always || (changed && policy.html == Html::Changed(look)))
+            && (policy.html == Html::Always || (run == Run::Changed && policy.html == Html::Changed(look)))
             && let Some(html) = look.html()
         {
             return html;
         }
-        if !changed {
+        if run == Run::Old {
             return old;
         }
         match look {
