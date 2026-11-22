@@ -27,8 +27,7 @@ pub(crate) struct Read {
     pub(crate) stamp: Stamp,
     pub(crate) hash: ContentHash,
     pub(crate) source: LinkSource,
-    /// Whether a note file is at the path where the facts keep the id of the note, when that
-    /// path is another one.
+    /// Whether a note file is at the path where the facts keep the id of the note, when that path is another one.
     pub(crate) owner_on_disk: bool,
 }
 
@@ -61,21 +60,20 @@ pub(crate) struct Put {
     pub(crate) stamp: Stamp,
     pub(crate) hash: ContentHash,
     pub(crate) source: LinkSource,
-    /// Whether the note is a copy: another note file keeps its id. A copy has no id here, so
-    /// the core can give it a new one.
+    /// Whether the note is a copy: another note file keeps its id. A copy has no id here, so the core can give it a
+    /// new one.
     pub(crate) copy: bool,
 }
 
 /// The plan for the notes at or below each of `nodes`, where `files` are the note files now.
 ///
-/// A known path that is gone and a new path are one move when they have the same file name and
-/// stamp, and no other gone or new path has both. A folder rename keeps the stamps of the files
-/// in it. A note with a file link is read again at its new path instead, since a relative file
-/// link points to another file after a move.
+/// A known path that is gone and a new path are one move when they have the same file name and stamp, and no other gone
+/// or new path has both. A folder rename keeps the stamps of the files in it. A note with a file link is read again at
+/// its new path instead, since a relative file link points to another file after a move.
 ///
-/// It reads each new file, and each known file whose stamp changed. A note that `nodes` name
-/// is read whatever its stamp, since two writes in one tick of the file clock can give one
-/// stamp. Known files come first, so a known file keeps its id when a new file has the same id.
+/// It reads each new file, and each known file whose stamp changed. A note that `nodes` name is read whatever its
+/// stamp, since two writes in one tick of the file clock can give one stamp. Known files come first, so a known file
+/// keeps its id when a new file has the same id.
 pub(crate) fn plan(facts: &Facts, nodes: &Nodes, files: Vec<(NotePath, Stamp)>) -> Plan {
     let known = facts.stamps_in(nodes);
     let found: HashMap<NotePath, Stamp> = files.into_iter().collect();
@@ -152,12 +150,11 @@ impl Plan {
         &self.reads
     }
 
-    /// What the plan changes in `facts`, with `reads` from the files of [`Plan::reads`].
-    /// A path to read with no read failed, so its note is gone. A read of another path does
-    /// nothing.
+    /// What the plan changes in `facts`, with `reads` from the files of [`Plan::reads`]. A path to read with no read
+    /// failed, so its note is gone. A read of another path does nothing.
     ///
-    /// Each note keeps its id, unless an earlier note in the order keeps it, or a note file at
-    /// another path that the facts know. When that file is gone, its note is gone too.
+    /// Each note keeps its id, unless an earlier note in the order keeps it, or a note file at another path that the
+    /// facts know. When that file is gone, its note is gone too.
     pub(crate) fn decide(self, facts: &Facts, reads: Vec<Read>) -> Settled {
         let snapshot = facts.snapshot();
         let mut reads: HashMap<NotePath, Read> = reads
@@ -238,8 +235,7 @@ impl Plan {
     }
 }
 
-/// The owner of each id while a plan decides: the facts, with the paths that the plan freed
-/// and the ids it claimed.
+/// The owner of each id while a plan decides: the facts, with the paths that the plan freed and the ids it claimed.
 struct Owners<'a> {
     snapshot: &'a Snapshot,
     freed: HashSet<NotePath>,
@@ -276,8 +272,8 @@ impl<'a> Owners<'a> {
     }
 }
 
-/// The gone paths and new paths that are one file at a new place: the same file name
-/// and stamp, with no other gone or new path that has both.
+/// The gone paths and new paths that are one file at a new place: the same file name and stamp, with no other gone or
+/// new path that has both.
 fn pairs<'a>(left: &[(&'a NotePath, Stamp)], joined: &[(&'a NotePath, Stamp)]) -> Vec<(&'a NotePath, &'a NotePath)> {
     type Key<'a> = (&'a OsStr, Stamp);
     type Sides<'a> = (Vec<&'a NotePath>, Vec<&'a NotePath>);

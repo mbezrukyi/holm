@@ -37,9 +37,8 @@ impl IntoElement for EditorElement {
     }
 }
 
-/// A view as big as its parent, with `child` in a text column of `width`. So a view in the place
-/// of the editor lines up with the text, when it has the text style of the editor and the
-/// width from [`Editor::text_width`].
+/// A view as big as its parent, with `child` in a text column of `width`. So a view in the place of the editor lines up
+/// with the text, when it has the text style of the editor and the width from [`Editor::text_width`].
 pub fn text_column(width: TextWidth, child: impl IntoElement) -> TextColumn {
     TextColumn {
         width,
@@ -142,8 +141,7 @@ fn width_of_chars(chars: u16, window: &Window) -> Pixels {
     (char_width(window) * f32::from(chars)).floor() + px(1.)
 }
 
-/// The text column in `bounds`: [`SIDE_MARGIN`] on each side, or less wide and centered for a
-/// limited `width`.
+/// The text column in `bounds`: [`SIDE_MARGIN`] on each side, or less wide and centered for a limited `width`.
 fn column(bounds: Bounds<Pixels>, width: TextWidth, window: &Window) -> Bounds<Pixels> {
     let room = (bounds.size.width - SIDE_MARGIN * 2.).max(px(0.));
     let width = match width {
@@ -229,8 +227,8 @@ impl gpui_kit::Element for EditorElement {
                 window,
             );
             let shows_start = editor.scroll.line == 0;
-            // Out of sight, the start view still gets drawn, far above the view and clipped. So
-            // it keeps the focus and its keys. Its popups stay out of the view too.
+            // Out of sight, the start view still gets drawn, far above the view and clipped. So it keeps the focus and
+            // its keys. Its popups stay out of the view too.
             let start_origin = if shows_start {
                 column.origin - point(px(0.), editor.scroll.offset)
             } else {
@@ -427,8 +425,8 @@ fn paint_text(
     cx: &mut App,
 ) {
     let line_height = line.line_height;
-    // A background is a bit lower than the row and a bit wider than its text, so two rows of
-    // backgrounds do not touch and the text keeps some room on its sides.
+    // A background is a bit lower than the row and a bit wider than its text, so two rows of backgrounds do not touch
+    // and the text keeps some room on its sides.
     let height = (line.font_size * 1.3).min(line_height);
     let side = line.font_size * 0.25;
     let mut start = 0;
@@ -525,8 +523,7 @@ fn paint_icon(icon: Icon, bounds: Bounds<Pixels>, color: Hsla, window: &mut Wind
     }
 }
 
-/// Thin, a bit light, close below the text line, with a gap where the ink of a letter crosses it, like a browser
-/// does.
+/// Thin, a bit light, close below the text line, with a gap where the ink of a letter crosses it, like a browser does.
 fn paint_underlines(
     text: &FlowLine,
     runs: &[Run],
@@ -582,8 +579,8 @@ fn paint_underlines(
                 continue;
             };
             for (left, gap_right) in ink::gaps(&font, c, band) {
-                // A tail can reach under the letter before, like the tail of `y`, so the part
-                // before the gap can get shorter.
+                // A tail can reach under the letter before, like the tail of `y`, so the part before the gap can get
+                // shorter.
                 if let Some(last) = parts.last_mut() {
                     last.1 = last.1.min(here.x + px(left) - ink_clearance);
                 }

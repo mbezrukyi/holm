@@ -1,29 +1,26 @@
 //! The tag row before the first line of the note: one chip for each tag, and a pin mark.
 //!
-//! The row only shows the tags. A popup under it edits them, so the row never changes size.
-//! The popup holds the field and one list. With an empty field, the list holds the tags of
-//! the note, each with a `✓`. Typing keeps the tags whose name holds the typed text, with no
-//! regard to capital letters. It adds the other known tags that match, without a `✓`.
-//! A typed name that no line has shows as an "Add" line. The popup changes no files itself.
-//! It sends each added or removed tag as a [`TagChange`].
+//! The row only shows the tags. A popup under it edits them, so the row never changes size. The popup holds the field
+//! and one list. With an empty field, the list holds the tags of the note, each with a `✓`. Typing keeps the tags whose
+//! name holds the typed text, with no regard to capital letters. It adds the other known tags that match, without a
+//! `✓`. A typed name that no line has shows as an "Add" line. The popup changes no files itself. It sends each added or
+//! removed tag as a [`TagChange`].
 //!
-//! - The field keeps the focus. `Tab` and `Shift+Tab` move a cursor through the list and
-//!   wrap. With no cursor, `Tab` goes to the first line and `Shift+Tab` to the last.
-//! - `Enter` adds or removes the tag under the cursor. With no cursor, it adds the typed tag.
-//!   A click on a line does the same as `Enter` on it.
+//! - The field keeps the focus. `Tab` and `Shift+Tab` move a cursor through the list and wrap. With no cursor, `Tab`
+//!   goes to the first line and `Shift+Tab` to the last.
+//! - `Enter` adds or removes the tag under the cursor. With no cursor, it adds the typed tag. A click on a line does
+//!   the same as `Enter` on it.
 //! - `Esc`, or a click outside the popup, closes it. See [`Dropdown`] for the focus.
-//! - `F2` on a tag line dispatches [`RenameTag`]. The app starts the rename of the tag in the
-//!   sidebar, for all notes. The focus moves to the sidebar, so the popup closes.
+//! - `F2` on a tag line dispatches [`RenameTag`]. The app starts the rename of the tag in the sidebar, for all notes.
+//!   The focus moves to the sidebar, so the popup closes.
 //! - A click on the row opens the popup. A click on a chip also puts the cursor on its tag.
 //!
-//! The row is one line. Chips that do not fit fold into a "+N" chip. A click on it opens the
-//! popup with the cursor on the first folded tag. The path of the note and the [`Backlinks`]
-//! count sit at the right end of the row: `Work › 2026 › Plans · ← 2 notes`. See
-//! [`TitleField`]. The row always shows. A note with no tags has a quiet "+ Tag" chip, and a
+//! The row is one line. Chips that do not fit fold into a "+N" chip. A click on it opens the popup with the cursor on
+//! the first folded tag. The path of the note and the [`Backlinks`] count sit at the right end of the row: `Work › 2026
+//! › Plans · ← 2 notes`. See [`TitleField`]. The row always shows. A note with no tags has a quiet "+ Tag" chip, and a
 //! click on it opens the popup as a click on the row does.
 //!
-//! A note with no file yet shows [`new_note_row`]: the same row with its tag and its title
-//! field, and no popup.
+//! A note with no file yet shows [`new_note_row`]: the same row with its tag and its title field, and no popup.
 
 use std::ops::Range;
 
@@ -66,8 +63,7 @@ pub(crate) enum TagChange {
     Remove(TagName),
 }
 
-/// The user pressed `F2` on the line of this tag. As an action, it goes up the element
-/// tree to the app.
+/// The user pressed `F2` on the line of this tag. As an action, it goes up the element tree to the app.
 #[derive(Clone, Debug, PartialEq, Eq, Action)]
 #[action(namespace = holm, no_json)]
 pub(crate) struct RenameTag(pub(crate) TagName);

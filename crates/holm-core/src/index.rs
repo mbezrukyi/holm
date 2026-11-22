@@ -1,6 +1,6 @@
-//! The index is a copy of the files, for a fast start and for search. It never reads or
-//! writes a note file. When SQLite fails on it or its shape is old, it starts again empty.
-//! When a new file fails too, the index lives in memory until Holm ends.
+//! The index is a copy of the files, for a fast start and for search. It never reads or writes a note file. When SQLite
+//! fails on it or its shape is old, it starts again empty. When a new file fails too, the index lives in memory until
+//! Holm ends.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -25,9 +25,8 @@ use crate::tag::TagName;
 mod search;
 
 const FILE: &str = "index.sqlite";
-/// Change this number with each change to [`SCHEMA`], to [`search::SCHEMA`], or to what a
-/// column holds.
-/// An index with another number is rebuilt.
+/// Change this number with each change to [`SCHEMA`], to [`search::SCHEMA`], or to what a column holds. An index with
+/// another number is rebuilt.
 const SHAPE: i32 = 10;
 
 const SCHEMA: &str = "
@@ -109,8 +108,8 @@ impl Index {
         Ok(Self { path, conn })
     }
 
-    /// Drops every row and writes `put`, which must hold every note file.
-    /// The rows go into a new file, or into memory when the new file fails.
+    /// Drops every row and writes `put`, which must hold every note file. The rows go into a new file, or into memory
+    /// when the new file fails.
     pub(crate) fn rebuild(&mut self, put: &[NoteRows<'_>]) -> Result<()> {
         self.conn = fresh(&self.path, put).map_err(|fail| fail.into_error(&self.path))?;
         Ok(())
@@ -154,8 +153,7 @@ impl Index {
         })
     }
 
-    /// Writes `rows` in one transaction. A moved note keeps its row, so its text, tags and
-    /// links stay.
+    /// Writes `rows` in one transaction. A moved note keeps its row, so its text, tags and links stay.
     pub(crate) fn write(&mut self, rows: &Rows<'_>) -> Result<()> {
         self.run(|conn| {
             let tx = conn.transaction()?;
@@ -249,8 +247,8 @@ fn connect(path: &Path) -> Result<Connection, Fail> {
 
 fn settings(conn: &Connection) -> Result<(), Fail> {
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-    // Without it, SQLite prepares some statements again for each new bound value,
-    // like the read of the link rows of a note.
+    // Without it, SQLite prepares some statements again for each new bound value, like the read of the link rows of a
+    // note.
     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_ENABLE_QPSG, true)?;
     Ok(())
 }
@@ -376,8 +374,7 @@ fn write_links(conn: &Connection, key: i64, links: &[Link]) -> Result<(), Fail> 
 
 /// Two values with the same hash count as the same.
 ///
-/// The hash may change with the `foldhash` version. Then the index writes the rows of each
-/// note once more.
+/// The hash may change with the `foldhash` version. Then the index writes the rows of each note once more.
 fn hash(value: impl Hash) -> i64 {
     let hash = foldhash::quality::FixedState::default().hash_one(value);
     i64::from_ne_bytes(hash.to_ne_bytes())

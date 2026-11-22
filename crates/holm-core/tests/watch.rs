@@ -472,8 +472,7 @@ fn a_tag_change_sends_a_tags_change() {
     assert_eq!(fed.core.snapshot().tags(), []);
 }
 
-/// Sets the modification time of the file at `path` to `time`, as when two writes come in
-/// one tick of the file clock.
+/// Sets the modification time of the file at `path` to `time`, as when two writes come in one tick of the file clock.
 fn set_modified(path: &std::path::Path, time: std::time::SystemTime) {
     let file = fs::File::options().write(true).open(path).unwrap();
     file.set_modified(time).unwrap();

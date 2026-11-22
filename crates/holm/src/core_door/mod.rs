@@ -1,34 +1,30 @@
 //! The app's only door to the core.
 //!
-//! [`CoreDoor`] holds the latest [`Snapshot`] and runs every read and write of the core.
-//! Writes, and reads that must see them, are jobs. They wait in the write line and run one at
-//! a time, in the order the UI asked for them. A failed job does not stop the line.
+//! [`CoreDoor`] holds the latest [`Snapshot`] and runs every read and write of the core. Writes, and reads that must
+//! see them, are jobs. They wait in the write line and run one at a time, in the order the UI asked for them. A failed
+//! job does not stop the line.
 //!
-//! Each job ends in one update. The entity sets the snapshot after it and sends one
-//! [`DoorEvent`] with the changes up to that snapshot. Then, in the same update, the caller
-//! gets the result. So no frame falls between them.
+//! Each job ends in one update. The entity sets the snapshot after it and sends one [`DoorEvent`] with the changes up
+//! to that snapshot. Then, in the same update, the caller gets the result. So no frame falls between them.
 //!
-//! A call waits on the UI thread for the jobs before it and its own, up to a budget. A job that
-//! ends in time ends in the update of the call, so no frame falls between the key and the end
-//! of its job. A late job ends in a later update, and [`CoreDoor::writing`] is true until then.
+//! A call waits on the UI thread for the jobs before it and its own, up to a budget. A job that ends in time ends in
+//! the update of the call, so no frame falls between the key and the end of its job. A late job ends in a later update,
+//! and [`CoreDoor::writing`] is true until then.
 //!
-//! It holds one [`Draft`]: the unsaved editor text of the open note, and of the notes the editor
-//! left. Before each job, the write line writes the draft. So no job sees a note file older than
-//! the editor text. When the editor takes text of another note, the old text goes in the line at
-//! once. The draft keeps each text until a write of it succeeds, and each write of it ends in at
-//! most one [`SaveEvent`]. While a disk question of a note is open, no job writes its text.
-//! Each write of the draft carries the revision of the snapshot when it goes in the line. The
-//! core refuses it after an outside change that this revision does not hold, and the draft then
-//! holds the text as a disk question does.
+//! It holds one [`Draft`]: the unsaved editor text of the open note, and of the notes the editor left. Before each job,
+//! the write line writes the draft. So no job sees a note file older than the editor text. When the editor takes text
+//! of another note, the old text goes in the line at once. The draft keeps each text until a write of it succeeds, and
+//! each write of it ends in at most one [`SaveEvent`]. While a disk question of a note is open, no job writes its text.
+//! Each write of the draft carries the revision of the snapshot when it goes in the line. The core refuses it after an
+//! outside change that this revision does not hold, and the draft then holds the text as a disk question does.
 //!
-//! A change list from outside Holm wakes it when no job runs, and it sends one event. During a
-//! job, the lists wait for the event of the job. When its window closes or the app quits, it runs
-//! every job that waits in the write line, and then writes the draft.
+//! A change list from outside Holm wakes it when no job runs, and it sends one event. During a job, the lists wait for
+//! the event of the job. When its window closes or the app quits, it runs every job that waits in the write line, and
+//! then writes the draft.
 //!
-//! Each job of the line, the search and the file links are work of the user. When one fails, it
-//! sends one [`JobFailed`] with the answer for the message line. The draft is Holm's own work.
-//! Each failed write of it sends a [`SaveEvent`], and the first fail of the draft also sends a
-//! [`JobFailed`]. The other reads log their error and give an empty value.
+//! Each job of the line, the search and the file links are work of the user. When one fails, it sends one [`JobFailed`]
+//! with the answer for the message line. The draft is Holm's own work. Each failed write of it sends a [`SaveEvent`],
+//! and the first fail of the draft also sends a [`JobFailed`]. The other reads log their error and give an empty value.
 
 use std::path::{Path, PathBuf};
 use std::task::{self, Poll};
@@ -48,12 +44,12 @@ use write_line::{Ended, Work, WriteLine};
 mod draft;
 mod write_line;
 
-/// What the core door tells the views: a job of Holm ended, or changes from outside came in.
-/// Each job sends one, also a failed job.
+/// What the core door tells the views: a job of Holm ended, or changes from outside came in. Each job sends one, also a
+/// failed job.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DoorEvent {
-    /// The changes of every revision up to [`CoreDoor::snapshot`], in order. It is empty when the
-    /// snapshot did not change.
+    /// The changes of every revision up to [`CoreDoor::snapshot`], in order. It is empty when the snapshot did not
+    /// change.
     changes: Vec<(Source, Change)>,
 }
 
@@ -94,8 +90,7 @@ impl<T: 'static> Done<T> {
     }
 }
 
-/// A job of the user, or the first write of the draft, failed. It holds the answer for the
-/// message line.
+/// A job of the user, or the first write of the draft, failed. It holds the answer for the message line.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct JobFailed(pub(crate) &'static str);
 
@@ -105,18 +100,17 @@ pub(crate) enum SaveEvent {
     Saved,
     /// The draft keeps the text, and the next job writes it again.
     Failed,
-    /// The core refused the write of the open note after an outside change. The draft holds
-    /// the text, as a disk question does.
+    /// The core refused the write of the open note after an outside change. The draft holds the text, as a disk
+    /// question does.
     Changed,
 }
 
-/// The editor text is not on disk after the writes: the last write of the draft failed, or a
-/// disk question holds the text.
+/// The editor text is not on disk after the writes: the last write of the draft failed, or a disk question holds the
+/// text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct NotSaved;
 
-/// The end of one job, on the UI thread after its work and its event: it gives the result to
-/// the caller.
+/// The end of one job, on the UI thread after its work and its event: it gives the result to the caller.
 type End = Box<dyn FnOnce(&mut CoreDoor, &mut Context<CoreDoor>)>;
 
 pub(crate) struct CoreDoor {
@@ -134,8 +128,8 @@ pub(crate) struct CoreDoor {
 }
 
 impl CoreDoor {
-    /// `core` opened the notes folder at `root`. The write line drains when `window` closes, when
-    /// the app quits, or when the entity goes.
+    /// `core` opened the notes folder at `root`. The write line drains when `window` closes, when the app quits, or
+    /// when the entity goes.
     pub(crate) fn new(core: Core, root: PathBuf, budget: Duration, window: &Window, cx: &mut Context<Self>) -> Self {
         cx.on_release(|door, _| door.drain()).detach();
         // The platform window can keep views alive after a close, and with them this entity.
@@ -181,8 +175,8 @@ impl CoreDoor {
         self.write_line.is_late()
     }
 
-    /// The editor text of the note at `path` is now `body`. It writes nothing yet. Text of
-    /// another note before it goes in the write line now.
+    /// The editor text of the note at `path` is now `body`. It writes nothing yet. Text of another note before it goes
+    /// in the write line now.
     pub(crate) fn set_text(&mut self, path: NotePath, body: String, cx: &mut Context<Self>) {
         if let Some(old) = self.draft.set(path, body) {
             self.push_save(old);
@@ -195,14 +189,14 @@ impl CoreDoor {
         self.draft.drop_text(path);
     }
 
-    /// A disk question of the note at `path` opened. No job writes its editor text until
-    /// [`Self::keep_text`] or [`Self::drop_text`].
+    /// A disk question of the note at `path` opened. No job writes its editor text until [`Self::keep_text`] or
+    /// [`Self::drop_text`].
     pub(crate) fn hold_text(&mut self, path: &NotePath) {
         self.draft.hold(path);
     }
 
-    /// The user keeps the editor text of the note at `path` over the file. The hold ends, and
-    /// the draft goes in the write line now.
+    /// The user keeps the editor text of the note at `path` over the file. The hold ends, and the draft goes in the
+    /// write line now.
     pub(crate) fn keep_text(&mut self, path: &NotePath, cx: &mut Context<Self>) {
         self.draft.release(path);
         self.save_text(cx);
@@ -223,8 +217,7 @@ impl CoreDoor {
         self.draft.unsaved_note(path)
     }
 
-    /// Why the draft has text that is not on disk: the reason of a failed write. The reason
-    /// of the open note wins.
+    /// Why the draft has text that is not on disk: the reason of a failed write. The reason of the open note wins.
     pub(crate) fn not_saved(&self) -> Option<&'static str> {
         self.draft.not_saved()
     }
@@ -235,8 +228,8 @@ impl CoreDoor {
         self.run(None, cx);
     }
 
-    /// Writes the draft, and ends after the writes before it. `done` gets [`NotSaved`] when
-    /// the write of the draft failed.
+    /// Writes the draft, and ends after the writes before it. `done` gets [`NotSaved`] when the write of the draft
+    /// failed.
     pub(crate) fn wait_saved(
         &mut self,
         done: impl FnOnce(Result<(), NotSaved>, &mut App) + 'static,
@@ -256,8 +249,8 @@ impl CoreDoor {
         self.job(move |core| core.read(&path), done, cx);
     }
 
-    /// Reads the note at `path` to replace its editor text. The text drops now with no write,
-    /// and comes back with its hold when the read fails.
+    /// Reads the note at `path` to replace its editor text. The text drops now with no write, and comes back with its
+    /// hold when the read fails.
     pub(crate) fn read_and_drop_text(&mut self, path: NotePath, done: Done<Note>, cx: &mut Context<Self>) {
         let text = self.draft.drop_for_read(&path);
         self.own_job(
@@ -417,8 +410,7 @@ impl CoreDoor {
         self.job(move |core| core.rename_tag(&from, &to), done, cx);
     }
 
-    /// The typed name `to` as a tag, and the number of notes that a rename to it changes,
-    /// after the writes before it.
+    /// The typed name `to` as a tag, and the number of notes that a rename to it changes, after the writes before it.
     pub(crate) fn tag_rename_count(
         &mut self,
         from: TagName,
@@ -447,8 +439,8 @@ impl CoreDoor {
         self.job(move |core| Ok(core.tag_delete_count(&tag)), done, cx);
     }
 
-    /// Copies pasted or dropped files into `attachments/`, and gives the link to each copy
-    /// from the note at `note`. A file with no copy gives `None`.
+    /// Copies pasted or dropped files into `attachments/`, and gives the link to each copy from the note at `note`. A
+    /// file with no copy gives `None`.
     pub(crate) fn attach(
         &mut self,
         note: NotePath,
@@ -474,8 +466,7 @@ impl CoreDoor {
         );
     }
 
-    /// The link to each file from the note at `note`, with no copy. A file with no link gives
-    /// `None`.
+    /// The link to each file from the note at `note`, with no copy. A file with no link gives `None`.
     pub(crate) fn file_links(
         &self,
         note: NotePath,
@@ -506,8 +497,8 @@ impl CoreDoor {
         self.look(move |core| logged(core.headings(&path), "cannot read the headings"), cx)
     }
 
-    /// The note links in the note at `path` whose note or heading is gone. It does not wait
-    /// for the line. After a failure, it gives none.
+    /// The note links in the note at `path` whose note or heading is gone. It does not wait for the line. After a
+    /// failure, it gives none.
     pub(crate) fn broken_links(&self, path: NotePath, cx: &App) -> Task<Vec<LinkTarget>> {
         self.look(
             move |core| logged(core.broken_links(&path), "cannot read the broken links"),
@@ -515,9 +506,9 @@ impl CoreDoor {
         )
     }
 
-    /// Puts `job` in the write line, and waits for it up to the budget. When it ends, the entity
-    /// sets the snapshot after it and sends the event. Then `done` gets its result, in the same
-    /// update. When the entity is gone first, `done` never runs.
+    /// Puts `job` in the write line, and waits for it up to the budget. When it ends, the entity sets the snapshot
+    /// after it and sends the event. Then `done` gets its result, in the same update. When the entity is gone first,
+    /// `done` never runs.
     fn job<T: Send + 'static>(
         &mut self,
         job: impl FnOnce(&Core) -> holm_core::Result<T> + Send + 'static,
@@ -545,8 +536,8 @@ impl CoreDoor {
         }
     }
 
-    /// Puts `save` in the write line. It carries the revision of the snapshot now, so the core
-    /// refuses it after an outside change that the door has not taken yet.
+    /// Puts `save` in the write line. It carries the revision of the snapshot now, so the core refuses it after an
+    /// outside change that the door has not taken yet.
     fn push_save(&mut self, save: DraftSave) {
         let (send, mut receive) = oneshot::channel();
         let seen = self.snapshot.revision();
@@ -611,8 +602,8 @@ impl CoreDoor {
         cx.background_spawn(async move { job(&core) })
     }
 
-    /// Runs the jobs of the write line. With `until`, it waits on this thread up to the budget,
-    /// until the job `until` ends. A job that does not end in time ends later, in its own update.
+    /// Runs the jobs of the write line. With `until`, it waits on this thread up to the budget, until the job `until`
+    /// ends. A job that does not end in time ends later, in its own update.
     fn run(&mut self, until: Option<u64>, cx: &mut Context<Self>) {
         let writing = self.writing();
         let run = self.write_line.run(until, self.budget, cx);
@@ -631,9 +622,9 @@ impl CoreDoor {
         self.tell_writing(writing, cx);
     }
 
-    /// Notifies the observers when [`Self::writing`] changed since `before`. It comes after the
-    /// ends of the jobs, so the observers run after the deferred steps of the ends. A step can
-    /// ask for a new late job, and the observers never see the short state between the jobs.
+    /// Notifies the observers when [`Self::writing`] changed since `before`. It comes after the ends of the jobs, so
+    /// the observers run after the deferred steps of the ends. A step can ask for a new late job, and the observers
+    /// never see the short state between the jobs.
     fn tell_writing(&self, before: bool, cx: &mut Context<Self>) {
         if self.writing() != before {
             cx.notify();
@@ -661,8 +652,8 @@ impl CoreDoor {
         self.write_line.drain(draft);
     }
 
-    /// Wakes on each change list while no job runs. A job ends it, and [`Self::run`] starts a
-    /// new one after the jobs that ended.
+    /// Wakes on each change list while no job runs. A job ends it, and [`Self::run`] starts a new one after the jobs
+    /// that ended.
     fn watch(cx: &mut Context<Self>) -> Task<()> {
         cx.spawn(async move |door, cx| {
             std::future::poll_fn(|waker| {
@@ -705,8 +696,7 @@ impl EventEmitter<SaveEvent> for CoreDoor {}
 
 impl EventEmitter<JobFailed> for CoreDoor {}
 
-/// Gives the result with the app error. A failure goes to the log, and its answer to
-/// [`JobFailed`].
+/// Gives the result with the app error. A failure goes to the log, and its answer to [`JobFailed`].
 fn answered<T>(result: holm_core::Result<T>, cx: &mut Context<CoreDoor>) -> Result<T, AppError> {
     result.map_err(|error| {
         let error = AppError::from(error);
@@ -757,8 +747,8 @@ pub(crate) fn open(
     Ok((core, note))
 }
 
-/// The note to open first: the last open note when it still exists, else the first note in
-/// `order`. With no notes, it is `None`.
+/// The note to open first: the last open note when it still exists, else the first note in `order`. With no notes, it
+/// is `None`.
 fn first_note(core: &Core, last: Option<&NotePath>, order: Order) -> holm_core::Result<Option<Note>> {
     let snapshot = core.snapshot();
     snapshot
@@ -784,8 +774,7 @@ mod tests {
         (dir, core_door)
     }
 
-    /// A door to a notes folder with `A.md`, and the feed that tells its core about outside
-    /// changes.
+    /// A door to a notes folder with `A.md`, and the feed that tells its core about outside changes.
     fn fed_core_door(cx: &mut TestAppContext) -> (TempDir, Entity<CoreDoor>, holm_core::Feed) {
         let dir = tempfile::tempdir().unwrap();
         let notes = dir.path().join("notes");

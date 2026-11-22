@@ -74,8 +74,8 @@ impl ColorWindow {
 
     /// `custom` are the last custom colors, the newest first.
     ///
-    /// Keys 1 to 6 pick a palette color, 7 to 9 a custom color, and 0 removes the color. `+`
-    /// opens the hex field. In the field, Enter takes a `rgb` or `rrggbb` value. Esc closes.
+    /// Keys 1 to 6 pick a palette color, 7 to 9 a custom color, and 0 removes the color. `+` opens the hex field. In
+    /// the field, Enter takes a `rgb` or `rrggbb` value. Esc closes.
     pub(crate) fn command(&mut self, command: Command, custom: &[Color]) -> KeyResult {
         if command == Command::CloseColor {
             return KeyResult::Close;

@@ -1,9 +1,9 @@
 //! The config file, TOML with `version = 1` at the top.
 //!
-//! Holm reads an older version with one migration step per version. A file with no `version`
-//! is version 0. Keys that Holm does not know stay in the file, and each gets a log line.
-//! A bad value gives the default for that key. A file Holm can't read gives the defaults,
-//! and Holm never writes over it. Holm also never writes over a file with a newer version.
+//! Holm reads an older version with one migration step per version. A file with no `version` is version 0. Keys that
+//! Holm does not know stay in the file, and each gets a log line. A bad value gives the default for that key. A file
+//! Holm can't read gives the defaults, and Holm never writes over it. Holm also never writes over a file with a newer
+//! version.
 
 use std::fs;
 use std::io::{self, Write as _};
@@ -158,8 +158,8 @@ impl Config {
         (self.health == Health::Broken || self.save_failed).then_some(text::CONFIG_WRITE)
     }
 
-    /// Applies `change` to the settings, writes them as [`Config::save`] does, and notifies the
-    /// observers. Settings that stay the same are not written.
+    /// Applies `change` to the settings, writes them as [`Config::save`] does, and notifies the observers. Settings
+    /// that stay the same are not written.
     pub(crate) fn change(&mut self, change: impl FnOnce(&mut Settings), cx: &mut Context<Self>) {
         let mut settings = self.settings.clone();
         change(&mut settings);
@@ -169,8 +169,8 @@ impl Config {
         }
     }
 
-    /// It does not write a broken file or a file with a newer version. A folder path that is not
-    /// UTF-8 stays out of the file.
+    /// It does not write a broken file or a file with a newer version. A folder path that is not UTF-8 stays out of the
+    /// file.
     fn save(&mut self, settings: Settings) {
         self.settings = settings;
         if self.health != Health::Writable {

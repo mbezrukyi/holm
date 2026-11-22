@@ -1,9 +1,8 @@
 //! A notes folder with many notes and real-like text, for speed tests and benches.
 //!
-//! The text draws its words from a fixed vocabulary of [`WORDS`] words, the most common
-//! ones most often, as in real text. So many words share a prefix, and the search lists of a
-//! short prefix grow long, as they do with real notes. A fixed seed gives the same folder
-//! on each run.
+//! The text draws its words from a fixed vocabulary of [`WORDS`] words, the most common ones most often, as in real
+//! text. So many words share a prefix, and the search lists of a short prefix grow long, as they do with real notes. A
+//! fixed seed gives the same folder on each run.
 
 use std::collections::HashSet;
 use std::fmt::Write as _;
@@ -132,9 +131,8 @@ const CODAS: &[&str] = &["", "", "", "n", "r", "s", "t", "l", "m", "nd", "st", "
 
 /// Fills the empty folder `dir` with [`NOTES`] notes in [`FOLDERS`] folders.
 ///
-/// The note `n` is `folder <n % FOLDERS>/Note <n>.md`, with the id `N<n>` in five digits.
-/// It has two tags, note links to the next two notes, a link to a missing file, and about
-/// 2 KB of text in two paragraphs.
+/// The note `n` is `folder <n % FOLDERS>/Note <n>.md`, with the id `N<n>` in five digits. It has two tags, note links
+/// to the next two notes, a link to a missing file, and about 2 KB of text in two paragraphs.
 pub fn notes_folder(dir: &Path) -> io::Result<()> {
     for folder in 0..FOLDERS {
         fs::create_dir(dir.join(format!("folder {folder}")))?;
@@ -160,8 +158,7 @@ pub fn notes_folder(dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// The words and the share of text each one gets. The word at rank `r` comes
-/// `1 / (r + 1)` as often as the first one.
+/// The words and the share of text each one gets. The word at rank `r` comes `1 / (r + 1)` as often as the first one.
 struct Vocabulary {
     words: Vec<String>,
     /// The sum of the shares up to and with each word.

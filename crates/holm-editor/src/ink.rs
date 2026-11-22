@@ -1,8 +1,7 @@
-//! Where the ink of a letter crosses an underline, so the underline can leave a gap there, like
-//! a browser does.
+//! Where the ink of a letter crosses an underline, so the underline can leave a gap there, like a browser does.
 //!
-//! GPUI does not give the outlines of letters, so this module reads the font files itself, with
-//! `fontdb` and `ttf-parser`. This module has no GPUI.
+//! GPUI does not give the outlines of letters, so this module reads the font files itself, with `fontdb` and
+//! `ttf-parser`. This module has no GPUI.
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
@@ -53,8 +52,7 @@ struct Key {
     band: [u32; 3],
 }
 
-/// The parts of the band that the ink of `letter` covers, sorted. A font or a letter that is not
-/// found has none.
+/// The parts of the band that the ink of `letter` covers, sorted. A font or a letter that is not found has none.
 pub(crate) fn gaps(font: &FontKey, letter: char, band: Band) -> Vec<Gap> {
     let key = Key {
         font: font.clone(),
@@ -102,8 +100,8 @@ fn face_gaps(face: &Face<'_>, letter: char, band: Band) -> Vec<Gap> {
     if face.outline_glyph(glyph, &mut ink).is_none() {
         return Vec::new();
     }
-    // Font units grow upward from the text line. The band lies below it. Some heights in the
-    // band each give the parts inside the outline, between pairs of edges.
+    // Font units grow upward from the text line. The band lies below it. Some heights in the band each give the parts
+    // inside the outline, between pairs of edges.
     let mut spans: Vec<Gap> = Vec::new();
     for step in 0..=BAND_STEPS {
         let below = band.top + (band.bottom - band.top) * f32::from(step) / f32::from(BAND_STEPS);

@@ -1,15 +1,13 @@
-//! The settings dialog over the notes view. Each change goes to [`Config::change`], which
-//! applies it at once.
+//! The settings dialog over the notes view. Each change goes to [`Config::change`], which applies it at once.
 //!
-//! `Tab` and `Shift+Tab` move the cursor between rows and wrap at the ends. On a choice row,
-//! `Space` picks the next option and `Shift+Space` the previous one, and the options wrap.
-//! `Space` switches a switch. `Space` or `Enter` on the notes folder opens the folder picker.
-//! `Esc` closes the dialog.
+//! `Tab` and `Shift+Tab` move the cursor between rows and wrap at the ends. On a choice row, `Space` picks the next
+//! option and `Shift+Space` the previous one, and the options wrap. `Space` switches a switch. `Space` or `Enter` on
+//! the notes folder opens the folder picker. `Esc` closes the dialog.
 //!
-//! With a limited text width, the width shows after the options of its row, with a caret while
-//! the cursor is on the row. Digits and `Backspace` there change the width; the first digit
-//! after the cursor comes to the row takes the place of the whole width. A width in the range
-//! applies at once. When the cursor leaves the row, it shows the width of the settings again.
+//! With a limited text width, the width shows after the options of its row, with a caret while the cursor is on the
+//! row. Digits and `Backspace` there change the width; the first digit after the cursor comes to the row takes the
+//! place of the whole width. A width in the range applies at once. When the cursor leaves the row, it shows the width
+//! of the settings again.
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::kbd::Kbd;
@@ -77,8 +75,8 @@ const MAX_CHARS_DIGITS: usize = 3;
 
 const CHARS_BOX_PAD: Pixels = px(5.);
 
-/// The height of a row of options with its frame. The text width row keeps it with or without
-/// the width box, so the dialog does not change its height at any scale.
+/// The height of a row of options with its frame. The text width row keeps it with or without the width box, so the
+/// dialog does not change its height at any scale.
 const CONTROL_HEIGHT: Pixels = px(24.);
 
 const ORDERS: [(Order, &str); 2] = [
@@ -134,8 +132,7 @@ impl CharsDraft {
         }
     }
 
-    /// Puts `digit` after the text, or in its place when it is fresh. A text with all its
-    /// digits takes no more.
+    /// Puts `digit` after the text, or in its place when it is fresh. A text with all its digits takes no more.
     fn type_digit(&mut self, digit: char) {
         if self.fresh {
             self.text.clear();
@@ -185,8 +182,8 @@ impl SettingsDialog {
         self.chars = CharsDraft::new(self.config.read(cx).settings().text_width.chars());
     }
 
-    /// Digits and Backspace on the text width row with a limited width change the width. A
-    /// width in the range applies at once.
+    /// Digits and Backspace on the text width row with a limited width change the width. A width in the range applies
+    /// at once.
     fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         let keystroke = &event.keystroke;
         let modifiers = keystroke.modifiers;
@@ -352,8 +349,8 @@ impl SettingsDialog {
                 let box_width = chars_box_width(window);
                 let theme = cx.theme();
                 let (muted, border, caret, radius) = (theme.muted_foreground, theme.border, theme.caret, theme.radius);
-                // A plain frame and no focus ring: the dialog keeps the focus. Its width fits 3
-                // digits, so the options before it stay in place while the user types.
+                // A plain frame and no focus ring: the dialog keeps the focus. Its width fits 3 digits, so the options
+                // before it stay in place while the user types.
                 let width = h_flex()
                     .id("text-width-chars")
                     .role(Role::TextInput)
@@ -471,9 +468,9 @@ fn format_key_chips(cx: &App) -> impl IntoElement + use<> {
 
 /// A click picks the option.
 ///
-/// The frame draws the outer border, and a line lies between each two buttons. The buttons
-/// have no border, so the chosen one is as wide as the others. Its fill stays inside the outer
-/// border, and the lines next to it take its fill, so it reads as one block.
+/// The frame draws the outer border, and a line lies between each two buttons. The buttons have no border, so the
+/// chosen one is as wide as the others. Its fill stays inside the outer border, and the lines next to it take its fill,
+/// so it reads as one block.
 fn options<T: Copy + PartialEq + 'static>(
     options: &'static [(T, &'static str)],
     current: T,
@@ -525,8 +522,7 @@ impl Render for SettingsDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let settings = self.config.read(cx).settings().clone();
         let theme = cx.theme();
-        // The cursor row has a bar on its left and no fill, so the outlines of its controls stay
-        // visible.
+        // The cursor row has a bar on its left and no fill, so the outlines of its controls stay visible.
         let (bar, radius) = (theme.primary, theme.radius);
         let rows: Vec<_> = ROWS
             .iter()

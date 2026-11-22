@@ -55,8 +55,8 @@ pub(crate) struct Vertical {
     pub(crate) x: Pixels,
     /// Whether the offset shows at the start of its row, as in [`LaidLine::caret`].
     pub(crate) row_start: bool,
-    /// The offset is in a line that showed no text, like a line with only an image. Its source
-    /// shows in the next frame, and only then can the cursor go to `x`.
+    /// The offset is in a line that showed no text, like a line with only an image. Its source shows in the next
+    /// frame, and only then can the cursor go to `x`.
     pub(crate) hidden: bool,
 }
 
@@ -670,11 +670,11 @@ pub(crate) enum Reveal {
     Top,
 }
 
-/// `start` is the height of the view before the first line. The scroll counts it as a part of
-/// line 0, so `scroll.offset` on line 0 starts at the top of that view.
+/// `start` is the height of the view before the first line. The scroll counts it as a part of line 0, so
+/// `scroll.offset` on line 0 starts at the top of that view.
 ///
-/// It first moves `scroll` to a line start. With a `reveal`, it then moves it so the cursor is
-/// in view. Line 0 never moves below the top of the view.
+/// It first moves `scroll` to a line start. With a `reveal`, it then moves it so the cursor is in view. Line 0 never
+/// moves below the top of the view.
 pub(crate) fn lay_out(
     model: &Model,
     scroll: &mut Scroll,
@@ -700,8 +700,7 @@ pub(crate) fn lay_out(
     fill_view(model, scroll, shaper, view, start, window)
 }
 
-/// The scroll that puts the cursor line at the nearest edge of the view, or none when the
-/// cursor shows.
+/// The scroll that puts the cursor line at the nearest edge of the view, or none when the cursor shows.
 fn to_edge(
     model: &Model,
     scroll: &Scroll,
@@ -741,8 +740,8 @@ fn to_edge(
     })
 }
 
-/// The scroll that puts the cursor in the middle or at the top of the view, or none when the
-/// row with the cursor shows whole.
+/// The scroll that puts the cursor in the middle or at the top of the view, or none when the row with the cursor shows
+/// whole.
 fn to_place(
     model: &Model,
     reveal: Reveal,
@@ -836,8 +835,8 @@ impl LaidLine {
         }
     }
 
-    /// The top and the height of the row that shows `offset`, from the top of the line. A line
-    /// with no text row gives its whole text. `row_start` is as in [`Self::caret`].
+    /// The top and the height of the row that shows `offset`, from the top of the line. A line with no text row gives
+    /// its whole text. `row_start` is as in [`Self::caret`].
     fn row_of(&self, offset: usize, row_start: bool) -> (Pixels, Pixels) {
         match self.caret(offset, row_start) {
             Some(at) => (self.pad + at.y, self.line_height),
@@ -850,9 +849,8 @@ impl LaidLine {
         self.top + self.pad
     }
 
-    /// Where `offset` shows, from the top left of the text. A wrap inside a word puts the end
-    /// of a row and the start of the next row at the same offset. `row_start` picks the start
-    /// of the next row there.
+    /// Where `offset` shows, from the top left of the text. A wrap inside a word puts the end of a row and the start of
+    /// the next row at the same offset. `row_start` picks the start of the next row there.
     fn caret(&self, offset: usize, row_start: bool) -> Option<Point<Pixels>> {
         let text = self.text()?;
         let index = self.display.to_display(offset);
@@ -866,8 +864,8 @@ impl LaidLine {
         Some(at)
     }
 
-    /// Whether `offset`, which a point on the row at `row_y` gave, shows at the end of the row
-    /// above. Then only `row_start` keeps it on its row.
+    /// Whether `offset`, which a point on the row at `row_y` gave, shows at the end of the row above. Then only
+    /// `row_start` keeps it on its row.
     fn shows_above(&self, offset: usize, row_y: Pixels) -> bool {
         self.caret(offset, false)
             .is_some_and(|at| at.y + self.line_height <= row_y)
@@ -929,8 +927,8 @@ impl Layout {
         None
     }
 
-    /// The source offset one text row above or below the cursor, near `goal_x`.
-    /// It returns `None` when that row is not in this layout.
+    /// The source offset one text row above or below the cursor, near `goal_x`. It returns `None` when that row is not
+    /// in this layout.
     pub(crate) fn vertical(
         &self,
         cursor: usize,
@@ -983,8 +981,8 @@ impl Layout {
         })
     }
 
-    /// The source offset at `x` on the first or the last text row of the line with the cursor,
-    /// and whether it is the start of its row, as in [`LaidLine::caret`].
+    /// The source offset at `x` on the first or the last text row of the line with the cursor, and whether it is the
+    /// start of its row, as in [`LaidLine::caret`].
     pub(crate) fn row_at(&self, cursor: usize, x: Pixels, first: bool) -> Option<(usize, bool)> {
         let line = self
             .lines
@@ -1001,9 +999,8 @@ impl Layout {
         Some((offset, line.shows_above(offset, row_y + line.line_height * 0.5)))
     }
 
-    /// The source offset at the start or the end of the screen row with the cursor.
-    /// It returns `None` when that row is not in this layout.
-    /// It also returns whether the offset is the start of its row, as in [`LaidLine::caret`].
+    /// The source offset at the start or the end of the screen row with the cursor. It returns `None` when that row is
+    /// not in this layout. It also returns whether the offset is the start of its row, as in [`LaidLine::caret`].
     pub(crate) fn row_edge(&self, cursor: usize, row_start: bool, end: bool) -> Option<(usize, bool)> {
         let line = self
             .lines
@@ -1034,8 +1031,7 @@ impl Layout {
         rows.to_usize().map_or(1, |rows| rows.max(1))
     }
 
-    /// The window bounds of the cursor, when its line is in this layout.
-    /// `row_start` is as in [`LaidLine::caret`].
+    /// The window bounds of the cursor, when its line is in this layout. `row_start` is as in [`LaidLine::caret`].
     pub(crate) fn cursor_bounds(&self, cursor: usize, row_start: bool) -> Option<Bounds<Pixels>> {
         let line = self
             .lines
@@ -1114,8 +1110,8 @@ impl Layout {
 /// The widths of table columns in `room`, from the narrowest and the widest width of each.
 ///
 /// - All widest widths fit: each column gets its widest width.
-/// - Only the narrowest widths fit: each column gets its narrowest width, and the room left goes
-///   to the columns in proportion to the difference of their two widths.
+/// - Only the narrowest widths fit: each column gets its narrowest width, and the room left goes to the columns in
+///   proportion to the difference of their two widths.
 /// - Else the narrowest widths shrink by the same factor, to no less than `floor`.
 fn split(columns: &[(Pixels, Pixels)], room: Pixels, floor: Pixels) -> Vec<Pixels> {
     let sum = |width: fn(&(Pixels, Pixels)) -> Pixels| columns.iter().map(width).fold(px(0.), |sum, w| sum + w);

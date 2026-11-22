@@ -1,8 +1,7 @@
 //! The note after Ctrl+N, before it has a title and a file.
 //!
-//! It shows in the place of the editor: the tag row with the tag of the note and an empty
-//! title field. The pane puts it in the text column, so it is at the same place as in the
-//! editor. Nothing else takes a click or a key.
+//! It shows in the place of the editor: the tag row with the tag of the note and an empty title field. The pane puts it
+//! in the text column, so it is at the same place as in the editor. Nothing else takes a click or a key.
 //!
 //! - `Enter` writes `<title>.md`, and sends [`NewNoteEvent::Created`].
 //! - `Esc`, or a fail that is not about the title, sends [`NewNoteEvent::Cancelled`].

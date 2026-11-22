@@ -1,7 +1,7 @@
 //! The rows of the link picker for the text in its field.
 //!
-//! The field matches note titles with fuzzy matching. A `#` after an exact title switches to the
-//! headings of that note. A field that starts with `#` lists the headings of the open note.
+//! The field matches note titles with fuzzy matching. A `#` after an exact title switches to the headings of that note.
+//! A field that starts with `#` lists the headings of the open note.
 
 use crate::lowercase::Lowercase;
 use crate::pick_notes::PickNotes;
@@ -17,8 +17,8 @@ pub(crate) enum Query<'a> {
 }
 
 impl<'a> Query<'a> {
-    /// The first `#` whose text before it is a whole title switches to headings. So "C# notes" stays a
-    /// title, unless a note has the title "C".
+    /// The first `#` whose text before it is a whole title switches to headings. So "C# notes" stays a title, unless a
+    /// note has the title "C".
     pub(crate) fn parse(text: &'a str, notes: &PickNotes) -> Self {
         if let Some(filter) = text.strip_prefix('#') {
             return Self::Headings { note: None, filter };
@@ -34,9 +34,8 @@ impl<'a> Query<'a> {
         Self::Titles(text)
     }
 
-    /// The field text that [`Self::parse`] reads back: `title#heading`, `title`, or
-    /// `#heading` for the open note. An empty heading gives `title#`, the headings of the
-    /// note with no filter.
+    /// The field text that [`Self::parse`] reads back: `title#heading`, `title`, or `#heading` for the open note. An
+    /// empty heading gives `title#`, the headings of the note with no filter.
     pub(crate) fn text(title: Option<&str>, heading: Option<&str>) -> String {
         match (title, heading) {
             (Some(title), Some(heading)) => format!("{title}#{heading}"),
@@ -61,9 +60,8 @@ pub(crate) enum LinkRow {
 
 /// `headings` are those of the note that the query names.
 ///
-/// Titles keep the order of `notes` with an empty query. Else the best match comes first.
-/// Only the first [`MAX_NOTES`] titles show. When no title is the query itself, the last row
-/// creates a note.
+/// Titles keep the order of `notes` with an empty query. Else the best match comes first. Only the first [`MAX_NOTES`]
+/// titles show. When no title is the query itself, the last row creates a note.
 pub(crate) fn rows(query: Query<'_>, notes: &PickNotes, headings: &[String]) -> Vec<LinkRow> {
     match query {
         Query::Titles(text) => {
@@ -89,8 +87,8 @@ pub(crate) fn rows(query: Query<'_>, notes: &PickNotes, headings: &[String]) -> 
     }
 }
 
-/// The places of the texts that match `pattern`, the best match first. With an empty pattern,
-/// all of them in their order.
+/// The places of the texts that match `pattern`, the best match first. With an empty pattern, all of them in their
+/// order.
 fn ranked<'a>(pattern: &Lowercase<'_>, texts: impl Iterator<Item = Lowercase<'a>>) -> Vec<usize> {
     let mut hits: Vec<(i64, usize)> = texts
         .enumerate()
@@ -101,9 +99,8 @@ fn ranked<'a>(pattern: &Lowercase<'_>, texts: impl Iterator<Item = Lowercase<'a>
     hits.into_iter().map(|(_, at)| at).collect()
 }
 
-/// How well `text` matches `pattern`, or `None` when the chars of `pattern` are not all in
-/// `text` in order. Chars in a row and chars at the start of a word score more. Text with the
-/// pattern as one piece scores most.
+/// How well `text` matches `pattern`, or `None` when the chars of `pattern` are not all in `text` in order. Chars in a
+/// row and chars at the start of a word score more. Text with the pattern as one piece scores most.
 fn score(pattern: &Lowercase<'_>, text: &Lowercase<'_>) -> Option<i64> {
     let (pattern, text) = (pattern.as_str(), text.as_str());
     if pattern.is_empty() {

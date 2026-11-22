@@ -1,11 +1,10 @@
 //! The links of the open note.
 //!
-//! It opens the links of the editor: a note, a heading in a note, a file in its system app, or
-//! a web address. It copies pasted files into `attachments/`. After each change in the notes
-//! folder, it reads the backlinks again and tells the editor which note links are broken.
+//! It opens the links of the editor: a note, a heading in a note, a file in its system app, or a web address. It copies
+//! pasted files into `attachments/`. After each change in the notes folder, it reads the backlinks again and tells the
+//! editor which note links are broken.
 //!
-//! It also runs the link picker flow. Ctrl+K gives the start of the picker, and the pick puts
-//! a link at the cursor.
+//! It also runs the link picker flow. Ctrl+K gives the start of the picker, and the pick puts a link at the cursor.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -42,8 +41,7 @@ pub(super) struct Links {
     backlinks: Entity<Backlinks>,
     open_note: Option<NotePath>,
     reading: Option<Task<()>>,
-    /// Whether the pick of the link picker changes the link at the cursor, not inserts a new
-    /// one.
+    /// Whether the pick of the link picker changes the link at the cursor, not inserts a new one.
     replace: bool,
     _subscriptions: Vec<Subscription>,
 }
@@ -89,8 +87,8 @@ impl Links {
         self.read(cx);
     }
 
-    /// Opens the system picker for `pick`, and embeds each picked path at the cursor, with no
-    /// copy. It shows as an image, a file chip or a folder chip, like a pasted path.
+    /// Opens the system picker for `pick`, and embeds each picked path at the cursor, with no copy. It shows as an
+    /// image, a file chip or a folder chip, like a pasted path.
     pub(super) fn pick(&mut self, pick: Pick, cx: &mut Context<Self>) {
         let Some(note) = self.open_note.clone() else {
             return;
@@ -126,9 +124,8 @@ impl Links {
         .detach();
     }
 
-    /// Gives `done` what the link picker starts with, after the write line writes the unsaved
-    /// text. In a note link, the field starts with its target, and the pick changes that link.
-    /// With no open note, it does nothing.
+    /// Gives `done` what the link picker starts with, after the write line writes the unsaved text. In a note link, the
+    /// field starts with its target, and the pick changes that link. With no open note, it does nothing.
     pub(super) fn start(&mut self, done: impl FnOnce(LinkStart, &mut App) + 'static, cx: &mut Context<Self>) {
         let Some(open_note) = self.open_note.clone() else {
             return;
@@ -148,9 +145,8 @@ impl Links {
         self.core_door.update(cx, |core_door, cx| core_door.wait(done, cx));
     }
 
-    /// Makes the link of `choice`, and puts it at the cursor. A new note goes in the folder of
-    /// the open note. The link goes only into the note that was open at the call. `done` runs
-    /// at the end, also with no link.
+    /// Makes the link of `choice`, and puts it at the cursor. A new note goes in the folder of the open note. The link
+    /// goes only into the note that was open at the call. `done` runs at the end, also with no link.
     pub(super) fn link(&mut self, choice: LinkChoice, done: Then<()>, cx: &mut Context<Self>) {
         let Some(note) = self.open_note.clone() else {
             cx.defer(move |cx| done((), cx));
@@ -255,8 +251,7 @@ impl Links {
         }
     }
 
-    /// Copies pasted or dropped files into `attachments/`, and puts a link to each copy at the
-    /// cursor.
+    /// Copies pasted or dropped files into `attachments/`, and puts a link to each copy at the cursor.
     fn paste_files(&mut self, files: Vec<PastedFile>, cx: &mut Context<Self>) {
         let Some(note) = self.open_note.clone() else {
             return;
@@ -285,8 +280,8 @@ impl Links {
         });
     }
 
-    /// Embeds a link to each file at the cursor, as `![name](..)`. It shows an image or a file
-    /// chip. A file with no link gets none.
+    /// Embeds a link to each file at the cursor, as `![name](..)`. It shows an image or a file chip. A file with no
+    /// link gets none.
     fn insert_file_links(&mut self, names: Vec<String>, files: Vec<Option<PathBuf>>, cx: &mut Context<Self>) {
         for (name, path) in names.into_iter().zip(files) {
             let Some(path) = path else {

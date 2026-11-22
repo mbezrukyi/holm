@@ -7,16 +7,15 @@ use crate::paths::FolderPath;
 use crate::snapshot::Snapshot;
 use crate::store::{AtPath, Store};
 
-/// The nodes for outside changes at the raw paths `paths`: what is there now, and what was
-/// there in `before`.
+/// The nodes for outside changes at the raw paths `paths`: what is there now, and what was there in `before`.
 pub(super) fn nodes(store: &Store, before: &Snapshot, paths: impl IntoIterator<Item = PathBuf>) -> Nodes {
     Nodes::new(paths.into_iter().flat_map(|path| at(store, before, &path)))
 }
 
 /// The empty path is the whole notes folder.
 ///
-/// A path that is gone, and that `before` knows as no note, may have been a folder that
-/// `before` does not list, like the attachment folder. So it gives a folder node.
+/// A path that is gone, and that `before` knows as no note, may have been a folder that `before` does not list, like
+/// the attachment folder. So it gives a folder node.
 fn at(store: &Store, before: &Snapshot, path: &Path) -> Vec<Node> {
     if path.as_os_str().is_empty() {
         return vec![Node::Folder(FolderPath::root())];

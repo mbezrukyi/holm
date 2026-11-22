@@ -22,16 +22,14 @@ pub enum Error {
         path: PathBuf,
         source: Box<dyn std::error::Error + Send + Sync>,
     },
-    /// A folder that Holm does not let the user move or delete, or a move of a folder into
-    /// itself. Also a file path that must be absolute but is not, and a changed path from a
-    /// [`Feed`](crate::Feed) that leaves the notes folder.
+    /// A folder that Holm does not let the user move or delete, or a move of a folder into itself. Also a file path
+    /// that must be absolute but is not, and a changed path from a [`Feed`](crate::Feed) that leaves the notes folder.
     #[error("{path} is not a note or a folder inside the notes folder")]
     BadPath {
         /// The path as the caller gave it.
         path: PathBuf,
     },
-    /// Nothing is left of a typed tag name after [`TagName::typed`](crate::TagName::typed)
-    /// cleans it.
+    /// Nothing is left of a typed tag name after [`TagName::typed`](crate::TagName::typed) cleans it.
     #[error("{tag:?} is not a tag name")]
     BadTag {
         /// The tag as the person typed it.
@@ -43,8 +41,8 @@ pub enum Error {
         /// The path that the name asks for.
         path: PathBuf,
     },
-    /// A save with a seen revision found an outside change of the note that the revision does
-    /// not hold. Nothing was written.
+    /// A save with a seen revision found an outside change of the note that the revision does not hold. Nothing was
+    /// written.
     #[error("{path} changed on disk")]
     Changed { path: PathBuf },
     #[error("{name:?} is not a name: {problem:?}")]

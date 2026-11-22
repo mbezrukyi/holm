@@ -1,16 +1,16 @@
 //! The draft: the unsaved editor text of the open note, and of the notes the editor left.
 //!
-//! The draft keeps each text until a write of that text succeeds. A failed write keeps it, so
-//! the next job writes it again. When the draft takes text of another note, it gives the write
-//! of the old text first. Only [`Draft::drop_text`] drops a text with no write. Each text
-//! follows the moves of its note, and an outside delete makes it a restore of the note.
+//! The draft keeps each text until a write of that text succeeds. A failed write keeps it, so the next job writes it
+//! again. When the draft takes text of another note, it gives the write of the old text first. Only
+//! [`Draft::drop_text`] drops a text with no write. Each text follows the moves of its note, and an outside delete
+//! makes it a restore of the note.
 //!
-//! A disk question holds the text of its note: the draft gives no write of it until
-//! [`Draft::release`] or [`Draft::drop_text`]. A write that the core refused after an outside
-//! change holds its text in the same way: [`Draft::refused`].
+//! A disk question holds the text of its note: the draft gives no write of it until [`Draft::release`] or
+//! [`Draft::drop_text`]. A write that the core refused after an outside change holds its text in the same way:
+//! [`Draft::refused`].
 //!
-//! A read of a note file can replace its text: [`Draft::drop_for_read`]. The text gives no
-//! write while the read runs, and it comes back when the read fails.
+//! A read of a note file can replace its text: [`Draft::drop_for_read`]. The text gives no write while the read runs,
+//! and it comes back when the read fails.
 
 use holm_core::model::{Change, Note, NoteInfo, Source};
 use holm_core::{Core, NotePath, Snapshot};
@@ -65,16 +65,15 @@ pub(super) struct DraftSave {
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Written {
     Saved,
-    /// The write failed, and the draft keeps the text. It is `first` when no other text of the
-    /// draft had a failed write.
+    /// The write failed, and the draft keeps the text. It is `first` when no other text of the draft had a failed
+    /// write.
     Failed {
         first: bool,
     },
-    /// The core refused the write of the open text after an outside change. The draft holds
-    /// the text, as a disk question does.
+    /// The core refused the write of the open text after an outside change. The draft holds the text, as a disk
+    /// question does.
     Changed,
-    /// The end tells the user nothing. The draft dropped the text, or the open text gives
-    /// its own end.
+    /// The end tells the user nothing. The draft dropped the text, or the open text gives its own end.
     Stale,
 }
 
@@ -94,8 +93,7 @@ struct Text {
 }
 
 impl Text {
-    /// The save to put in the write line. It is `None` when the line already holds a save
-    /// of this body.
+    /// The save to put in the write line. It is `None` when the line already holds a save of this body.
     fn save(&mut self) -> Option<DraftSave> {
         if self.held || self.writing == Some(self.version) {
             return None;
@@ -143,9 +141,8 @@ pub(super) struct Draft {
 }
 
 impl Draft {
-    /// The text of the note at `path` is now `body`. A restore of the note stays a restore.
-    /// When the open text is of another note, it gives the write of that text, and the caller
-    /// puts it in the write line.
+    /// The text of the note at `path` is now `body`. A restore of the note stays a restore. When the open text is of
+    /// another note, it gives the write of that text, and the caller puts it in the write line.
     #[must_use = "the write of the old text goes in the write line"]
     pub(super) fn set(&mut self, path: NotePath, body: String) -> Option<DraftSave> {
         self.version += 1;
@@ -186,8 +183,8 @@ impl Draft {
         self.reading.retain(|text| text.note.path() != path);
     }
 
-    /// Takes out the text of the note at `path` for a read of its file, and gives the id of the
-    /// text. Until [`Self::read_ended`], the text gives no write and is not unsaved.
+    /// Takes out the text of the note at `path` for a read of its file, and gives the id of the text. Until
+    /// [`Self::read_ended`], the text gives no write and is not unsaved.
     pub(super) fn drop_for_read(&mut self, path: &NotePath) -> Option<u64> {
         let text = if self.open.as_ref().is_some_and(|open| open.note.path() == path) {
             self.open.take()
@@ -200,9 +197,8 @@ impl Draft {
         Some(id)
     }
 
-    /// The read for the text `id` ended. A failed read gives the text back, with its hold.
-    /// When a newer text of the note came during the read, the newer text stays and takes the
-    /// hold.
+    /// The read for the text `id` ended. A failed read gives the text back, with its hold. When a newer text of the
+    /// note came during the read, the newer text stays and takes the hold.
     pub(super) fn read_ended(&mut self, id: u64, ok: bool) {
         let Some(at) = self.reading.iter().position(|text| text.id == id) else {
             return;
@@ -254,20 +250,19 @@ impl Draft {
         self.texts().any(|text| text.failed.is_some())
     }
 
-    /// Why a text is not on disk: the reason of its failed write. The reason of the open text
-    /// wins.
+    /// Why a text is not on disk: the reason of its failed write. The reason of the open text wins.
     pub(super) fn not_saved(&self) -> Option<&'static str> {
         self.texts().filter_map(|text| text.failed).last()
     }
 
-    /// Whether a text stays off the disk after the writes in the line: its last write failed,
-    /// or a disk question holds it.
+    /// Whether a text stays off the disk after the writes in the line: its last write failed, or a disk question holds
+    /// it.
     pub(super) fn kept_back(&self) -> bool {
         self.texts().any(|text| text.failed.is_some() || text.held)
     }
 
-    /// The saves to put in the write line before a job, the left texts first. A text whose save
-    /// is already in the line gives none.
+    /// The saves to put in the write line before a job, the left texts first. A text whose save is already in the line
+    /// gives none.
     pub(super) fn writes(&mut self) -> Vec<DraftSave> {
         self.left
             .iter_mut()
@@ -276,9 +271,8 @@ impl Draft {
             .collect()
     }
 
-    /// Takes the end of the write of `version` of the text `id`, with the reason of its
-    /// `failure`. The text goes only when this write saved it and no newer body came. A saved
-    /// left text tells the user only when no other text waits.
+    /// Takes the end of the write of `version` of the text `id`, with the reason of its `failure`. The text goes only
+    /// when this write saved it and no newer body came. A saved left text tells the user only when no other text waits.
     pub(super) fn written(&mut self, id: u64, version: u64, failure: Option<&'static str>) -> Written {
         let first = !self.failed();
         let is_open = self.open.as_ref().is_some_and(|open| open.id == id);
@@ -311,8 +305,8 @@ impl Draft {
         }
     }
 
-    /// Takes the end of the write of `version` of the text `id`, which the core refused after
-    /// an outside change. The text stays, and the draft holds it until [`Self::release`].
+    /// Takes the end of the write of `version` of the text `id`, which the core refused after an outside change. The
+    /// text stays, and the draft holds it until [`Self::release`].
     pub(super) fn refused(&mut self, id: u64, version: u64) -> Written {
         let is_open = self.open.as_ref().is_some_and(|open| open.id == id);
         let text = self.left.iter_mut().chain(&mut self.open).find(|text| text.id == id);

@@ -1,9 +1,8 @@
 //! A one-line text field that draws its own text, selection and caret.
 //!
-//! The field has no frame and no padding. It takes the text style of its parent, and it is as
-//! wide as its text and the caret. In a narrower parent it shrinks and scrolls, so the caret
-//! stays in view.
-//! So the field lays out its text like any other text of the same style.
+//! The field has no frame and no padding. It takes the text style of its parent, and it is as wide as its text and the
+//! caret. In a narrower parent it shrinks and scrolls, so the caret stays in view. So the field lays out its text like
+//! any other text of the same style.
 //!
 //! - `Enter` sends [`FieldEvent::Enter`], and `Esc` sends [`FieldEvent::Escape`].
 //! - When the field loses the focus, it sends [`FieldEvent::Blur`].
@@ -11,8 +10,7 @@
 //! - `Backspace`, `Delete`, `Ctrl+A`, `Ctrl+C`, `Ctrl+X` and `Ctrl+V` work as usual.
 //! - A click puts the caret, a drag selects, and a double click selects all.
 //!
-//! Typed text comes through the platform input handler. It has no undo. A locked field takes no
-//! keys and no typed text.
+//! Typed text comes through the platform input handler. It has no undo. A locked field takes no keys and no typed text.
 
 use std::ops::Range;
 
@@ -65,8 +63,8 @@ struct Shaped {
 }
 
 impl Shaped {
-    /// The box of the glyphs from `start` to `end` on the line. The line paints its glyphs in
-    /// the middle of the line height, so the box fits the text in any line height.
+    /// The box of the glyphs from `start` to `end` on the line. The line paints its glyphs in the middle of the line
+    /// height, so the box fits the text in any line height.
     fn span(&self, start: Pixels, end: Pixels) -> Bounds<Pixels> {
         let height = self.line.ascent + self.line.descent;
         let top = (self.line_height - height) / 2.;
@@ -327,8 +325,7 @@ impl EntityInputHandler for TextField {
         if self.locked {
             return;
         }
-        // A key that no binding takes can come here as its control char, like Tab on the test
-        // platform.
+        // A key that no binding takes can come here as its control char, like Tab on the test platform.
         let text: String = text.chars().filter(|char| !char.is_control()).collect();
         if text.is_empty() {
             return;
@@ -370,8 +367,8 @@ impl EntityInputHandler for TextField {
     }
 }
 
-/// `text` as a field shows it, with no caret and no keys. It is as wide as a field with the same
-/// text, so a field and its text can take turns in one place.
+/// `text` as a field shows it, with no caret and no keys. It is as wide as a field with the same text, so a field and
+/// its text can take turns in one place.
 pub(crate) fn label(text: impl Into<SharedString>) -> impl IntoElement {
     Line(Source::Text(text.into()))
 }
@@ -424,8 +421,8 @@ impl Element for Line {
         let mut run = style.to_run(text.len());
         run.color = color;
         let line = window.text_system().shape_line(text, font_size, &[run], None);
-        // The room after the text holds the caret. Rounding up keeps the text in the bounds
-        // that the layout rounds to device pixels.
+        // The room after the text holds the caret. Rounding up keeps the text in the bounds that the layout rounds to
+        // device pixels.
         let scale = window.scale_factor();
         let width = px((f32::from(line.width()) * scale).ceil() / scale) + CARET_WIDTH;
         let mut layout = Style::default();

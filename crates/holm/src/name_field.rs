@@ -1,19 +1,18 @@
 //! A field for a name that Holm may refuse, like a title or a folder name.
 //!
-//! The field opens for a new name or for a rename. It takes the job of its owner. `Enter`
-//! sends the typed name to the job, and the field waits for its end. While it waits, the field
-//! keeps its look and the focus, and takes no keys.
+//! The field opens for a new name or for a rename. It takes the job of its owner. `Enter` sends the typed name to the
+//! job, and the field waits for its end. While it waits, the field keeps its look and the focus, and takes no keys.
 //!
-//! - The job works: the focus goes to the home of the owner, and the field sends
-//!   [`NameEvent::Written`] with the value of the job.
+//! - The job works: the focus goes to the home of the owner, and the field sends [`NameEvent::Written`] with the value
+//!   of the job.
 //! - Holm refuses the name: the field opens again with its text.
 //! - Another fail: the field sends [`NameEvent::Closed`].
 //!
 //! The job shows the answer of a fail.
 //!
-//! `Enter` with the unchanged name of a rename writes nothing, and sends [`NameEvent::Closed`].
-//! So does `Esc`, and the focus goes home. When the field loses the focus, it sends
-//! [`NameEvent::Blur`]. While a job runs, the field sends neither.
+//! `Enter` with the unchanged name of a rename writes nothing, and sends [`NameEvent::Closed`]. So does `Esc`, and the
+//! focus goes home. When the field loses the focus, it sends [`NameEvent::Blur`]. While a job runs, the field sends
+//! neither.
 
 use std::rc::Rc;
 

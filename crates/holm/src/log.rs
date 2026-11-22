@@ -1,8 +1,7 @@
 //! The log: one file per day in the state folder, kept 7 days.
 //!
-//! `holm.log` links to the file of today. The level is `info`. `HOLM_LOG` changes it.
-//! The log never holds note text, only paths and ids. When Holm can't write the log file,
-//! it logs to the terminal, and the log has a problem.
+//! `holm.log` links to the file of today. The level is `info`. `HOLM_LOG` changes it. The log never holds note text,
+//! only paths and ids. When Holm can't write the log file, it logs to the terminal, and the log has a problem.
 
 use std::error::Error;
 use std::path::{Path, PathBuf};

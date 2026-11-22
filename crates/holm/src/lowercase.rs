@@ -17,8 +17,7 @@ impl Lowercase<'_> {
         &self.0
     }
 
-    /// The match rule of each list that a typed text filters, except the fuzzy match of the link
-    /// picker.
+    /// The match rule of each list that a typed text filters, except the fuzzy match of the link picker.
     pub(crate) fn holds(&self, part: &Lowercase<'_>) -> bool {
         self.0.contains(part.as_str())
     }

@@ -1,5 +1,5 @@
-//! Holm's inline parser. It follows the `CommonMark` inline rules. It adds `~` and `~~` from
-//! GFM and `==` as delimiters. Holm's HTML tags become style nodes.
+//! Holm's inline parser. It follows the `CommonMark` inline rules. It adds `~` and `~~` from GFM and `==` as
+//! delimiters. Holm's HTML tags become style nodes.
 
 use std::collections::HashMap;
 use std::ops::Range;
@@ -87,8 +87,8 @@ fn is_special(c: u8) -> bool {
     SPECIAL[usize::from(c)]
 }
 
-/// The bytes that can start inline syntax. A table is faster than a match in the plain text
-/// scan, which runs over the whole note.
+/// The bytes that can start inline syntax. A table is faster than a match in the plain text scan, which runs over the
+/// whole note.
 static SPECIAL: [bool; 256] = {
     let mut table = [false; 256];
     let chars = b"\\`*_~=[]<\n";
@@ -611,8 +611,8 @@ fn run_len(b: &[u8], start: usize) -> usize {
     b[start..].iter().take_while(|&&c| c == b[start]).count()
 }
 
-/// The content of a code span. When both ends have a space or a line break, one comes off each
-/// end. Code of only spaces stays as it is.
+/// The content of a code span. When both ends have a space or a line break, one comes off each end. Code of only spaces
+/// stays as it is.
 fn code_content(b: &[u8], inner: Range<usize>) -> Range<usize> {
     let space = |c: u8| matches!(c, b' ' | b'\n');
     let code = &b[inner.clone()];
@@ -645,8 +645,7 @@ fn finish(text: &str, mut nodes: Vec<Node>) -> Vec<Node> {
     pair_tags(text, nodes)
 }
 
-/// Pairs Holm's HTML tags among sibling nodes. Tags that cross another node do not pair. Both
-/// stay raw HTML.
+/// Pairs Holm's HTML tags among sibling nodes. Tags that cross another node do not pair. Both stay raw HTML.
 fn pair_tags(text: &str, nodes: Vec<Node>) -> Vec<Node> {
     if !nodes.iter().any(|n| matches!(n.kind, Kind::Html)) {
         return nodes;

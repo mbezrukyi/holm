@@ -42,9 +42,8 @@ fn heading_prefix(line: &str) -> (u8, usize) {
 }
 
 impl Model {
-    /// Makes each line the selection touches a heading of `level`, or a plain line with 0.
-    /// When every such line already has `level`, they become plain lines.
-    /// Returns whether the text changed.
+    /// Makes each line the selection touches a heading of `level`, or a plain line with 0. When every such line already
+    /// has `level`, they become plain lines. Returns whether the text changed.
     pub(crate) fn toggle_heading(&mut self, level: u8) -> bool {
         let selection = self.selection();
         let first = self.line_of(selection.start);
@@ -76,8 +75,8 @@ impl Model {
         self.edit(edits, (anchor, cursor), Group::Alone, None)
     }
 
-    /// Enter: in a list item it starts the next item and counts the list again, and on an empty
-    /// item it ends the list. Elsewhere it types a line break. Returns whether the text changed.
+    /// Enter: in a list item it starts the next item and counts the list again, and on an empty item it ends the list.
+    /// Elsewhere it types a line break. Returns whether the text changed.
     pub(crate) fn newline(&mut self, continue_lists: bool, now: std::time::Instant) -> bool {
         let edit = continue_lists
             .then(|| relist(&self.text, &self.body, self.selection(), Move::Next))
@@ -88,9 +87,8 @@ impl Model {
         }
     }
 
-    /// Tab and Shift+Tab: moves each list item that the selection touches one level in or out,
-    /// with its children, and counts the lists it changes again.
-    /// Returns `None` when the selection touches no list item.
+    /// Tab and Shift+Tab: moves each list item that the selection touches one level in or out, with its children, and
+    /// counts the lists it changes again. Returns `None` when the selection touches no list item.
     pub(crate) fn indent(&mut self, out: bool) -> Option<bool> {
         let key = if out { Move::Out } else { Move::In };
         let edit = relist(&self.text, &self.body, self.selection(), key)?;

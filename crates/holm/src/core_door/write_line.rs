@@ -12,8 +12,7 @@ use gpui_kit::{App, AppContext as _, Task};
 use holm_core::model::ChangeList;
 use holm_core::{ChangeLists, Core};
 
-/// The work of one job. It runs off the UI thread, and gives the error of a failed job for the
-/// log at quit.
+/// The work of one job. It runs off the UI thread, and gives the error of a failed job for the log at quit.
 pub(super) type Work = Box<dyn FnOnce(&Core) -> Option<String> + Send>;
 
 /// A job whose work ran, with the change lists of the core since the job before it.
@@ -26,8 +25,8 @@ pub(super) struct Ended<E> {
 pub(super) struct Run<E> {
     /// The jobs whose work ran, in their order.
     pub(super) ended: Vec<Ended<E>>,
-    /// It is there when the run started a job that still runs. It comes when the work of that
-    /// job ends, and then the next run gives the job.
+    /// It is there when the run started a job that still runs. It comes when the work of that job ends, and then the
+    /// next run gives the job.
     pub(super) wake: Option<Wake>,
 }
 
@@ -59,8 +58,8 @@ struct RunningJob<E> {
     task: Option<Task<()>>,
 }
 
-/// The jobs of the user and the writes of the draft. One job runs at a time, and a failed job
-/// does not stop the line. `E` is what the caller does at the end of a job.
+/// The jobs of the user and the writes of the draft. One job runs at a time, and a failed job does not stop the line.
+/// `E` is what the caller does at the end of a job.
 pub(super) struct WriteLine<E> {
     core: Core,
     changes: ChangeLists,
@@ -69,8 +68,8 @@ pub(super) struct WriteLine<E> {
     last_ended: u64,
     /// The last job that is past its budget, until it ends.
     late: Option<u64>,
-    /// The work that left the line. Its thread holds the lock while it runs, so the drain
-    /// waits for it, or runs it when the thread did not start yet.
+    /// The work that left the line. Its thread holds the lock while it runs, so the drain waits for it, or runs it
+    /// when the thread did not start yet.
     work: Arc<Mutex<Option<Work>>>,
     running: Option<RunningJob<E>>,
     /// After the drain, no job runs.
@@ -105,9 +104,9 @@ impl<E> WriteLine<E> {
         self.late.is_some()
     }
 
-    /// Runs the jobs, one at a time, and gives the jobs that ended. With `until`, it waits on
-    /// this thread up to `budget` until the job `until` ended. When the time is up, that job
-    /// is late until it ends. Without `until`, it only starts the next job.
+    /// Runs the jobs, one at a time, and gives the jobs that ended. With `until`, it waits on this thread up to
+    /// `budget` until the job `until` ended. When the time is up, that job is late until it ends. Without `until`, it
+    /// only starts the next job.
     pub(super) fn run(&mut self, until: Option<u64>, budget: Duration, cx: &App) -> Run<E> {
         let deadline = Instant::now() + budget;
         let mut ended = Vec::new();
@@ -135,8 +134,8 @@ impl<E> WriteLine<E> {
         Run { ended, wake }
     }
 
-    /// The change lists that wait, while no job runs. During a job it gives `None`, and the
-    /// lists wait for the end of the job. It wakes `waker` when a list comes.
+    /// The change lists that wait, while no job runs. During a job it gives `None`, and the lists wait for the end of
+    /// the job. It wakes `waker` when a list comes.
     pub(super) fn outside(&mut self, waker: &mut task::Context<'_>) -> Option<Vec<ChangeList>> {
         if self.running.is_some() {
             return None;
@@ -148,8 +147,8 @@ impl<E> WriteLine<E> {
         Some(lists)
     }
 
-    /// Runs the work that left the line, every job that waits, and then `last`. Later jobs do
-    /// not run. It works on the UI thread, because no task runs after the window is gone.
+    /// Runs the work that left the line, every job that waits, and then `last`. Later jobs do not run. It works on the
+    /// UI thread, because no task runs after the window is gone.
     pub(super) fn drain(&mut self, last: Work) {
         self.closed = true;
         let mut slot = lock(&self.work);
@@ -193,8 +192,8 @@ impl<E> WriteLine<E> {
         true
     }
 
-    /// Whether the work of the running job ended, and whether it ran. With `wait`, it waits
-    /// on this thread up to that time. It gives `None` while the work runs.
+    /// Whether the work of the running job ended, and whether it ran. With `wait`, it waits on this thread up to that
+    /// time. It gives `None` while the work runs.
     fn wait(&mut self, wait: Option<Duration>, cx: &App) -> Option<bool> {
         let job = self.running.as_mut()?;
         let done = match job.done.try_recv() {
@@ -210,8 +209,8 @@ impl<E> WriteLine<E> {
         Some(done.is_ok())
     }
 
-    /// Ends the running job. When its work `ran`, it gives the job with the lists that wait.
-    /// A late job is no longer late once it ends.
+    /// Ends the running job. When its work `ran`, it gives the job with the lists that wait. A late job is no longer
+    /// late once it ends.
     fn end(&mut self, ran: bool) -> Option<Ended<E>> {
         let job = self.running.take()?;
         self.last_ended = job.number;
@@ -225,8 +224,7 @@ impl<E> WriteLine<E> {
     }
 }
 
-/// A lock that still works after a panic in another thread. A job never leaves a half-done
-/// change on disk.
+/// A lock that still works after a panic in another thread. A job never leaves a half-done change on disk.
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }

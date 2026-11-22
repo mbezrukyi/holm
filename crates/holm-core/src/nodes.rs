@@ -1,7 +1,7 @@
 use crate::paths::{FolderPath, NotePath};
 
-/// A note or a folder that the core brings up to date with the disk. A folder node holds
-/// everything at its path and below it.
+/// A note or a folder that the core brings up to date with the disk. A folder node holds everything at its path and
+/// below it.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub(crate) enum Node {
     Note(NotePath),

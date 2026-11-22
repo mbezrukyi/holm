@@ -1,5 +1,5 @@
-//! This module has no GPUI. Every offset is a byte offset in the source text, on a char boundary.
-//! The text has only LF line breaks.
+//! This module has no GPUI. Every offset is a byte offset in the source text, on a char boundary. The text has only LF
+//! line breaks.
 
 mod caret;
 mod display;
@@ -31,8 +31,7 @@ pub(crate) struct Model {
     /// The same text as `rope`. The parser and the text shaper need one `&str`.
     text: String,
     body: Body,
-    /// What the splices since the last parse changed: a range of the old text, and the end of
-    /// its new text.
+    /// What the splices since the last parse changed: a range of the old text, and the end of its new text.
     changed: Option<(Range<usize>, usize)>,
     caret: Caret,
     anchor: usize,
@@ -138,8 +137,8 @@ impl Model {
         self.set_caret(Caret::at(offset), extend);
     }
 
-    /// Moves the cursor like [`Self::set_cursor`], and keeps the row start and the goals of
-    /// `caret` while its offset is on a char boundary.
+    /// Moves the cursor like [`Self::set_cursor`], and keeps the row start and the goals of `caret` while its offset is
+    /// on a char boundary.
     pub(crate) fn set_caret(&mut self, caret: Caret, extend: bool) {
         let offset = self.floor(caret.offset());
         self.caret = if offset == caret.offset() {
@@ -204,8 +203,8 @@ impl Model {
         }
     }
 
-    /// The edits are in order and apart, in the current text. `ends` are in the new text.
-    /// Returns whether the text changed.
+    /// The edits are in order and apart, in the current text. `ends` are in the new text. Returns whether the text
+    /// changed.
     fn edit(&mut self, edits: Vec<Edit>, ends: Ends, group: Group, now: Option<Instant>) -> bool {
         let before = self.ends();
         let mut changes = Vec::with_capacity(edits.len());
@@ -392,8 +391,8 @@ impl Model {
         self.set_cursor(self.word_right(self.cursor()), extend);
     }
 
-    /// The offset before the spaces and then the run of one kind of chars before `offset`.
-    /// A line break is a run of its own.
+    /// The offset before the spaces and then the run of one kind of chars before `offset`. A line break is a run of its
+    /// own.
     fn word_left(&self, offset: usize) -> usize {
         let mut start = offset;
         let mut chars = self.text[..offset].char_indices().rev().peekable();
@@ -420,8 +419,8 @@ impl Model {
         start
     }
 
-    /// The offset after the spaces and then the run of one kind of chars after `offset`.
-    /// A line break is a run of its own.
+    /// The offset after the spaces and then the run of one kind of chars after `offset`. A line break is a run of its
+    /// own.
     fn word_right(&self, offset: usize) -> usize {
         let mut end = offset;
         let mut chars = self.text[offset..].chars().peekable();
@@ -448,8 +447,7 @@ impl Model {
         end
     }
 
-    /// The run of one kind of chars at `offset`, for a double click. A line break is never part
-    /// of it.
+    /// The run of one kind of chars at `offset`, for a double click. A line break is never part of it.
     pub(crate) fn word_at(&self, offset: usize) -> Range<usize> {
         let offset = self.floor(offset);
         let after = self.text[offset..].chars().next();

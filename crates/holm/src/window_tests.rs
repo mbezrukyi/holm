@@ -88,8 +88,7 @@ impl Fixture {
     }
 }
 
-/// An inactive window sends no focus events. Each write ends within its budget, as a quick disk
-/// does.
+/// An inactive window sends no focus events. Each write ends within its budget, as a quick disk does.
 fn open(cx: &mut TestAppContext, startup: Startup) -> AnyWindowHandle {
     cx.executor().set_block_on_ticks(usize::MAX..=usize::MAX);
     let opened = cx.update(|cx| {
@@ -887,8 +886,8 @@ fn sidebar(cx: &mut TestAppContext, handle: AnyWindowHandle) -> String {
     })
 }
 
-/// Which part has the focus: "sidebar", "editor", "tag field", "title field", "search", or
-/// "other". The tag row lies inside the editor, so it comes first.
+/// Which part has the focus: "sidebar", "editor", "tag field", "title field", "search", or "other". The tag row lies
+/// inside the editor, so it comes first.
 fn focus(cx: &mut TestAppContext, handle: AnyWindowHandle) -> &'static str {
     screen(cx, handle, |window| {
         let focused = |id| window.try_find(id).and_then(|part| part.focused()) == Some(true);
@@ -1692,8 +1691,8 @@ fn type_new_name(cx: &mut TestAppContext, handle: AnyWindowHandle, name: &str) {
     cx.simulate_input(handle, name);
 }
 
-/// A write that the key starts has not run yet.
-/// Presses `key` and runs no task, so a write that it starts has not run yet.
+/// A write that the key starts has not run yet. Presses `key` and runs no task, so a write that it starts has not run
+/// yet.
 fn press(cx: &mut TestAppContext, handle: AnyWindowHandle, key: &'static str) {
     cx.update_window(handle, |_, window, cx| {
         window.dispatch_keystroke(gpui_kit::Keystroke::parse(key).unwrap(), cx);
@@ -2184,8 +2183,7 @@ fn a_new_tag_renames_in_all_notes_with_no_wait(cx: &mut TestAppContext) {
     assert_eq!(fields(&a).0, ["job"]);
 }
 
-/// Whether the last drawn frame shows `id`. It draws no new frame, so it shows a frame that
-/// the window still owes.
+/// Whether the last drawn frame shows `id`. It draws no new frame, so it shows a frame that the window still owes.
 fn drawn(cx: &mut TestAppContext, handle: AnyWindowHandle, id: &'static str) -> bool {
     cx.update_window(handle, |_, window, _| shows(window, id)).unwrap()
 }
@@ -3727,8 +3725,7 @@ fn space_on_the_scale_row_wraps_from_the_largest(cx: &mut TestAppContext) {
     assert_eq!(zoom(cx, handle), 0.8);
 }
 
-/// The left and the width of the text column, from the left of the editor. The tag row fills
-/// the column.
+/// The left and the width of the text column, from the left of the editor. The tag row fills the column.
 fn text_column(cx: &mut TestAppContext, handle: AnyWindowHandle) -> (f32, f32) {
     screen(cx, handle, |window| {
         let editor = window.find("editor").bounds();

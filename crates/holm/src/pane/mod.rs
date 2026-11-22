@@ -1,29 +1,25 @@
-//! The editor pane: one note in the editor, with autosave. With no open note, it shows the
-//! empty pane.
+//! The editor pane: one note in the editor, with autosave. With no open note, it shows the empty pane.
 //!
-//! The pane keeps its unsaved text in the draft of the core door. The write line writes the
-//! draft before each job, so each file action sees the text. The pane also saves a short time
-//! after the user stops typing, and when the app quits. A close of the window saves first.
-//! When that save fails, a second close closes the window while the text stays the same.
-//! An outside change of the note reloads it quietly when the pane has no unsaved
-//! changes. Else the message line asks to reload or to keep the text in the editor.
-//! When a save fails, the message line shows "Not saved", and the text stays in the editor.
-//! When another tool deletes the note, the app opens another one. With unsaved changes, the
-//! message line first asks to write the note again or to close it.
+//! The pane keeps its unsaved text in the draft of the core door. The write line writes the draft before each job, so
+//! each file action sees the text. The pane also saves a short time after the user stops typing, and when the app
+//! quits. A close of the window saves first. When that save fails, a second close closes the window while the text
+//! stays the same. An outside change of the note reloads it quietly when the pane has no unsaved changes. Else the
+//! message line asks to reload or to keep the text in the editor. When a save fails, the message line shows "Not
+//! saved", and the text stays in the editor. When another tool deletes the note, the app opens another one. With
+//! unsaved changes, the message line first asks to write the note again or to close it.
 //!
-//! When the user opens another note, the pane saves the note first. When that save fails, the
-//! pane stays on the note. Holm never renames a note by itself.
+//! When the user opens another note, the pane saves the note first. When that save fails, the pane stays on the note.
+//! Holm never renames a note by itself.
 //!
-//! The title field in the tag row renames the note. Ctrl+N shows a [`NewNote`] in the place of
-//! the editor. Its file comes only with its title. The editor keeps the note from before, so
-//! `Esc` shows it again as it was.
+//! The title field in the tag row renames the note. Ctrl+N shows a [`NewNote`] in the place of the editor. Its file
+//! comes only with its title. The editor keeps the note from before, so `Esc` shows it again as it was.
 //!
-//! The tag row before the first line shows the tags, the pin and the path of the note. It
-//! scrolls with the text. The pane writes the changes of the tags and the pin at once. The
-//! editor undo stack holds only the text, so Ctrl+Z does not undo them.
+//! The tag row before the first line shows the tags, the pin and the path of the note. It scrolls with the text. The
+//! pane writes the changes of the tags and the pin at once. The editor undo stack holds only the text, so Ctrl+Z does
+//! not undo them.
 //!
-//! `links` runs the link picker flow, opens the links of the note and reads its backlinks.
-//! The backlinks show in the tag row.
+//! `links` runs the link picker flow, opens the links of the note and reads its backlinks. The backlinks show in the
+//! tag row.
 
 mod links;
 mod new_note;
@@ -70,9 +66,9 @@ pub(crate) enum PaneEvent {
     /// The pane shows the note at this path: after an open, a move, or an open that stopped.
     Opened(NotePath),
     Closed,
-    /// The open note at this path is gone, by a Holm delete or another tool, and the pane has
-    /// no text to keep. The app must open another note or call [`NotePane::close`]. The pane
-    /// cannot pick the note, because the neighbor comes from the sidebar list.
+    /// The open note at this path is gone, by a Holm delete or another tool, and the pane has no text to keep. The app
+    /// must open another note or call [`NotePane::close`]. The pane cannot pick the note, because the neighbor comes
+    /// from the sidebar list.
     Gone(NotePath),
 }
 
@@ -85,8 +81,7 @@ pub(crate) enum Leave {
     Drop,
 }
 
-/// A question about the open note after another tool changed its file, while the editor had
-/// unsaved changes.
+/// A question about the open note after another tool changed its file, while the editor had unsaved changes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DiskQuestion {
     Changed,
@@ -130,8 +125,8 @@ impl DiskQuestion {
 enum Content {
     Empty,
     Note(NotePath),
-    /// The note after Ctrl+N, before it has a file, in the place of the editor. The editor
-    /// keeps the note from before, at `kept`.
+    /// The note after Ctrl+N, before it has a file, in the place of the editor. The editor keeps the note from before,
+    /// at `kept`.
     New {
         note: Entity<NewNote>,
         kept: Option<NotePath>,
@@ -187,8 +182,7 @@ pub(crate) struct NotePane {
     /// The heading to show when the note that opens is ready.
     open_heading: Option<String>,
     is_saving_for_close: bool,
-    /// The draft version at a close that failed to save. A close at the same version closes,
-    /// so typed text stops it.
+    /// The draft version at a close that failed to save. A close at the same version closes, so typed text stops it.
     close_again: Option<u64>,
     _subscriptions: Vec<Subscription>,
 }
@@ -364,8 +358,7 @@ impl NotePane {
         }
     }
 
-    /// Shows the state in the message line. A disk question wins over "Not saved", which has
-    /// only its reason.
+    /// Shows the state in the message line. A disk question wins over "Not saved", which has only its reason.
     fn show_state(&self, cx: &mut Context<Self>) {
         let state = match (self.disk, self.core_door.read(cx).not_saved()) {
             (Some(question), _) => Some(question.state()),
@@ -403,16 +396,16 @@ impl NotePane {
         self.links.update(cx, |links, cx| links.pick(pick, cx));
     }
 
-    /// Ctrl+K: gives `done` what the link picker starts with. See [`Links::start`]. With no
-    /// note in the editor, it does nothing.
+    /// Ctrl+K: gives `done` what the link picker starts with. See [`Links::start`]. With no note in the editor, it does
+    /// nothing.
     pub(crate) fn start_link(&mut self, done: impl FnOnce(LinkStart, &mut App) + 'static, cx: &mut Context<Self>) {
         if self.content.note().is_some() {
             self.links.update(cx, |links, cx| links.start(done, cx));
         }
     }
 
-    /// Puts the link that the user picked in the link picker at the cursor. See
-    /// [`Links::link`]. With no note in the editor, it does nothing. `done` runs at the end.
+    /// Puts the link that the user picked in the link picker at the cursor. See [`Links::link`]. With no note in the
+    /// editor, it does nothing. `done` runs at the end.
     pub(crate) fn link(&mut self, choice: LinkChoice, done: Then<()>, cx: &mut Context<Self>) {
         if self.content.note().is_some() {
             self.links.update(cx, |links, cx| links.link(choice, done, cx));
@@ -499,9 +492,9 @@ impl NotePane {
         self.core_door.update(cx, CoreDoor::save_text);
     }
 
-    /// A close of the window: gives whether the window may close now. With unsaved text, the
-    /// pane saves first and closes the window when the save works. When it fails, the answer
-    /// asks for a second close. A close with the same text as at that failure gives `true`.
+    /// A close of the window: gives whether the window may close now. With unsaved text, the pane saves first and
+    /// closes the window when the save works. When it fails, the answer asks for a second close. A close with the same
+    /// text as at that failure gives `true`.
     pub(crate) fn may_close(&mut self, window: &Window, cx: &mut Context<Self>) -> bool {
         if self.is_saving_for_close {
             return false;
@@ -530,8 +523,7 @@ impl NotePane {
         false
     }
 
-    /// Gives the writing help and the text width of `config` to `editor`, now and after each
-    /// change.
+    /// Gives the writing help and the text width of `config` to `editor`, now and after each change.
     fn take_settings(editor: &Entity<Editor>, config: &Entity<Config>, cx: &mut Context<Self>) -> Subscription {
         let give = |editor: &Entity<Editor>, config: &Entity<Config>, cx: &mut Context<Self>| {
             let settings = config.read(cx).settings();
@@ -565,8 +557,8 @@ impl NotePane {
         cx.notify();
     }
 
-    /// Takes a change of the open note. Only a change by another tool can ask the disk
-    /// question. [`Self::follow`] takes the moves.
+    /// Takes a change of the open note. Only a change by another tool can ask the disk question. [`Self::follow`] takes
+    /// the moves.
     fn take_change(&mut self, source: Source, change: &Change, cx: &mut Context<Self>) {
         let Some(path) = self.content.editor() else {
             return;
@@ -610,8 +602,8 @@ impl NotePane {
         self.keep_text(cx);
     }
 
-    /// Ends the hold of the disk question, and writes the text over the file. After an outside
-    /// delete, it writes the note again at its path.
+    /// Ends the hold of the disk question, and writes the text over the file. After an outside delete, it writes the
+    /// note again at its path.
     fn keep_text(&mut self, cx: &mut Context<Self>) {
         self.autosave = None;
         if let Some(path) = self.content.editor().cloned() {
@@ -620,8 +612,7 @@ impl NotePane {
         }
     }
 
-    /// "Close" after an outside delete: drops the note and its text, and the app opens another
-    /// note.
+    /// "Close" after an outside delete: drops the note and its text, and the app opens another note.
     fn close_deleted(&mut self, cx: &mut Context<Self>) {
         let Some(path) = self.content.editor().cloned() else {
             return;
@@ -630,8 +621,7 @@ impl NotePane {
         cx.emit(PaneEvent::Gone(path));
     }
 
-    /// The open note: the note that an open reads, or else the note in the editor, also
-    /// under a new note.
+    /// The open note: the note that an open reads, or else the note in the editor, also under a new note.
     pub(crate) fn path(&self) -> Option<&NotePath> {
         self.next.as_ref().or_else(|| self.content.editor())
     }
@@ -648,8 +638,8 @@ impl NotePane {
         self.content.note()
     }
 
-    /// Opens the note at `path`, and drops a new note. With [`Leave::Keep`], the write
-    /// line first writes the unsaved text. When that save fails, the pane stays on the note.
+    /// Opens the note at `path`, and drops a new note. With [`Leave::Keep`], the write line first writes the unsaved
+    /// text. When that save fails, the pane stays on the note.
     pub(crate) fn open(&mut self, path: NotePath, leave: Leave, cx: &mut Context<Self>) {
         if leave == Leave::Keep && self.content.note() == Some(&path) {
             self.stop_opening(cx);
@@ -711,9 +701,8 @@ impl NotePane {
         }
     }
 
-    /// Follows a move of the open note, or of a folder that holds it. A move to another
-    /// folder can change the file links in the note, so the pane reads it again when the note
-    /// has no unsaved text.
+    /// Follows a move of the open note, or of a folder that holds it. A move to another folder can change the file
+    /// links in the note, so the pane reads it again when the note has no unsaved text.
     fn follow(&mut self, event: &DoorEvent, cx: &mut Context<Self>) {
         if let Some(next) = &mut self.next
             && let Some(new) = event.changes().find_map(|change| change.note_after(next))
@@ -759,9 +748,8 @@ impl NotePane {
         });
     }
 
-    /// Ctrl+N: after the write line writes the unsaved text, shows a new note for `folder`, with
-    /// `tag` when it has one. When the save fails, the pane stays on the note. Another Ctrl+N on
-    /// a new note only gives its field the focus.
+    /// Ctrl+N: after the write line writes the unsaved text, shows a new note for `folder`, with `tag` when it has one.
+    /// When the save fails, the pane stays on the note. Another Ctrl+N on a new note only gives its field the focus.
     pub(crate) fn new_note(
         &mut self,
         folder: FolderPath,
@@ -817,8 +805,7 @@ impl NotePane {
     }
 }
 
-/// A `done` step for a job of the core door: it runs `step` on the pane, when the pane
-/// still exists.
+/// A `done` step for a job of the core door: it runs `step` on the pane, when the pane still exists.
 fn step<R: 'static>(
     cx: &Context<NotePane>,
     step: impl FnOnce(&mut NotePane, R, &mut Context<NotePane>) + 'static,
@@ -864,8 +851,8 @@ fn note_text() -> Div {
         .line_height(theme::NOTE_LINE)
 }
 
-/// The pane with no open note: a line, and the keys that open one. It holds the focus of the
-/// editor, so the window keys still work when no other part has the focus.
+/// The pane with no open note: a line, and the keys that open one. It holds the focus of the editor, so the window keys
+/// still work when no other part has the focus.
 fn empty_pane(focus: &FocusHandle, cx: &App) -> impl IntoElement {
     let theme = cx.theme();
     let chip = |key: &'static str| {

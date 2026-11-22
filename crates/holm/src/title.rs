@@ -1,12 +1,10 @@
-//! The path of the open note at the right end of the tag row: its folders and its title, like
-//! `Work › 2026 › Plans`. A long path cuts folders from the left, never the title. The folders
-//! are only text.
+//! The path of the open note at the right end of the tag row: its folders and its title, like `Work › 2026 › Plans`. A
+//! long path cuts folders from the left, never the title. The folders are only text.
 //!
-//! The title field takes the place of the title. It is a [`NameField`] with the job of the
-//! owner. The title, the field and the name of a running job share one text element, so the
-//! path does not move when the field opens or closes.
-//! The field closes after [`NameEvent::Written`] and [`NameEvent::Closed`], and it sends each
-//! [`NameEvent`] on to the owner. The owner decides what a blur does.
+//! The title field takes the place of the title. It is a [`NameField`] with the job of the owner. The title, the field
+//! and the name of a running job share one text element, so the path does not move when the field opens or closes. The
+//! field closes after [`NameEvent::Written`] and [`NameEvent::Closed`], and it sends each [`NameEvent`] on to the
+//! owner. The owner decides what a blur does.
 
 use std::path::Path;
 
@@ -65,8 +63,7 @@ impl<T: Clone + 'static> TitleField<T> {
             .unwrap_or_default()
     }
 
-    /// Opens the field with the title, selected, and gives it the focus. An open field only
-    /// gets the focus.
+    /// Opens the field with the title, selected, and gives it the focus. An open field only gets the focus.
     pub(crate) fn open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some((field, _)) = &self.field {
             field.update(cx, |field, cx| field.focus(window, cx));

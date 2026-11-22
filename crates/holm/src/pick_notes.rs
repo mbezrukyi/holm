@@ -1,5 +1,5 @@
-//! The notes that a popup picks from, with each title in lowercase. The popup makes them once
-//! when it opens, so a key does not lowercase each title again.
+//! The notes that a popup picks from, with each title in lowercase. The popup makes them once when it opens, so a key
+//! does not lowercase each title again.
 
 use holm_core::model::NoteInfo;
 

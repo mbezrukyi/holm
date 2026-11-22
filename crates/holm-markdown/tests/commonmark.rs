@@ -1,9 +1,9 @@
-//! The inline examples of the `CommonMark` 0.31.2 spec: backslash escapes, entities, and the
-//! sections from code spans to the end.
+//! The inline examples of the `CommonMark` 0.31.2 spec: backslash escapes, entities, and the sections from code spans
+//! to the end.
 //!
-//! The test writes HTML from the inline tree and compares it with the spec. Links and images
-//! compare without their attributes, because the tree keeps no link title. Examples with blocks
-//! other than paragraphs and headings are not checked here: they test the block parser.
+//! The test writes HTML from the inline tree and compares it with the spec. Links and images compare without their
+//! attributes, because the tree keeps no link title. Examples with blocks other than paragraphs and headings are not
+//! checked here: they test the block parser.
 
 #![cfg(test)]
 
@@ -102,8 +102,7 @@ fn unescape(text: &str) -> String {
     out
 }
 
-/// The text of a text node as HTML: escapes and entities as chars, no spaces around a line
-/// break.
+/// The text of a text node as HTML: escapes and entities as chars, no spaces around a line break.
 fn text_html(source: &str) -> String {
     let lines: Vec<&str> = source.split('\n').collect();
     let last = lines.len() - 1;

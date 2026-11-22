@@ -1,6 +1,5 @@
-//! The look of a small window over the notes: a dim layer over the whole window, a panel in
-//! its middle, and [`PickList`], a list with a search field in the panel. Also [`Dropdown`], a
-//! popup under a part of a row.
+//! The look of a small window over the notes: a dim layer over the whole window, a panel in its middle, and
+//! [`PickList`], a list with a search field in the panel. Also [`Dropdown`], a popup under a part of a row.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -23,8 +22,7 @@ use crate::list_cursor;
 use crate::shortcuts::{Command, Place, Run};
 use crate::text;
 
-/// A layer over the whole window that centers its child. The parts under it get no mouse
-/// input.
+/// A layer over the whole window that centers its child. The parts under it get no mouse input.
 pub(crate) fn layer(cx: &App) -> Div {
     div()
         .occlude()
@@ -132,9 +130,9 @@ pub(crate) enum PickEvent {
 
 /// A search field over a list of rows, for the panel of a small window.
 ///
-/// Its keys are the rows of [`Place::Picker`]. `Tab` and `Shift+Tab` move the cursor and wrap.
-/// A row under the mouse gets the cursor too. A list that is too long for the panel scrolls,
-/// and its scrollbar takes a lane on the right of the rows.
+/// Its keys are the rows of [`Place::Picker`]. `Tab` and `Shift+Tab` move the cursor and wrap. A row under the mouse
+/// gets the cursor too. A list that is too long for the panel scrolls, and its scrollbar takes a lane on the right of
+/// the rows.
 pub(crate) struct PickList {
     field: Entity<InputState>,
     rows: Rc<[PickRow]>,
@@ -145,8 +143,7 @@ pub(crate) struct PickList {
 }
 
 impl PickList {
-    /// An empty list. The field shows `placeholder` and gets the focus. A list with no rows
-    /// shows `empty`.
+    /// An empty list. The field shows `placeholder` and gets the focus. A list with no rows shows `empty`.
     pub(crate) fn new(
         placeholder: impl Into<SharedString>,
         empty: &'static str,
@@ -253,8 +250,8 @@ impl PickList {
             .when(scrolls, |list| list.pr(Scrollbar::width()))
             .child(rows)
             .when(scrolls, |list| {
-                // The scrollbar fills its parent and draws its track at the right edge, which
-                // is the lane of the right padding.
+                // The scrollbar fills its parent and draws its track at the right edge, which is the lane of the right
+                // padding.
                 list.child(
                     div().absolute().inset_0().child(
                         Scrollbar::vertical(&self.scroll)
@@ -324,11 +321,10 @@ pub(crate) fn option(id: impl Into<ElementId>, current: bool, cx: &App) -> State
 ///
 /// - A mouse down in the popup keeps the focus where it is.
 /// - A mouse down outside the popup and the opener closes it.
-/// - The popup closes when the focus leaves it, in the same frame. When the focus goes to no
-///   other part, it goes back to the text. So a closed popup never keeps the focus, and never
-///   takes it from another part.
-/// - The focus may move only to parts that the open popup already showed in the last frame.
-///   A new part takes the panel away until the next frame.
+/// - The popup closes when the focus leaves it, in the same frame. When the focus goes to no other part, it goes back
+///   to the text. So a closed popup never keeps the focus, and never takes it from another part.
+/// - The focus may move only to parts that the open popup already showed in the last frame. A new part takes the panel
+///   away until the next frame.
 pub(crate) struct Dropdown<T> {
     focus: FocusHandle,
     close: fn(&mut T, &mut Window, &mut Context<T>),
@@ -374,8 +370,8 @@ impl<T: 'static> Dropdown<T> {
         }
     }
 
-    /// Takes the bounds of the opener from `opener`, for an opener that another part draws and
-    /// keeps the bounds of. Without it, [`Self::root`] keeps them.
+    /// Takes the bounds of the opener from `opener`, for an opener that another part draws and keeps the bounds of.
+    /// Without it, [`Self::root`] keeps them.
     pub(crate) fn with_opener(mut self, opener: Rc<Cell<Bounds<Pixels>>>) -> Self {
         self.opener = opener;
         self
@@ -410,8 +406,7 @@ impl<T: 'static> Dropdown<T> {
 
     /// With no place: the owner places it.
     pub(crate) fn frame(&self, width: Pixels, window: &Window, cx: &Context<T>) -> Div {
-        // GPUI tells about a focus move only after the next frame. This hides the panel in
-        // that frame already.
+        // GPUI tells about a focus move only after the next frame. This hides the panel in that frame already.
         let left = self.had_focus.get() && !self.focus.contains_focused(window, cx);
         let opener = self.opener.clone();
         let close = self.close;

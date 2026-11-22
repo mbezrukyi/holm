@@ -1,6 +1,5 @@
-//! Each path is relative to the notes folder and plain: each part is a [`Name`]. So a path has
-//! no `.` or `..` part, no hidden part, no `//` and no `/` at the end. The root folder is the
-//! empty path.
+//! Each path is relative to the notes folder and plain: each part is a [`Name`]. So a path has no `.` or `..` part, no
+//! hidden part, no `//` and no `/` at the end. The root folder is the empty path.
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -33,8 +32,8 @@ pub struct NotePath {
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct FolderPath(Plain);
 
-/// One part of a plain path: not empty, with no `/`, no leading `.`, no zero byte, and at most
-/// [`MAX_NAME_BYTES`] bytes.
+/// One part of a plain path: not empty, with no `/`, no leading `.`, no zero byte, and at most [`MAX_NAME_BYTES`]
+/// bytes.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Name(Arc<[u8]>);
 
@@ -44,8 +43,8 @@ impl Name {
         Self::checked(text.trim(), 0)
     }
 
-    /// The typed note title `text` with no spaces around it. [`NameProblem::TooLong`] when its file
-    /// name with `.md` is too long.
+    /// The typed note title `text` with no spaces around it. [`NameProblem::TooLong`] when its file name with `.md` is
+    /// too long.
     pub(crate) fn title(text: &str) -> Result<Self> {
         Self::checked(text.trim(), NOTE_EXT.len())
     }
@@ -119,8 +118,7 @@ impl NotePath {
         self.folder == *folder || self.folder.is_below(folder)
     }
 
-    /// The path after the folder `from` moved to `to`, or `None` when the note is not below
-    /// `from`.
+    /// The path after the folder `from` moved to `to`, or `None` when the note is not below `from`.
     pub fn moved(&self, from: &FolderPath, to: &FolderPath) -> Option<Self> {
         self.folder.moved(from, to).map(|folder| self.in_folder(&folder))
     }
@@ -215,8 +213,7 @@ impl FolderPath {
         !self.is_root() && parent != self && !parent.is_below(self)
     }
 
-    /// The path after the folder `from` moved to `to`, or `None` when this folder is not
-    /// `from` and not below it.
+    /// The path after the folder `from` moved to `to`, or `None` when this folder is not `from` and not below it.
     pub fn moved(&self, from: &Self, to: &Self) -> Option<Self> {
         self.0.moved(&from.0, &to.0).map(Self)
     }
@@ -247,8 +244,7 @@ impl FolderPath {
         (!self.is_root()).then(|| (Self(self.0.parent()), Name(self.0.name().into())))
     }
 
-    /// The folder and the last part of the raw relative path `path`, or `None` when `path` is
-    /// empty or not plain.
+    /// The folder and the last part of the raw relative path `path`, or `None` when `path` is empty or not plain.
     pub(crate) fn split_raw(path: &Path) -> Option<(Self, Name)> {
         let (folder, name) = split(path.as_os_str().as_bytes())?;
         Some((Self(Plain::from(folder)), Name(name.into())))
@@ -276,8 +272,7 @@ impl NoteReader {
     }
 }
 
-/// The folder and the last part of a plain path, or `None` when it is not plain or is the
-/// root.
+/// The folder and the last part of a plain path, or `None` when it is not plain or is the root.
 fn split(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
     if bytes.is_empty() || !is_plain(bytes) {
         return None;

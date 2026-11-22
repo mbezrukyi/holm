@@ -38,8 +38,7 @@ pub(crate) struct Stamp {
     pub(crate) size: i64,
 }
 
-/// Two versions of a note with the same hash have the same
-/// content, also when their stamps differ.
+/// Two versions of a note with the same hash have the same content, also when their stamps differ.
 ///
 /// The hash may change with the `foldhash` version. Then each note counts as changed once.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -98,8 +97,8 @@ impl Store {
         &self.root
     }
 
-    /// The path for a link from the note at `note` to the absolute path `file`, with no copy.
-    /// It follows the symlinks in `file` when it can.
+    /// The path for a link from the note at `note` to the absolute path `file`, with no copy. It follows the symlinks
+    /// in `file` when it can.
     pub(crate) fn file_link(&self, note: &NotePath, file: &Path) -> Result<PathBuf> {
         if !file.is_absolute() {
             return Err(Error::BadPath { path: file.to_owned() });
@@ -108,8 +107,7 @@ impl Store {
         Ok(crate::links::link(&self.root, note, &file))
     }
 
-    /// Every note file at `node` or below it.
-    /// A subfolder or a file that can't be read is left out with a log line.
+    /// Every note file at `node` or below it. A subfolder or a file that can't be read is left out with a log line.
     ///
     /// # Errors
     ///
@@ -168,8 +166,7 @@ impl Store {
         self.root.join(rel).is_file()
     }
 
-    /// Every subfolder at `folder` or below it, sorted by path. It skips the
-    /// [attachment folder](attachment).
+    /// Every subfolder at `folder` or below it, sorted by path. It skips the [attachment folder](attachment).
     ///
     /// # Errors
     ///
@@ -214,13 +211,12 @@ impl Store {
         self.read(rel)
     }
 
-    /// `edit` gets the path and the text of each note,
-    /// and returns its new text, or `None` to keep it. Each note keeps its modification
-    /// time and permissions.
+    /// `edit` gets the path and the text of each note, and returns its new text, or `None` to keep it. Each note keeps
+    /// its modification time and permissions.
     ///
-    /// It syncs the whole file system twice, not each note. So each note changes in one
-    /// step, but after a crash some notes can be new and some old.
-    /// It returns each note that changed or failed. A note that fails keeps its old text.
+    /// It syncs the whole file system twice, not each note. So each note changes in one step, but after a crash some
+    /// notes can be new and some old. It returns each note that changed or failed. A note that fails keeps its old
+    /// text.
     pub(crate) fn rewrite(
         &self,
         paths: &[NotePath],
@@ -281,8 +277,7 @@ impl Store {
 
     /// The frontmatter stays.
     ///
-    /// It adds an id when the file has none. When the body stays the same,
-    /// the file keeps its old modification time.
+    /// It adds an id when the file has none. When the body stays the same, the file keeps its old modification time.
     ///
     /// With `base`, it fails with [`Error::Changed`] when the file has other content.
     pub(crate) fn save(
@@ -310,9 +305,8 @@ impl Store {
         self.read(rel)
     }
 
-    /// Writes `note` again at its path after another tool deleted the file.
-    /// It keeps the id, the tags and the pin. When a file is at the path again,
-    /// it saves the body over it like [`Self::save`].
+    /// Writes `note` again at its path after another tool deleted the file. It keeps the id, the tags and the pin. When
+    /// a file is at the path again, it saves the body over it like [`Self::save`].
     pub(crate) fn restore(&self, note: &Note) -> Result<(Note, Stamp, ContentHash)> {
         let path = self.root.join(&note.info.path);
         let dir = self.root.join(note.info.path.folder());
@@ -355,9 +349,8 @@ impl Store {
 
     /// It fixes the relative file links in the note.
     ///
-    /// The note keeps its modification time and permissions. When `to` is `from`, the note
-    /// stays where it is. It fails with [`Error::NameTaken`] when something in the folder of
-    /// `to` has its name.
+    /// The note keeps its modification time and permissions. When `to` is `from`, the note stays where it is. It fails
+    /// with [`Error::NameTaken`] when something in the folder of `to` has its name.
     pub(crate) fn move_note(&self, from: &NotePath, to: NotePath) -> Result<NotePath> {
         if to == *from {
             return Ok(to);
@@ -390,8 +383,8 @@ impl Store {
         }
     }
 
-    /// It fails with [`Error::BadName`] when `name` is [reserved](attachment::reserves), and with
-    /// [`Error::NameTaken`] when something in `parent` has the name.
+    /// It fails with [`Error::BadName`] when `name` is [reserved](attachment::reserves), and with [`Error::NameTaken`]
+    /// when something in `parent` has the name.
     pub(crate) fn create_folder(&self, parent: &FolderPath, name: &Name) -> Result<FolderPath> {
         let rel = new_folder(parent, name)?;
         self.check_free(parent, name.as_os_str(), None)?;
@@ -406,9 +399,8 @@ impl Store {
         }
     }
 
-    /// Names work as in [`Store::create_folder`]. The folder may take its own name with other
-    /// capital letters. It fixes the relative file links in the notes inside. A note that can't
-    /// be fixed keeps its links, with a log line.
+    /// Names work as in [`Store::create_folder`]. The folder may take its own name with other capital letters. It fixes
+    /// the relative file links in the notes inside. A note that can't be fixed keeps its links, with a log line.
     pub(crate) fn move_folder(&self, from: &FolderPath, parent: &FolderPath, name: &Name) -> Result<FolderPath> {
         self.check_user_folder(from)?;
         if !from.can_move_into(parent) {
@@ -422,8 +414,8 @@ impl Store {
         self.check_free(parent, rel.name().unwrap_or_default(), own)?;
         let source = self.root.join(from);
         let path = self.root.join(&rel);
-        // An empty folder takes the name first. The rename then replaces it,
-        // so it never replaces a folder that someone else made.
+        // An empty folder takes the name first. The rename then replaces it, so it never replaces a folder that someone
+        // else made.
         match fs::create_dir(&path) {
             Ok(()) => {}
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
@@ -443,9 +435,8 @@ impl Store {
         Ok(rel)
     }
 
-    /// Fails with [`Error::NameTaken`] when an entry in `folder` has `name`, also with other
-    /// capital letters. `own` is the name of the entry in `folder` that takes `name`, so it
-    /// does not count.
+    /// Fails with [`Error::NameTaken`] when an entry in `folder` has `name`, also with other capital letters. `own` is
+    /// the name of the entry in `folder` that takes `name`, so it does not count.
     fn check_free(&self, folder: &FolderPath, name: &OsStr, own: Option<&OsStr>) -> Result<()> {
         let wanted = name.to_string_lossy().to_lowercase();
         let dir = self.root.join(folder);

@@ -1,13 +1,12 @@
 //! The sidebar: one panel that shows the tree or the note list of one tree item.
 //!
-//! The tree has "All notes", then the folders, then the tags. `Tab` and `Shift+Tab` move
-//! through the tree or the list and wrap. In a list, they open each note at once. `Space` opens
-//! or closes a tree item. A name field of a folder writes its name through the core door. The name
-//! field of a tag writes through its owner. For other changes, the sidebar sends a
-//! [`SidebarEvent`].
+//! The tree has "All notes", then the folders, then the tags. `Tab` and `Shift+Tab` move through the tree or the list
+//! and wrap. In a list, they open each note at once. `Space` opens or closes a tree item. A name field of a folder
+//! writes its name through the core door. The name field of a tag writes through its owner. For other changes, the
+//! sidebar sends a [`SidebarEvent`].
 //!
-//! The search field sits at the top. While it holds text, the note list shows the notes that
-//! match it, and `Esc` clears it and shows the last sidebar view again.
+//! The search field sits at the top. While it holds text, the note list shows the notes that match it, and `Esc` clears
+//! it and shows the last sidebar view again.
 
 mod list;
 mod tree;
@@ -75,8 +74,7 @@ pub(crate) enum SidebarEvent {
     AppMenu,
 }
 
-/// Renames the tag `from` to a typed name, and ends with the result. It shows the answer of
-/// a fail.
+/// Renames the tag `from` to a typed name, and ends with the result. It shows the answer of a fail.
 pub(crate) type TagRename = Rc<dyn Fn(TagName, String, Then<Result<(), AppError>>, &mut Window, &mut App)>;
 
 /// In the tree: for a folder or a tag after `F2`, or for a new folder.
@@ -123,8 +121,8 @@ pub(crate) struct Sidebar {
     list: NoteList,
     /// For the open note, which is the selected row of a list.
     pane: Entity<NotePane>,
-    /// The open note after it is gone from the notes folder, with its neighbor in the list
-    /// before. The app asks for the next note only after the list lost the gone note.
+    /// The open note after it is gone from the notes folder, with its neighbor in the list before. The app asks for
+    /// the next note only after the list lost the gone note.
     left: Option<(NotePath, NotePath)>,
     field: Option<Naming>,
     search: Entity<InputState>,
@@ -195,8 +193,7 @@ impl Sidebar {
         sidebar
     }
 
-    /// The window bounds of the app menu button in the last frame. The sidebar updates them
-    /// at each frame.
+    /// The window bounds of the app menu button in the last frame. The sidebar updates them at each frame.
     pub(crate) fn menu_button(&self) -> Rc<Cell<Bounds<Pixels>>> {
         self.menu_button.clone()
     }
@@ -209,8 +206,7 @@ impl Sidebar {
         SavedSidebarView::from(&self.view)
     }
 
-    /// Takes the end of a job or of outside changes: it follows the moves, and then shows
-    /// the snapshot.
+    /// Takes the end of a job or of outside changes: it follows the moves, and then shows the snapshot.
     fn changed(&mut self, event: &DoorEvent, cx: &mut Context<Self>) {
         if event.is_empty() {
             return;
@@ -368,8 +364,8 @@ impl Sidebar {
         cx.notify();
     }
 
-    /// The folder for a new note, and the tag it gets, from the item of the sidebar view. A note
-    /// from the search results goes in the root folder.
+    /// The folder for a new note, and the tag it gets, from the item of the sidebar view. A note from the search
+    /// results goes in the root folder.
     pub(crate) fn new_note_place(&self) -> (FolderPath, Option<TagName>) {
         if self.searching() {
             return (FolderPath::root(), None);
@@ -382,8 +378,8 @@ impl Sidebar {
         (item.folder(), tag)
     }
 
-    /// The note to open after the open note `gone` is gone: its neighbor in the list when
-    /// it still exists, else the first note. With no notes, it is `None`.
+    /// The note to open after the open note `gone` is gone: its neighbor in the list when it still exists, else the
+    /// first note. With no notes, it is `None`.
     pub(crate) fn next_note(&self, gone: &NotePath, cx: &App) -> Option<NotePath> {
         self.core_door
             .read(cx)
@@ -392,8 +388,8 @@ impl Sidebar {
             .map(|note| note.path.clone())
     }
 
-    /// The note after `path` in the list, or else the one before it. For the open note after
-    /// it is gone, it is its neighbor before.
+    /// The note after `path` in the list, or else the one before it. For the open note after it is gone, it is its
+    /// neighbor before.
     fn neighbor(&self, path: &NotePath) -> Option<NotePath> {
         let Some(at) = self.list.position(path) else {
             return self
@@ -453,9 +449,8 @@ impl Sidebar {
         self.list.position(self.open_note(cx)?)
     }
 
-    /// Starts the name field of a tag in the tree, with its full name, so a rename can also move
-    /// the tag under another parent. `rename` writes the typed name. It does nothing while the
-    /// job of a name field runs.
+    /// Starts the name field of a tag in the tree, with its full name, so a rename can also move the tag under another
+    /// parent. `rename` writes the typed name. It does nothing while the job of a name field runs.
     pub(crate) fn rename_tag(&mut self, tag: TagName, rename: TagRename, window: &mut Window, cx: &mut Context<Self>) {
         let sidebar = cx.weak_entity();
         // The name field follows moves, so the job takes the tag it names at `Enter`.
@@ -478,8 +473,8 @@ impl Sidebar {
         self.open_name_field(Named::Folder(folder), Some(&text), item, write, window, cx);
     }
 
-    /// Starts an empty name field for a new folder in the folder of the sidebar view, as its first
-    /// child row. Nothing is on disk before `Enter`.
+    /// Starts an empty name field for a new folder in the folder of the sidebar view, as its first child row. Nothing
+    /// is on disk before `Enter`.
     pub(crate) fn new_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let parent = self.view.item().folder();
         let item = if parent.is_root() {
@@ -497,8 +492,7 @@ impl Sidebar {
         self.field.as_ref().map(|naming| naming.named.clone())
     }
 
-    /// Opens the name field for `named`, with `text` for a rename, and shows `item` selected in
-    /// the tree.
+    /// Opens the name field for `named`, with `text` for a rename, and shows `item` selected in the tree.
     fn open_name_field(
         &mut self,
         named: Named,
@@ -537,8 +531,7 @@ impl Sidebar {
         self.show_in_tree(item, cx);
     }
 
-    /// The job of a folder name field. The name field follows moves, so the job takes the
-    /// folder it names at `Enter`.
+    /// The job of a folder name field. The name field follows moves, so the job takes the folder it names at `Enter`.
     fn folder_write(cx: &Context<Self>) -> NameWrite<()> {
         let sidebar = cx.weak_entity();
         Rc::new(move |name, done, _, cx| {
@@ -602,9 +595,8 @@ impl Sidebar {
             .is_some_and(|naming| naming.field.read(cx).writing())
     }
 
-    /// The key context of the sidebar while it has the focus itself: [`Place::Sidebar`] with
-    /// [`Place::Tree`] or [`Place::NoteList`]. The search field and the name field get no
-    /// sidebar keys.
+    /// The key context of the sidebar while it has the focus itself: [`Place::Sidebar`] with [`Place::Tree`] or
+    /// [`Place::NoteList`]. The search field and the name field get no sidebar keys.
     fn key_context(&self) -> KeyContext {
         let mut context = KeyContext::default();
         context.add(Place::Sidebar.key_context());
@@ -890,8 +882,7 @@ impl Sidebar {
             .into_any_element()
     }
 
-    /// The head of a note list: `‹`, the name of the list, and its count. A click leaves the
-    /// list.
+    /// The head of a note list: `‹`, the name of the list, and its count. A click leaves the list.
     fn back(
         &self,
         label: impl Into<SharedString>,

@@ -1,8 +1,8 @@
 //! The step of a list cursor, for every list and the options of a settings row.
 
-/// The item after `at`, or before it when not `forward`, among the `len` items. It wraps at
-/// the ends, and skips each item where `works` is false. With no cursor, forward goes to the
-/// first item that works, back to the last. It is `None` only when no item works.
+/// The item after `at`, or before it when not `forward`, among the `len` items. It wraps at the ends, and skips each
+/// item where `works` is false. With no cursor, forward goes to the first item that works, back to the last. It is
+/// `None` only when no item works.
 pub(crate) fn step(at: Option<usize>, len: usize, forward: bool, works: impl Fn(usize) -> bool) -> Option<usize> {
     let start = match at.filter(|at| *at < len) {
         Some(at) => at,

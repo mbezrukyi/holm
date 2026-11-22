@@ -22,8 +22,8 @@ fn skip_spaces(b: &[u8], mut i: usize) -> usize {
     i
 }
 
-/// Whether `c` is punctuation for the delimiter rules: an ASCII punctuation char, or a char
-/// of the Unicode P or S classes. The Unicode part covers the common blocks only.
+/// Whether `c` is punctuation for the delimiter rules: an ASCII punctuation char, or a char of the Unicode P or S
+/// classes. The Unicode part covers the common blocks only.
 pub(super) fn is_punctuation(c: char) -> bool {
     if c.is_ascii() {
         return c.is_ascii_punctuation();
@@ -44,8 +44,7 @@ pub(super) fn is_punctuation(c: char) -> bool {
     )
 }
 
-/// An autolink like `<https://a.b>` or `<me@a.b>` at `start`. Gives its end and whether it is
-/// an email address.
+/// An autolink like `<https://a.b>` or `<me@a.b>` at `start`. Gives its end and whether it is an email address.
 pub(super) fn autolink(text: &str, start: usize) -> Option<(usize, bool)> {
     let b = text.as_bytes();
     uri_autolink(b, start)
@@ -108,8 +107,8 @@ fn email_autolink(b: &[u8], start: usize) -> Option<usize> {
     }
 }
 
-/// Raw inline HTML at `start`: a tag, a comment, a processing instruction, a declaration or a
-/// CDATA section. Gives its end.
+/// Raw inline HTML at `start`: a tag, a comment, a processing instruction, a declaration or a CDATA section. Gives its
+/// end.
 pub(super) fn raw_html(text: &str, start: usize) -> Option<usize> {
     let b = text.as_bytes();
     let rest = &text[start..];
@@ -220,8 +219,8 @@ pub(super) fn is_label(label: &str) -> bool {
     label.chars().count() <= 999 && !label.trim().is_empty()
 }
 
-/// The form of a label that two labels share when they match: lower case, with each run of
-/// spaces as one space. `ß` becomes `ss`, as in Unicode case folding.
+/// The form of a label that two labels share when they match: lower case, with each run of spaces as one space. `ß`
+/// becomes `ss`, as in Unicode case folding.
 pub(super) fn normalize_label(label: &str) -> String {
     label
         .split_whitespace()

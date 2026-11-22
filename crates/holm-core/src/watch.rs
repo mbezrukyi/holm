@@ -1,7 +1,7 @@
 //! The source of file changes. It is the only seam in the core.
 //!
-//! In the app, `notify` sends the changes. In tests, a [`Feed`] takes them by hand.
-//! Both give the core a [`Batch`] of paths, which it checks against the disk.
+//! In the app, `notify` sends the changes. In tests, a [`Feed`] takes them by hand. Both give the core a [`Batch`] of
+//! paths, which it checks against the disk.
 
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
@@ -15,8 +15,8 @@ use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher as _};
 
 use crate::error::{Error, Result};
 
-/// Paths relative to the notes folder where something may have changed.
-/// The empty path stands for the whole notes folder.
+/// Paths relative to the notes folder where something may have changed. The empty path stands for the whole notes
+/// folder.
 pub(crate) type Batch = BTreeSet<PathBuf>;
 
 /// Gives a batch to the core. It returns `None` when the core is gone.
@@ -54,8 +54,8 @@ pub(crate) fn start(root: &Path) -> notify::Result<(Watcher, Events)> {
 }
 
 impl Events {
-    /// Gives the events to `handler` in batches, on a new thread.
-    /// The thread ends when the [`Watcher`] or the core is gone.
+    /// Gives the events to `handler` in batches, on a new thread. The thread ends when the [`Watcher`] or the core is
+    /// gone.
     pub(crate) fn run(self, handler: Handler) {
         let spawned = thread::Builder::new()
             .name("holm-watch".to_owned())
@@ -113,8 +113,8 @@ impl Events {
 
 /// Tells a core that has no file watching about changes on disk.
 ///
-/// [`Core::open_with_feed`](crate::Core::open_with_feed) gives it. Tests use it in place of
-/// real file events, so they decide when the core sees a change.
+/// [`Core::open_with_feed`](crate::Core::open_with_feed) gives it. Tests use it in place of real file events, so they
+/// decide when the core sees a change.
 pub struct Feed {
     pub(crate) handler: Handler,
 }
@@ -122,14 +122,12 @@ pub struct Feed {
 impl Feed {
     /// Tells the core that something changed at each of `paths`: a note, a folder, or any other file.
     ///
-    /// The paths are relative to the notes folder. The empty path stands for the whole notes folder.
-    /// The paths are one batch, like the events of one moment. So a file that moved
-    /// comes as one [`Change::Moved`](crate::model::Change::Moved) only when both of its paths
-    /// are in the same batch.
+    /// The paths are relative to the notes folder. The empty path stands for the whole notes folder. The paths are one
+    /// batch, like the events of one moment. So a file that moved comes as one
+    /// [`Change::Moved`](crate::model::Change::Moved) only when both of its paths are in the same batch.
     ///
-    /// The core checks the disk at each path and below it, updates the index,
-    /// and sends the changes to each [`ChangeLists`](crate::ChangeLists) before this returns.
-    /// Hidden paths are skipped.
+    /// The core checks the disk at each path and below it, updates the index, and sends the changes to each
+    /// [`ChangeLists`](crate::ChangeLists) before this returns. Hidden paths are skipped.
     ///
     /// # Errors
     ///

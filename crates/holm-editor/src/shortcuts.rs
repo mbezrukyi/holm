@@ -1,8 +1,8 @@
 //! [`crate::init`] turns this table into the GPUI bindings, so each key reaches the editor as a `Run` action. The app
 //! shows the same table in the shortcut list.
 //!
-//! Plain cursor keys, Backspace, Delete, Enter for a new line, and typing are not shortcuts, so
-//! they are not in the table.
+//! Plain cursor keys, Backspace, Delete, Enter for a new line, and typing are not shortcuts, so they are not in the
+//! table.
 
 use std::rc::Rc;
 
@@ -462,8 +462,7 @@ mod tests {
 
     #[test]
     fn no_key_with_no_case_carries_shift() {
-        // GPUI on Linux drops Shift for a key whose char has no case, so a binding with Shift
-        // never matches it.
+        // GPUI on Linux drops Shift for a key whose char has no case, so a binding with Shift never matches it.
         for shortcut in SHORTCUTS {
             let mut chars = shortcut.keys.key.chars();
             let no_case = matches!(

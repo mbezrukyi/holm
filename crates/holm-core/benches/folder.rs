@@ -75,9 +75,8 @@ fn sidebar_tags(bencher: divan::Bencher<'_, '_>) {
     bencher.bench_local(|| core.snapshot().tags());
 }
 
-/// A search key, with the results in the order of the list. `"work ho"` matches about 2,100
-/// notes, and `"note 50"` 11 notes. `"tag"` matches every note through its tags, and
-/// `"tag work"` through a tag and the text.
+/// A search key, with the results in the order of the list. `"work ho"` matches about 2,100 notes, and `"note 50"` 11
+/// notes. `"tag"` matches every note through its tags, and `"tag work"` through a tag and the text.
 #[divan::bench(sample_count = 50, args = ["work ho", "note 50", "tag work", "tag"])]
 fn search(bencher: divan::Bencher<'_, '_>, text: &str) {
     let notes = notes_folder();
@@ -86,8 +85,8 @@ fn search(bencher: divan::Bencher<'_, '_>, text: &str) {
     bencher.bench_local(|| core.search(text, Order::LastChange).unwrap());
 }
 
-/// An autosave: the note file and its index row. The 2 KB note is one of the folder.
-/// The bigger ones are new notes with headings, lists, links and code.
+/// An autosave: the note file and its index row. The 2 KB note is one of the folder. The bigger ones are new notes with
+/// headings, lists, links and code.
 #[divan::bench(sample_count = 50, args = [2_000, 200_000, 1_000_000])]
 fn save(bencher: divan::Bencher<'_, '_>, size: usize) {
     let notes = notes_folder();
@@ -145,8 +144,8 @@ fn add_or_remove_tag(bencher: divan::Bencher<'_, '_>) {
     });
 }
 
-/// A tag rename on 1,000 notes in 10 folders, back and forth. It runs on the disk of `target/`,
-/// not on tmpfs, because the time goes to the syncs.
+/// A tag rename on 1,000 notes in 10 folders, back and forth. It runs on the disk of `target/`, not on tmpfs, because
+/// the time goes to the syncs.
 #[divan::bench(sample_count = 20)]
 fn rename_tag_on_disk(bencher: divan::Bencher<'_, '_>) {
     let disk = env!("CARGO_TARGET_TMPDIR");

@@ -204,8 +204,8 @@ pub struct Link {
     /// The link text between `[` and `]`, as written.
     pub text: Range<usize>,
     pub target: Target,
-    /// The target as written, with its `< >`. It is `None` for a reference link,
-    /// because the target is in its definition line.
+    /// The target as written, with its `< >`. It is `None` for a reference link, because the target is in its
+    /// definition line.
     pub target_range: Option<Range<usize>>,
     /// Whether it is `![..](..)`: an image or a file chip.
     pub embedded: bool,
@@ -245,23 +245,21 @@ impl Body {
 
     /// Parses `text` again after an edit, with the same result as [`Body::parse`].
     ///
-    /// `text` is the text of this body with the bytes in `old` replaced by `new_len` bytes. Only
-    /// the blocks near the edit are parsed again. An edit that can change blocks far away, like
-    /// an open code fence or a link definition, gets a full parse. So does an edit that does not
-    /// fit the old text.
+    /// `text` is the text of this body with the bytes in `old` replaced by `new_len` bytes. Only the blocks near the
+    /// edit are parsed again. An edit that can change blocks far away, like an open code fence or a link definition,
+    /// gets a full parse. So does an edit that does not fit the old text.
     pub fn reparse(&mut self, text: &str, old: Range<usize>, new_len: usize) {
         if !self.reparse_part(text, old, new_len) {
             *self = Self::parse(text);
         }
     }
 
-    /// Parses again only the top level blocks near the edit. Returns `false`, with the body
-    /// unchanged, when that can give a result other than a full parse.
+    /// Parses again only the top level blocks near the edit. Returns `false`, with the body unchanged, when that can
+    /// give a result other than a full parse.
     ///
-    /// The part starts after a blank line before the edit. There the parser is in the same state
-    /// as at the start of a text. The part ends with the first block after the edit, and the line
-    /// breaks after that block. When that block comes out the same, the parser is in the same
-    /// state after it as before the edit.
+    /// The part starts after a blank line before the edit. There the parser is in the same state as at the start of a
+    /// text. The part ends with the first block after the edit, and the line breaks after that block. When that block
+    /// comes out the same, the parser is in the same state after it as before the edit.
     fn reparse_part(&mut self, text: &str, old: Range<usize>, new_len: usize) -> bool {
         let fits = old.start <= old.end
             && old.end <= self.text_len
@@ -353,8 +351,7 @@ impl Body {
 
     /// The inline tree of `leaf`, in source offsets. `text` is the parsed text.
     ///
-    /// The body keeps no trees, because many small trees are slow to free. This call parses the
-    /// leaf again.
+    /// The body keeps no trees, because many small trees are slow to free. This call parses the leaf again.
     pub fn inline(&self, text: &str, leaf: &Leaf) -> Vec<Node> {
         leaf.tree(text, &self.defs)
     }
@@ -461,8 +458,7 @@ impl Moves for Leaf {
     }
 }
 
-/// Puts `new` in place of the items in `range` of a list sorted by start, and moves the items
-/// after them by `to`.
+/// Puts `new` in place of the items in `range` of a list sorted by start, and moves the items after them by `to`.
 fn replace<T: Moves>(list: &mut Vec<T>, new: Vec<T>, range: Range<usize>, to: &impl Fn(usize) -> usize) {
     let lo = list.partition_point(|item| item.start() < range.start);
     let hi = list.partition_point(|item| item.start() < range.end);
@@ -510,8 +506,7 @@ struct Frame {
 
 /// The inline events of a leaf block, while the walker reads them.
 struct OpenLeaf {
-    /// How many frames are open, with the leaf's own frame. For the text of a tight list item,
-    /// the item's frame.
+    /// How many frames are open, with the leaf's own frame. For the text of a tight list item, the item's frame.
     depth: usize,
     /// Whether it is the text of a tight list item. Such text has no frame of its own.
     item: bool,
@@ -729,10 +724,9 @@ impl<'a> Walker<'a> {
 
     /// Whether a heading is text with an empty nested item under it, like `- a\n  - `.
     ///
-    /// An empty item cannot interrupt a paragraph. So `CommonMark` reads the `-` line as a setext
-    /// underline. A new nested item has this form until its first char. The walker reads it as an
-    /// item now, so the line keeps its form while the user types. The heading text becomes the
-    /// text of the outer item.
+    /// An empty item cannot interrupt a paragraph. So `CommonMark` reads the `-` line as a setext underline. A new
+    /// nested item has this form until its first char. The walker reads it as an item now, so the line keeps its form
+    /// while the user types. The heading text becomes the text of the outer item.
     fn read_as_empty_item(&mut self, range: &Range<usize>) -> bool {
         let in_item = matches!(
             self.frames.iter().rev().find(|frame| frame.kind.is_some()),
@@ -1031,9 +1025,9 @@ fn is_break(b: u8) -> bool {
     matches!(b, b'\n' | b'\r')
 }
 
-/// Adds the source of each line of the leaf in `range` to `segments`. Line breaks, quote
-/// markers and indents are not in it. A paragraph line never starts with `>`, because that
-/// starts a quote. So the `>`, spaces and tabs at the start of a line are never text.
+/// Adds the source of each line of the leaf in `range` to `segments`. Line breaks, quote markers and indents are not in
+/// it. A paragraph line never starts with `>`, because that starts a quote. So the `>`, spaces and tabs at the start of
+/// a line are never text.
 fn segments(text: &str, range: Range<usize>, segments: &mut Vec<Range<usize>>) {
     let (first, last) = (range.start, range.end);
     let b = text.as_bytes();

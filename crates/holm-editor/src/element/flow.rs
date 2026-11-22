@@ -1,6 +1,6 @@
-//! A chip is a box between the text pieces. Its icon, name and detail have exact sizes, and its
-//! detail has a smaller font. The line wraps with GPUI's [`LineWrapper`], which sees the parts of
-//! a chip around its name as fixed-width elements. So a chip only breaks at a space in its name.
+//! A chip is a box between the text pieces. Its icon, name and detail have exact sizes, and its detail has a smaller
+//! font. The line wraps with GPUI's [`LineWrapper`], which sees the parts of a chip around its name as fixed-width
+//! elements. So a chip only breaks at a space in its name.
 //!
 //! [`LineWrapper`]: gpui_kit::LineWrapper
 
@@ -35,8 +35,7 @@ const CHIP_UNDERLINE: f32 = 0.2;
 /// The size of the detail of a chip, like the file size, as a part of the text size.
 const DETAIL_SCALE: f32 = 0.72;
 
-/// The widest the name in a chip gets, as a part of the text size. A longer name loses chars
-/// in the middle.
+/// The widest the name in a chip gets, as a part of the text size. A longer name loses chars in the middle.
 const CHIP_NAME_WIDTH: f32 = 18.;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,9 +55,8 @@ pub(crate) struct ChipBox {
 }
 
 impl ChipBox {
-    /// A chip in place of the screen text `range`. Its name has the look of a run, and gets
-    /// shorter to fit. Its detail has the look of a run too, in a smaller font. All sizes grow
-    /// with `font_size`, so a chip fits in a heading too.
+    /// A chip in place of the screen text `range`. Its name has the look of a run, and gets shorter to fit. Its detail
+    /// has the look of a run too, in a smaller font. All sizes grow with `font_size`, so a chip fits in a heading too.
     pub(crate) fn new(
         range: Range<usize>,
         icon: Icon,
@@ -87,8 +85,8 @@ impl ChipBox {
     }
 }
 
-/// `name` as it is when it `fits`. Else the longest cut that fits, with `…` in place of chars
-/// in the middle. The extension and the few chars before it stay.
+/// `name` as it is when it `fits`. Else the longest cut that fits, with `…` in place of chars in the middle. The
+/// extension and the few chars before it stay.
 fn shorten(name: &str, fits: impl Fn(&str) -> bool) -> String {
     if fits(name) {
         return name.to_owned();
@@ -176,8 +174,8 @@ enum WrapSegment {
 }
 
 impl FlowLine {
-    /// Lays out `text` with its `runs` in rows of `wrap_width`. `chips` are in order and take
-    /// the place of their screen text. `font` is the main font of the line.
+    /// Lays out `text` with its `runs` in rows of `wrap_width`. `chips` are in order and take the place of their screen
+    /// text. `font` is the main font of the line.
     pub(crate) fn new(
         text: SharedString,
         runs: &[TextRun],
@@ -194,9 +192,9 @@ impl FlowLine {
 
     /// The narrowest and the widest width of the line, as [`Self::new`] takes it.
     ///
-    /// The narrowest width is that of the widest piece no row breaks inside: rows of that width
-    /// break only at the places the wrapper picks for a break, like a space or after a hyphen.
-    /// The widest width is that of the line on one row.
+    /// The narrowest width is that of the widest piece no row breaks inside: rows of that width break only at the
+    /// places the wrapper picks for a break, like a space or after a hyphen. The widest width is that of the line on
+    /// one row.
     pub(crate) fn widths(
         text: SharedString,
         runs: &[TextRun],
@@ -217,8 +215,8 @@ impl FlowLine {
                 }
             }
         }
-        // The wrapper adds the width of each char of its own font, which can be wider than the
-        // shaped text. A piece needs room for both, or the wrapper breaks inside it.
+        // The wrapper adds the width of each char of its own font, which can be wider than the shaped text. A piece
+        // needs room for both, or the wrapper breaks inside it.
         let text_system = window.text_system();
         let font_id = text_system.resolve_font(font);
         let mut summed = vec![px(0.); seen.len() + 1];
@@ -358,8 +356,7 @@ impl FlowLine {
         }
     }
 
-    /// The parts of the line for the wrapper. It sees the parts of a chip around its name as
-    /// elements of a fixed width.
+    /// The parts of the line for the wrapper. It sees the parts of a chip around its name as elements of a fixed width.
     fn fragments<'a>(&'a self, segments: &'a [WrapSegment]) -> Vec<LineFragment<'a>> {
         segments
             .iter()
@@ -374,16 +371,16 @@ impl FlowLine {
 
     /// The offsets in the wrapper text where rows start, and its length at the end.
     ///
-    /// The wrapper adds the width of each char and does not see kerning or other fonts, so each
-    /// row is checked against its shaped width, as gpui-base does it.
+    /// The wrapper adds the width of each char and does not see kerning or other fonts, so each row is checked against
+    /// its shaped width, as gpui-base does it.
     fn wrap(&self, segments: &[WrapSegment], wrapper: &mut LineWrapper, wrap_width: Pixels) -> Vec<usize> {
         let total: usize = segments.iter().map(|segment| self.segment_len(segment)).sum();
         let fragments = self.fragments(segments);
         let width = |range: Range<usize>| self.measure(segments, range);
         let mut cuts = vec![0];
         let mut start = 0;
-        // One wrapper pass gives the ends of all rows. Only a row that is too wide by its shaped
-        // width starts a new pass, after its new end.
+        // One wrapper pass gives the ends of all rows. Only a row that is too wide by its shaped width starts a new
+        // pass, after its new end.
         'pass: while start < total {
             let rest = fragments_from(&fragments, start);
             let mut ends: Vec<usize> = wrapper
@@ -396,8 +393,8 @@ impl FlowLine {
                     continue;
                 }
                 if width(start..end) > wrap_width {
-                    // A new wrap of this row: the boundaries of `rest` count from the start of
-                    // the pass, which is an earlier row.
+                    // A new wrap of this row: the boundaries of `rest` count from the start of the pass, which is an
+                    // earlier row.
                     let row = fragments_from(&fragments, start);
                     start = self.shrink(segments, &row, wrapper, (start, end), total, wrap_width);
                     cuts.push(start);
@@ -419,9 +416,8 @@ impl FlowLine {
         cuts
     }
 
-    /// A new end for the row `start..end`, which is too wide. A smaller budget makes the
-    /// wrapper break earlier. The step doubles while the break stays. A word wider than the row
-    /// keeps its row.
+    /// A new end for the row `start..end`, which is too wide. A smaller budget makes the wrapper break earlier. The
+    /// step doubles while the break stays. A word wider than the row keeps its row.
     fn shrink(
         &self,
         segments: &[WrapSegment],
@@ -566,8 +562,7 @@ impl FlowLine {
         width
     }
 
-    /// How far a line with its own ascent and descent moves down, so it sits on the baseline
-    /// of this line.
+    /// How far a line with its own ascent and descent moves down, so it sits on the baseline of this line.
     fn shift(&self, line: &ShapedLine) -> Pixels {
         ((self.ascent - self.descent) - (line.ascent - line.descent)) / 2.
     }
@@ -593,8 +588,8 @@ impl FlowLine {
         size(self.width(), line_height * self.rows.len())
     }
 
-    /// Where the screen offset `index` shows, from the top left of the line. An offset between
-    /// two rows shows at the end of the first row, as in [`gpui_kit::WrappedLine`].
+    /// Where the screen offset `index` shows, from the top left of the line. An offset between two rows shows at the
+    /// end of the first row, as in [`gpui_kit::WrappedLine`].
     pub(crate) fn position_for_index(&self, index: usize, line_height: Pixels) -> Option<Point<Pixels>> {
         let (ix, row) = self.rows.iter().enumerate().find(|(_, row)| index <= row.range.end)?;
         if index < row.range.start {
@@ -626,8 +621,8 @@ impl FlowLine {
         if index <= row.range.start { px(0.) } else { row.width }
     }
 
-    /// The screen offset closest to `position`. A point on a chip gives the start of the chip.
-    /// A point outside the text gives `Err` with the nearest offset.
+    /// The screen offset closest to `position`. A point on a chip gives the start of the chip. A point outside the text
+    /// gives `Err` with the nearest offset.
     pub(crate) fn closest_index_for_position(
         &self,
         position: Point<Pixels>,
@@ -702,8 +697,7 @@ impl FlowLine {
                 let name = (&piece.name, point(name_x, y + self.shift(&piece.name)));
                 let detail = chip.detail.as_ref().filter(|_| piece.last).map(|detail| {
                     let x = name_x + piece.name.width() + font_size * CHIP_DETAIL_GAP;
-                    // In the middle of the row, like the name, so it sits a bit above the
-                    // baseline of the name.
+                    // In the middle of the row, like the name, so it sits a bit above the baseline of the name.
                     let at = point(x, y + (line_height - detail.ascent - detail.descent) / 2.);
                     let under = at.y + detail.ascent + detail.font_size * CHIP_UNDERLINE;
                     let underline = Bounds::new(point(x, under), size(detail.width(), px(1.)));
@@ -739,8 +733,8 @@ fn slice_runs(runs: &[TextRun], range: &Range<usize>) -> Vec<TextRun> {
     sliced
 }
 
-/// Cuts the rows out of the shaped pieces of a line. It keeps the rest of each piece after
-/// its last cut. So rows in order split each piece once per row.
+/// Cuts the rows out of the shaped pieces of a line. It keeps the rest of each piece after its last cut. So rows in
+/// order split each piece once per row.
 struct Cutter {
     /// For each piece, the start of its rest and the rest, from x zero.
     rests: Vec<Option<(usize, ShapedLine)>>,
@@ -854,8 +848,8 @@ mod tests {
             .shape_line(text.to_owned().into(), font_size, &[run(text.len())], None)
     }
 
-    /// `before`, a chip with `name` and `detail`, then `after`, in rows of `wrap`.
-    /// It also gives the screen text of the chip.
+    /// `before`, a chip with `name` and `detail`, then `after`, in rows of `wrap`. It also gives the screen text of the
+    /// chip.
     fn flow(
         (before, name, detail, after): (&str, &str, Option<&str>, &str),
         wrap: Pixels,
@@ -999,8 +993,8 @@ mod tests {
         });
     }
 
-    /// A line laid out at its narrowest width breaks only between pieces: after a space, after
-    /// a hyphen, or at a space in the name of a chip.
+    /// A line laid out at its narrowest width breaks only between pieces: after a space, after a hyphen, or at a space
+    /// in the name of a chip.
     #[test]
     fn a_line_at_its_narrowest_width_breaks_no_word() {
         in_window(|window| {
@@ -1065,8 +1059,8 @@ mod tests {
         });
     }
 
-    /// Code in a wider font than the text makes rows wider than the wrapper thinks. A row
-    /// after the first one of a wrap pass that is too wide still breaks between words.
+    /// Code in a wider font than the text makes rows wider than the wrapper thinks. A row after the first one of a wrap
+    /// pass that is too wide still breaks between words.
     #[test]
     fn a_too_wide_row_with_code_breaks_between_words() {
         in_window(|window| {

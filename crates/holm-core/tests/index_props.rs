@@ -1,5 +1,5 @@
-//! Random edits, then a fresh reconcile from empty facts must give the same answers. A new
-//! index folder makes the start reconcile every file from empty facts.
+//! Random edits, then a fresh reconcile from empty facts must give the same answers. A new index folder makes the start
+//! reconcile every file from empty facts.
 
 #![cfg(test)]
 

@@ -1,6 +1,6 @@
-//! A leaf block is a paragraph, a heading or a table cell. The text of a tight list item is one
-//! too. Its text can run over several lines. Quote markers or an indent can stand between
-//! them. The tree skips them, but a node that crosses a line holds them in its range.
+//! A leaf block is a paragraph, a heading or a table cell. The text of a tight list item is one too. Its text can run
+//! over several lines. Quote markers or an indent can stand between them. The tree skips them, but a node that crosses
+//! a line holds them in its range.
 
 mod html_tag;
 mod parse;
@@ -68,8 +68,8 @@ pub struct Destination {
 pub struct Leaf {
     /// The source from the start of the first line to the end of the last one.
     range: Range<usize>,
-    /// All lines, when quote markers, an indent or `\r` stand between them. Without a list, the
-    /// source of the leaf is its joined text.
+    /// All lines, when quote markers, an indent or `\r` stand between them. Without a list, the source of the leaf is
+    /// its joined text.
     lines: Box<[Line]>,
     table: bool,
 }
@@ -114,8 +114,8 @@ impl Leaf {
         parse::is_plain(&self.joined(text))
     }
 
-    /// The inline tree in source offsets, with the buffers of earlier parses. With `plain`, it
-    /// also writes the plain text for a heading link.
+    /// The inline tree in source offsets, with the buffers of earlier parses. With `plain`, it also writes the plain
+    /// text for a heading link.
     pub(crate) fn parse(
         &self,
         text: &str,

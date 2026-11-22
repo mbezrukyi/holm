@@ -1,9 +1,8 @@
-//! The shortcuts of the app. [`bind`] turns this table into the GPUI bindings, so each key
-//! reaches its view as a [`Run`] action. [`list`] joins it with the editor table for the
-//! shortcut list.
+//! The shortcuts of the app. [`bind`] turns this table into the GPUI bindings, so each key reaches its view as a
+//! [`Run`] action. [`list`] joins it with the editor table for the shortcut list.
 //!
-//! Typing, Backspace and Delete in a text field, and the plain cursor keys are not shortcuts,
-//! so they are not in the table.
+//! Typing, Backspace and Delete in a text field, and the plain cursor keys are not shortcuts, so they are not in the
+//! table.
 
 use gpui_kit::{Action, App, KeyBinding, Keystroke, NoAction};
 use holm_editor::shortcuts::{self as editor, Keys, Shift};
@@ -41,9 +40,8 @@ pub(crate) enum Place {
 }
 
 impl Place {
-    /// The view of the place sets this context while it is in the place. A [`Place::Note`] key works
-    /// while the editor has the focus, so it has the context of the editor element, like each place
-    /// of the editor.
+    /// The view of the place sets this context while it is in the place. A [`Place::Note`] key works while the editor
+    /// has the focus, so it has the context of the editor element, like each place of the editor.
     pub(crate) const fn key_context(self) -> &'static str {
         match self {
             Self::Anywhere => "Anywhere",
@@ -130,8 +128,8 @@ pub(crate) enum Command {
     Close,
     Confirm,
     Cancel,
-    /// Switches the item under the cursor: opens or closes a tree item, picks the next option of
-    /// a choice row, switches a switch, or opens the folder picker on the notes folder row.
+    /// Switches the item under the cursor: opens or closes a tree item, picks the next option of a choice row, switches
+    /// a switch, or opens the folder picker on the notes folder row.
     Switch,
     /// Picks the previous option of a choice row.
     SwitchBack,
@@ -464,9 +462,9 @@ const ROWS: &[Row] = &[
     ),
 ];
 
-/// Second keys of a row. They work in the place of the first row of their command, and the
-/// shortcut list does not show them. A key with Shift gives `+` and `_` on one layout and `=`
-/// and `-` on another, so Ctrl and the `+` key or the `-` key work on each layout.
+/// Second keys of a row. They work in the place of the first row of their command, and the shortcut list does not show
+/// them. A key with Shift gives `+` and `_` on one layout and `=` and `-` on another, so Ctrl and the `+` key or the
+/// `-` key work on each layout.
 const SECOND_KEYS: [(Keys, Command); 2] = [
     (Keys::ctrl("="), Command::ScaleUp),
     (Keys::ctrl("_"), Command::ScaleDown),
@@ -493,8 +491,8 @@ const INPUT: &str = "Input";
 /// The context of the window root of `gpui-component`. It binds Tab to a focus move.
 const ROOT: &str = "Root";
 
-/// Binds the keys of each row to [`Run`], and the editor [`editor::Place::Text`] rows in the
-/// text fields. Then it gives the text inputs their keys back with `NoAction`:
+/// Binds the keys of each row to [`Run`], and the editor [`editor::Place::Text`] rows in the text fields. Then it gives
+/// the text inputs their keys back with `NoAction`:
 ///
 /// - each text input keeps each key that types a char and that some place binds;
 /// - a text field keeps each plain key of the other places, except the keys of the whole window.
@@ -652,8 +650,7 @@ mod tests {
 
     #[test]
     fn no_key_with_no_case_carries_shift() {
-        // GPUI on Linux drops Shift for a key whose char has no case, so a binding with Shift
-        // never matches it.
+        // GPUI on Linux drops Shift for a key whose char has no case, so a binding with Shift never matches it.
         let keys = ROWS
             .iter()
             .map(|row| (row.place, row.keys))

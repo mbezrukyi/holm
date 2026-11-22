@@ -9,8 +9,7 @@ use crate::nodes::Node;
 use crate::paths::{FolderPath, NotePath};
 use crate::tag::{self, TagName};
 
-/// The facts of the notes folder at one moment, from [`Core::snapshot`](crate::Core::snapshot).
-/// It never changes.
+/// The facts of the notes folder at one moment, from [`Core::snapshot`](crate::Core::snapshot). It never changes.
 ///
 /// It is cheap to clone.
 #[derive(Clone, Debug, Default)]
@@ -27,8 +26,8 @@ type Map<K, V> = imbl::GenericHashMap<K, V, foldhash::fast::RandomState, imbl::s
 #[derive(Debug)]
 pub(crate) struct Removal {
     pub(crate) notes: usize,
-    /// The file link targets that the removed notes link and no other note links,
-    /// relative to the notes folder, in byte order. They are outside input.
+    /// The file link targets that the removed notes link and no other note links, relative to the notes folder, in
+    /// byte order. They are outside input.
     pub(crate) files: Vec<PathBuf>,
 }
 
@@ -48,8 +47,8 @@ impl Snapshot {
 
     /// Pinned notes are on top.
     ///
-    /// Only `*.md` files are notes. Hidden files and folders, and symlinks, are skipped.
-    /// A note that can't be read is left out.
+    /// Only `*.md` files are notes. Hidden files and folders, and symlinks, are skipped. A note that can't be read is
+    /// left out.
     pub fn notes(&self, set: NoteSet<'_>, order: Order) -> Vec<NoteInfo> {
         let mut notes: Vec<&NoteInfo> = self.matching(set).collect();
         sort(&mut notes, order);
@@ -114,8 +113,8 @@ impl Snapshot {
         nested_tags(&counts)
     }
 
-    /// The count of notes right in each folder, without the notes of its subfolders. A folder
-    /// with no notes is not in the map.
+    /// The count of notes right in each folder, without the notes of its subfolders. A folder with no notes is not in
+    /// the map.
     pub fn folder_counts(&self) -> HashMap<&FolderPath, usize> {
         let mut counts = HashMap::new();
         for note in self.notes.keys() {
@@ -131,8 +130,8 @@ impl Snapshot {
         self.notes.get(path).map_or(&[], |entry| entry.links.as_slice())
     }
 
-    /// The other notes that link to the note at `path`, by its id or by its file path. The
-    /// newest change is first, as in [`Snapshot::newest`].
+    /// The other notes that link to the note at `path`, by its id or by its file path. The newest change is first, as
+    /// in [`Snapshot::newest`].
     pub fn backlinks(&self, path: &NotePath) -> Vec<NoteInfo> {
         let Some(target) = self.notes.get(path) else {
             return Vec::new();
@@ -228,8 +227,7 @@ impl Snapshot {
         }
     }
 
-    /// Takes out the notes at `removed`, then puts in `put`. So a note can move to a path and
-    /// keep its id.
+    /// Takes out the notes at `removed`, then puts in `put`. So a note can move to a path and keep its id.
     pub(crate) fn swap(&mut self, removed: Vec<NotePath>, put: impl IntoIterator<Item = (NoteInfo, Vec<Link>)>) {
         for path in removed {
             self.remove(&path);

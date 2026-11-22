@@ -1,20 +1,19 @@
 /// The cursor offset, with what Up, Down, Home and End know about its screen row.
 ///
-/// [`super::Model::set_cursor`] makes a plain caret. So any other cursor change drops the row
-/// start and the goals.
+/// [`super::Model::set_cursor`] makes a plain caret. So any other cursor change drops the row start and the goals.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct Caret {
     offset: usize,
-    /// A wrap inside a word puts the end of a row and the start of the next row at the same
-    /// offset. This picks the start.
+    /// A wrap inside a word puts the end of a row and the start of the next row at the same offset. This picks the
+    /// start.
     row_start: bool,
     /// The x that Up and Down keep, in pixels.
     goal_x: Option<f32>,
     goal_row: Option<GoalRow>,
 }
 
-/// After Up or Down into a line that showed no text: the row to put the cursor on at the goal
-/// x, once the next frame shows the source of that line.
+/// After Up or Down into a line that showed no text: the row to put the cursor on at the goal x, once the next frame
+/// shows the source of that line.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct GoalRow {
     /// The first row after Down, the last row after Up.

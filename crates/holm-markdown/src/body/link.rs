@@ -11,11 +11,11 @@ pub enum Target {
 }
 
 impl Target {
-    /// The target as a link destination, the part between `(` and `)`. Parsing it gives back
-    /// this target, with a space for each line break.
+    /// The target as a link destination, the part between `(` and `)`. Parsing it gives back this target, with a space
+    /// for each line break.
     ///
-    /// A destination with spaces or brackets goes in `< >`. A file path that reads as another
-    /// kind of target gets `./` before it, so it parses back with `./`.
+    /// A destination with spaces or brackets goes in `< >`. A file path that reads as another kind of target gets `./`
+    /// before it, so it parses back with `./`.
     ///
     /// ```
     /// use holm_markdown::Target;
@@ -132,8 +132,8 @@ pub(crate) fn target(dest: &str) -> Option<Target> {
     Some(Target::File(dest.to_owned()))
 }
 
-/// A URL scheme: a letter, then letters, digits, `+`, `-` or `.`, then `:`.
-/// One letter is not a scheme, so `C:` stays a path.
+/// A URL scheme: a letter, then letters, digits, `+`, `-` or `.`, then `:`. One letter is not a scheme, so `C:` stays a
+/// path.
 fn has_scheme(dest: &str) -> bool {
     let Some((scheme, _)) = dest.split_once(':') else {
         return false;

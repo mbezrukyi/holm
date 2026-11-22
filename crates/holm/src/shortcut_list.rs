@@ -1,8 +1,8 @@
-//! The shortcut list over the notes view. Its rows come from [`shortcuts::list`], so it shows
-//! each key of the app and the editor tables, and no other key.
+//! The shortcut list over the notes view. Its rows come from [`shortcuts::list`], so it shows each key of the app and
+//! the editor tables, and no other key.
 //!
-//! Each group first shows the rows that work everywhere in it. Then the rows of each other place
-//! follow under a heading, like "In a question", so their labels can stay short.
+//! Each group first shows the rows that work everywhere in it. Then the rows of each other place follow under a
+//! heading, like "In a question", so their labels can stay short.
 //!
 //! `Tab` and `Shift+Tab` scroll the list. `Esc` closes it.
 
@@ -26,8 +26,8 @@ const COLUMNS: [&[Group]; 2] = [&[Group::Text], &[Group::Note, Group::Sidebar, G
 /// A longer list scrolls.
 const MAX_LIST_HEIGHT: Pixels = px(560.);
 
-/// The height around the rows: the title and the padding of the panel, and a margin to the
-/// edges of the window. In a low window, like at a big scale, the rows take the rest.
+/// The height around the rows: the title and the padding of the panel, and a margin to the edges of the window. In a
+/// low window, like at a big scale, the rows take the rest.
 const AROUND_LIST: Pixels = px(100.);
 
 const MIN_LIST_HEIGHT: Pixels = px(100.);
@@ -72,8 +72,8 @@ fn heading(place: Place) -> Option<&'static str> {
     }
 }
 
-/// The rows of `group` as places in `shortcuts`, in sections. The section with no heading
-/// comes first. Then each heading follows in the order of its first row.
+/// The rows of `group` as places in `shortcuts`, in sections. The section with no heading comes first. Then each
+/// heading follows in the order of its first row.
 fn sections(shortcuts: &[Shortcut], group: Group) -> Vec<(Option<&'static str>, Vec<usize>)> {
     let mut sections: Vec<(Option<&'static str>, Vec<usize>)> = vec![(None, Vec::new())];
     for (at, shortcut) in shortcuts.iter().enumerate() {
@@ -217,8 +217,8 @@ impl Render for ShortcutList {
                 .min(window.viewport_size().height - AROUND_LIST)
                 .max(MIN_LIST_HEIGHT))
             .child(rows)
-            // The scrollbar fills its parent and draws its track at the right edge, which is
-            // the lane of the right padding.
+            // The scrollbar fills its parent and draws its track at the right edge, which is the lane of the right
+            // padding.
             .child(
                 div().absolute().inset_0().child(
                     Scrollbar::vertical(&self.scroll)

@@ -1,11 +1,9 @@
-//! The state menu: the reason and the choices of the state, right above the state in the
-//! message line. Its right edge meets the right edge of the state.
+//! The state menu: the reason and the choices of the state, right above the state in the message line. Its right edge
+//! meets the right edge of the state.
 //!
-//! - It opens with the cursor on the first choice. A state with no choices shows only its
-//!   reason.
+//! - It opens with the cursor on the first choice. A state with no choices shows only its reason.
 //! - `Tab` and `Shift+Tab` move the cursor and wrap. `Enter` or a click picks the choice under it.
-//! - `Esc`, or a click outside the menu and the state, closes it. See [`Dropdown`] for the
-//!   focus.
+//! - `Esc`, or a click outside the menu and the state, closes it. See [`Dropdown`] for the focus.
 //! - A new state closes the menu.
 
 use std::cell::Cell;

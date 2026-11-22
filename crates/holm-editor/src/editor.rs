@@ -27,40 +27,35 @@ const TAB: &str = "    ";
 /// How far the mouse moves with the button down before a click becomes a drag.
 const DRAG_START: Pixels = px(4.);
 
-/// The text is the note body only, with LF line breaks. The editor turns other line breaks
-/// into LF. Markdown syntax shows on the lines with the cursor or the selection, and hides on
-/// all other lines. A code block or a table shows its whole source while the cursor or the
-/// selection is in it. Embedded images show below their line, and other embedded files show
-/// as file chips in their line.
+/// The text is the note body only, with LF line breaks. The editor turns other line breaks into LF. Markdown syntax
+/// shows on the lines with the cursor or the selection, and hides on all other lines. A code block or a table shows its
+/// whole source while the cursor or the selection is in it. Embedded images show below their line, and other embedded
+/// files show as file chips in their line.
 ///
-/// The editor takes its font, size and line height from the text style of its parent element.
-/// It draws its own background and a text column with space on each side. The column fills the
-/// editor, or [`Editor::set_text_width`] limits it to a number of chars. The app sets light or
-/// dark mode with [`Editor::set_appearance`].
+/// The editor takes its font, size and line height from the text style of its parent element. It draws its own
+/// background and a text column with space on each side. The column fills the editor, or [`Editor::set_text_width`]
+/// limits it to a number of chars. The app sets light or dark mode with [`Editor::set_appearance`].
 ///
 /// The editor gets its shortcuts from [`crate::shortcuts`], once the app calls [`crate::init`]:
 ///
-/// - Arrows move by char, and with Ctrl by word. Home and End go to the row ends, and with
-///   Ctrl to the note ends. Page Up and Page Down move by one view. Shift selects.
+/// - Arrows move by char, and with Ctrl by word. Home and End go to the row ends, and with Ctrl to the note ends. Page
+///   Up and Page Down move by one view. Shift selects.
 /// - Ctrl+A selects all. Ctrl+C, Ctrl+X and Ctrl+V copy, cut and paste the Markdown source.
 /// - Ctrl+Z undoes, Ctrl+Y redoes. Ctrl+Backspace and Ctrl+Delete remove a word.
-/// - Format keys: Ctrl+B bold, Ctrl+I italic, Ctrl+U underline, Ctrl+D strikethrough,
-///   Ctrl+H highlight, Ctrl+E code, Ctrl+1 to Ctrl+6 a heading, Ctrl+0 a plain line.
+/// - Format keys: Ctrl+B bold, Ctrl+I italic, Ctrl+U underline, Ctrl+D strikethrough, Ctrl+H highlight, Ctrl+E code,
+///   Ctrl+1 to Ctrl+6 a heading, Ctrl+0 a plain line.
 /// - Enter continues a list. Tab and Shift+Tab move a list item in and out.
 /// - Ctrl+L checks or clears the task boxes on the selected lines. A click on a task box does too.
-/// - A click places the cursor, also on a link. Ctrl+click opens the link under the mouse, and
-///   Ctrl+Enter the link at the cursor. A link to a heading in this note moves the cursor
-///   there, and a heading out of view goes to the top line. Other links send [`OpenLink`] or [`OpenFile`].
-/// - Ctrl+V with files or an image on the clipboard sends [`PasteFiles`], and so does a drop of
-///   files.
-/// - Ctrl+T opens the color window for the text color, and Ctrl+M for the highlight color.
-///   Keys 1 to 6 pick a palette color, 7 to 9 one of the last custom colors, and 0 removes the
-///   color. `+` opens a hex field, and Enter takes its value. Esc closes the window. A new
-///   custom color sends [`CustomColors`].
+/// - A click places the cursor, also on a link. Ctrl+click opens the link under the mouse, and Ctrl+Enter the link at
+///   the cursor. A link to a heading in this note moves the cursor there, and a heading out of view goes to the top
+///   line. Other links send [`OpenLink`] or [`OpenFile`].
+/// - Ctrl+V with files or an image on the clipboard sends [`PasteFiles`], and so does a drop of files.
+/// - Ctrl+T opens the color window for the text color, and Ctrl+M for the highlight color. Keys 1 to 6 pick a palette
+///   color, 7 to 9 one of the last custom colors, and 0 removes the color. `+` opens a hex field, and Enter takes its
+///   value. Esc closes the window. A new custom color sends [`CustomColors`].
 /// - Up with the cursor at the very start of the text sends [`UpFromStart`].
-/// - Ctrl+F opens find. Typed text goes into its query. Enter and Shift+Enter select the next
-///   and the match before. A match out of view goes to the middle of the view. Esc or a click
-///   in the text closes it.
+/// - Ctrl+F opens find. Typed text goes into its query. Enter and Shift+Enter select the next and the match before. A
+///   match out of view goes to the middle of the view. Esc or a click in the text closes it.
 ///
 /// [`WritingHelp`] turns off the format keys, the color window and the list keys.
 pub struct Editor {
@@ -89,8 +84,8 @@ pub struct Editor {
 
 /// The selection grows by `unit` from `origin`.
 ///
-/// A click can show the syntax of its line and so move the text under the mouse. So the
-/// drag waits until the mouse is [`DRAG_START`] away from `down`.
+/// A click can show the syntax of its line and so move the text under the mouse. So the drag waits until the mouse is
+/// [`DRAG_START`] away from `down`.
 #[derive(Clone, Debug)]
 struct Drag {
     unit: Unit,
@@ -132,8 +127,8 @@ pub enum TextWidth {
     /// Fills the editor, minus the space on each side.
     #[default]
     Full,
-    /// The column is as wide as this many chars at the text size, and centered. In a narrower
-    /// editor it fills the editor, like [`TextWidth::Full`].
+    /// The column is as wide as this many chars at the text size, and centered. In a narrower editor it fills the
+    /// editor, like [`TextWidth::Full`].
     Limited(u16),
 }
 
@@ -150,15 +145,15 @@ pub struct Changed;
 
 impl EventEmitter<Changed> for Editor {}
 
-/// The user pressed Up with the cursor at the very start of the text, and no selection.
-/// The app can move the focus to a part above the editor.
+/// The user pressed Up with the cursor at the very start of the text, and no selection. The app can move the focus to a
+/// part above the editor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UpFromStart;
 
 impl EventEmitter<UpFromStart> for Editor {}
 
-/// The user asked to open a file or a folder: with Ctrl and a click on a file link or a file
-/// chip, or Ctrl+Enter at the cursor.
+/// The user asked to open a file or a folder: with Ctrl and a click on a file link or a file chip, or Ctrl+Enter at the
+/// cursor.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpenFile {
     /// A relative link starts at the folder of the note.
@@ -175,8 +170,8 @@ pub struct OpenLink {
 
 impl EventEmitter<OpenLink> for Editor {}
 
-/// The user pasted or dropped files or an image. The app stores them and calls
-/// [`Editor::insert_link`] for each one. A drop first moves the cursor to the drop point.
+/// The user pasted or dropped files or an image. The app stores them and calls [`Editor::insert_link`] for each one. A
+/// drop first moves the cursor to the drop point.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PasteFiles {
     pub files: Vec<PastedFile>,
@@ -196,8 +191,8 @@ pub enum PastedFile {
     },
 }
 
-/// The last custom colors changed, after the user picked a color that is not in the palette.
-/// The app stores them and gives them back with [`Editor::set_custom_colors`].
+/// The last custom colors changed, after the user picked a color that is not in the palette. The app stores them and
+/// gives them back with [`Editor::set_custom_colors`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CustomColors {
     /// The newest first. There are at most 3.
@@ -243,8 +238,7 @@ impl Editor {
         }
     }
 
-    /// Shows `text` from its start, with the cursor at the start and an empty undo stack.
-    /// Use it to open a note.
+    /// Shows `text` from its start, with the cursor at the start and an empty undo stack. Use it to open a note.
     pub fn set_text(&mut self, text: &str, cx: &mut Context<Self>) {
         let broken = self.model.take_broken();
         self.model = Model::new(text);
@@ -256,8 +250,8 @@ impl Editor {
         cx.notify();
     }
 
-    /// Puts in `text` from the disk in place of the current text, as one undo step.
-    /// The view and the cursor stay near their place. It sends no [`Changed`].
+    /// Puts in `text` from the disk in place of the current text, as one undo step. The view and the cursor stay near
+    /// their place. It sends no [`Changed`].
     pub fn reload_text(&mut self, text: &str, cx: &mut Context<Self>) {
         if self.model.reload(text) {
             self.version += 1;
@@ -305,9 +299,9 @@ impl Editor {
         cx.notify();
     }
 
-    /// Sets the link targets that are missing, like a note link to a heading that the note does
-    /// not have. Their links get a quiet "broken" style. The editor itself checks links to
-    /// headings in this note. The set stays for the next notes, until the next call.
+    /// Sets the link targets that are missing, like a note link to a heading that the note does not have. Their links
+    /// get a quiet "broken" style. The editor itself checks links to headings in this note. The set stays for the next
+    /// notes, until the next call.
     pub fn set_link_states(&mut self, broken: HashSet<Target>, cx: &mut Context<Self>) {
         self.model.set_broken(broken);
         cx.notify();
@@ -326,12 +320,11 @@ impl Editor {
         })
     }
 
-    /// Puts a link to `target` in place of the selection, as one undo step, and the cursor
-    /// after it. The selection becomes the link text. With no selection, `text` does, written
-    /// so that it shows as it is. `embedded` writes `![..](..)`. A link to an image gets a line
-    /// of its own, and the image shows under it. A link to another file or a folder stays at
-    /// the cursor, as a file chip, with a space on each side where the text needs one.
-    /// It sends [`Changed`].
+    /// Puts a link to `target` in place of the selection, as one undo step, and the cursor after it. The selection
+    /// becomes the link text. With no selection, `text` does, written so that it shows as it is. `embedded` writes
+    /// `![..](..)`. A link to an image gets a line of its own, and the image shows under it. A link to another file or
+    /// a folder stays at the cursor, as a file chip, with a space on each side where the text needs one. It sends
+    /// [`Changed`].
     pub fn insert_link(&mut self, text: &str, target: &Target, embedded: bool, cx: &mut Context<Self>) {
         let form = match target {
             _ if !embedded => LinkForm::Text,
@@ -342,17 +335,17 @@ impl Editor {
         self.report_edit(changed, cx);
     }
 
-    /// Points the link at the cursor to `target`, as one undo step. The link text stays.
-    /// It returns whether the text changed. It changes nothing with no link at the cursor, or
-    /// for a reference link like `[text][name]`. It sends [`Changed`] when the text changes.
+    /// Points the link at the cursor to `target`, as one undo step. The link text stays. It returns whether the text
+    /// changed. It changes nothing with no link at the cursor, or for a reference link like `[text][name]`. It sends
+    /// [`Changed`] when the text changes.
     pub fn set_link_target(&mut self, target: &Target, cx: &mut Context<Self>) -> bool {
         let changed = self.model.set_link_target(target);
         self.report_edit(changed, cx);
         changed
     }
 
-    /// Puts the cursor at the first heading with the text `heading`, and shows that heading at
-    /// the top of the view. It returns whether the text has such a heading.
+    /// Puts the cursor at the first heading with the text `heading`, and shows that heading at the top of the view. It
+    /// returns whether the text has such a heading.
     pub fn show_heading(&mut self, heading: &str, cx: &mut Context<Self>) -> bool {
         let Some(start) = self.model.heading_start(heading) else {
             return false;
@@ -366,20 +359,19 @@ impl Editor {
         true
     }
 
-    /// Sets a view that shows before the first line of the text, in the text column, or none.
-    /// It scrolls with the text, and its height is a part of the scroll. A click in it does not
-    /// move the cursor, and keys there do not reach the text.
+    /// Sets a view that shows before the first line of the text, in the text column, or none. It scrolls with the text,
+    /// and its height is a part of the scroll. A click in it does not move the cursor, and keys there do not reach the
+    /// text.
     ///
-    /// When the focus moves into the view, the editor scrolls to the very top. When the focus
-    /// comes back to the editor, the view goes back to the cursor. Out of sight, the view
-    /// keeps the focus and its keys.
+    /// When the focus moves into the view, the editor scrolls to the very top. When the focus comes back to the editor,
+    /// the view goes back to the cursor. Out of sight, the view keeps the focus and its keys.
     pub fn set_start(&mut self, start: Option<AnyView>, cx: &mut Context<Self>) {
         self.start = start;
         cx.notify();
     }
 
-    /// Scrolls when the focus moves into the start view or back to the editor.
-    /// `in_start` and `focused` describe the focus now.
+    /// Scrolls when the focus moves into the start view or back to the editor. `in_start` and `focused` describe the
+    /// focus now.
     pub(crate) fn follow_focus(&mut self, in_start: bool, focused: bool) {
         if in_start == self.was_start_focused {
             return;

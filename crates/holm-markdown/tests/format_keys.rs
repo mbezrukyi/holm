@@ -229,8 +229,8 @@ fn every_neighbor_of_a_marker_writes_back() {
     }
 }
 
-/// Checks one key press. The visible text stays, and the selected text gets the wanted style.
-/// The other text keeps its styles.
+/// Checks one key press. The visible text stays, and the selected text gets the wanted style. The other text keeps its
+/// styles.
 fn check_press(text: &str, selection: Range<usize>, format: Format) {
     let body = Body::parse(text);
     // With no selection a key takes the word at the cursor. `keys_with_no_selection` tests it.
@@ -280,8 +280,8 @@ fn check_press(text: &str, selection: Range<usize>, format: Format) {
         return;
     }
     let Some((new_text, _)) = press(text, selection.clone(), format) else {
-        // A lone backtick can pair with a new marker, and no escape stops that. A new block can
-        // start after a key on only marker chars and tags. Spaces at the line start can do it too.
+        // A lone backtick can pair with a new marker, and no escape stops that. A new block can start after a key on
+        // only marker chars and tags. Spaces at the line start can do it too.
         let letters = picked
             .iter()
             .any(|s| s.c.is_alphanumeric() && !raw.iter().any(|r| r.contains(&s.at)));
@@ -343,8 +343,8 @@ const COLOR_KEYS: [Format; 6] = [
     Format::HighlightColor(None),
 ];
 
-/// Checks one color key on plain words and styles away from links and code. The visible text
-/// stays, the selected letters get only the new color, and the other styles stay.
+/// Checks one color key on plain words and styles away from links and code. The visible text stays, the selected
+/// letters get only the new color, and the other styles stay.
 fn check_color(text: &str, selection: Range<usize>, format: Format) {
     let body = Body::parse(text);
     if selection.is_empty() || body.blocks().iter().any(|b| b.kind != BlockKind::Paragraph) {

@@ -1,9 +1,8 @@
 //! The link picker: a small window that finds the target of a note link.
 //!
-//! It matches titles with fuzzy matching, and lists the headings of a note after `#`. A `#`
-//! typed into a field with no `#` yet fills in the title of the note under the cursor. When no
-//! title is the typed text, the last row creates a note. `Enter` picks a row, and `Esc` closes
-//! the window.
+//! It matches titles with fuzzy matching, and lists the headings of a note after `#`. A `#` typed into a field with no
+//! `#` yet fills in the title of the note under the cursor. When no title is the typed text, the last row creates a
+//! note. `Enter` picks a row, and `Esc` closes the window.
 
 use std::collections::{HashMap, HashSet};
 
@@ -28,10 +27,9 @@ pub(crate) struct LinkStart {
 }
 
 impl LinkStart {
-    /// The picker lists the notes of `snapshot` with the newest change first, as
-    /// [`Snapshot::newest`] gives them. It does not take the note order of the sidebar: a link
-    /// most often goes to a note of late. The link goes into `open_note`. The field starts with
-    /// `target`, the link at the cursor, when it is a note or a heading.
+    /// The picker lists the notes of `snapshot` with the newest change first, as [`Snapshot::newest`] gives them. It
+    /// does not take the note order of the sidebar: a link most often goes to a note of late. The link goes into
+    /// `open_note`. The field starts with `target`, the link at the cursor, when it is a note or a heading.
     pub(crate) fn new(snapshot: &Snapshot, open_note: NotePath, target: Option<&Target>) -> Self {
         let query = match target {
             Some(Target::Note { id, heading }) => snapshot

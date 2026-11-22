@@ -65,8 +65,8 @@ pub(crate) struct Shown {
     segments: Vec<Segment>,
 }
 
-/// An embedded file that is not an image. It shows in the line as a chip. Its screen text is one
-/// [`CHIP_ATOM`], which is not in the source and maps to the start of the link.
+/// An embedded file that is not an image. It shows in the line as a chip. Its screen text is one [`CHIP_ATOM`], which
+/// is not in the source and maps to the start of the link.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Chip {
     /// In screen text.
@@ -123,8 +123,8 @@ pub(crate) struct DisplayLine {
     pub(crate) depth: usize,
     /// The marker of a list item that starts on this line. Only a line that hides its syntax has it.
     pub(crate) mark: Option<Mark>,
-    /// The source before the text of a list line: its indent and its marker. A line that shows
-    /// its syntax hangs it to the left, so the text stays in place.
+    /// The source before the text of a list line: its indent and its marker. A line that shows its syntax hangs it to
+    /// the left, so the text stays in place.
     pub(crate) prefix: Option<Range<usize>>,
     source: Range<usize>,
 }
@@ -257,8 +257,8 @@ impl Model {
         }
     }
 
-    /// The list items of the line above the empty line `line`, when that line is item text.
-    /// Text typed on `line` joins these items, by lazy continuation.
+    /// The list items of the line above the empty line `line`, when that line is item text. Text typed on `line` joins
+    /// these items, by lazy continuation.
     fn lazy_items(&self, line: usize) -> Vec<&Block> {
         let Some(above) = line.checked_sub(1).map(|above| self.line_range(above)) else {
             return Vec::new();
@@ -284,8 +284,8 @@ impl Model {
         self.chain_at(self.probe(line))
     }
 
-    /// The first offset of the line that is neither space nor hidden syntax. It finds the blocks
-    /// of the line, because a nested block can start after the line start.
+    /// The first offset of the line that is neither space nor hidden syntax. It finds the blocks of the line, because a
+    /// nested block can start after the line start.
     fn probe(&self, line: &Range<usize>) -> usize {
         let hidden = self.body.hidden();
         let first = hidden.partition_point(|h| h.end <= line.start);
@@ -441,8 +441,8 @@ impl Model {
         (mark, end)
     }
 
-    /// The screen text of `range`. Without `raw`, it hides the syntax and `extra`, and shows
-    /// the `chips` that start in `range`.
+    /// The screen text of `range`. Without `raw`, it hides the syntax and `extra`, and shows the `chips` that start in
+    /// `range`.
     fn shown(
         &self,
         range: &Range<usize>,
@@ -565,8 +565,8 @@ impl Shown {
         self.text.push_str(&source[piece]);
     }
 
-    /// Adds a chip. Its left edge maps to the start of its link, and its right edge to the end
-    /// of its link, cut at `end`.
+    /// Adds a chip. Its left edge maps to the start of its link, and its right edge to the end of its link, cut at
+    /// `end`.
     fn push_chip(&mut self, chip: &ChipLink<'_>, end: usize) {
         let start = self.text.len();
         self.segments.push(Segment {

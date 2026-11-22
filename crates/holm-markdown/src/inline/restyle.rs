@@ -1,6 +1,6 @@
-//! Format keys. A key makes a flat list of styled text pieces from the touched part of each
-//! leaf. It adds or removes one style and builds a tree again. It writes the tree and parses
-//! the result to check it. When the check fails, it tries other markers.
+//! Format keys. A key makes a flat list of styled text pieces from the touched part of each leaf. It adds or removes
+//! one style and builds a tree again. It writes the tree and parses the result to check it. When the check fails, it
+//! tries other markers.
 
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
@@ -25,11 +25,11 @@ pub enum Format {
     Highlight,
     /// Ctrl+E: `` `text` ``.
     Code,
-    /// The text color: `<span style="color: #rrggbb">`. It takes the place of any other text
-    /// color. `None` removes the text color.
+    /// The text color: `<span style="color: #rrggbb">`. It takes the place of any other text color. `None` removes the
+    /// text color.
     TextColor(Option<Color>),
-    /// The highlight color: `<mark style="background: #rrggbb">`. It takes the place of any other
-    /// highlight, also `==text==`. `None` removes the highlight.
+    /// The highlight color: `<mark style="background: #rrggbb">`. It takes the place of any other highlight, also
+    /// `==text==`. `None` removes the highlight.
     HighlightColor(Option<Color>),
 }
 
@@ -44,10 +44,10 @@ pub struct Edit {
 
 /// `body` is the parse of `text`.
 ///
-/// The key adds the style when any selected text lacks it. It removes the style when all of it
-/// has it. A color key sets its color on all selected text. With no selection, the key works on the word at the cursor. Between words, it puts
-/// in an empty pair of markers. It gives `None` when nothing changes, or when no valid Markdown
-/// gives the wanted styles.
+/// The key adds the style when any selected text lacks it. It removes the style when all of it has it. A color key sets
+/// its color on all selected text. With no selection, the key works on the word at the cursor. Between words, it puts
+/// in an empty pair of markers. It gives `None` when nothing changes, or when no valid Markdown gives the wanted
+/// styles.
 ///
 /// ```
 /// use holm_markdown::Body;
@@ -70,8 +70,8 @@ pub fn restyle(text: &str, body: &Body, selection: Range<usize>, format: Format)
     keeps_blocks(text, body, &edit).then_some(edit)
 }
 
-/// Whether the blocks around `edit` keep their kinds. A marker or escape at the start of a line
-/// can start another block, like a code fence.
+/// Whether the blocks around `edit` keep their kinds. A marker or escape at the start of a line can start another
+/// block, like a code fence.
 fn keeps_blocks(text: &str, body: &Body, edit: &Edit) -> bool {
     let blocks = body.blocks();
     let first = blocks.partition_point(|b| b.range.end < edit.range.start);
@@ -202,8 +202,7 @@ impl Format {
         }
     }
 
-    /// The empty marker pair, and the length of its first half. A key that only removes has
-    /// none.
+    /// The empty marker pair, and the length of its first half. A key that only removes has none.
     fn pair(self) -> Option<(String, usize)> {
         let delim = |pair: &str| Some((pair.to_owned(), pair.len() / 2));
         match self {
@@ -341,8 +340,8 @@ impl Piece {
     }
 }
 
-/// Splits `nodes` into pieces. Text splits into words, spaces and other chars, and also at
-/// `cuts`. An escape or an entity is never split.
+/// Splits `nodes` into pieces. Text splits into words, spaces and other chars, and also at `cuts`. An escape or an
+/// entity is never split.
 fn flatten(joined: &str, nodes: &[Node], cuts: &Range<usize>, marks: &mut Vec<Mark>, out: &mut Vec<Piece>) {
     for node in nodes {
         let class = match &node.kind {
@@ -514,8 +513,8 @@ struct Change {
     /// The old source.
     old: Range<usize>,
     new: String,
-    /// For each piece: its old source in the joined text of the leaf, and its new source in
-    /// `new`. The flag says whether the piece is written as it was.
+    /// For each piece: its old source in the joined text of the leaf, and its new source in `new`. The flag says
+    /// whether the piece is written as it was.
     pieces: Vec<(Range<usize>, Range<usize>, bool)>,
     /// The leaf, to map a source offset into its joined text.
     leaf: Leaf,
@@ -569,8 +568,8 @@ fn leaf_change(text: &str, work: &Work<'_>, body: &Body, action: Action) -> Opti
     let (path, range) = region(&work.nodes, &work.selection, action)?;
     let whole = path.is_empty() && range == (0..work.nodes.len());
     write_region(text, work, body, action, &path, range).or_else(|| {
-        // Marker chars in the text outside the part can pair with new markers. The last try
-        // writes the whole leaf, so that they can get escapes.
+        // Marker chars in the text outside the part can pair with new markers. The last try writes the whole leaf, so
+        // that they can get escapes.
         if whole {
             return None;
         }
@@ -677,8 +676,8 @@ fn region(nodes: &[Node], selection: &Range<usize>, action: Action) -> Option<(V
         let first = list.iter().position(overlaps)?;
         let end = list.iter().rposition(overlaps)? + 1;
         let node = &list[first];
-        // Go into a style node only when the selection holds a part of its text. A key on all
-        // of it may need to write its markers again.
+        // Go into a style node only when the selection holds a part of its text. A key on all of it may need to write
+        // its markers again.
         let inside = node.source.start <= selection.start && selection.end <= node.source.end;
         let all = selection.start <= node.content.start && node.content.end <= selection.end;
         if first + 1 == end && Look::of(&node.kind).is_some() && inside && !all {
@@ -701,8 +700,8 @@ fn region(nodes: &[Node], selection: &Range<usize>, action: Action) -> Option<(V
     Some((path, widen(list, range)))
 }
 
-/// The range with the style nodes next to it, so that runs of one style can join. Then the
-/// text nodes next to it join too, so that the last try can escape their marker chars.
+/// The range with the style nodes next to it, so that runs of one style can join. Then the text nodes next to it join
+/// too, so that the last try can escape their marker chars.
 fn widen(list: &[Node], mut range: Range<usize>) -> Range<usize> {
     while range.start > 0 && Look::of(&list[range.start - 1].kind).is_some() {
         range.start -= 1;
@@ -783,8 +782,7 @@ fn act(
     Some(())
 }
 
-/// Adds `look` to the selected pieces that have no look of its kind, unless a style around them
-/// has one.
+/// Adds `look` to the selected pieces that have no look of its kind, unless a style around them has one.
 fn add(pieces: &mut [Piece], outer: &[Mark], look: Look) {
     if outer.iter().any(|m| look.is_kin(m.look)) {
         return;
@@ -864,8 +862,8 @@ fn unescape_but_pipes(text: &str) -> String {
     text.split("\\|").map(scan::unescape).collect::<Vec<_>>().join("\\|")
 }
 
-/// Takes a style off the blank pieces at the ends of each of its runs. A run that is still
-/// exactly one old node stays as it is.
+/// Takes a style off the blank pieces at the ends of each of its runs. A run that is still exactly one old node stays
+/// as it is.
 fn trim_edges(pieces: &mut [Piece]) {
     let mut looks: Vec<Look> = Vec::new();
     for mark in pieces.iter().flat_map(|p| &p.marks) {
@@ -1063,8 +1061,7 @@ impl Writer<'_> {
         let mut i = a;
         while i < b {
             let piece = &self.pieces[i];
-            // A run starts on a space only where a cut put it. A style that does not show
-            // there stays off.
+            // A run starts on a space only where a cut put it. A style that does not show there stays off.
             let candidates: Vec<(usize, Look)> = piece
                 .marks
                 .iter()
@@ -1211,8 +1208,8 @@ enum End {
     End,
 }
 
-/// Where the source offset `pos` lands in the new text. An offset in a changed part keeps its
-/// place in the visible text.
+/// Where the source offset `pos` lands in the new text. An offset in a changed part keeps its place in the visible
+/// text.
 fn map(changes: &[Change], pos: usize, end: End) -> usize {
     let mut delta = 0_isize;
     for change in changes {

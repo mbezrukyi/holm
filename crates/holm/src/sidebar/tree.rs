@@ -44,8 +44,7 @@ impl Item {
         }
     }
 
-    /// The name the tree shows: "All notes", the last part of the folder path, or the last
-    /// part of the tag name.
+    /// The name the tree shows: "All notes", the last part of the folder path, or the last part of the tag name.
     pub(crate) fn name(&self) -> String {
         match self {
             Self::All => text::ALL_NOTES.to_owned(),
@@ -221,8 +220,7 @@ impl Lists {
         }
     }
 
-    /// A folder list has only the notes right in it. A tag list also has the notes of its child
-    /// tags.
+    /// A folder list has only the notes right in it. A tag list also has the notes of its child tags.
     pub(crate) fn list(&self, item: &Item) -> NoteList {
         match item.set() {
             NoteSet::All => self.notes.clone(),
@@ -247,10 +245,9 @@ impl Lists {
         item
     }
 
-    /// The visible tree: "All notes", then the folders, then the tags, each group under its
-    /// label. Only the children of `open` items show. `new_folder` is the parent of the field of
-    /// a new folder. The field is the first child line of its parent. A field at the root comes
-    /// first under the folder label.
+    /// The visible tree: "All notes", then the folders, then the tags, each group under its label. Only the children of
+    /// `open` items show. `new_folder` is the parent of the field of a new folder. The field is the first child line of
+    /// its parent. A field at the root comes first under the folder label.
     pub(crate) fn tree(&self, open: &HashSet<Item>, new_folder: Option<&FolderPath>) -> Tree {
         let rows = self.rows(open, new_folder);
         let mut entries = Vec::with_capacity(rows.len() + 3);

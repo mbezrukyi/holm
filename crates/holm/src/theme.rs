@@ -12,8 +12,8 @@ const THEMES: &str = include_str!("theme.json");
 const LIGHT: &str = "Holm Light";
 const DARK: &str = "Holm Dark";
 
-/// The UI font that `theme.json` names. Holm ships its static files, because GPUI can't pick
-/// a weight in a variable font.
+/// The UI font that `theme.json` names. Holm ships its static files, because GPUI can't pick a weight in a variable
+/// font.
 const UI_FONT_FILES: [&[u8]; 4] = [
     include_bytes!("../fonts/Inter-Regular.ttf"),
     include_bytes!("../fonts/Inter-Medium.ttf"),

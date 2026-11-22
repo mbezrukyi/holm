@@ -1,16 +1,14 @@
-//! The message line: one line at the bottom of the window, under the sidebar and the note. It
-//! shows only when it has a message or a state.
+//! The message line: one line at the bottom of the window, under the sidebar and the note. It shows only when it has a
+//! message or a state.
 //!
-//! - The left side shows one answer or start message. A new one takes its place. The next key
-//!   clears it, and the key still works as usual.
+//! - The left side shows one answer or start message. A new one takes its place. The next key clears it, and the key
+//!   still works as usual.
 //! - `Ctrl+Shift+E` opens the problem list, wherever the focus is.
-//! - The right side shows a state, like "Not saved", after a mark. A click on it or
-//!   `Ctrl+Shift+D` opens the [`StateMenu`]. A pick in it goes back to the owner of the
-//!   state as a [`StatePick`].
-//! - While a job is late, the right side shows "Writing…" in place of the state. It takes
-//!   no clicks.
-//! - Right before the state, with no gap, a gray mark counts the problems of Holm. A click on
-//!   it opens the [`ProblemList`].
+//! - The right side shows a state, like "Not saved", after a mark. A click on it or `Ctrl+Shift+D` opens the
+//!   [`StateMenu`]. A pick in it goes back to the owner of the state as a [`StatePick`].
+//! - While a job is late, the right side shows "Writing…" in place of the state. It takes no clicks.
+//! - Right before the state, with no gap, a gray mark counts the problems of Holm. A click on it opens the
+//!   [`ProblemList`].
 
 use std::cell::Cell;
 use std::rc::Rc;

@@ -1,8 +1,8 @@
 //! A row of items on one line. The items that do not fit fold into one "more" item.
 //!
-//! The row draws a lead, the items, the "more" item and a tail, from left to right. The tail
-//! sits at the right end, and never over another part. An item that does not fit whole
-//! folds, and so do all items after it. The fold follows the width of the row in each frame.
+//! The row draws a lead, the items, the "more" item and a tail, from left to right. The tail sits at the right end, and
+//! never over another part. An item that does not fit whole folds, and so do all items after it. The fold follows the
+//! width of the row in each frame.
 
 use std::ops::Range;
 

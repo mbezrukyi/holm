@@ -97,8 +97,8 @@ impl Frontmatter {
         self.raw(Key::Tags).map(read_tags).unwrap_or_default()
     }
 
-    /// `None` removes the field. The new field takes the place of the old one. A field that was not there goes
-    /// after the last Holm field that comes before it, or at the top.
+    /// `None` removes the field. The new field takes the place of the old one. A field that was not there goes after
+    /// the last Holm field that comes before it, or at the top.
     pub(crate) fn set(&mut self, key: Key, raw: Option<String>) {
         let old = self.entries.iter().position(|e| e.key == Some(key));
         // Removing a later copy of the key never moves the first one.

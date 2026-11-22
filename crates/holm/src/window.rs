@@ -1,10 +1,10 @@
 //! The main window: the notes folder screen, the notes view, and the message line under them.
 //!
-//! The keys of [`Place::Anywhere`] work in each part of the window. Without a notes view, the
-//! window holds the focus itself, so the keys reach it.
+//! The keys of [`Place::Anywhere`] work in each part of the window. Without a notes view, the window holds the focus
+//! itself, so the keys reach it.
 //!
-//! The first start asks for the notes folder. A notes folder that Holm can't open shows
-//! a screen that offers to pick another one.
+//! The first start asks for the notes folder. A notes folder that Holm can't open shows a screen that offers to pick
+//! another one.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -81,8 +81,8 @@ pub(crate) struct HolmWindow {
     index_dir: PathBuf,
     default_folder: PathBuf,
     write_budget: Duration,
-    /// The notes folder that the window shows or opens. It differs from the settings while the
-    /// open folder writes its text before a change.
+    /// The notes folder that the window shows or opens. It differs from the settings while the open folder writes its
+    /// text before a change.
     folder: Option<PathBuf>,
     /// The open notes folder writes its text before a change of the folder.
     leaving: bool,
@@ -172,8 +172,7 @@ impl HolmWindow {
         }
     }
 
-    /// The open folder writes its text first. A failed write keeps the open folder, also in the
-    /// settings.
+    /// The open folder writes its text first. A failed write keeps the open folder, also in the settings.
     fn change_folder(&mut self, folder: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         let Stage::Open(notes) = &self.stage else {
             self.choose(folder, false, window, cx);

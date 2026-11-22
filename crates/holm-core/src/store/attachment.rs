@@ -1,8 +1,7 @@
 //! The attachment folder `attachments/` at the root, where Holm puts pasted files.
 //!
-//! Only the folder with exactly this name is the attachments folder. A folder like
-//! `Attachments/` is a user folder. A new folder name takes the name in any case, like a name
-//! clash.
+//! Only the folder with exactly this name is the attachments folder. A folder like `Attachments/` is a user folder. A
+//! new folder name takes the name in any case, like a name clash.
 
 use std::ffi::OsStr;
 use std::fmt::Write as _;
@@ -19,8 +18,8 @@ use crate::paths::{FolderPath, Name, NotePath};
 const ATTACHMENTS: &str = "attachments";
 const PASTED_IMAGE: &str = "Pasted image";
 
-/// It leaves room for the hash and the extension of an
-/// attachment under [`MAX_NAME_BYTES`](crate::paths::MAX_NAME_BYTES).
+/// It leaves room for the hash and the extension of an attachment under
+/// [`MAX_NAME_BYTES`](crate::paths::MAX_NAME_BYTES).
 const MAX_STEM_BYTES: usize = 240;
 /// The bytes of the content hash in an attachment name: 8 hex digits.
 const HASH_BYTES: usize = 4;
@@ -69,12 +68,11 @@ impl Store {
         Ok(crate::links::link(&self.root, note, &file))
     }
 
-    /// Copies `content` into the attachment folder as `<stem>-<hash>.<ext>`, and returns its
-    /// absolute path. The hash is a short hash of the content, so a name never clashes.
-    /// With no `ext`, the name has no `.` either.
+    /// Copies `content` into the attachment folder as `<stem>-<hash>.<ext>`, and returns its absolute path. The hash is
+    /// a short hash of the content, so a name never clashes. With no `ext`, the name has no `.` either.
     ///
-    /// When a file with that name is there, it keeps that file and drops the new copy.
-    /// It makes the folder when it is missing.
+    /// When a file with that name is there, it keeps that file and drops the new copy. It makes the folder when it is
+    /// missing.
     fn add_attachment(&self, stem: &str, ext: Option<&str>, content: impl io::Read) -> Result<PathBuf> {
         let Some(folder) = folder() else {
             return Err(write_error(&self.root, io::ErrorKind::InvalidInput.into()));
@@ -134,8 +132,8 @@ impl Store {
         Ok(())
     }
 
-    /// Whether `rel`, a path relative to the notes folder, is a file in the attachment folder
-    /// that is not a note. A symlink counts as a file. No folder on the way may be a symlink.
+    /// Whether `rel`, a path relative to the notes folder, is a file in the attachment folder that is not a note. A
+    /// symlink counts as a file. No folder on the way may be a symlink.
     fn is_attachment(&self, rel: &Path) -> bool {
         let Some((folder, name)) = FolderPath::split_raw(rel) else {
             return false;

@@ -3,8 +3,8 @@ use std::ops::Range;
 use holm_markdown::Body;
 use holm_markdown::list::{Move, relist};
 
-/// The text and the selection after `key`. The selection is given and returned with `|`
-/// for the cursor, or two `|` around the selected text.
+/// The text and the selection after `key`. The selection is given and returned with `|` for the cursor, or two `|`
+/// around the selected text.
 fn key(marked: &str, key: Move) -> String {
     let (text, selection) = unmark(marked);
     let Some(edit) = relist(&text, &Body::parse(&text), selection, key) else {

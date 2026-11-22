@@ -1,5 +1,5 @@
-//! Runs the plans of [`reconcile`] on the disk: it lists and reads the note files, parses
-//! their links, and gives each copied note a new id.
+//! Runs the plans of [`reconcile`] on the disk: it lists and reads the note files, parses their links, and gives each
+//! copied note a new id.
 
 use crate::error::Result;
 use crate::facts::Facts;
@@ -9,9 +9,8 @@ use crate::nodes::Nodes;
 use crate::reconcile::{self, Plan, Read, Settled};
 use crate::store::{ContentHash, Stamp, Store};
 
-/// Brings the notes at or below each of `nodes` up to date with the files, from `facts`.
-/// It reads only the files whose stamp changed, and the notes that `nodes` name. A file that can't be read is left out with a
-/// log line.
+/// Brings the notes at or below each of `nodes` up to date with the files, from `facts`. It reads only the files whose
+/// stamp changed, and the notes that `nodes` name. A file that can't be read is left out with a log line.
 ///
 /// # Errors
 ///
@@ -71,8 +70,7 @@ fn read(store: &Store, facts: &Facts, note: Note, stamp: Stamp, hash: ContentHas
     }
 }
 
-/// Writes a new id into each copy. A copy whose write fails stays
-/// without an id, with a log line.
+/// Writes a new id into each copy. A copy whose write fails stays without an id, with a log line.
 fn decide_with_ids(store: &Store, facts: &Facts, plan: Plan, reads: Vec<Read>) -> Settled {
     let mut settled = plan.decide(facts, reads);
     for put in settled.put.iter_mut().filter(|put| put.copy) {

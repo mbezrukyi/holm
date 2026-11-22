@@ -23,11 +23,11 @@ fn time(what: &str, run: impl FnOnce()) {
     println!("{what:>32} {:8.2} ms", start.elapsed().as_secs_f64() * 1000.);
 }
 
-/// Types `key` in the search field and draws the new rows. It prints the time on the UI thread
-/// and the time from the key to the rows apart.
+/// Types `key` in the search field and draws the new rows. It prints the time on the UI thread and the time from the
+/// key to the rows apart.
 ///
-/// The test runs the background tasks on this thread too. The UI time leaves them out.
-/// The test window draws a frame after each update, so the rows are on screen at the end.
+/// The test runs the background tasks on this thread too. The UI time leaves them out. The test window draws a frame
+/// after each update, so the rows are on screen at the end.
 fn search_key(cx: &mut TestAppContext, handle: AnyWindowHandle, key: &'static str) {
     let executor = cx.executor();
     let dispatcher = executor.dispatcher().as_test().unwrap();
@@ -124,12 +124,10 @@ fn window_speed(cx: &mut TestAppContext) {
     });
 }
 
-/// Presses `key`, runs the tasks one at a time until `shown`, then draws one frame, and prints the
-/// time.
+/// Presses `key`, runs the tasks one at a time until `shown`, then draws one frame, and prints the time.
 ///
-/// The check reads the pane and draws no frame, so the time holds only the frames a window would
-/// draw. The test runs the background tasks on this thread too, so the time holds a write that
-/// runs.
+/// The check reads the pane and draws no frame, so the time holds only the frames a window would draw. The test runs
+/// the background tasks on this thread too, so the time holds a write that runs.
 fn key_until(
     what: &str,
     cx: &mut TestAppContext,

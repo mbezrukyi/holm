@@ -6,8 +6,8 @@ use crate::paths::{FolderPath, NotePath};
 use crate::reconcile::Settled;
 use crate::snapshot::Snapshot;
 
-/// What one write touched: the note paths, the folders and the moves it made. The diff
-/// looks only there, so its cost grows with the write, not with the notes folder.
+/// What one write touched: the note paths, the folders and the moves it made. The diff looks only there, so its cost
+/// grows with the write, not with the notes folder.
 #[derive(Debug, Default)]
 pub(crate) struct Touched {
     /// In no order, maybe with repeats.
@@ -36,21 +36,19 @@ impl Touched {
         self.folders.push(folder);
     }
 
-    /// Adds a move that the write made: [`Change::Moved`], [`Change::FolderMoved`] or
-    /// [`Change::TagMoved`].
+    /// Adds a move that the write made: [`Change::Moved`], [`Change::FolderMoved`] or [`Change::TagMoved`].
     pub(crate) fn moved(&mut self, change: Change) {
         self.moves.push(change);
     }
 
-    /// The facts after the write, and its change list from `source`. With a change, the
-    /// facts get the next revision, and the list carries its snapshot. With no change, there is
-    /// no list, and the facts keep their revision. From outside, each note that was read with a
-    /// new content hash gets the revision of the facts after the write as its outside revision.
+    /// The facts after the write, and its change list from `source`. With a change, the facts get the next revision,
+    /// and the list carries its snapshot. With no change, there is no list, and the facts keep their revision. From
+    /// outside, each note that was read with a new content hash gets the revision of the facts after the write as its
+    /// outside revision.
     ///
-    /// The list holds the moves of the write first, then the note changes in path order,
-    /// then [`Change::Folders`] and [`Change::Tags`]. A note that a move of the write
-    /// explains gives no other change. A gone note and a new note with the same id are one
-    /// [`Change::Moved`]. A note with a new content hash is [`Change::Changed`], also when
+    /// The list holds the moves of the write first, then the note changes in path order, then [`Change::Folders`] and
+    /// [`Change::Tags`]. A note that a move of the write explains gives no other change. A gone note and a new note
+    /// with the same id are one [`Change::Moved`]. A note with a new content hash is [`Change::Changed`], also when
     /// what the snapshot shows of it stays.
     pub(crate) fn list(mut self, source: Source, before: &Facts, after: Facts) -> (Facts, Option<ChangeList>) {
         let mut read = std::mem::take(&mut self.read);

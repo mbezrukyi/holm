@@ -1,8 +1,7 @@
 //! Quick open: a small window that finds a note by its title.
 //!
-//! It matches every title that holds the typed text, and shows the first [`MAX_ROWS`] of them.
-//! Each row shows the folder of its note on the right.
-//! `Tab` and `Shift+Tab` pick a note, `Enter` opens it, and `Esc` closes the window.
+//! It matches every title that holds the typed text, and shows the first [`MAX_ROWS`] of them. Each row shows the
+//! folder of its note on the right. `Tab` and `Shift+Tab` pick a note, `Enter` opens it, and `Esc` closes the window.
 
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _, IntoElement, ParentElement, Render, Role,
@@ -70,8 +69,7 @@ impl QuickOpen {
     }
 }
 
-/// The place of each title that holds `query`, with no regard to capital letters. Only the
-/// first [`MAX_ROWS`] show.
+/// The place of each title that holds `query`, with no regard to capital letters. Only the first [`MAX_ROWS`] show.
 fn rows(query: &str, notes: &PickNotes) -> Vec<usize> {
     let query = Lowercase::new(query.trim());
     notes

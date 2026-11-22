@@ -28,9 +28,8 @@ impl LineEnding {
     }
 }
 
-/// [`NoteFile::parse`] never fails, and its [`Display`](fmt::Display) gives back the same bytes.
-/// The setters change only Holm's own fields: `id`, `tags` and `pinned`.
-/// Every other line stays in its place with its exact text.
+/// [`NoteFile::parse`] never fails, and its [`Display`](fmt::Display) gives back the same bytes. The setters change
+/// only Holm's own fields: `id`, `tags` and `pinned`. Every other line stays in its place with its exact text.
 ///
 /// ```
 /// use holm_markdown::NoteFile;
@@ -50,8 +49,8 @@ pub struct NoteFile {
 }
 
 impl NoteFile {
-    /// A frontmatter starts with a `---` line at the very top and ends with a `---` or `...` line.
-    /// Without the end line, the whole text is body.
+    /// A frontmatter starts with a `---` line at the very top and ends with a `---` or `...` line. Without the end
+    /// line, the whole text is body.
     pub fn parse(text: &str) -> Self {
         let (frontmatter, body) = Frontmatter::split(text);
         Self {
@@ -86,8 +85,8 @@ impl NoteFile {
         self.frontmatter.as_ref().is_some_and(Frontmatter::pinned)
     }
 
-    /// The first line that has text, without its Markdown syntax. A long line is cut to 200 chars.
-    /// Empty when the body has no text.
+    /// The first line that has text, without its Markdown syntax. A long line is cut to 200 chars. Empty when the body
+    /// has no text.
     ///
     /// ```
     /// use holm_markdown::NoteFile;

@@ -23,8 +23,8 @@ fn note_text() -> impl Strategy<Value = String> {
     parts.prop_map(|parts| parts.into_iter().map(|(l, e)| l + &e).collect())
 }
 
-/// A field Holm does not know, a comment, or a field with lines below it.
-/// Each line holds `Q<n>`, and Holm's own lines never hold a `Q`.
+/// A field Holm does not know, a comment, or a field with lines below it. Each line holds `Q<n>`, and Holm's own lines
+/// never hold a `Q`.
 fn unknown(n: usize) -> impl Strategy<Value = Vec<String>> {
     prop_oneof![
         Just(vec![format!("Q{n}: value")]),

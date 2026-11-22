@@ -1,8 +1,8 @@
 use holm_markdown::{Body, Target, escape_text};
 use proptest::prelude::*;
 
-/// The target of the one link in `[text](dest)`, and the text a reader sees.
-/// A heading around the link gives the text, as heading links match it.
+/// The target of the one link in `[text](dest)`, and the text a reader sees. A heading around the link gives the text,
+/// as heading links match it.
 fn parse_link(text: &str, dest: &str) -> (Target, String) {
     let source = format!("# [{text}]({dest})\n");
     let body = Body::parse(&source);

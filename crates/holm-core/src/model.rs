@@ -132,8 +132,8 @@ pub enum LinkTarget {
     Note { id: NoteId, heading: Option<String> },
     /// A heading in the same note: `#<heading>`.
     Heading(String),
-    /// A file. The path is relative to the notes folder when the file is inside it.
-    /// It is absolute when the file is outside.
+    /// A file. The path is relative to the notes folder when the file is inside it. It is absolute when the file is
+    /// outside.
     File(PathBuf),
     /// A web address, like `https://...` or `mailto:...`.
     Web(String),
@@ -147,15 +147,14 @@ pub struct DeleteCount {
     pub attachments: usize,
 }
 
-/// One change to the notes folder, in a [`ChangeList`]. A note change names only paths. The
-/// snapshot of the list has the facts of each note.
+/// One change to the notes folder, in a [`ChangeList`]. A note change names only paths. The snapshot of the list has
+/// the facts of each note.
 ///
-/// A write through [`Core`](crate::Core) gives the moves it makes: [`Change::Moved`],
-/// [`Change::FolderMoved`] and [`Change::TagMoved`]. A note that such a move explains gives
-/// no other change.
+/// A write through [`Core`](crate::Core) gives the moves it makes: [`Change::Moved`], [`Change::FolderMoved`] and
+/// [`Change::TagMoved`]. A note that such a move explains gives no other change.
 ///
-/// The core finds no folder moves from other tools. Each note of a moved folder comes as
-/// [`Change::Moved`] or as [`Change::Removed`] and [`Change::Added`].
+/// The core finds no folder moves from other tools. Each note of a moved folder comes as [`Change::Moved`] or as
+/// [`Change::Removed`] and [`Change::Added`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Change {
@@ -210,8 +209,8 @@ impl Change {
     }
 }
 
-/// The notes that match a search, from [`Core::search`](crate::Core::search), in the order
-/// of a list, with the snapshot that knows each one.
+/// The notes that match a search, from [`Core::search`](crate::Core::search), in the order of a list, with the snapshot
+/// that knows each one.
 #[derive(Clone, Debug, Default)]
 pub struct SearchResults {
     snapshot: Snapshot,
@@ -254,8 +253,7 @@ pub struct ChangeList {
     pub source: Source,
     /// The first snapshot that shows the changes.
     pub snapshot: Snapshot,
-    /// The changes in order: first the moves of a write, then the note changes in path order,
-    /// then [`Change::Folders`] and [`Change::Tags`]. It is never empty, and each new revision
-    /// has one.
+    /// The changes in order: first the moves of a write, then the note changes in path order, then [`Change::Folders`]
+    /// and [`Change::Tags`]. It is never empty, and each new revision has one.
     pub changes: Vec<Change>,
 }

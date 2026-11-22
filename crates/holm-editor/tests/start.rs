@@ -168,8 +168,7 @@ fn up_and_page_up_bring_the_start_view_back() {
     let editor_focus = cx.read(|cx| editor.focus_handle(cx));
     focus(cx, &editor_focus);
 
-    // Up from the second line, after a scroll that hides the start view and cuts off the
-    // first line.
+    // Up from the second line, after a scroll that hides the start view and cuts off the first line.
     cx.simulate_keystrokes("down");
     scroll(cx, START + LINE_HEIGHT / 2.);
     cx.simulate_keystrokes("up");

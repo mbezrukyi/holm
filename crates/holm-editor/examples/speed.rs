@@ -1,9 +1,8 @@
 //! Plays a fixed key list in a real window with a 1 MB note and prints the time of each frame.
 //!
-//! A frame time is the key handling plus the layout and paint of the frame.
-//! The example draws each frame itself, so the time does not wait for the screen refresh.
-//! The GPU work after the paint is not in it.
-//! It fails when any frame takes 16 ms or more.
+//! A frame time is the key handling plus the layout and paint of the frame. The example draws each frame itself, so the
+//! time does not wait for the screen refresh. The GPU work after the paint is not in it. It fails when any frame takes
+//! 16 ms or more.
 //!
 //! ```sh
 //! cargo run --release -p holm-editor --example speed

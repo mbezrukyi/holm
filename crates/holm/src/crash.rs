@@ -1,7 +1,7 @@
 //! The panic hook and the crash mark.
 //!
-//! The hook writes the panic and a backtrace to the log, and leaves a mark file.
-//! The next start takes the mark and tells the user.
+//! The hook writes the panic and a backtrace to the log, and leaves a mark file. The next start takes the mark and
+//! tells the user.
 
 use std::backtrace::Backtrace;
 use std::path::Path;

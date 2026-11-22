@@ -1,12 +1,11 @@
 //! The app menu: Settings, Shortcuts, Pin note and Quit, each with its keys.
 //!
-//! - It opens under the ☰ button of the sidebar head, or at the top-left corner of the window
-//!   while the sidebar is hidden.
-//! - It opens with the cursor on the first item. `Tab` and `Shift+Tab` move the cursor past an
-//!   item that is off, and wrap. `Enter` or a click picks the item under it.
-//! - `Esc`, a pick, or a second open closes it and gives the focus back to the part that had
-//!   it before. A click outside the menu and the button closes it too. See [`Dropdown`] for
-//!   the focus.
+//! - It opens under the ☰ button of the sidebar head, or at the top-left corner of the window while the sidebar is
+//!   hidden.
+//! - It opens with the cursor on the first item. `Tab` and `Shift+Tab` move the cursor past an item that is off, and
+//!   wrap. `Enter` or a click picks the item under it.
+//! - `Esc`, a pick, or a second open closes it and gives the focus back to the part that had it before. A click outside
+//!   the menu and the button closes it too. See [`Dropdown`] for the focus.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -60,8 +59,8 @@ pub(crate) struct AppMenu {
 }
 
 impl AppMenu {
-    /// `text` gets the focus when the menu closes with it and no part had it before. The
-    /// sidebar keeps the bounds of the button in `button`.
+    /// `text` gets the focus when the menu closes with it and no part had it before. The sidebar keeps the bounds of
+    /// the button in `button`.
     pub(crate) fn new(
         text: FocusHandle,
         button: Rc<Cell<Bounds<Pixels>>>,
@@ -76,8 +75,7 @@ impl AppMenu {
         }
     }
 
-    /// Opens the menu at `spot`, or closes it when it is open. Pin note is off unless
-    /// `has_open_note`.
+    /// Opens the menu at `spot`, or closes it when it is open. Pin note is off unless `has_open_note`.
     pub(crate) fn toggle(&mut self, spot: Spot, has_open_note: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.open.is_some() {
             self.leave(window, cx);

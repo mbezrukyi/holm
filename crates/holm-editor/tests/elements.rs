@@ -68,9 +68,8 @@ const FLEX_TABLE: &str = "a\n\n\
 | `align-items` | cross | `stretch` (default), `start`, `center`, `baseline` | Aligns items inside their line |
 | `gap` | both | `1rem`, `1rem 2rem` | Space between items. Replaces margin hacks |";
 
-/// Where each char offset shows in a window of `width` by `height`, by a sweep of points 2 px
-/// apart over the rows. A click past the end of a row gives the start of the next row, so each
-/// offset keeps the first point on its lowest row.
+/// Where each char offset shows in a window of `width` by `height`, by a sweep of points 2 px apart over the rows. A
+/// click past the end of a row gives the start of the next row, so each offset keeps the first point on its lowest row.
 fn char_places(
     editor: &Entity<Editor>,
     cx: &mut VisualTestContext,
@@ -99,8 +98,8 @@ fn char_places(
     places
 }
 
-/// Whether `word` in `FLEX_TABLE` shows on one row, by the places of its first and last char.
-/// `None` when it is not in the table or does not show.
+/// Whether `word` in `FLEX_TABLE` shows on one row, by the places of its first and last char. `None` when it is not in
+/// the table or does not show.
 fn on_one_row(places: &HashMap<usize, Point<Pixels>>, word: &str) -> Option<bool> {
     let start = FLEX_TABLE.find(word)?;
     let utf16 = |end: usize| FLEX_TABLE[..end].encode_utf16().count();

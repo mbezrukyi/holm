@@ -1,6 +1,6 @@
-//! The width of the text column as the settings keep it: "Full" or "Limited", and the width in
-//! chars apart from the mode. So "Full" keeps the width for the next "Limited". The range and
-//! the default live here, and nothing else knows them.
+//! The width of the text column as the settings keep it: "Full" or "Limited", and the width in chars apart from the
+//! mode. So "Full" keeps the width for the next "Limited". The range and the default live here, and nothing else knows
+//! them.
 
 use holm_editor::TextWidth;
 

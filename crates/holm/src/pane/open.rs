@@ -1,6 +1,6 @@
-//! The opens of the pane. Each open of a note starts a new open, and each drop or stop of
-//! an open cancels the steps of the opens before. A step made from an [`Open`] runs only
-//! while no newer open started, so a late read never shows over a newer note.
+//! The opens of the pane. Each open of a note starts a new open, and each drop or stop of an open cancels the steps of
+//! the opens before. A step made from an [`Open`] runs only while no newer open started, so a late read never shows
+//! over a newer note.
 
 use gpui_kit::{Context, Window};
 

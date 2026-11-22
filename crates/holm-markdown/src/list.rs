@@ -1,8 +1,7 @@
 //! The list keys: Tab, Shift+Tab and Enter in a list.
 //!
-//! A key reads the list tree around the selection from the parse, makes its move on the tree,
-//! and writes the lists out again. Each line keeps its text and gets the indent and the number
-//! of its new place.
+//! A key reads the list tree around the selection from the parse, makes its move on the tree, and writes the lists out
+//! again. Each line keeps its text and gets the indent and the number of its new place.
 
 use std::ops::Range;
 
@@ -14,8 +13,8 @@ use crate::{Block, BlockKind, Body};
 pub enum Move {
     /// Tab: each item that the selection touches becomes the last child of the item above it.
     In,
-    /// Shift+Tab: each item that the selection touches becomes the next sibling of its parent.
-    /// The items below it in its list become its children.
+    /// Shift+Tab: each item that the selection touches becomes the next sibling of its parent. The items below it in
+    /// its list become its children.
     Out,
     /// Enter: starts a new item at the cursor, or ends the list on an empty item.
     Next,
@@ -23,10 +22,9 @@ pub enum Move {
 
 /// `body` is the parse of `text`.
 ///
-/// An item moves whole, with its children and its later paragraphs. A moved item takes the
-/// marker of the list it joins. Each ordered list that the key changes counts up from its first
-/// number, and a new list starts at 1. Other lists keep their numbers. The edit is empty when
-/// the key does nothing in a list, like Tab on the first item of a list.
+/// An item moves whole, with its children and its later paragraphs. A moved item takes the marker of the list it joins.
+/// Each ordered list that the key changes counts up from its first number, and a new list starts at 1. Other lists keep
+/// their numbers. The edit is empty when the key does nothing in a list, like Tab on the first item of a list.
 ///
 /// Gives `None` outside a list item, and for Enter before the text of the item.
 ///
@@ -197,8 +195,8 @@ fn next(text: &str, body: &Body, selection: Range<usize>) -> Option<Plan> {
     let parts = &current.parts;
     let lazy_or_blank = |part: &Part| matches!(part, Part::Line(line) if line.extra.is_none());
     if rest && parts.first().is_some_and(lazy_or_blank) && !parts.iter().all(Part::is_blank) {
-        // The new item would have no text. A blank line would end it before its parts, and a
-        // lazy line would have no paragraph to go on.
+        // The new item would have no text. A blank line would end it before its parts, and a lazy line would have no
+        // paragraph to go on.
         return None;
     }
     current.kept = Src::Old(kept.start..selection.start);
@@ -231,8 +229,7 @@ fn next(text: &str, body: &Body, selection: Range<usize>) -> Option<Plan> {
     Some(source.finish(writer, tree, cursor..cursor))
 }
 
-/// Where the last item of the list `block` ends. The range of a list can end in the indent of
-/// the next line.
+/// Where the last item of the list `block` ends. The range of a list can end in the indent of the next line.
 fn list_end(block: &Block) -> usize {
     block.children.last().map_or(block.range.end, |item| item.range.end)
 }
@@ -339,8 +336,7 @@ enum Src {
 struct Line {
     /// The quote markers.
     prefix: Range<usize>,
-    /// The indent past the content column of the item. `None` for a blank line or a lazy line:
-    /// it is written as it is.
+    /// The indent past the content column of the item. `None` for a blank line or a lazy line: it is written as it is.
     extra: Option<usize>,
     /// The text after the indent.
     kept: Range<usize>,
@@ -349,8 +345,8 @@ struct Line {
     lead: usize,
     /// Whether the text could start a block, like a list item, if it were not lazy.
     risky: bool,
-    /// Whether the line goes on with the text of the line above, and would start a block, like a
-    /// list item or indented code, after a line with no text.
+    /// Whether the line goes on with the text of the line above, and would start a block, like a list item or indented
+    /// code, after a line with no text.
     continues: bool,
 }
 
@@ -405,8 +401,8 @@ struct Source<'a> {
 }
 
 impl<'a> Source<'a> {
-    /// The source of the list tree around the last block of `path`, an item, with the item. The
-    /// tree holds the outermost list of the item, and the lists right before and after it.
+    /// The source of the list tree around the last block of `path`, an item, with the item. The tree holds the
+    /// outermost list of the item, and the lists right before and after it.
     fn around<'b>(text: &'a str, top: &'b [Block], path: &[&'b Block]) -> Option<(Self, Vec<&'b Block>, &'b Block)> {
         let item = *path.last()?;
         let mut root = path.len() - 1;
@@ -648,8 +644,7 @@ impl<'a> Source<'a> {
         }
     }
 
-    /// The edit that puts the written tree in place of the region. Only the changed middle goes
-    /// in the edit.
+    /// The edit that puts the written tree in place of the region. Only the changed middle goes in the edit.
     fn finish(self, writer: Writer<'_>, tree: Vec<Part>, selection: Range<usize>) -> Plan {
         let old = &self.text[self.region.clone()];
         let new = writer.out;
@@ -897,8 +892,7 @@ fn move_out(tree: &mut Vec<Part>, id: usize) -> Option<()> {
     Some(())
 }
 
-/// Joins each two lists with the same marker that only blank lines part. The parse reads them
-/// as one list.
+/// Joins each two lists with the same marker that only blank lines part. The parse reads them as one list.
 fn merge_lists(parts: &mut Vec<Part>) {
     for part in parts.iter_mut() {
         if let Part::List(list) = part {
@@ -948,8 +942,8 @@ struct Writer<'a> {
     out: String,
     started: bool,
     keeps: Vec<Placed>,
-    /// Whether a line would join another item than the tree says, like a lazy line that could
-    /// start a block and lost its laziness.
+    /// Whether a line would join another item than the tree says, like a lazy line that could start a block and lost
+    /// its laziness.
     broken: bool,
     /// The content column of the last top item, when the tree ends with an item.
     last: Option<usize>,
@@ -990,11 +984,11 @@ impl<'a> Writer<'a> {
         writer
     }
 
-    /// Writes `parts` at the content column `col`. Gives the content column of the last item,
-    /// past `col`, when the parts end with an item.
+    /// Writes `parts` at the content column `col`. Gives the content column of the last item, past `col`, when the
+    /// parts end with an item.
     fn parts(&mut self, parts: &[Part], col: usize) -> Option<usize> {
-        // The content column of the item above, past `col`. An item at it or past it would be
-        // a child of that item. An empty item ends at a blank line, and then takes nothing.
+        // The content column of the item above, past `col`. An item at it or past it would be a child of that item. An
+        // empty item ends at a blank line, and then takes nothing.
         let mut above: Option<(usize, bool)> = None;
         for part in parts {
             match part {
@@ -1043,8 +1037,7 @@ impl<'a> Writer<'a> {
         self.out.extend(std::iter::repeat_n(' ', count));
     }
 
-    /// Writes `item` with its marker `rel` columns past `col`, and gives its content column past
-    /// `col`.
+    /// Writes `item` with its marker `rel` columns past `col`, and gives its content column past `col`.
     fn item(&mut self, item: &Item, rel: usize, mark: Mark, number: u64, col: usize) -> usize {
         if item.empty && self.above == Above::Lazy {
             self.broken = true;
@@ -1198,10 +1191,9 @@ mod tests {
         source.tree(&blocks).ok_or_else(|| "no tree".to_owned())
     }
 
-    /// Whether a list after the first starts with an empty item. Markdown cannot write it, since
-    /// such an item cannot start a list after a paragraph. The parser lets an empty bullet
-    /// through one level down, but no deeper. The key writes it anyway, and it becomes a list once
-    /// the item has text.
+    /// Whether a list after the first starts with an empty item. Markdown cannot write it, since such an item cannot
+    /// start a list after a paragraph. The parser lets an empty bullet through one level down, but no deeper. The key
+    /// writes it anyway, and it becomes a list once the item has text.
     fn has_empty_head(text: &str, parts: &[Part], top: bool) -> bool {
         parts.iter().enumerate().any(|(k, part)| {
             let Part::List(list) = part else {
@@ -1231,8 +1223,8 @@ mod tests {
     const MARKS: [&str; 4] = ["-", "*", ".", ")"];
     const TEXTS: [&str; 5] = ["a", "bb", "", "[ ] t", "c d"];
 
-    /// A text of list lines: level, marker, text, a second line (none, indented, lazy), a blank
-    /// line after, and the spaces before the marker.
+    /// A text of list lines: level, marker, text, a second line (none, indented, lazy), a blank line after, and the
+    /// spaces before the marker.
     fn list_text(lines: &[(usize, usize, usize, usize, bool, usize)], start: u64, quote: bool) -> String {
         let mut out = Vec::new();
         let mut cols: Vec<usize> = Vec::new();
@@ -1273,8 +1265,7 @@ mod tests {
     }
 
     proptest! {
-        /// The parse after the edit gives the tree that the key planned, and the text of each
-        /// line stays.
+        /// The parse after the edit gives the tree that the key planned, and the text of each line stays.
         #[test]
         fn the_parse_after_a_key_has_the_planned_tree(
             lines in proptest::collection::vec(

@@ -1,6 +1,5 @@
-//! The folder picker for a move. It shows the folders whose path holds the typed text, with no
-//! regard to capital letters.
-//! `Tab` and `Shift+Tab` pick a folder, `Enter` moves there, `Esc` cancels.
+//! The folder picker for a move. It shows the folders whose path holds the typed text, with no regard to capital
+//! letters. `Tab` and `Shift+Tab` pick a folder, `Enter` moves there, `Esc` cancels.
 
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _, IntoElement, ParentElement, Render, Role,
@@ -32,8 +31,8 @@ pub(crate) struct FolderPicker {
 }
 
 impl FolderPicker {
-    /// It leaves out the folder of the target. For a folder move, it also leaves out that folder
-    /// and its children. The field gets the focus.
+    /// It leaves out the folder of the target. For a folder move, it also leaves out that folder and its children. The
+    /// field gets the focus.
     pub(crate) fn new(target: Target, folders: &[FolderPath], window: &mut Window, cx: &mut Context<Self>) -> Self {
         let (home, inside) = match &target {
             Target::Note(path) => (Some(path.folder().clone()), None),

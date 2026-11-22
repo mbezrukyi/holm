@@ -1,5 +1,5 @@
-//! A note stores each color as hex. Holm finds its own palette hexes in it and shows their dark
-//! tone in dark mode. Any other color shows as it is.
+//! A note stores each color as hex. Holm finds its own palette hexes in it and shows their dark tone in dark mode. Any
+//! other color shows as it is.
 
 use holm_markdown::Color;
 

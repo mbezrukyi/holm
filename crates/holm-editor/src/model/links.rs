@@ -9,8 +9,8 @@ use super::{Group, Model, map_offset};
 pub(crate) enum LinkForm {
     /// `[..](..)` at the cursor.
     Text,
-    /// `![..](..)` at the cursor, which shows a file chip. It gets a space before it and after
-    /// it, where the text around it needs one.
+    /// `![..](..)` at the cursor, which shows a file chip. It gets a space before it and after it, where the text
+    /// around it needs one.
     Inline,
     /// `![..](..)` on a line of its own, which shows an image. The cursor goes to the next line.
     Block,
@@ -26,8 +26,8 @@ impl Model {
         std::mem::take(&mut self.broken)
     }
 
-    /// Whether a link to `target` gets the broken style. A heading in this note is broken when
-    /// no heading has its text. Other targets are broken when the app says so.
+    /// Whether a link to `target` gets the broken style. A heading in this note is broken when no heading has its text.
+    /// Other targets are broken when the app says so.
     pub(crate) fn is_broken(&self, target: &Target) -> bool {
         match target {
             Target::Heading(name) => self.heading_start(name).is_none(),
@@ -107,8 +107,8 @@ impl Model {
         )
     }
 
-    /// Writes `target` in place of the target of the link at the cursor. The link text stays.
-    /// It does nothing for a reference link, whose target is in its definition.
+    /// Writes `target` in place of the target of the link at the cursor. The link text stays. It does nothing for a
+    /// reference link, whose target is in its definition.
     pub(crate) fn set_link_target(&mut self, target: &Target) -> bool {
         let Some(range) = self.link_at(self.cursor()).and_then(|link| link.target_range.clone()) else {
             return false;

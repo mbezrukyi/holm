@@ -1,8 +1,7 @@
 //! Text with path chips. Each path shows in a small box inside the line.
 //!
-//! The text wraps only at spaces, and a path chip moves with the mark after it, like ".".
-//! In one line, a text that is too wide ends in "…". A cut inside a path keeps the chip, and
-//! the "…" goes inside its box.
+//! The text wraps only at spaces, and a path chip moves with the mark after it, like ".". In one line, a text that is
+//! too wide ends in "…". A cut inside a path keeps the chip, and the "…" goes inside its box.
 
 use std::fmt;
 
@@ -160,8 +159,8 @@ fn push(row: &mut WrapRow, piece: Piece, measure: Measure<'_>) {
     row.pieces.push(piece);
 }
 
-/// The pieces between two breaks. A break is after a space. A chip only breaks inside when it
-/// is wider than `width`; then it loses its end to "…".
+/// The pieces between two breaks. A break is after a space. A chip only breaks inside when it is wider than `width`;
+/// then it loses its end to "…".
 fn atoms(segs: Vec<Piece>, width: Pixels, measure: Measure<'_>) -> Vec<Vec<Piece>> {
     let mut atoms = Vec::new();
     let mut atom = Vec::new();

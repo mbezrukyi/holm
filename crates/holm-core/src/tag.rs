@@ -6,9 +6,8 @@ use crate::error::{Error, Result};
 
 /// The full name of a tag, like `work/holm`, as Holm writes it in the frontmatter.
 ///
-/// Each part between two `/` is not empty and has no spaces. The tag `work` holds itself and
-/// its child tags, like `work/holm`, but not `workshop`. Names match exactly, also in capital
-/// letters. Its order is the order of the text.
+/// Each part between two `/` is not empty and has no spaces. The tag `work` holds itself and its child tags, like
+/// `work/holm`, but not `workshop`. Names match exactly, also in capital letters. Its order is the order of the text.
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TagName(String);
 
@@ -18,8 +17,7 @@ impl TagName {
         (normalize_tag(name).as_deref() == Some(name)).then(|| Self(name.into()))
     }
 
-    /// The tag that a person typed, cleaned: no spaces around a part, `-` for a space inside
-    /// one, and no empty parts.
+    /// The tag that a person typed, cleaned: no spaces around a part, `-` for a space inside one, and no empty parts.
     ///
     /// # Errors
     ///
@@ -53,8 +51,8 @@ impl TagName {
         child_part(&tag.0, &self.0).is_some()
     }
 
-    /// The name after the tag `from` became `to`, or `None` when `from` does not hold this
-    /// tag. Child tags follow: `work/holm` becomes `home/holm`.
+    /// The name after the tag `from` became `to`, or `None` when `from` does not hold this tag. Child tags follow:
+    /// `work/holm` becomes `home/holm`.
     #[must_use]
     pub fn moved(&self, from: &Self, to: &Self) -> Option<Self> {
         let rest = child_part(&self.0, &from.0)?;
@@ -79,8 +77,8 @@ pub(crate) fn parent(name: &str) -> Option<&str> {
     name.rsplit_once('/').map(|(parent, _)| parent)
 }
 
-/// What follows `parent` in `tag`: `""` for `parent` itself, `"/holm"` for `parent/holm`.
-/// `None` when `tag` is not `parent` or one of its child tags.
+/// What follows `parent` in `tag`: `""` for `parent` itself, `"/holm"` for `parent/holm`. `None` when `tag` is not
+/// `parent` or one of its child tags.
 fn child_part<'t>(tag: &'t str, parent: &str) -> Option<&'t str> {
     tag.strip_prefix(parent)
         .filter(|rest| rest.is_empty() || rest.starts_with('/'))

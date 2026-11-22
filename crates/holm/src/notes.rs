@@ -1,14 +1,13 @@
 //! The notes view: the sidebar, the editor pane, and the file actions between them.
 //!
-//! Each file action goes in the write line of the core door. The write line writes the
-//! unsaved text of the pane first. The sidebar shows each new snapshot by itself.
+//! Each file action goes in the write line of the core door. The write line writes the unsaved text of the pane first.
+//! The sidebar shows each new snapshot by itself.
 //!
-//! Every change that counts notes or asks the user runs here. The sidebar sends an event for
-//! it. A name field of the sidebar writes by itself, and the field of a tag writes through
-//! this view.
+//! Every change that counts notes or asks the user runs here. The sidebar sends an event for it. A name field of the
+//! sidebar writes by itself, and the field of a tag writes through this view.
 //!
-//! Holm makes no note by itself. When the open note is gone, the pane opens its neighbor in
-//! the sidebar list. With no note left, it shows the empty pane.
+//! Holm makes no note by itself. When the open note is gone, the pane opens its neighbor in the sidebar list. With no
+//! note left, it shows the empty pane.
 
 use std::rc::Rc;
 
@@ -59,8 +58,8 @@ pub(crate) struct NotesView {
     settings: Option<Entity<SettingsDialog>>,
     shortcut_list: Option<Entity<ShortcutList>>,
     app_menu: Entity<AppMenu>,
-    /// The part that had the focus before quick open, the link picker, the settings or the
-    /// shortcut list. It gets the focus back on `Esc`.
+    /// The part that had the focus before quick open, the link picker, the settings or the shortcut list. It gets the
+    /// focus back on `Esc`.
     before_popup: Option<FocusHandle>,
     message_line: Entity<MessageLine>,
     subscriptions: Vec<Subscription>,
@@ -107,9 +106,8 @@ impl NotesView {
             }),
             cx.subscribe_in(&sidebar, window, Self::sidebar_event),
             cx.subscribe_in(&pane, window, Self::pane_event),
-            // The focused part can leave the screen, like the tag field that closes when a
-            // popup takes the focus. With no focus, no key reaches this view, so the focus
-            // goes home.
+            // The focused part can leave the screen, like the tag field that closes when a popup takes the focus. With
+            // no focus, no key reaches this view, so the focus goes home.
             cx.on_focus_lost(window, |this, window, cx| this.focus_home(window, cx)),
         ];
         let mut this = Self {
@@ -294,8 +292,7 @@ impl NotesView {
         }
     }
 
-    /// `then` gets whether the user confirmed. After "Do not show again", a delete confirms with
-    /// no dialog.
+    /// `then` gets whether the user confirmed. After "Do not show again", a delete confirms with no dialog.
     fn ask(
         &mut self,
         ask: Ask,
@@ -401,8 +398,8 @@ impl NotesView {
         cx.notify();
     }
 
-    /// F10 or the button of the sidebar head. With the sidebar hidden, it opens at the window
-    /// corner, and the sidebar stays hidden.
+    /// F10 or the button of the sidebar head. With the sidebar hidden, it opens at the window corner, and the sidebar
+    /// stays hidden.
     fn toggle_app_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let spot = if self.hidden { Spot::Corner } else { Spot::Button };
         let has_open_note = self.pane.read(cx).path().is_some();
@@ -551,17 +548,15 @@ impl NotesView {
         self.pane.update(cx, |pane, cx| pane.may_close(window, cx))
     }
 
-    /// Before the notes folder closes for another one: writes the unsaved text and waits for
-    /// the jobs. `done` gets whether the text is on disk. A failed write keeps the text in the
-    /// editor and shows "Not saved".
+    /// Before the notes folder closes for another one: writes the unsaved text and waits for the jobs. `done` gets
+    /// whether the text is on disk. A failed write keeps the text in the editor and shows "Not saved".
     pub(crate) fn leave(&self, done: Then<bool>, cx: &mut Context<Self>) {
         self.core_door.update(cx, |core_door, cx| {
             core_door.wait_saved(move |saved: Result<(), NotSaved>, cx| done(saved.is_ok(), cx), cx);
         });
     }
 
-    /// Puts the job of `start` in the write line. `done` gets its value in the update where
-    /// the job ends.
+    /// Puts the job of `start` in the write line. `done` gets its value in the update where the job ends.
     fn call<T: 'static>(
         &mut self,
         window: &mut Window,

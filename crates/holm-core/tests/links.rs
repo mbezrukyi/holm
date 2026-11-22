@@ -11,8 +11,7 @@ fn note(id: &str, body: &str) -> String {
     format!("---\nid: {id}\n---\n{body}")
 }
 
-/// The links of `path` in the snapshot. It checks that the index rows and a new index give
-/// the same links.
+/// The links of `path` in the snapshot. It checks that the index rows and a new index give the same links.
 fn links_everywhere(folder: &mut Folder, path: &str) -> Vec<Link> {
     let links = folder.core.snapshot().links(&note_path(path)).to_vec();
     folder.reopen();

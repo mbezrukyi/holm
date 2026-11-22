@@ -1,7 +1,7 @@
 //! The backlinks of a note: the other notes that link to it.
 //!
-//! A quiet count button at the right end of the tag row: "← 1 note" or "← N notes". A click
-//! on it, or Ctrl+Shift+B, opens a list under it, the last changed note first.
+//! A quiet count button at the right end of the tag row: "← 1 note" or "← N notes". A click on it, or Ctrl+Shift+B,
+//! opens a list under it, the last changed note first.
 //!
 //! - `Tab` and `Shift+Tab` move the cursor and wrap. `Enter` or a click opens the note under it.
 //! - `Esc`, or a click outside the list, closes it. See [`Dropdown`] for the focus.

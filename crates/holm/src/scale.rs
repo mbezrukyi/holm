@@ -1,5 +1,5 @@
-//! The scale of the app: how much bigger or smaller Holm draws the whole window than the
-//! desktop scale. The steps live here, and nothing else knows them.
+//! The scale of the app: how much bigger or smaller Holm draws the whole window than the desktop scale. The steps live
+//! here, and nothing else knows them.
 
 /// One of the steps of the scale.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

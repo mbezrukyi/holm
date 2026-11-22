@@ -1,5 +1,5 @@
-//! The steps of one write. Each step changes the disk, puts what it finds in the next facts,
-//! and records what it touched. So the change list of a write misses nothing.
+//! The steps of one write. Each step changes the disk, puts what it finds in the next facts, and records what it
+//! touched. So the change list of a write misses nothing.
 
 use super::{Disk, outside, scan};
 use crate::diff::Touched;
@@ -22,8 +22,8 @@ pub(crate) struct Write<'a> {
     touched: Touched,
 }
 
-/// Runs `op` on a copy of `facts`, which then replaces `facts`. With a change, the facts get
-/// the next revision, and the change list from `source` carries its snapshot.
+/// Runs `op` on a copy of `facts`, which then replaces `facts`. With a change, the facts get the next revision, and the
+/// change list from `source` carries its snapshot.
 pub(crate) fn run<T>(
     disk: &mut Disk,
     facts: &mut Facts,
@@ -42,8 +42,8 @@ pub(crate) fn run<T>(
 }
 
 impl Write<'_> {
-    /// With `seen`, it refuses an outside change of the note that revision `seen` does not hold: one
-    /// that the facts know, or one on disk that they do not know yet.
+    /// With `seen`, it refuses an outside change of the note that revision `seen` does not hold: one that the facts
+    /// know, or one on disk that they do not know yet.
     pub(crate) fn save(&mut self, path: &NotePath, body: &str, seen: Option<u64>) -> Result<Note> {
         let base = match seen {
             Some(seen) if self.next.changed_after(path, seen) => {
@@ -269,8 +269,8 @@ impl Write<'_> {
         self.take(settled)
     }
 
-    /// Runs `delete` on `node`, then deletes its attachment files.
-    /// It updates the index and the next facts also when `delete` fails, since a part may be gone.
+    /// Runs `delete` on `node`, then deletes its attachment files. It updates the index and the next facts also when
+    /// `delete` fails, since a part may be gone.
     fn delete(&mut self, node: &Node, delete: impl FnOnce(&Store) -> Result<()>) -> Result<()> {
         let (_, files) = self.disk.removal(self.next.snapshot(), node);
         let deleted = delete(&self.disk.store);

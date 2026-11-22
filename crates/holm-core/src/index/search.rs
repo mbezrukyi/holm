@@ -1,9 +1,8 @@
-//! The text of a note and its tags have their own word tables. The tag words are kept once
-//! per tag name, not per note. So a change of tags never parses the text of a note again,
-//! and a tag rename on many notes adds one row.
+//! The text of a note and its tags have their own word tables. The tag words are kept once per tag name, not per note.
+//! So a change of tags never parses the text of a note again, and a tag rename on many notes adds one row.
 //!
-//! The text words also keep a list for each prefix of one to three letters. So a short search
-//! word reads one list, and does not merge the lists of all words that start with it.
+//! The text words also keep a list for each prefix of one to three letters. So a short search word reads one list, and
+//! does not merge the lists of all words that start with it.
 
 use std::collections::{HashMap, HashSet};
 

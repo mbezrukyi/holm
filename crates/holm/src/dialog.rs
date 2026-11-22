@@ -1,10 +1,8 @@
-//! The dialog before a change that has no undo. It says how many notes the change touches.
-//! It gives its decision to the step of its owner, once. A dialog that closes with no
-//! decision gives "cancel".
+//! The dialog before a change that has no undo. It says how many notes the change touches. It gives its decision to the
+//! step of its owner, once. A dialog that closes with no decision gives "cancel".
 //!
-//! `Enter` confirms and `Esc` cancels. Before a delete of notes, `Space` turns the
-//! "Do not show again" switch on and off. The tag dialogs always show, because their count of
-//! notes is the point of the dialog.
+//! `Enter` confirms and `Esc` cancels. Before a delete of notes, `Space` turns the "Do not show again" switch on and
+//! off. The tag dialogs always show, because their count of notes is the point of the dialog.
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::switch::Switch;
