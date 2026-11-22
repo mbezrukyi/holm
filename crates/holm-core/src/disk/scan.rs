@@ -50,7 +50,7 @@ fn read(store: &Store, facts: &Facts, note: Note, stamp: Stamp, hash: ContentHas
         .info
         .id
         .as_ref()
-        .and_then(|id| facts.snapshot().note_with_id(id.as_str()))
+        .and_then(|id| facts.snapshot().note_with_id(id))
         .filter(|owner| owner.path != note.info.path && store.exists(&owner.path))
         .map_or(Owner::Absent, |_| Owner::OnDisk);
     let source = LinkSource::of(&note);

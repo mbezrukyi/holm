@@ -10,7 +10,7 @@ use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _, IntoElement, ParentElement, Render, Role,
     StatefulInteractiveElement as _, Subscription, TestSupportExt as _, Window, px,
 };
-use holm_core::model::{NoteInfo, NoteSet};
+use holm_core::model::{NoteId, NoteInfo, NoteSet};
 use holm_core::{NotePath, Snapshot};
 use holm_markdown::Target;
 
@@ -33,7 +33,7 @@ impl LinkStart {
     pub(crate) fn new(snapshot: &Snapshot, open_note: NotePath, target: Option<&Target>) -> Self {
         let query = match target {
             Some(Target::Note { id, heading }) => snapshot
-                .note_with_id(id)
+                .note_with_id(&NoteId::from_field(id.clone()))
                 .map(|note| Query::text(Some(&note.title), heading.as_deref()))
                 .unwrap_or_default(),
             Some(Target::Heading(heading)) => Query::text(None, Some(heading)),

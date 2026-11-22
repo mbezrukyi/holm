@@ -264,7 +264,7 @@ impl<'a> Owners<'a> {
             return Some((path.clone(), true));
         }
         self.snapshot
-            .note_with_id(id.as_str())
+            .note_with_id(id)
             .filter(|owner| !self.freed.contains(&owner.path))
             .map(|owner| (owner.path.clone(), false))
     }

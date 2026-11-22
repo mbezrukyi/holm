@@ -2,7 +2,7 @@
 
 use std::fs;
 
-use holm_core::model::{NoteInfo, NoteSet, Order, Tag};
+use holm_core::model::{NoteId, NoteInfo, NoteSet, Order, Tag};
 use holm_core::{Core, NotePath, Result, Snapshot, TagName};
 use holm_core_test::{Folder, folder_path, note_path, tag_name};
 
@@ -102,7 +102,10 @@ fn note_writes_show_in_the_snapshot_after_them() {
     let plans = core.read(&note_path("Plans.md")).unwrap();
     fs::remove_file(folder.path("Plans.md")).unwrap();
     let (_, snapshot) = one_step(core, |core| core.restore(&plans));
-    assert_eq!(snapshot.note_with_id("P").unwrap().path, note_path("Plans.md"));
+    assert_eq!(
+        snapshot.note_with_id(&NoteId::from_field("P".to_owned())).unwrap().path,
+        note_path("Plans.md")
+    );
 }
 
 #[test]
@@ -111,7 +114,7 @@ fn link_id_shows_the_new_id_in_the_snapshot() {
 
     let (id, snapshot) = one_step(&folder.core, |core| core.link_id(&note_path("a.md")));
 
-    assert_eq!(snapshot.note_with_id(id.as_str()).unwrap().path, note_path("a.md"));
+    assert_eq!(snapshot.note_with_id(&id).unwrap().path, note_path("a.md"));
 }
 
 #[test]

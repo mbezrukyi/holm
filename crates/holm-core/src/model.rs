@@ -15,7 +15,7 @@ impl NoteId {
         Self(ulid::Ulid::generate().to_string())
     }
 
-    pub(crate) fn from_field(id: String) -> Self {
+    pub fn from_field(id: String) -> Self {
         Self(id)
     }
 

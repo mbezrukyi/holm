@@ -74,10 +74,7 @@ pub(crate) fn broken(
         let targets = match known.entry(id) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
-                let note = snapshot
-                    .note_with_id(id.as_str())
-                    .map(|info| read(&info.path))
-                    .transpose()?;
+                let note = snapshot.note_with_id(id).map(|info| read(&info.path)).transpose()?;
                 entry.insert(note.as_ref().map(headings))
             }
         };

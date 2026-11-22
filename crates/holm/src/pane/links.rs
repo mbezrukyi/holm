@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use gpui_kit::{App, Context, Entity, EventEmitter, PathPromptOptions, Subscription, Task};
 use holm_core::NotePath;
-use holm_core::model::LinkTarget;
+use holm_core::model::{LinkTarget, NoteId};
 use holm_editor::{Editor, OpenFile, OpenLink, PasteFiles, PastedFile};
 use holm_markdown::{LinkKind, Target};
 
@@ -236,7 +236,7 @@ impl Links {
             }
             Target::Heading(_) | Target::File(_) => return,
         };
-        match self.core_door.read(cx).snapshot().note_with_id(&id) {
+        match self.core_door.read(cx).snapshot().note_with_id(&NoteId::from_field(id)) {
             Some(note) => self.open_at(note.path.clone(), heading, cx),
             None => cx.emit(LinksEvent::Error(text::NOTE_GONE)),
         }

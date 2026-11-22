@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use holm_core::Error;
-use holm_core::model::{Link, LinkTarget};
+use holm_core::model::{Link, LinkTarget, NoteId};
 use holm_core_test::{Folder, folder_path, note_path, tag_name};
 
 fn note(id: &str, body: &str) -> String {
@@ -80,11 +80,30 @@ fn a_folder_move_points_relative_file_links_to_the_new_place() {
 fn note_with_id_finds_the_note_or_none() {
     let folder = Folder::new(&[("work/a.md", &note("01A", "# A\n")), ("b.md", "# B\n")]);
 
-    let found = folder.core.snapshot().note_with_id("01A").cloned().unwrap();
+    let found = folder
+        .core
+        .snapshot()
+        .note_with_id(&NoteId::from_field("01A".to_owned()))
+        .cloned()
+        .unwrap();
 
     assert_eq!(found.path, note_path("work/a.md"));
-    assert_eq!(folder.core.snapshot().note_with_id("01X").cloned(), None);
-    assert_eq!(folder.core.snapshot().note_with_id("").cloned(), None);
+    assert_eq!(
+        folder
+            .core
+            .snapshot()
+            .note_with_id(&NoteId::from_field("01X".to_owned()))
+            .cloned(),
+        None
+    );
+    assert_eq!(
+        folder
+            .core
+            .snapshot()
+            .note_with_id(&NoteId::from_field(String::new()))
+            .cloned(),
+        None
+    );
 }
 
 #[test]

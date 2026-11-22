@@ -4,7 +4,7 @@ use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::model::{Link, LinkTarget, NoteInfo, NoteSet, Order, Tag};
+use crate::model::{Link, LinkTarget, NoteId, NoteInfo, NoteSet, Order, Tag};
 use crate::nodes::Node;
 use crate::paths::{FolderPath, NotePath};
 use crate::tag::{self, TagName};
@@ -16,7 +16,7 @@ use crate::tag::{self, TagName};
 pub struct Snapshot {
     revision: u64,
     notes: Map<NotePath, Arc<NoteData>>,
-    ids: Map<String, NotePath>,
+    ids: Map<NoteId, NotePath>,
     folders: imbl::OrdSet<FolderPath>,
 }
 
@@ -188,7 +188,7 @@ impl Snapshot {
         self.notes.get(path).map(|entry| &entry.info)
     }
 
-    pub fn note_with_id(&self, id: &str) -> Option<&NoteInfo> {
+    pub fn note_with_id(&self, id: &NoteId) -> Option<&NoteInfo> {
         let path = self.ids.get(id)?;
         self.notes.get(path).map(|entry| &entry.info)
     }
@@ -239,7 +239,7 @@ impl Snapshot {
             }
             self.remove(&entry.info.path);
             if let Some(id) = &entry.info.id {
-                self.ids.insert(id.as_str().to_owned(), entry.info.path.clone());
+                self.ids.insert(id.clone(), entry.info.path.clone());
             }
             self.notes.insert(entry.info.path.clone(), Arc::new(entry));
         }
@@ -272,9 +272,9 @@ impl Snapshot {
             return;
         };
         if let Some(id) = &old.info.id
-            && self.ids.get(id.as_str()).is_some_and(|owner| owner == path)
+            && self.ids.get(id).is_some_and(|owner| owner == path)
         {
-            self.ids.remove(id.as_str());
+            self.ids.remove(id);
         }
     }
 }
