@@ -1,6 +1,13 @@
 //! The scale of the app: how much bigger or smaller Holm draws the whole window than the desktop scale. The steps live
 //! here, and nothing else knows them.
 
+/// Which way a step of the scale goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Size {
+    Bigger,
+    Smaller,
+}
+
 /// One of the steps of the scale.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Scale(u16);
@@ -47,15 +54,18 @@ impl Scale {
         &STEPS
     }
 
-    /// The next step up or down, or `None` at that end.
-    pub(crate) fn step(self, bigger: bool) -> Option<Self> {
+    /// The next step that way, or `None` at that end.
+    pub(crate) fn step(self, size: Size) -> Option<Self> {
         let at = STEPS.iter().position(|(step, _)| *step == self)?;
-        let next = if bigger { at.checked_add(1)? } else { at.checked_sub(1)? };
+        let next = match size {
+            Size::Bigger => at.checked_add(1)?,
+            Size::Smaller => at.checked_sub(1)?,
+        };
         STEPS.get(next).map(|(step, _)| *step)
     }
 
-    pub(crate) fn at_end(self, bigger: bool) -> bool {
-        self.step(bigger).is_none()
+    pub(crate) fn at_end(self, size: Size) -> bool {
+        self.step(size).is_none()
     }
 }
 
@@ -76,15 +86,15 @@ mod tests {
     fn the_steps_go_up_and_down_and_stop_at_the_ends() {
         let mut scale = Scale::default();
         let mut up = Vec::new();
-        while let Some(next) = scale.step(true) {
+        while let Some(next) = scale.step(Size::Bigger) {
             scale = next;
             up.push(scale.percent());
         }
         assert_eq!(up, [110, 125, 150, 175, 200]);
-        assert!(scale.at_end(true));
-        assert_eq!(Scale::from_percent(90).step(false), Some(Scale(80)));
-        assert_eq!(Scale::from_percent(80).step(false), None);
-        assert!(Scale::from_percent(80).at_end(false));
+        assert!(scale.at_end(Size::Bigger));
+        assert_eq!(Scale::from_percent(90).step(Size::Smaller), Some(Scale(80)));
+        assert_eq!(Scale::from_percent(80).step(Size::Smaller), None);
+        assert!(Scale::from_percent(80).at_end(Size::Smaller));
         assert!((Scale::from_percent(125).factor() - 1.25).abs() < f32::EPSILON);
     }
 }

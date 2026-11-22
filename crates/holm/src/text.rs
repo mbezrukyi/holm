@@ -5,7 +5,7 @@ use std::path::Path;
 use holm_core::{FolderPath, TagName};
 
 use crate::path_text::PathText;
-use crate::scale::Scale;
+use crate::scale::{Scale, Size};
 
 pub(crate) const NOTES_FOLDER: &str = "Holm can't open the notes folder.";
 pub(crate) const READ: &str = "Holm can't read a file in the notes folder.";
@@ -198,9 +198,9 @@ pub(crate) const SETTINGS: &str = "Settings";
 /// The answer to a zoom key.
 pub(crate) fn scale_answer(scale: Scale) -> String {
     let percent = scale.percent();
-    if scale.at_end(false) {
+    if scale.at_end(Size::Smaller) {
         format!("Scale {percent} %, the smallest")
-    } else if scale.at_end(true) {
+    } else if scale.at_end(Size::Bigger) {
         format!("Scale {percent} %, the largest")
     } else {
         format!("Scale {percent} %")

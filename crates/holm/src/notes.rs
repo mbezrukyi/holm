@@ -30,6 +30,7 @@ use crate::message_line::MessageLine;
 use crate::pane::{Leave, NotePane, PaneEvent, Pick};
 use crate::picker::{FolderPicker, PickerEvent};
 use crate::quick_open::{QuickOpen, QuickOpenEvent};
+use crate::scale::Size;
 use crate::settings::{self, SettingsDialog};
 use crate::shortcut_list::{self, ShortcutList};
 use crate::shortcuts::{Command, Place, Run};
@@ -651,16 +652,16 @@ impl NotesView {
             Command::Settings => self.open_settings(window, cx),
             Command::ShortcutList => self.open_shortcut_list(window, cx),
             Command::AppMenu => self.toggle_app_menu(window, cx),
-            Command::ScaleUp => self.step_scale(true, cx),
-            Command::ScaleDown => self.step_scale(false, cx),
+            Command::ScaleUp => self.step_scale(Size::Bigger, cx),
+            Command::ScaleDown => self.step_scale(Size::Smaller, cx),
             _ => return false,
         }
         true
     }
 
-    fn step_scale(&mut self, bigger: bool, cx: &mut Context<Self>) {
+    fn step_scale(&mut self, size: Size, cx: &mut Context<Self>) {
         let scale = self.config.read(cx).settings().scale;
-        let next = scale.step(bigger).unwrap_or(scale);
+        let next = scale.step(size).unwrap_or(scale);
         if next != scale {
             self.config.update(cx, |config, cx| {
                 config.change(|settings| settings.scale = next, cx);
