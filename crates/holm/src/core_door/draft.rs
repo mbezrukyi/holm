@@ -199,12 +199,12 @@ impl Draft {
 
     /// The read for the text `id` ended. A failed read gives the text back, with its hold. When a newer text of the
     /// note came during the read, the newer text stays and takes the hold.
-    pub(super) fn read_ended(&mut self, id: u64, ok: bool) {
+    pub(super) fn read_ended(&mut self, id: u64, read: &holm_core::Result<Note>) {
         let Some(at) = self.reading.iter().position(|text| text.id == id) else {
             return;
         };
         let text = self.reading.remove(at);
-        if ok {
+        if read.is_ok() {
             return;
         }
         if let Some(newer) = self.text_mut(text.note.path()) {
@@ -358,6 +358,28 @@ mod tests {
         NoteText::Save {
             path: note_path(path),
             body: body.to_owned(),
+        }
+    }
+
+    fn failed_read() -> holm_core::Result<Note> {
+        Err(holm_core::Error::Read {
+            path: "A.md".into(),
+            source: std::io::ErrorKind::NotFound.into(),
+        })
+    }
+
+    fn read_note(path: &str) -> Note {
+        Note {
+            info: NoteInfo {
+                path: note_path(path),
+                id: None,
+                title: String::new(),
+                preview: String::new(),
+                tags: Vec::new(),
+                pinned: false,
+                modified: std::time::SystemTime::UNIX_EPOCH,
+            },
+            body: String::new(),
         }
     }
 
@@ -612,7 +634,7 @@ mod tests {
         assert!(!draft.unsaved());
         assert!(draft.writes().is_empty());
 
-        draft.read_ended(id, false);
+        draft.read_ended(id, &failed_read());
         assert!(draft.unsaved_note(&note_path("A.md")));
         assert!(draft.writes().is_empty(), "the hold came back");
         draft.release(&note_path("A.md"));
@@ -624,7 +646,7 @@ mod tests {
         let mut draft = Draft::default();
         set(&mut draft, "A.md", "one");
         let id = draft.drop_for_read(&note_path("A.md")).unwrap();
-        draft.read_ended(id, true);
+        draft.read_ended(id, &Ok(read_note("A.md")));
         assert!(!draft.unsaved());
         assert_eq!(draft.take(), []);
     }
@@ -637,7 +659,7 @@ mod tests {
         let id = draft.drop_for_read(&note_path("A.md")).unwrap();
         set(&mut draft, "A.md", "one two");
 
-        draft.read_ended(id, false);
+        draft.read_ended(id, &failed_read());
         assert!(draft.writes().is_empty(), "the newer text is held");
         assert_eq!(draft.take(), [save("A.md", "one two")]);
     }
@@ -648,7 +670,7 @@ mod tests {
         set(&mut draft, "A.md", "one");
         let id = draft.drop_for_read(&note_path("A.md")).unwrap();
         draft.drop_text(&note_path("A.md"));
-        draft.read_ended(id, false);
+        draft.read_ended(id, &failed_read());
         assert!(!draft.unsaved());
     }
 
@@ -665,7 +687,7 @@ mod tests {
             },
             &Snapshot::default(),
         );
-        draft.read_ended(id, false);
+        draft.read_ended(id, &failed_read());
         assert_eq!(draft.take(), [save("work/A.md", "one")]);
     }
 

@@ -257,7 +257,7 @@ impl CoreDoor {
             move |core| core.read(&path),
             move |door, note, cx| {
                 if let Some(id) = text {
-                    door.draft.read_ended(id, note.is_ok());
+                    door.draft.read_ended(id, &note);
                 }
                 give(note, done, cx);
             },
