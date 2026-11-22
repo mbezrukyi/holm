@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use super::html_tag::{self, HtmlTag};
-use super::scan::{self, InlineLink};
+use super::scan::{self, Autolink, InlineLink};
 use super::{Destination, Kind, Node};
 use crate::body::link;
 
@@ -230,9 +230,9 @@ impl Parser<'_> {
                     }
                 }
                 b'<' => {
-                    if let Some((end, email)) = scan::autolink(self.text, p) {
+                    if let Some((end, autolink)) = scan::autolink(self.text, p) {
                         self.flush(text_start..p);
-                        self.push_autolink(p..end, email);
+                        self.push_autolink(p..end, autolink);
                         p = end;
                         text_start = p;
                     } else if let Some(end) = scan::raw_html(self.text, p) {
@@ -321,13 +321,12 @@ impl Parser<'_> {
         self.brackets.push(at);
     }
 
-    fn push_autolink(&mut self, source: Range<usize>, email: bool) {
+    fn push_autolink(&mut self, source: Range<usize>, autolink: Autolink) {
         let content = source.start + 1..source.end - 1;
         let dest = &self.text[content.clone()];
-        let target = if email {
-            Some(link::Target::Web(format!("mailto:{dest}")))
-        } else {
-            link::target(dest)
+        let target = match autolink {
+            Autolink::Email => Some(link::Target::Web(format!("mailto:{dest}"))),
+            Autolink::Uri => link::target(dest),
         };
         let destination = Destination {
             target,

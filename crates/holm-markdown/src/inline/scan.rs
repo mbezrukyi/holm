@@ -44,12 +44,21 @@ pub(super) fn is_punctuation(c: char) -> bool {
     )
 }
 
-/// An autolink like `<https://a.b>` or `<me@a.b>` at `start`. Gives its end and whether it is an email address.
-pub(super) fn autolink(text: &str, start: usize) -> Option<(usize, bool)> {
+/// What an autolink holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Autolink {
+    /// `<https://a.b>`.
+    Uri,
+    /// `<me@a.b>`.
+    Email,
+}
+
+/// The end and the kind of the autolink at `start`.
+pub(super) fn autolink(text: &str, start: usize) -> Option<(usize, Autolink)> {
     let b = text.as_bytes();
     uri_autolink(b, start)
-        .map(|end| (end, false))
-        .or_else(|| email_autolink(b, start).map(|end| (end, true)))
+        .map(|end| (end, Autolink::Uri))
+        .or_else(|| email_autolink(b, start).map(|end| (end, Autolink::Email)))
 }
 
 fn uri_autolink(b: &[u8], start: usize) -> Option<usize> {
