@@ -60,7 +60,7 @@ impl Facts {
                     stamps.extend(self.files.iter().map(stamp));
                 }
                 Node::Folder(folder) => {
-                    stamps.extend(self.files.iter().filter(|(path, _)| path.is_below(folder)).map(stamp))
+                    stamps.extend(self.files.iter().filter(|(path, _)| path.is_below(folder)).map(stamp));
                 }
             }
         }
