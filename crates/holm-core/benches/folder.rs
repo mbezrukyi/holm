@@ -1,7 +1,7 @@
 //! Speed of the core in a notes folder with many notes: the start, the lists, the search, saves
 //! and a tag rename on the real disk.
 
-#![allow(clippy::unwrap_used, reason = "benches")]
+#![expect(clippy::unwrap_used, reason = "benches")]
 
 use std::fmt::Write as _;
 use std::fs;

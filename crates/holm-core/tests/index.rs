@@ -1,6 +1,6 @@
 //! Lists, tags, search and links through `Core` on a real temp folder and a real index.
 
-#![allow(clippy::unwrap_used, reason = "tests")]
+#![cfg(test)]
 
 mod common;
 

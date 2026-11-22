@@ -1,6 +1,6 @@
 //! Changing tags and pins through `Core` on a real temp folder.
 
-#![allow(clippy::unwrap_used, reason = "tests")]
+#![cfg(test)]
 
 mod common;
 

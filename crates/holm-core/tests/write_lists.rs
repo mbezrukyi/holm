@@ -1,6 +1,6 @@
 //! Each write of `Core` names in its change list every note and folder that it changed on disk.
 
-#![allow(clippy::unwrap_used, reason = "tests")]
+#![cfg(test)]
 
 mod common;
 

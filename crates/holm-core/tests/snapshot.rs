@@ -1,6 +1,6 @@
 //! The snapshot after each write and each outside change, and its revision.
 
-#![allow(clippy::unwrap_used, reason = "tests")]
+#![cfg(test)]
 
 mod common;
 

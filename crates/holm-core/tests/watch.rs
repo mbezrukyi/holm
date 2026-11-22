@@ -1,7 +1,7 @@
 //! Outside changes to the notes folder, pushed by hand through the `Feed`,
 //! and a few through real file events.
 
-#![allow(clippy::unwrap_used, reason = "tests")]
+#![cfg(test)]
 
 mod common;
 

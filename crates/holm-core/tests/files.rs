@@ -1,6 +1,6 @@
 //! Renaming, moving and deleting notes and folders through `Core` on a real temp folder.
 
-#![allow(clippy::unwrap_used, reason = "tests")]
+#![cfg(test)]
 
 mod common;
 

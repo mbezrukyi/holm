@@ -5,7 +5,7 @@
 //! compare without their attributes, because the tree keeps no link title. Examples with blocks
 //! other than paragraphs and headings are not checked here: they test the block parser.
 
-#![allow(clippy::unwrap_used, reason = "tests")]
+#![cfg(test)]
 
 use std::fmt::Write as _;
 use std::fs;

@@ -1,7 +1,7 @@
 //! Link targets through `Core` on a real temp folder: notes by id, headings, broken links and
 //! file link paths.
 
-#![allow(clippy::unwrap_used, reason = "tests")]
+#![cfg(test)]
 
 mod common;
 
