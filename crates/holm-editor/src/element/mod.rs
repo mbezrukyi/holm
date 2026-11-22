@@ -17,6 +17,7 @@ pub(crate) use layout::{Edge, Layout, Reveal, Scroll};
 use theme::Place;
 pub(crate) use theme::Theme;
 
+use crate::editor::Focus;
 use crate::ink;
 use crate::model::{LineKind, Mark, Quote, Run, Styles};
 use crate::{Editor, TextWidth};
@@ -201,16 +202,21 @@ impl gpui_kit::Element for EditorElement {
         let column = column(bounds, self.editor.read(cx).text_width, window);
         let width = size(AvailableSpace::Definite(column.size.width), AvailableSpace::MinContent);
         let editor = self.editor.read(cx);
-        let focus = editor.focus.clone();
+        let handle = editor.focus.clone();
         let mut start_view = editor.start.clone().map(IntoElement::into_any_element);
         let start_height = start_view
             .as_mut()
             .map_or(px(0.), |view| view.layout_as_root(width, window, cx).height);
         // Nothing else in the editor takes the focus, so it can only be in the start view.
-        let focused = focus.is_focused(window);
-        let in_start = start_view.is_some() && !focused && focus.contains_focused(window, cx);
+        let focus = if handle.is_focused(window) {
+            Focus::Editor
+        } else if start_view.is_some() && handle.contains_focused(window, cx) {
+            Focus::StartView
+        } else {
+            Focus::Outside
+        };
         let (layout, start_origin) = self.editor.update(cx, |editor, _| {
-            editor.follow_focus(in_start, focused);
+            editor.follow_focus(focus);
             let mut shaper = Shaper::new(
                 style,
                 column.size.width,

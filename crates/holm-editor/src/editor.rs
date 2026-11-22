@@ -102,6 +102,15 @@ enum Unit {
     Line,
 }
 
+/// Where the focus is, from the view of the editor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Focus {
+    Editor,
+    /// Inside the view of [`Editor::set_start`].
+    StartView,
+    Outside,
+}
+
 /// The user can turn each one off.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WritingHelp {
@@ -369,18 +378,20 @@ impl Editor {
         cx.notify();
     }
 
-    /// Scrolls when the focus moves into the start view or back to the editor. `in_start` and `focused` describe the
-    /// focus now.
-    pub(crate) fn follow_focus(&mut self, in_start: bool, focused: bool) {
+    /// Scrolls when the focus moves into the start view or back to the editor. `focus` is where the focus is now.
+    pub(crate) fn follow_focus(&mut self, focus: Focus) {
+        let in_start = focus == Focus::StartView;
         if in_start == self.was_start_focused {
             return;
         }
         self.was_start_focused = in_start;
-        if in_start {
-            self.scroll = Scroll::default();
-            self.reveal = None;
-        } else if focused {
-            self.reveal = Some(Reveal::Edge);
+        match focus {
+            Focus::StartView => {
+                self.scroll = Scroll::default();
+                self.reveal = None;
+            }
+            Focus::Editor => self.reveal = Some(Reveal::Edge),
+            Focus::Outside => {}
         }
     }
 
