@@ -126,7 +126,7 @@ fn shift(text: &str, body: &Body, selection: Range<usize>, key: Move) -> Option<
         return Some(nothing(selection));
     }
     merge_lists(&mut tree);
-    let writer = Writer::write(text, &tree, source.after_text());
+    let writer = Writer::write(text, &tree, source.above());
     if writer.broken || source.captures(&writer) {
         return Some(nothing(selection));
     }
@@ -216,7 +216,7 @@ fn next(text: &str, body: &Body, selection: Range<usize>) -> Option<Plan> {
     };
     list.items.insert(i + 1, new);
     list.renumber = true;
-    let writer = Writer::write(text, &tree, source.after_text());
+    let writer = Writer::write(text, &tree, source.above());
     if writer.broken || source.captures(&writer) {
         return None;
     }
@@ -510,14 +510,19 @@ impl<'a> Source<'a> {
         (at, count)
     }
 
-    /// Whether the line before the source has text.
-    fn after_text(&self) -> bool {
+    /// What the line before the source holds. After its text, as after lazy text, an empty item would not start an
+    /// item.
+    fn above(&self) -> Above {
         if self.region.start == 0 {
-            return false;
+            return Above::Nothing;
         }
         let line = line_start(self.text, self.region.start - 1)..self.region.start - 1;
         let (at, count) = self.quotes_end(&line);
-        count >= self.quotes && !self.text[at..line.end].trim().is_empty()
+        if count >= self.quotes && !self.text[at..line.end].trim().is_empty() {
+            Above::Lazy
+        } else {
+            Above::Nothing
+        }
     }
 
     /// Whether the written tree would take in the text after the source.
@@ -978,8 +983,8 @@ enum Above {
 }
 
 impl<'a> Writer<'a> {
-    /// Writes `tree`. `after_text` tells whether a line with text comes right before it.
-    fn write(text: &'a str, tree: &[Part], after_text: bool) -> Self {
+    /// Writes `tree` after a line that holds `above`.
+    fn write(text: &'a str, tree: &[Part], above: Above) -> Self {
         let mut writer = Self {
             text,
             out: String::new(),
@@ -987,7 +992,7 @@ impl<'a> Writer<'a> {
             keeps: Vec::new(),
             broken: false,
             last: None,
-            above: if after_text { Above::Lazy } else { Above::Nothing },
+            above,
             depth: 0,
             top: 0,
         };
