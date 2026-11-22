@@ -1,15 +1,7 @@
-//! Link targets.
-
-/// Where a link points.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Target {
     /// `holm:<id>`, or `holm:<id>#<heading>` for a heading in that note.
-    Note {
-        /// The note id.
-        id: String,
-        /// The heading text after `#`.
-        heading: Option<String>,
-    },
+    Note { id: String, heading: Option<String> },
     /// `#<heading>`: a heading in the same note.
     Heading(String),
     /// A file path, relative to the note or absolute.
@@ -116,7 +108,7 @@ pub fn unescape_text(text: &str) -> String {
     out
 }
 
-/// The target of a link destination, or `None` when it is empty.
+/// `None` when `dest` is empty.
 pub(crate) fn target(dest: &str) -> Option<Target> {
     if dest.is_empty() {
         return None;

@@ -59,12 +59,10 @@ const BLOCKS: &str = "> A quote with *one* mark
 
 ";
 
-/// About 1 MB of `part`, one after another.
 fn one_mb(part: &str) -> String {
     part.repeat(1_000_000 / part.len() + 1)
 }
 
-/// About 1 MB of [`CHUNK`] parts, one after another.
 fn one_mb_note() -> String {
     one_mb(CHUNK)
 }

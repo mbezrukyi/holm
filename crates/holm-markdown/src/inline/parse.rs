@@ -23,7 +23,7 @@ impl Defs {
     }
 }
 
-/// Parses the text of one leaf block into its inline nodes.
+/// `text` is one leaf block.
 pub(crate) fn parse(text: &str, defs: &Defs) -> Vec<Node> {
     parse_with(text, defs, &mut Scratch::default())
 }
@@ -37,7 +37,6 @@ pub(crate) struct Scratch {
     no_closer: Vec<usize>,
 }
 
-/// Parses like [`parse`], with buffers from an earlier parse.
 pub(crate) fn parse_with(text: &str, defs: &Defs, scratch: &mut Scratch) -> Vec<Node> {
     if is_plain(text) {
         return if text.is_empty() {
@@ -75,8 +74,7 @@ pub(crate) fn parse_with(text: &str, defs: &Defs, scratch: &mut Scratch) -> Vec<
     finish(text, nodes)
 }
 
-/// Whether `text` has no inline syntax, so its tree is one text node. A line break counts only
-/// after two spaces.
+/// No inline syntax, so the tree is one text node. A line break counts only after two spaces.
 pub(crate) fn is_plain(text: &str) -> bool {
     let b = text.as_bytes();
     b.iter().enumerate().all(|(i, &c)| match c {
@@ -144,9 +142,8 @@ struct Parser<'a> {
     /// A linked list of items. Slot 0 is its head and holds no item.
     slots: Vec<Slot>,
     tail: usize,
-    /// The delimiter slots, in order.
     delims: Vec<usize>,
-    /// The open bracket slots, in order.
+    /// The open bracket slots.
     brackets: Vec<usize>,
     /// The backtick run lengths with no closing run after the last search.
     no_closer: Vec<usize>,
@@ -635,7 +632,6 @@ fn text_node(range: Range<usize>) -> Node {
     }
 }
 
-/// Joins text nodes that touch, then pairs Holm's HTML tags into style nodes.
 fn finish(text: &str, mut nodes: Vec<Node>) -> Vec<Node> {
     nodes.dedup_by(|next, last| {
         let touch =

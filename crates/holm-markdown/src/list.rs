@@ -21,7 +21,7 @@ pub enum Move {
     Next,
 }
 
-/// The edit of the list key `key` on `selection` in `text`. `body` is the parse of `text`.
+/// `body` is the parse of `text`.
 ///
 /// An item moves whole, with its children and its later paragraphs. A moved item takes the
 /// marker of the list it joins. Each ordered list that the key changes counts up from its first
@@ -53,7 +53,6 @@ struct Plan {
     tree: Option<Planned>,
 }
 
-/// A tree that a key writes.
 #[cfg_attr(not(test), expect(dead_code, reason = "the tests compare it with the parse"))]
 struct Planned {
     parts: Vec<Part>,
@@ -139,7 +138,6 @@ fn shift(text: &str, body: &Body, selection: Range<usize>, out: bool) -> Option<
     Some(source.finish(writer, tree, selection))
 }
 
-/// The edit that changes nothing.
 fn nothing(selection: Range<usize>) -> Plan {
     Plan {
         edit: Edit {
@@ -330,7 +328,6 @@ impl Mark {
     }
 }
 
-/// Text from the old source, or new text.
 #[derive(Clone, Debug)]
 enum Src {
     Old(Range<usize>),
@@ -802,7 +799,6 @@ fn ends_at_blank(item: &Item) -> bool {
     item.empty && item.parts.iter().all(Part::is_blank)
 }
 
-/// Takes the blank lines at the end of `parts`.
 fn trailing_blanks(parts: &mut Vec<Part>) -> Vec<Part> {
     let blanks = parts.iter().rev().take_while(|p| p.is_blank()).count();
     parts.split_off(parts.len() - blanks)
@@ -947,7 +943,6 @@ struct Placed {
     new_keep: usize,
 }
 
-/// Writes a tree out as text.
 struct Writer<'a> {
     text: &'a str,
     out: String,
@@ -1132,7 +1127,6 @@ impl<'a> Writer<'a> {
     }
 }
 
-/// The number of each item of `list`.
 fn numbers(list: &List) -> impl Iterator<Item = u64> + '_ {
     let start = list
         .items

@@ -183,7 +183,7 @@ fn render(text: &str, nodes: &[Node], out: &mut String) {
     }
 }
 
-/// The HTML of the body. It is `None` for a block that is not a paragraph or a heading.
+/// `None` for a block that is not a paragraph or a heading.
 fn html(text: &str) -> Option<String> {
     let body = Body::parse(text);
     let mut out = String::new();

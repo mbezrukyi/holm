@@ -1,11 +1,9 @@
-//! Snapshot tests on the sample notes in `tests/samples/`.
-
 use std::fmt::Write as _;
 use std::fs;
 
 use holm_markdown::NoteFile;
 
-/// Shows `\r`, so the snapshot shows the line endings.
+/// So the snapshot shows the line endings.
 fn visible(text: &str) -> String {
     text.replace('\r', "␍")
 }

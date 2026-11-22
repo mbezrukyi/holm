@@ -1,5 +1,3 @@
-//! The note body as blocks, leaves, styled spans, hidden syntax, links and headings.
-
 pub(crate) mod link;
 
 use std::ops::Range;
@@ -17,8 +15,6 @@ const OPTIONS: Options = Options::ENABLE_TABLES
     .union(Options::ENABLE_STRIKETHROUGH)
     .union(Options::ENABLE_GFM);
 
-/// A parsed note body, for live preview and for the index.
-///
 /// Every range is a byte range in the parsed text, and lies on char boundaries.
 ///
 /// ```
@@ -40,27 +36,20 @@ pub struct Body {
     defs: Defs,
     /// The source of each link reference definition, sorted.
     def_ranges: Vec<Range<usize>>,
-    /// The length of the parsed text.
-    len: usize,
+    text_len: usize,
 }
 
-/// One block of the body, with the blocks inside it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Block {
     /// The source of the block, without the line break at its end.
     pub range: Range<usize>,
-    /// What the block is.
     pub kind: BlockKind,
-    /// The blocks inside this one, like the items of a list.
     pub children: Vec<Block>,
 }
 
-/// The kind of a [`Block`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BlockKind {
-    /// A paragraph.
     Paragraph,
-    /// A heading of level 1 to 6.
     Heading {
         /// The level: 1 for `#`, 6 for `######`.
         level: u8,
@@ -74,7 +63,6 @@ pub enum BlockKind {
         /// The first number of an ordered list. `None` for a bullet list.
         start: Option<u64>,
     },
-    /// One list item.
     Item {
         /// The `[ ]` or `[x]` of a task list item.
         task: Option<Task>,
@@ -83,22 +71,19 @@ pub enum BlockKind {
     Code {
         /// The first word after the opening fence.
         language: Option<String>,
-        /// Whether it has fences. An indented code block has none.
+        /// An indented code block has no fences.
         fenced: bool,
     },
     /// A table. Its children are [`BlockKind::TableRow`] blocks.
     Table {
-        /// The alignment of each column.
         alignments: Vec<Alignment>,
     },
     /// A table row. Its children are [`BlockKind::TableCell`] blocks.
     TableRow {
-        /// Whether it is the head row.
         head: bool,
     },
     /// A table cell. Its range has the spaces around the cell text.
     TableCell,
-    /// A block of raw HTML.
     Html,
     /// A thematic break like `---`.
     Rule,
@@ -119,16 +104,13 @@ pub enum CalloutKind {
     Caution,
 }
 
-/// The task marker of a list item.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Task {
-    /// Whether it is `[x]`.
     pub checked: bool,
     /// The source of the marker, like `[ ]`.
     pub range: Range<usize>,
 }
 
-/// The alignment of a table column.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Alignment {
     /// No colon in the delimiter row.
@@ -141,16 +123,14 @@ pub enum Alignment {
     Right,
 }
 
-/// A range of text with one style. Spans can overlap.
+/// Spans can overlap.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Span {
     /// The styled text, without its syntax.
     pub range: Range<usize>,
-    /// The style.
     pub style: Style,
 }
 
-/// The style of a [`Span`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Style {
     /// `*text*`
@@ -174,17 +154,12 @@ pub enum Style {
 /// A color from a `#rgb` or `#rrggbb` hex value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Color {
-    /// Red.
     pub r: u8,
-    /// Green.
     pub g: u8,
-    /// Blue.
     pub b: u8,
 }
 
 impl Color {
-    /// The color of a `#rgb` or `#rrggbb` hex value.
-    ///
     /// ```
     /// use holm_markdown::Color;
     ///
@@ -228,7 +203,6 @@ pub struct Link {
     pub range: Range<usize>,
     /// The link text between `[` and `]`, as written.
     pub text: Range<usize>,
-    /// Where the link points.
     pub target: Target,
     /// The target as written, with its `< >`. It is `None` for a reference link,
     /// because the target is in its definition line.
@@ -249,7 +223,7 @@ pub struct Heading {
 }
 
 impl Body {
-    /// Parses a note body: the text after the frontmatter. It never fails.
+    /// `text` is the text after the frontmatter.
     pub fn parse(text: &str) -> Self {
         let events = Parser::new_ext(text, OPTIONS).into_offset_iter();
         // The parser reads the link definitions before the first event.
@@ -290,8 +264,8 @@ impl Body {
     /// state after it as before the edit.
     fn reparse_part(&mut self, text: &str, old: Range<usize>, new_len: usize) -> bool {
         let fits = old.start <= old.end
-            && old.end <= self.len
-            && self.len - old.len() + new_len == text.len()
+            && old.end <= self.text_len
+            && self.text_len - old.len() + new_len == text.len()
             && text.is_char_boundary(old.start)
             && text.is_char_boundary(old.start + new_len);
         if !fits {
@@ -324,7 +298,7 @@ impl Body {
                 let stop = line_start(text, moved(next.range.start));
                 (stop + old.len() - new_len, stop)
             }
-            None => (self.len, text.len()),
+            None => (self.text_len, text.len()),
         };
         let defs_after = self.def_ranges.partition_point(|range| range.start < old_stop);
         if self.def_ranges.partition_point(|range| range.start < start) != defs_after {
@@ -364,7 +338,7 @@ impl Body {
         for range in &mut self.def_ranges[defs_after..] {
             range.shift(&moved);
         }
-        self.len = text.len();
+        self.text_len = text.len();
         true
     }
 
@@ -373,7 +347,6 @@ impl Body {
         &self.blocks
     }
 
-    /// The leaf blocks, in order.
     pub fn leaves(&self) -> &[Leaf] {
         &self.leaves
     }
@@ -386,7 +359,7 @@ impl Body {
         leaf.tree(text, &self.defs)
     }
 
-    /// The styled spans, sorted by start.
+    /// Sorted by start.
     pub fn spans(&self) -> &[Span] {
         &self.spans
     }
@@ -403,7 +376,6 @@ impl Body {
         &self.links
     }
 
-    /// The headings, in order.
     pub fn headings(&self) -> &[Heading] {
         &self.headings
     }
@@ -521,7 +493,6 @@ fn is_blank_gap(gap: &str) -> bool {
     breaks >= 2
 }
 
-/// The start of the line at `at`.
 fn line_start(text: &str, at: usize) -> usize {
     text[..at].rfind(['\n', '\r']).map_or(0, |i| i + 1)
 }
@@ -576,7 +547,7 @@ impl<'a> Walker<'a> {
             empty_item: None,
             body: Body {
                 defs,
-                len: text.len(),
+                text_len: text.len(),
                 ..Body::default()
             },
         }
@@ -597,7 +568,7 @@ impl<'a> Walker<'a> {
             Event::Rule => {
                 self.touch(&range);
                 let block = Block {
-                    range: self.trim(&range),
+                    range: self.trim_line_breaks(&range),
                     kind: BlockKind::Rule,
                     children: Vec::new(),
                 };
@@ -608,7 +579,6 @@ impl<'a> Walker<'a> {
         }
     }
 
-    /// Notes an inline event.
     fn inline(&mut self, range: &Range<usize>) {
         self.touch(range);
         if range.is_empty() {
@@ -649,7 +619,7 @@ impl<'a> Walker<'a> {
                 self.body.headings.push(Heading {
                     level: heading_level(level),
                     text: String::new(),
-                    range: self.trim(&range),
+                    range: self.trim_line_breaks(&range),
                 });
                 Some(BlockKind::Heading {
                     level: heading_level(level),
@@ -712,7 +682,7 @@ impl<'a> Walker<'a> {
         let Some(kind) = frame.kind.clone() else {
             return;
         };
-        let range = self.trim(&frame.range);
+        let range = self.trim_line_breaks(&frame.range);
         match &kind {
             BlockKind::Heading { .. } => self.hide_heading_syntax(&range, &frame),
             BlockKind::Code { fenced: true, .. } => self.hide_fences(&range, frame.last),
@@ -771,7 +741,7 @@ impl<'a> Walker<'a> {
                 ..
             })
         );
-        let range = self.trim(range);
+        let range = self.trim_line_breaks(range);
         let Some(line_start) = self.text[range.clone()].rfind('\n') else {
             return false;
         };
@@ -822,7 +792,6 @@ impl<'a> Walker<'a> {
         }
     }
 
-    /// Hides the opening fence line and the closing fence line.
     fn hide_fences(&mut self, range: &Range<usize>, content_end: Option<usize>) {
         let open_end = self.line_end(range.start, range.end);
         self.hide(range.start..open_end);
@@ -901,7 +870,6 @@ impl<'a> Walker<'a> {
         body
     }
 
-    /// Adds the spans, the hidden syntax and the links of an inline tree.
     fn collect(&mut self, nodes: Vec<Node>) {
         for node in nodes {
             let style = match node.kind {
@@ -1005,8 +973,7 @@ impl<'a> Walker<'a> {
         }
     }
 
-    /// The range without the line breaks at its end.
-    fn trim(&self, range: &Range<usize>) -> Range<usize> {
+    fn trim_line_breaks(&self, range: &Range<usize>) -> Range<usize> {
         let source = &self.text[range.clone()];
         let kept = source.trim_end_matches(['\n', '\r']).len();
         range.start..range.start + kept

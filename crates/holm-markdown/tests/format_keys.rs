@@ -1,5 +1,3 @@
-//! Tests of the format keys through `inline::restyle`.
-
 use std::fmt::Write as _;
 use std::ops::Range;
 
@@ -70,7 +68,6 @@ fn press(text: &str, selection: Range<usize>, format: Format) -> Option<(String,
     Some((new, edit.selection))
 }
 
-/// The selection of the first `part` in `text`.
 fn find(text: &str, part: &str) -> Range<usize> {
     let start = text.find(part).unwrap_or_else(|| panic!("no {part:?} in {text:?}"));
     start..start + part.len()
@@ -116,7 +113,6 @@ fn known_cases() {
         steps("a.b", &[("a.", Italic)]),
         steps("Write", &[("t", Bold)]),
         steps("ab", &[("a", Italic), ("b", Bold)]),
-        // More shapes.
         steps("a **b** c", &[("a **b** c", Bold), ("a b c", Bold)]),
         steps("a *b* _c_ d", &[("a *b* _c_ d", Italic)]),
         steps("a word", &[("word", Underline), ("word", Strikethrough)]),
@@ -213,7 +209,6 @@ fn color_keys() {
     insta::assert_snapshot!(cases.join("\n"));
 }
 
-/// Letters, spaces and punctuation inside and outside the markers of each style.
 #[test]
 fn every_neighbor_of_a_marker_writes_back() {
     let outside = ["", "a", " ", ".", "*", "_", "=", "~", "`", "<"];
@@ -449,8 +444,6 @@ fn piece() -> impl Strategy<Value = &'static str> {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(4096))]
 
-    /// A random block, selection and key: the output keeps the visible text and has the wanted
-    /// styles.
     #[test]
     fn a_key_keeps_the_text_and_sets_the_style(
         pieces in prop::collection::vec(piece(), 1..14),
@@ -466,8 +459,6 @@ proptest! {
         check_press(&text, start..end, FORMATS[key]);
     }
 
-    /// A random block, selection and color key: the output keeps the visible text, and the
-    /// selected text has only the new color.
     #[test]
     fn a_color_key_keeps_the_text_and_sets_the_color(
         pieces in prop::collection::vec(piece(), 1..14),
@@ -483,7 +474,6 @@ proptest! {
         check_color(&text, start..end, COLOR_KEYS[key]);
     }
 
-    /// The same key twice on the new selection gives back text with the old styles.
     #[test]
     fn a_key_pressed_twice_gives_back_the_styles(
         words in prop::collection::vec("[a-z]{1,4}", 1..6),

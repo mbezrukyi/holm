@@ -1,5 +1,3 @@
-//! Snapshot tests on the sample bodies in `tests/bodies/`.
-
 use std::fmt::Write as _;
 use std::fs;
 use std::ops::Range;

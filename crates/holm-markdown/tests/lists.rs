@@ -1,5 +1,3 @@
-//! Tests of the list keys through `list::relist`.
-
 use std::ops::Range;
 
 use holm_markdown::Body;
@@ -17,7 +15,6 @@ fn key(marked: &str, key: Move) -> String {
     mark(&new, &edit.selection)
 }
 
-/// What [`key`] gives when [`relist`] gives no edit.
 const NO_EDIT: &str = "no edit";
 
 fn unmark(marked: &str) -> (String, Range<usize>) {

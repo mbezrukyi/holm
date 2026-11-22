@@ -1,10 +1,9 @@
 use pulldown_cmark::{Event, Parser};
 
-/// Longest preview line in chars. A note list shows only the start of it.
+/// A note list shows only the start of the line.
 const MAX_PREVIEW_CHARS: usize = 200;
 
-/// The first line of text in a note body, with no Markdown syntax. It is empty when the
-/// body has no text.
+/// The first line that has text, without its Markdown syntax.
 pub(crate) fn preview(body: &str) -> String {
     body.lines()
         .filter(|line| !line.trim().is_empty())
@@ -14,7 +13,7 @@ pub(crate) fn preview(body: &str) -> String {
         .unwrap_or_default()
 }
 
-/// The text of one line, parsed alone, with no Markdown syntax.
+/// Parsed alone, without its Markdown syntax.
 fn line_text(line: &str) -> String {
     let mut text = String::new();
     for event in Parser::new(line) {

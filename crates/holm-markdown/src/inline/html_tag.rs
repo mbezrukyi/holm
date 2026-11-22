@@ -1,10 +1,6 @@
-//! The HTML tags that Holm reads as styles: `<u>`, `<span style="color: …">`, `<mark>`,
-//! `<b>`, `<strong>`, `<i>`, `<em>`, `<s>` and `<del>`.
-
 use super::Kind;
 use crate::Color;
 
-/// An HTML tag that opens or closes a style.
 pub(super) enum HtmlTag {
     Open(&'static str, Kind),
     Close(&'static str),
@@ -12,7 +8,7 @@ pub(super) enum HtmlTag {
 
 const NAMES: [&str; 9] = ["u", "span", "mark", "b", "strong", "i", "em", "s", "del"];
 
-/// Reads one raw HTML tag. Other HTML tags, and a `<span>` with no hex color, give `None`.
+/// Other HTML tags, and a `<span>` with no hex color, give `None`.
 pub(super) fn read(source: &str) -> Option<HtmlTag> {
     let inner = source.strip_prefix('<')?.strip_suffix('>')?;
     if let Some(name) = inner.strip_prefix('/') {
@@ -39,7 +35,6 @@ fn known(name: &str) -> Option<&'static str> {
     NAMES.iter().find(|known| known.eq_ignore_ascii_case(name)).copied()
 }
 
-/// The value of the attribute `name` in the attribute list `attributes`.
 fn attribute<'a>(attributes: &'a str, name: &str) -> Option<&'a str> {
     let mut rest = attributes.trim_start();
     while !rest.is_empty() {
@@ -68,9 +63,9 @@ fn attribute<'a>(attributes: &'a str, name: &str) -> Option<&'a str> {
     None
 }
 
-/// The color of the first of `properties` in a CSS declaration list.
-fn css_color(style: &str, properties: &[&str]) -> Option<Color> {
-    style.split(';').find_map(|declaration| {
+/// The color of the first declaration that sets one of `properties`.
+fn css_color(declarations: &str, properties: &[&str]) -> Option<Color> {
+    declarations.split(';').find_map(|declaration| {
         let (property, value) = declaration.split_once(':')?;
         let property = property.trim();
         properties

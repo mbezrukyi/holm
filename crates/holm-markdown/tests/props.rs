@@ -1,9 +1,7 @@
-//! Property tests for split, join and the field setters.
-
 use holm_markdown::{NoteFile, normalize_tag};
 use proptest::prelude::*;
 
-/// Lines that look like frontmatter, Markdown and YAML, to reach the edge cases.
+/// To reach the edge cases.
 fn line() -> impl Strategy<Value = String> {
     prop_oneof![
         Just("---".to_owned()),
@@ -51,7 +49,6 @@ fn op() -> impl Strategy<Value = Op> {
     ]
 }
 
-/// Frontmatter lines: unknown entries with Holm fields between them, in any order.
 fn frontmatter() -> impl Strategy<Value = (Vec<String>, Vec<String>)> {
     let holm = prop_oneof![
         Just(vec!["id: 01AB".to_owned()]),

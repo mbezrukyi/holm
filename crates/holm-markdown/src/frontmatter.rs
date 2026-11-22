@@ -1,4 +1,4 @@
-//! The frontmatter as a list of entries. Each entry keeps its exact text.
+//! Each entry keeps its exact text.
 
 use crate::tag::clean_tags;
 use crate::yaml::{read_flow_list, read_scalar, write_scalar};
@@ -37,7 +37,7 @@ pub(crate) struct Frontmatter {
 }
 
 impl Frontmatter {
-    /// Splits `text` into frontmatter and body. Without a closed frontmatter, all text is body.
+    /// Without a closed frontmatter, all text is body.
     pub(crate) fn split(text: &str) -> (Option<Self>, &str) {
         let mut lines = text.split_inclusive('\n');
         let Some(open) = lines.next() else {
@@ -63,7 +63,6 @@ impl Frontmatter {
         (None, text)
     }
 
-    /// An empty frontmatter, for a note that has none.
     pub(crate) fn new(line_ending: &str) -> Self {
         Self {
             open: format!("---{line_ending}"),
@@ -98,9 +97,7 @@ impl Frontmatter {
         self.raw(Key::Tags).map(read_tags).unwrap_or_default()
     }
 
-    /// Replaces the field `key` with `raw`, or removes it when `raw` is `None`.
-    ///
-    /// The new field takes the place of the old one. A field that was not there goes
+    /// `None` removes the field. The new field takes the place of the old one. A field that was not there goes
     /// after the last Holm field that comes before it, or at the top.
     pub(crate) fn set(&mut self, key: Key, raw: Option<String>) {
         let old = self.entries.iter().position(|e| e.key == Some(key));
@@ -142,17 +139,16 @@ impl std::fmt::Display for Frontmatter {
     }
 }
 
-/// The line without its line ending.
-fn content(line: &str) -> &str {
+fn without_line_ending(line: &str) -> &str {
     let line = line.strip_suffix('\n').unwrap_or(line);
     line.strip_suffix('\r').unwrap_or(line)
 }
 
 fn is_fence(line: &str, fence: &str) -> bool {
-    content(line).trim_end_matches([' ', '\t']) == fence
+    without_line_ending(line).trim_end_matches([' ', '\t']) == fence
 }
 
-/// Splits a top level line into its key and the text after the `:`.
+/// The key, and the text after the `:`.
 fn split_key(line: &str) -> Option<(&str, &str)> {
     if line.starts_with(['#', '-', ' ', '\t']) {
         return None;
@@ -163,9 +159,9 @@ fn split_key(line: &str) -> Option<(&str, &str)> {
     })
 }
 
-/// The text after the `:` on the first line of an entry.
+/// The text after the `:`, on the first line only.
 fn value(raw: &str) -> &str {
-    let first = content(raw.split_inclusive('\n').next().unwrap_or(""));
+    let first = without_line_ending(raw.split_inclusive('\n').next().unwrap_or(""));
     split_key(first).map_or("", |(_, rest)| rest)
 }
 
@@ -178,7 +174,7 @@ fn entries(lines: &[&str]) -> Vec<Entry> {
     // Blank lines join the entry above only when more of that entry follows.
     let mut blanks: Vec<&str> = Vec::new();
     for &line in lines {
-        let text = content(line);
+        let text = without_line_ending(line);
         if text.trim().is_empty() {
             blanks.push(line);
             continue;
@@ -213,7 +209,7 @@ fn other(line: &str) -> Entry {
 /// Reads a flow list, a block list or one scalar.
 fn read_tags(raw: &str) -> Vec<String> {
     let value = value(raw).trim_start();
-    let below = raw.split_inclusive('\n').skip(1).map(content);
+    let below = raw.split_inclusive('\n').skip(1).map(without_line_ending);
     if let Some(flow) = value.strip_prefix('[') {
         let joined: Vec<&str> = std::iter::once(flow).chain(below).collect();
         return clean_tags(read_flow_list(&joined.join(" ")));

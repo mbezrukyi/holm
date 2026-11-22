@@ -1,5 +1,3 @@
-//! The preview line of a note.
-
 use holm_markdown::NoteFile;
 
 fn preview(text: &str) -> String {

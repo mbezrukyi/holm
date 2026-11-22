@@ -33,19 +33,16 @@ pub enum Format {
     HighlightColor(Option<Color>),
 }
 
-/// A change to the note text from [`restyle`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Edit {
     /// The replaced source.
     pub range: Range<usize>,
-    /// The new text for `range`.
     pub text: String,
     /// The selection in the new text. It covers the same visible text as before.
     pub selection: Range<usize>,
 }
 
-/// Adds or removes the style of `format` on `selection` in `text`. `body` is the parse of
-/// `text`.
+/// `body` is the parse of `text`.
 ///
 /// The key adds the style when any selected text lacks it. It removes the style when all of it
 /// has it. A color key sets its color on all selected text. With no selection, the key works on the word at the cursor. Between words, it puts
@@ -151,7 +148,7 @@ impl Look {
         self == other || self.family().is_some_and(|family| family.has(other))
     }
 
-    /// Whether the style shows on a space. Bold and italic do not.
+    /// Bold and italic do not.
     fn shows_on_space(self) -> bool {
         !matches!(self, Self::Emphasis | Self::Strong)
     }
@@ -391,8 +388,7 @@ fn split_text(joined: &str, range: Range<usize>, cuts: &Range<usize>, marks: &[M
     let mut start = range.start;
     let mut class = None;
     let mut i = range.start;
-    // The start of the last unit.
-    let mut prev = range.start;
+    let mut last_unit_start = range.start;
     while i < range.end {
         let (len, unit) = if b[i] == b'\\' && b.get(i + 1).is_some_and(u8::is_ascii_punctuation) {
             (2, Class::Punct)
@@ -410,13 +406,13 @@ fn split_text(joined: &str, range: Range<usize>, cuts: &Range<usize>, marks: &[M
             (c.len_utf8(), unit)
         };
         // A cut inside an escape or an entity moves out to hold all of it.
-        let cut = (i <= cuts.start && cuts.start < i + len) || (prev < cuts.end && cuts.end <= i);
+        let cut = (i <= cuts.start && cuts.start < i + len) || (last_unit_start < cuts.end && cuts.end <= i);
         if i > start && (class != Some(unit) || cut) {
             push_text(out, start..i, class, marks);
             start = i;
         }
         class = Some(unit);
-        prev = i;
+        last_unit_start = i;
         i += len;
     }
     if i > start {
@@ -460,7 +456,6 @@ enum Action {
 }
 
 impl Action {
-    /// Whether the action takes `look` off the selected text.
     fn removes(self, look: Look) -> bool {
         match self {
             Self::Remove(removed) => removed == look,
@@ -1127,7 +1122,6 @@ impl Writer<'_> {
         (from..b).find(|&k| !self.pieces[k].has(look)).unwrap_or(b)
     }
 
-    /// Whether the run `a..b` of `look` is not exactly one old node.
     fn changed(&self, a: usize, b: usize, look: Look) -> bool {
         !is_old_node(self.pieces, a, b, look)
     }
@@ -1264,7 +1258,6 @@ fn map_in(change: &Change, pos: usize, end: End) -> usize {
     }
 }
 
-/// The changes as one edit.
 fn join(text: &str, changes: &[Change], selection: Range<usize>) -> Edit {
     let start = changes[0].old.start;
     let end = changes[changes.len() - 1].old.end;

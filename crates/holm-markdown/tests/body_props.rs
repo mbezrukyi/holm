@@ -1,11 +1,9 @@
-//! Property tests for the body parser.
-
 use std::ops::Range;
 
 use holm_markdown::{Block, Body};
 use proptest::prelude::*;
 
-/// Pieces of Markdown syntax, to reach the edge cases more often than random text.
+/// To reach the edge cases more often than random text.
 fn piece() -> impl Strategy<Value = String> {
     prop_oneof![
         prop::sample::select(vec![
@@ -78,7 +76,6 @@ fn body_text() -> impl Strategy<Value = String> {
     prop::collection::vec(piece(), 0..40).prop_map(|pieces| pieces.concat())
 }
 
-/// Lines of block syntax, joined by one or two line breaks, for texts with many blocks.
 fn block_text() -> impl Strategy<Value = String> {
     let line = prop::sample::select(vec![
         "Some *text*",
@@ -114,7 +111,7 @@ fn block_text() -> impl Strategy<Value = String> {
         .prop_map(|lines| lines.into_iter().flat_map(|(line, gap)| [line, gap]).collect())
 }
 
-/// A text and one edit in it: a range on char boundaries and the new text for it.
+/// The range of the edit is on char boundaries.
 fn text_and_edit(text: impl Strategy<Value = String>) -> impl Strategy<Value = (String, Range<usize>, String)> {
     (
         text,
@@ -129,7 +126,6 @@ fn text_and_edit(text: impl Strategy<Value = String>) -> impl Strategy<Value = (
         })
 }
 
-/// Asserts that `reparsed` has the same result as a full parse of `text`.
 fn assert_same(text: &str, reparsed: &Body) {
     let full = Body::parse(text);
     assert_eq!(reparsed.blocks(), full.blocks());

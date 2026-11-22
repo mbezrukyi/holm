@@ -4,18 +4,15 @@ use crate::frontmatter::{Frontmatter, Key};
 use crate::preview::preview;
 use crate::tag::clean_tags;
 
-/// The line ending of a note.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum LineEnding {
-    /// `\n`. A new note uses it.
     #[default]
     Lf,
-    /// `\r\n`.
     CrLf,
 }
 
 impl LineEnding {
-    /// Finds the line ending of `text` from its first line break. With no break, it is [`LineEnding::Lf`].
+    /// From the first line break of `text`. With no break, [`LineEnding::Lf`].
     pub fn detect(text: &str) -> Self {
         match text.find('\n') {
             Some(i) if text[..i].ends_with('\r') => Self::CrLf,
@@ -23,7 +20,6 @@ impl LineEnding {
         }
     }
 
-    /// The line ending as text.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Lf => "\n",
@@ -32,8 +28,6 @@ impl LineEnding {
     }
 }
 
-/// The text of one note, split into frontmatter and body.
-///
 /// [`NoteFile::parse`] never fails, and its [`Display`](fmt::Display) gives back the same bytes.
 /// The setters change only Holm's own fields: `id`, `tags` and `pinned`.
 /// Every other line stays in its place with its exact text.
@@ -56,8 +50,6 @@ pub struct NoteFile {
 }
 
 impl NoteFile {
-    /// Splits the text of a note.
-    ///
     /// A frontmatter starts with a `---` line at the very top and ends with a `---` or `...` line.
     /// Without the end line, the whole text is body.
     pub fn parse(text: &str) -> Self {
@@ -69,36 +61,33 @@ impl NoteFile {
         }
     }
 
-    /// The text after the frontmatter.
     pub fn body(&self) -> &str {
         &self.body
     }
 
-    /// The line ending that new lines use. It comes from the first line break of the text.
+    /// New lines use it.
     pub fn line_ending(&self) -> LineEnding {
         self.line_ending
     }
 
-    /// The `id` field, or `None` when it is missing or empty.
+    /// `None` when the field is missing or empty.
     pub fn id(&self) -> Option<String> {
         self.frontmatter.as_ref().and_then(Frontmatter::id)
     }
 
-    /// The `tags` field, normalized like [`normalize_tag`](crate::normalize_tag), with no repeats.
+    /// Normalized like [`normalize_tag`](crate::normalize_tag), with no repeats.
     ///
     /// It reads a block list, a flow list like `[a, b]`, and a single tag.
     pub fn tags(&self) -> Vec<String> {
         self.frontmatter.as_ref().map(Frontmatter::tags).unwrap_or_default()
     }
 
-    /// Whether the `pinned` field is `true`.
     pub fn pinned(&self) -> bool {
         self.frontmatter.as_ref().is_some_and(Frontmatter::pinned)
     }
 
-    /// The first line of text of the body, with no Markdown syntax, for a note list.
-    ///
-    /// It is empty when the body has no text. A long line is cut to 200 chars.
+    /// The first line that has text, without its Markdown syntax. A long line is cut to 200 chars.
+    /// Empty when the body has no text.
     ///
     /// ```
     /// use holm_markdown::NoteFile;
@@ -110,18 +99,18 @@ impl NoteFile {
         preview(&self.body)
     }
 
-    /// Replaces the text after the frontmatter. The frontmatter stays as it is.
+    /// The frontmatter stays as it is.
     pub fn set_body(&mut self, body: &str) {
         body.clone_into(&mut self.body);
     }
 
-    /// Sets the `id` field, or removes it with `None`.
+    /// `None` removes the field.
     pub fn set_id(&mut self, id: Option<&str>) {
         let raw = id.map(|id| Frontmatter::write_id(id, self.line_ending.as_str()));
         self.set(Key::Id, raw);
     }
 
-    /// Sets the `tags` field as a block list. With no tags left, it removes the field.
+    /// Writes a block list, or removes the field when no tag is left.
     ///
     /// It normalizes each tag like [`normalize_tag`](crate::normalize_tag) and drops repeats.
     pub fn set_tags<S: AsRef<str>>(&mut self, tags: &[S]) {

@@ -1,5 +1,3 @@
-//! Inline text: the tree of styled text in each leaf block, its parser, and the format keys.
-//!
 //! A leaf block is a paragraph, a heading or a table cell. The text of a tight list item is one
 //! too. Its text can run over several lines. Quote markers or an indent can stand between
 //! them. The tree skips them, but a node that crosses a line holds them in its range.
@@ -17,10 +15,8 @@ pub use restyle::{Edit, Format, restyle};
 
 use crate::{Color, Target};
 
-/// One node of the inline tree.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Node {
-    /// What the node is.
     pub kind: Kind,
     /// The whole source of the node, with its markers.
     pub source: Range<usize>,
@@ -30,7 +26,7 @@ pub struct Node {
     pub children: Vec<Node>,
 }
 
-/// The kind of a [`Node`]. The marker spelling is the source outside the content.
+/// The marker spelling is the source outside the content.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Kind {
     /// Plain text. Backslash escapes and entities stay as written.
@@ -59,16 +55,15 @@ pub enum Kind {
     Html,
 }
 
-/// Where a link or an image points.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Destination {
-    /// The target. It is `None` when the destination is empty.
+    /// `None` when the destination is empty.
     pub target: Option<Target>,
     /// The destination as written, with its `< >`. It is `None` for a reference link.
     pub range: Option<Range<usize>>,
 }
 
-/// A leaf block: where its text lies in the source. [`crate::Body::inline`] gives its tree.
+/// Where the text of a leaf block lies in the source. [`crate::Body::inline`] gives its tree.
 #[derive(Clone, Debug)]
 pub struct Leaf {
     /// The source from the start of the first line to the end of the last one.
@@ -114,7 +109,7 @@ impl Leaf {
         }
     }
 
-    /// Whether the text has no inline syntax. Its tree is then one text node.
+    /// No inline syntax, so the tree is one text node.
     pub(crate) fn is_plain(&self, text: &str) -> bool {
         parse::is_plain(&self.joined(text))
     }
@@ -140,7 +135,7 @@ impl Leaf {
         self.to_source_nodes(nodes)
     }
 
-    /// The inline tree in source offsets.
+    /// In source offsets.
     pub(crate) fn tree(&self, text: &str, defs: &Defs) -> Vec<Node> {
         self.parse(text, defs, &mut Scratch::default(), None)
     }
@@ -171,7 +166,6 @@ impl Leaf {
         }
     }
 
-    /// Whether the leaf is a table cell.
     pub(crate) fn is_table_cell(&self) -> bool {
         self.table
     }
@@ -199,7 +193,6 @@ impl Leaf {
         &text[self.lines[i].source.end..self.lines[i + 1].source.start]
     }
 
-    /// The source offset of an offset in the joined text.
     pub(crate) fn to_source(&self, joined: usize) -> usize {
         if self.lines.is_empty() {
             return self.range.start + joined.min(self.range.len());
@@ -212,8 +205,7 @@ impl Leaf {
         line.source.start + (joined - line.joined).min(line.source.len())
     }
 
-    /// The offset in the joined text of a source offset. An offset between two lines lands on
-    /// the line break.
+    /// An offset between two lines lands on the line break.
     pub(crate) fn to_joined(&self, source: usize) -> usize {
         if self.lines.is_empty() {
             return source.clamp(self.range.start, self.range.end) - self.range.start;

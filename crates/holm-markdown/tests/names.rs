@@ -1,5 +1,3 @@
-//! Tests for tag names.
-
 use holm_markdown::normalize_tag;
 
 #[test]

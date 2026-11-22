@@ -1,4 +1,4 @@
-/// Turns what the user typed into a tag name, or `None` when nothing is left.
+/// `None` when nothing is left of what the user typed.
 ///
 /// - A space becomes `-`.
 /// - `/` makes a child tag, like `work/holm`.

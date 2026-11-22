@@ -1,5 +1,4 @@
-//! Scanners for the inline syntax that has a fixed form: autolinks, raw HTML, link labels,
-//! link destinations and titles. Each takes the text and the offset of its first char.
+//! Each scanner takes the text and the offset of its first char.
 
 use std::borrow::Cow;
 use std::ops::Range;
@@ -208,7 +207,6 @@ pub(super) fn link_label(text: &str, start: usize) -> Option<usize> {
     (is_label(label)).then_some(i + 1)
 }
 
-/// Whether `label` can be the inside of a link label.
 pub(super) fn is_label(label: &str) -> bool {
     let b = label.as_bytes();
     let mut i = 0;
@@ -295,7 +293,6 @@ pub(super) fn inline_link(text: &str, start: usize) -> Option<InlineLink> {
     (b.get(i) == Some(&b')')).then_some(InlineLink { end: i + 1, dest })
 }
 
-/// The text with each backslash escape replaced by its char.
 pub(super) fn unescape(text: &str) -> Cow<'_, str> {
     if !text.contains('\\') {
         return Cow::Borrowed(text);

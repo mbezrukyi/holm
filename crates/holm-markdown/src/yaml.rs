@@ -1,6 +1,6 @@
 //! The small part of YAML that Holm's own fields need.
 
-/// Reads one scalar from the start of `s`. Returns the value and the text after it.
+/// The value at the start of `s`, and the text after it.
 ///
 /// In a flow list, `,` and `]` end a plain scalar.
 pub(crate) fn read_scalar(s: &str, in_flow: bool) -> (String, &str) {
@@ -61,7 +61,7 @@ fn read_plain(s: &str, in_flow: bool) -> (String, &str) {
     (s[..end].trim().to_owned(), &s[end..])
 }
 
-/// Reads the items of a flow list. `s` starts after the `[`.
+/// `s` starts after the `[`.
 pub(crate) fn read_flow_list(s: &str) -> Vec<String> {
     let mut items = Vec::new();
     let mut rest = s;

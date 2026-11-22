@@ -1,7 +1,4 @@
-//! Parses a note into frontmatter, links, tags and styled spans. Restyles inline text for the
-//! format keys, and moves list items for the list keys.
-//!
-//! It does no I/O. The caller reads and writes the files.
+//! The crate does no I/O. The caller reads and writes the files.
 
 mod body;
 mod frontmatter;
@@ -19,7 +16,6 @@ pub use body::{
 pub use note::{LineEnding, NoteFile};
 pub use tag::normalize_tag;
 
-/// An error from `holm-markdown`.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {}

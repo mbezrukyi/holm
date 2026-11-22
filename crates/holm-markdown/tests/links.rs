@@ -1,5 +1,3 @@
-//! Writing link targets and link text, then parsing them back.
-
 use holm_markdown::{Body, Target, escape_text};
 use proptest::prelude::*;
 
