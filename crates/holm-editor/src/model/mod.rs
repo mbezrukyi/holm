@@ -17,7 +17,7 @@ use ropey::{LineType, Rope};
 
 pub(crate) use caret::{Affinity, Caret, Direction, GoalRow, Selection};
 pub(crate) use display::{
-    Cell, Chip, DisplayLine, Embed, Highlight, LineKind, LinkTarget, Look, Mark, Quote, Run, Styles, TextKind,
+    Cell, Chip, DisplayLine, Embed, Highlight, LineKind, LinkTarget, Look, Mark, Quote, Run, Styles, Syntax, TextKind,
 };
 pub(crate) use format::Format;
 pub(crate) use history::Group;
@@ -523,10 +523,13 @@ impl Model {
         start..end
     }
 
-    /// Whether `range` shows its syntax: it has the cursor or touches the selection.
-    fn is_raw(&self, range: &Range<usize>) -> bool {
+    fn syntax_of(&self, range: &Range<usize>) -> Syntax {
         let selection = self.selection();
-        range.start <= selection.end && selection.start <= range.end
+        if range.start <= selection.end && selection.start <= range.end {
+            Syntax::Shown
+        } else {
+            Syntax::Hidden
+        }
     }
 
     /// For the platform text input.
@@ -790,7 +793,7 @@ mod tests {
     fn syntax_hides_away_from_the_cursor_line() {
         let model = model_at("a **b** c\n\nnext", 12);
         let line = model.display_line(0, &mut plain_chip);
-        assert!(!line.raw);
+        assert_eq!(line.syntax, Syntax::Hidden);
         assert_eq!(line.shown.text, "a b c");
         assert_eq!(line.shown.runs.len(), 3);
         assert!(line.shown.runs[1].look.styles.contains(Styles::STRONG));
@@ -804,7 +807,7 @@ mod tests {
     fn syntax_shows_on_the_cursor_line() {
         let model = model_at("a **b** c\n\nnext", 1);
         let line = model.display_line(0, &mut plain_chip);
-        assert!(line.raw);
+        assert_eq!(line.syntax, Syntax::Shown);
         assert_eq!(line.shown.text, "a **b** c");
         assert_eq!(line.shown.runs[1].look.kind, TextKind::Syntax);
         assert_eq!(line.to_source(5), 5);
@@ -814,9 +817,9 @@ mod tests {
     fn a_selection_shows_syntax_on_each_line_it_touches() {
         let mut model = Model::new("**a**\n**b**\n**c**");
         model.select(2..8);
-        assert!(model.display_line(0, &mut plain_chip).raw);
-        assert!(model.display_line(1, &mut plain_chip).raw);
-        assert!(!model.display_line(2, &mut plain_chip).raw);
+        assert_eq!(model.display_line(0, &mut plain_chip).syntax, Syntax::Shown);
+        assert_eq!(model.display_line(1, &mut plain_chip).syntax, Syntax::Shown);
+        assert_eq!(model.display_line(2, &mut plain_chip).syntax, Syntax::Hidden);
     }
 
     #[test]

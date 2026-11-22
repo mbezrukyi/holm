@@ -107,6 +107,13 @@ struct Segment {
     len: usize,
 }
 
+/// A line shows its syntax while it has the cursor or touches the selection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Syntax {
+    Shown,
+    Hidden,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct DisplayLine {
     /// The source line without its hidden syntax.
@@ -114,8 +121,7 @@ pub(crate) struct DisplayLine {
     pub(crate) heading: Option<u8>,
     /// In order. They show under the line.
     pub(crate) images: Vec<String>,
-    /// Whether the line shows its syntax.
-    pub(crate) raw: bool,
+    pub(crate) syntax: Syntax,
     pub(crate) kind: LineKind,
     /// The quotes and callouts, from the outside in.
     pub(crate) quotes: Vec<Quote>,
@@ -195,9 +201,9 @@ impl Model {
         let whole = chain
             .iter()
             .find(|b| matches!(b.kind, BlockKind::Code { .. } | BlockKind::Table { .. }));
-        let raw = match whole {
-            Some(block) => self.is_raw(&block.range),
-            None => self.is_raw(&source),
+        let syntax = match whole {
+            Some(block) => self.syntax_of(&block.range),
+            None => self.syntax_of(&source),
         };
 
         let quotes = chain
@@ -217,13 +223,13 @@ impl Model {
             items = self.lazy_items(line);
         }
 
-        let kind = self.line_kind(line, &source, &chain, raw, &chips);
+        let kind = self.line_kind(line, &source, &chain, syntax, &chips);
         let mut mark = None;
         let mut list_prefix = None;
         if matches!(kind, LineKind::Text) {
             if let Some(item) = items.last().filter(|i| self.line_of(i.range.start) == line) {
                 let (found, end) = self.mark(item);
-                mark = (!raw).then_some(found);
+                mark = (syntax == Syntax::Hidden).then_some(found);
                 list_prefix = Some(source.start..end);
             } else if !items.is_empty() {
                 let text = &self.text[source.clone()];
@@ -237,7 +243,10 @@ impl Model {
                 start: source.start,
                 ..Shown::default()
             },
-            _ => self.shown(&source, from, raw, list_prefix.clone().filter(|_| !raw), &chips),
+            _ => {
+                let extra = list_prefix.clone().filter(|_| syntax == Syntax::Hidden);
+                self.shown(&source, from, syntax, extra, &chips)
+            }
         };
 
         DisplayLine {
@@ -247,7 +256,7 @@ impl Model {
                 _ => None,
             }),
             images,
-            raw,
+            syntax,
             kind,
             quotes,
             depth: items.len(),
@@ -330,7 +339,7 @@ impl Model {
         line: usize,
         source: &Range<usize>,
         chain: &[&Block],
-        raw: bool,
+        syntax: Syntax,
         chips: &[ChipLink<'_>],
     ) -> LineKind {
         for block in chain.iter().rev() {
@@ -338,11 +347,11 @@ impl Model {
                 BlockKind::Code { language, fenced } => {
                     return self.code_kind(line, block, language.as_deref(), *fenced);
                 }
-                BlockKind::Table { alignments } if !raw => {
+                BlockKind::Table { alignments } if syntax == Syntax::Hidden => {
                     return self.table_kind(source, chain[0].range.start, block, alignments, chips);
                 }
-                BlockKind::Rule if !raw => return LineKind::Rule,
-                BlockKind::Callout(kind) if !raw && self.line_of(block.range.start) == line => {
+                BlockKind::Rule if syntax == Syntax::Hidden => return LineKind::Rule,
+                BlockKind::Callout(kind) if syntax == Syntax::Hidden && self.line_of(block.range.start) == line => {
                     return LineKind::CalloutTitle(*kind);
                 }
                 _ => {}
@@ -401,7 +410,7 @@ impl Model {
                 let start = cell.range.start + text.len() - text.trim_start().len();
                 let end = cell.range.start + text.trim_end().len();
                 Cell {
-                    shown: self.shown(&(start..end.max(start)), from, false, None, chips),
+                    shown: self.shown(&(start..end.max(start)), from, Syntax::Hidden, None, chips),
                     alignment,
                 }
             })
@@ -441,13 +450,13 @@ impl Model {
         (mark, end)
     }
 
-    /// The screen text of `range`. Without `raw`, it hides the syntax and `extra`, and shows the `chips` that start in
-    /// `range`.
+    /// The screen text of `range`. With [`Syntax::Hidden`], it hides the syntax and `extra`, and shows the `chips` that
+    /// start in `range`.
     fn shown(
         &self,
         range: &Range<usize>,
         from: usize,
-        raw: bool,
+        syntax: Syntax,
         extra: Option<Range<usize>>,
         chips: &[ChipLink<'_>],
     ) -> Shown {
@@ -473,7 +482,10 @@ impl Model {
         for h in &hidden {
             cuts.extend([h.start, h.end]);
         }
-        let chips: &[ChipLink<'_>] = if raw { &[] } else { chips };
+        let chips: &[ChipLink<'_>] = match syntax {
+            Syntax::Shown => &[],
+            Syntax::Hidden => chips,
+        };
         let mut chips = chips.iter().filter(|chip| range.contains(&chip.range.start)).peekable();
         cuts.extend(chips.clone().map(|chip| chip.range.start));
         cuts.retain(|cut| range.contains(cut) || *cut == range.end);
@@ -489,12 +501,12 @@ impl Model {
             while let Some(chip) = chips.next_if(|chip| chip.range.start <= piece.start) {
                 shown.push_chip(chip, range.end);
             }
-            let syntax = hidden.iter().any(|h| h.start <= piece.start && piece.end <= h.end);
-            if syntax && !raw {
+            let is_syntax = hidden.iter().any(|h| h.start <= piece.start && piece.end <= h.end);
+            if is_syntax && syntax == Syntax::Hidden {
                 continue;
             }
             let mut look = Look {
-                kind: if syntax { TextKind::Syntax } else { TextKind::Content },
+                kind: if is_syntax { TextKind::Syntax } else { TextKind::Content },
                 ..Look::default()
             };
             for span in spans
@@ -690,7 +702,7 @@ mod tests {
         let text = "a\n```rust\nfn x() {}\n```\nb";
         let away = model_at(text, 0);
         let fence = away.display_line(1, &mut plain_chip);
-        assert!(!fence.raw);
+        assert_eq!(fence.syntax, Syntax::Hidden);
         assert!(matches!(fence.kind, LineKind::Code { fence: true, .. }));
         let LineKind::Code {
             language,
@@ -708,8 +720,8 @@ mod tests {
         ));
 
         let inside = model_at(text, 12);
-        assert!(inside.display_line(1, &mut plain_chip).raw);
-        assert!(inside.display_line(3, &mut plain_chip).raw);
+        assert_eq!(inside.display_line(1, &mut plain_chip).syntax, Syntax::Shown);
+        assert_eq!(inside.display_line(3, &mut plain_chip).syntax, Syntax::Shown);
         assert_eq!(inside.display_line(1, &mut plain_chip).shown.text, "```rust");
     }
 
@@ -732,7 +744,7 @@ mod tests {
         let inside = model_at(text, text.find('2').unwrap_or(0));
         for line in 2..=4 {
             let display = inside.display_line(line, &mut plain_chip);
-            assert!(display.raw);
+            assert_eq!(display.syntax, Syntax::Shown);
             assert!(matches!(display.kind, LineKind::Text));
         }
     }

@@ -16,7 +16,9 @@ use super::flow::{ChipBox, FlowLine, Icon};
 use super::theme::{Place, Theme};
 use crate::files::{FileKind, LinkedFiles};
 use crate::highlight::{Highlighter, Tokens};
-use crate::model::{Affinity, Cell, Chip, Direction, DisplayLine, Embed, LineKind, Look, Mark, Model, Run, Styles};
+use crate::model::{
+    Affinity, Cell, Chip, Direction, DisplayLine, Embed, LineKind, Look, Mark, Model, Run, Styles, Syntax,
+};
 
 /// Above and below an image.
 pub(crate) const IMAGE_MARGIN: Pixels = px(4.);
@@ -213,7 +215,7 @@ impl Shaper<'_> {
         let code = matches!(display.kind, LineKind::Code { .. });
         let left = if code {
             block_left + base * 0.75
-        } else if let Some(prefix) = display.prefix.as_ref().filter(|_| display.raw) {
+        } else if let Some(prefix) = display.prefix.as_ref().filter(|_| display.syntax == Syntax::Shown) {
             // The marker hangs to the left, so the text stays where the preview shows it.
             (block_left - self.plain_text_width(&model.text()[prefix.clone()], font_size, window)).max(quote_left)
         } else {
@@ -244,7 +246,7 @@ impl Shaper<'_> {
             images.push(LaidImage { path, bounds });
         }
         if let LineKind::Code { fence: true, .. } = display.kind
-            && !display.raw
+            && display.syntax == Syntax::Hidden
         {
             height = base_height * 0.5;
         }
@@ -296,7 +298,7 @@ impl Shaper<'_> {
         let mut code_font = self.style.font();
         code_font.family = CODE_FONT.into();
         let content = match &display.kind {
-            LineKind::Code { fence: true, .. } if !display.raw => Content::Empty,
+            LineKind::Code { fence: true, .. } if display.syntax == Syntax::Hidden => Content::Empty,
             LineKind::TableRule => Content::Empty,
             LineKind::Rule => return (Content::Empty, line_height),
             LineKind::CalloutTitle(kind) => {
@@ -379,7 +381,11 @@ impl Shaper<'_> {
         };
         let plain = self.theme.text;
         if text.len() != source.len() || source.start < code.start || source.end > code.end {
-            return vec![run(text.len(), if display.raw { self.theme.muted } else { plain })];
+            let color = match display.syntax {
+                Syntax::Shown => self.theme.muted,
+                Syntax::Hidden => plain,
+            };
+            return vec![run(text.len(), color)];
         }
         let tokens: Tokens = self.highlighter.tokens(language, &model.text()[code.clone()]);
         let start = source.start - code.start;
@@ -1064,7 +1070,7 @@ impl Layout {
         let line = self
             .lines
             .iter()
-            .find(|line| line.display.raw && contains_with_end(&line.display.source(), cursor))?;
+            .find(|line| line.display.syntax == Syntax::Shown && contains_with_end(&line.display.source(), cursor))?;
         let at = line.caret(cursor, affinity)?;
         // The cursor is as tall as the text, in the middle of its row.
         let height = (line.font_size * 1.3).min(line.line_height);
@@ -1095,7 +1101,11 @@ impl Layout {
     /// With `raw_only`, only lines that show their syntax.
     fn text_bounds(&self, selection: &Range<usize>, raw_only: bool) -> Vec<Bounds<Pixels>> {
         let mut rects = Vec::new();
-        for line in self.lines.iter().filter(|line| line.display.raw || !raw_only) {
+        for line in self
+            .lines
+            .iter()
+            .filter(|line| line.display.syntax == Syntax::Shown || !raw_only)
+        {
             let Some(text) = line.text() else { continue };
             let source = line.display.source();
             if selection.end < source.start || selection.start > source.end {
