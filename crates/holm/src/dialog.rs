@@ -31,8 +31,14 @@ pub(crate) enum Ask {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Answer {
+    Confirm,
+    Cancel,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Decision {
-    pub(crate) confirm: bool,
+    pub(crate) answer: Answer,
     pub(crate) do_not_ask: bool,
 }
 
@@ -48,7 +54,8 @@ impl Dialog {
     pub(crate) fn new(ask: Ask, then: Then<Decision>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
-        cx.on_release(|dialog: &mut Self, cx| dialog.decide(false, cx)).detach();
+        cx.on_release(|dialog: &mut Self, cx| dialog.decide(Answer::Cancel, cx))
+            .detach();
         Self {
             ask,
             do_not_ask: false,
@@ -66,12 +73,12 @@ impl Dialog {
         }
     }
 
-    fn decide(&mut self, confirm: bool, cx: &mut App) {
+    fn decide(&mut self, answer: Answer, cx: &mut App) {
         let Some(step) = self.then.take() else {
             return;
         };
         let decision = Decision {
-            confirm,
+            answer,
             do_not_ask: self.do_not_ask,
         };
         // The step updates the owner, which may hold this dialog in its own update.
@@ -87,8 +94,8 @@ impl Dialog {
 
     fn run(&mut self, Run(command): &Run, _window: &mut Window, cx: &mut Context<Self>) {
         match command {
-            Command::Yes => self.decide(true, cx),
-            Command::No => self.decide(false, cx),
+            Command::Yes => self.decide(Answer::Confirm, cx),
+            Command::No => self.decide(Answer::Cancel, cx),
             Command::SwitchAsk => self.toggle(cx),
             _ => cx.propagate(),
         }
@@ -138,13 +145,13 @@ impl Render for Dialog {
                         Button::new("cancel")
                             .label(text::CANCEL)
                             .ghost()
-                            .on_click(cx.listener(|dialog, _, _, cx| dialog.decide(false, cx))),
+                            .on_click(cx.listener(|dialog, _, _, cx| dialog.decide(Answer::Cancel, cx))),
                     )
                     .child(
                         Button::new("confirm")
                             .label(confirm)
                             .danger()
-                            .on_click(cx.listener(|dialog, _, _, cx| dialog.decide(true, cx))),
+                            .on_click(cx.listener(|dialog, _, _, cx| dialog.decide(Answer::Confirm, cx))),
                     ),
             );
         popup::layer(cx)

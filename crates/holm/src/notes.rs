@@ -23,7 +23,7 @@ use holm_core::{FolderPath, NotePath, TagName};
 use crate::app_menu::{AppMenu, Picked, Spot};
 use crate::config::{Config, SidebarSettings};
 use crate::core_door::{CoreDoor, Done, JobFailed, NotSaved, Then};
-use crate::dialog::{self, Ask, Dialog};
+use crate::dialog::{self, Answer, Ask, Dialog};
 use crate::error::AppError;
 use crate::link_picker::{LinkPicker, LinkPickerEvent, LinkStart};
 use crate::message_line::MessageLine;
@@ -210,8 +210,8 @@ impl NotesView {
                     to: to.clone(),
                     notes,
                 };
-                this.ask(ask, window, cx, move |this, confirmed, _, cx| {
-                    if !confirmed {
+                this.ask(ask, window, cx, move |this, answer, _, cx| {
+                    if answer == Answer::Cancel {
                         done(Ok(()), cx);
                         return;
                     }
@@ -275,8 +275,8 @@ impl NotesView {
                             tag: tag.clone(),
                             notes,
                         };
-                        this.ask(ask, window, cx, move |this, confirmed, window, cx| {
-                            if confirmed {
+                        this.ask(ask, window, cx, move |this, answer, window, cx| {
+                            if answer == Answer::Confirm {
                                 this.call(
                                     window,
                                     cx,
@@ -293,16 +293,16 @@ impl NotesView {
         }
     }
 
-    /// `then` gets whether the user confirmed. After "Do not show again", a delete confirms with no dialog.
+    /// `then` gets the answer of the user. After "Do not show again", a delete confirms with no dialog.
     fn ask(
         &mut self,
         ask: Ask,
         window: &mut Window,
         cx: &mut Context<Self>,
-        then: impl FnOnce(&mut Self, bool, &mut Window, &mut Context<Self>) + 'static,
+        then: impl FnOnce(&mut Self, Answer, &mut Window, &mut Context<Self>) + 'static,
     ) {
         if ask.can_skip() && !self.config.read(cx).settings().ask_before_delete {
-            then(self, true, window, cx);
+            then(self, Answer::Confirm, window, cx);
             return;
         }
         let decided = window_step(
@@ -312,12 +312,12 @@ impl NotesView {
                 this.dialog = None;
                 this.focus_sidebar(window, cx);
                 cx.notify();
-                if decision.confirm && decision.do_not_ask {
+                if decision.answer == Answer::Confirm && decision.do_not_ask {
                     this.config.update(cx, |config, cx| {
                         config.change(|settings| settings.ask_before_delete = false, cx);
                     });
                 }
-                then(this, decision.confirm, window, cx);
+                then(this, decision.answer, window, cx);
             },
         );
         self.dialog = Some(cx.new(|cx| Dialog::new(ask, decided, window, cx)));
@@ -504,8 +504,8 @@ impl NotesView {
                     Ask::Delete { name, count },
                     window,
                     cx,
-                    move |this, confirmed, window, cx| {
-                        if confirmed {
+                    move |this, answer, window, cx| {
+                        if answer == Answer::Confirm {
                             this.delete(target, window, cx);
                         }
                     },
