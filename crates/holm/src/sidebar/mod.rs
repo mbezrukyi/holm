@@ -831,7 +831,6 @@ impl Sidebar {
             .field
             .as_ref()
             .filter(|naming| Some(&naming.named) == named.as_ref());
-        let editing = field.is_some();
         let label = match field {
             Some(naming) => field_label(&naming.field),
             None => div().flex_1().min_w_0().truncate().child(name).into_any_element(),
@@ -853,7 +852,7 @@ impl Sidebar {
                 }
             }));
         let item = row.item.clone();
-        row_frame(row.depth, editing, cx)
+        row_frame(row.depth, field, cx)
             .id(ElementId::NamedInteger("tree-row".into(), at as u64))
             .role(Role::TreeItem)
             .aria_label(aria)
@@ -880,7 +879,7 @@ impl Sidebar {
         let Some(naming) = &self.field else {
             return div().into_any_element();
         };
-        row_frame(depth, true, cx)
+        row_frame(depth, Some(naming), cx)
             .id("new-folder")
             .role(Role::TreeItem)
             .aria_label(text::NEW_FOLDER)
@@ -1003,8 +1002,8 @@ fn item_label(item: &Item) -> String {
     }
 }
 
-/// The frame of a tree row: its height, its indent, and the bar of an open name field.
-fn row_frame(depth: usize, editing: bool, cx: &App) -> Div {
+/// The frame of a tree row: its height, its indent, and the bar of its open name `field`.
+fn row_frame(depth: usize, field: Option<&Naming>, cx: &App) -> Div {
     let theme = cx.theme();
     h_flex()
         .w_full()
@@ -1012,7 +1011,7 @@ fn row_frame(depth: usize, editing: bool, cx: &App) -> Div {
         .pr_3()
         .pl(px(12.) + px(16.) * depth)
         .gap_2()
-        .when(editing, |row| {
+        .when(field.is_some(), |row| {
             row.relative()
                 .child(div().absolute().left_0().top_0().bottom_0().w(px(2.)).bg(theme.ring))
         })
