@@ -18,7 +18,7 @@ use holm_core::{Core, NotePath, Snapshot};
 /// The editor text of a note, for a write.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum NoteText {
-    /// The new body of the note at `path`. The note keeps its other facts.
+    /// The note keeps its other facts.
     Save { path: NotePath, body: String },
     /// The note after another tool deleted its file: its last facts and its body.
     Restore { info: NoteInfo, body: String },
@@ -45,8 +45,7 @@ impl NoteText {
         }
     }
 
-    /// Saves the body. A save keeps the other facts that the core has for the note. With
-    /// `seen`, the core refuses a save over an outside change after that revision.
+    /// With `seen`, the core refuses a save over an outside change after that revision.
     pub(super) fn write(self, core: &Core, seen: Option<u64>) -> holm_core::Result<()> {
         match self {
             Self::Save { path, body } => core.save(&path, &body, seen).map(drop),
@@ -65,11 +64,12 @@ pub(super) struct DraftSave {
 /// What the end of a write means for the user.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Written {
-    /// The text of the write is on disk.
     Saved,
     /// The write failed, and the draft keeps the text. It is `first` when no other text of the
     /// draft had a failed write.
-    Failed { first: bool },
+    Failed {
+        first: bool,
+    },
     /// The core refused the write of the open text after an outside change. The draft holds
     /// the text, as a disk question does.
     Changed,
@@ -326,7 +326,7 @@ impl Draft {
         if is_open { Written::Changed } else { Written::Stale }
     }
 
-    /// Follows `change` from `source`. `before` is the snapshot before it.
+    /// `before` is the snapshot before `change`.
     pub(super) fn follow(&mut self, source: Source, change: &Change, before: &Snapshot) {
         let texts = self.left.iter_mut().chain(&mut self.open);
         for text in texts.chain(&mut self.reading) {

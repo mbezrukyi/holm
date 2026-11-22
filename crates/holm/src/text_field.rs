@@ -31,7 +31,6 @@ use crate::shortcuts::{Command, Place, Run};
 
 const CARET_WIDTH: Pixels = px(1.);
 
-/// What the field tells its owner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FieldEvent {
     Enter,
@@ -42,7 +41,6 @@ pub(crate) enum FieldEvent {
 pub(crate) struct TextField {
     id: SharedString,
     label: SharedString,
-    /// The muted text of an empty field.
     placeholder: SharedString,
     text: String,
     /// The fixed end of the selection, in bytes.

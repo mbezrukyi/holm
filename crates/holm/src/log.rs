@@ -16,25 +16,22 @@ use crate::text;
 const LINK: &str = "holm.log";
 const DAYS: usize = 7;
 
-/// Where the log goes.
 pub(crate) struct Log {
     /// `holm.log`, or `None` when the log goes to the terminal.
     file: Option<PathBuf>,
 }
 
 impl Log {
-    /// The path of `holm.log`, when the log goes there.
     pub(crate) fn file(&self) -> Option<&Path> {
         self.file.as_deref()
     }
 
-    /// The problem of the log: Holm can't write the log file.
+    /// Holm can't write the log file.
     pub(crate) fn problem(&self) -> Option<&'static str> {
         self.file.is_none().then_some(text::LOG)
     }
 }
 
-/// Starts the log in `dir`, or in the terminal when the file fails.
 pub(crate) fn start(dir: &Path) -> Log {
     let value = std::env::var("HOLM_LOG").ok();
     let level = value.as_deref().and_then(level);
@@ -81,7 +78,6 @@ fn level(value: &str) -> Option<LevelFilter> {
 
 #[cfg(test)]
 impl Log {
-    /// A log that writes to `file`, for tests.
     pub(crate) fn at(file: PathBuf) -> Self {
         Self { file: Some(file) }
     }

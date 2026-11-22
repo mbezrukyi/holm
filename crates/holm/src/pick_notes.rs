@@ -21,7 +21,7 @@ impl PickNotes {
         self.notes.get(at)
     }
 
-    /// The title of each note, in the order of the notes.
+    /// In the order of the notes.
     pub(crate) fn titles(&self) -> impl Iterator<Item = Lowercase<'_>> {
         self.titles.iter()
     }

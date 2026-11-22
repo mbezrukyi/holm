@@ -30,8 +30,7 @@ use crate::window_step::window_step;
 /// Writes a typed name, and ends with the result of the job. It shows the answer of a fail.
 pub(crate) type NameWrite<T> = Rc<dyn Fn(String, Then<Result<T, AppError>>, &mut Window, &mut App)>;
 
-/// What the field tells its owner. After [`NameEvent::Written`] and [`NameEvent::Closed`], the
-/// owner drops the field.
+/// After [`NameEvent::Written`] and [`NameEvent::Closed`], the owner drops the field.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum NameEvent<T> {
     Written(T),
@@ -41,13 +40,11 @@ pub(crate) enum NameEvent<T> {
 
 pub(crate) struct NameField<T> {
     field: Entity<TextField>,
-    /// The name before a rename.
-    start: Option<String>,
+    old_name: Option<String>,
     write: NameWrite<T>,
     /// It gets the focus after `Esc` or the end of the field.
     home: FocusHandle,
-    /// The job of the typed name runs.
-    writing: bool,
+    is_writing: bool,
     _subscription: Subscription,
 }
 
@@ -55,7 +52,6 @@ pub(crate) struct NameField<T> {
 pub(crate) struct Wording {
     pub(crate) id: &'static str,
     pub(crate) label: SharedString,
-    /// The muted text of an empty field.
     pub(crate) placeholder: SharedString,
 }
 
@@ -71,27 +67,27 @@ impl<T: Clone + 'static> NameField<T> {
         Self::open(wording, None, write, home, window, cx)
     }
 
-    /// Opens the field with the name `start`, selected, and gives it the focus.
+    /// Opens the field with the name `old_name`, selected, and gives it the focus.
     pub(crate) fn rename(
         wording: Wording,
-        start: &str,
+        old_name: &str,
         write: NameWrite<T>,
         home: FocusHandle,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        Self::open(wording, Some(start.to_owned()), write, home, window, cx)
+        Self::open(wording, Some(old_name.to_owned()), write, home, window, cx)
     }
 
     fn open(
         wording: Wording,
-        start: Option<String>,
+        old_name: Option<String>,
         write: NameWrite<T>,
         home: FocusHandle,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let text = start.as_deref().unwrap_or_default();
+        let text = old_name.as_deref().unwrap_or_default();
         let field =
             cx.new(|cx| TextField::new(wording.id, wording.label, text, window, cx).placeholder(wording.placeholder));
         let subscription = cx.subscribe_in(&field, window, |this, _, event, window, cx| {
@@ -100,10 +96,10 @@ impl<T: Clone + 'static> NameField<T> {
         window.focus(&field.focus_handle(cx), cx);
         Self {
             field,
-            start,
+            old_name,
             write,
             home,
-            writing: false,
+            is_writing: false,
             _subscription: subscription,
         }
     }
@@ -113,11 +109,11 @@ impl<T: Clone + 'static> NameField<T> {
     }
 
     pub(crate) fn writing(&self) -> bool {
-        self.writing
+        self.is_writing
     }
 
     fn field_event(&mut self, event: FieldEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if self.writing {
+        if self.is_writing {
             return;
         }
         match event {
@@ -136,7 +132,7 @@ impl<T: Clone + 'static> NameField<T> {
 
     fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let name = self.field.read(cx).text().to_owned();
-        if self.start.as_deref() == Some(name.trim()) {
+        if self.old_name.as_deref() == Some(name.trim()) {
             window.focus(&self.home, cx);
             cx.emit(NameEvent::Closed);
             return;
@@ -150,7 +146,7 @@ impl<T: Clone + 'static> NameField<T> {
     }
 
     fn set_writing(&mut self, writing: bool, cx: &mut Context<Self>) {
-        self.writing = writing;
+        self.is_writing = writing;
         self.field.update(cx, |field, _| field.set_locked(writing));
     }
 

@@ -127,7 +127,6 @@ pub(crate) const DELETE: &str = "Delete";
 pub(crate) const CANCEL: &str = "Cancel";
 pub(crate) const DO_NOT_ASK: &str = "Do not show again";
 
-/// The question of the delete dialog.
 pub(crate) fn delete_question(name: &str, notes: usize, files: usize) -> String {
     let notes = count(notes, "note", "notes");
     let what = match files {
@@ -195,9 +194,8 @@ pub(crate) fn create_note(title: &str) -> String {
     format!("Create “{title}”")
 }
 
-// The labels of the app shortcuts in the shortcut list.
 pub(crate) const SETTINGS: &str = "Settings";
-/// The answer to a zoom key: the scale, and whether it is at an end.
+/// The answer to a zoom key.
 pub(crate) fn scale_answer(scale: Scale) -> String {
     let percent = scale.percent();
     if scale.at_end(false) {

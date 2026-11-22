@@ -37,7 +37,6 @@ pub(crate) const APP_ID: &str = "io.github.mbezrukyi.Holm";
 /// Opens the core on a notes folder and an index folder. The app uses [`Core::open`].
 pub(crate) type OpenCore = Arc<dyn Fn(&Path, &Path) -> holm_core::Result<Core> + Send + Sync>;
 
-/// What the window needs from the start of the app.
 pub(crate) struct Startup {
     pub(crate) open_core: OpenCore,
     pub(crate) config: Config,
@@ -89,7 +88,6 @@ pub(crate) struct HolmWindow {
     leaving: bool,
     stage: Stage,
     message_line: Entity<MessageLine>,
-    /// The focus of the window itself.
     focus: FocusHandle,
     _subscriptions: [Subscription; 3],
 }
@@ -98,7 +96,6 @@ enum Stage {
     /// The first start: no notes folder yet.
     Ask,
     Opening,
-    /// Holm can't open the notes folder.
     Failed(PathText),
     Open(Entity<NotesView>),
 }
@@ -162,8 +159,6 @@ impl HolmWindow {
         this
     }
 
-    /// Applies the settings to the window: the problems, the theme, the scale, and the notes
-    /// folder.
     fn config_changed(&mut self, _: Entity<Config>, window: &mut Window, cx: &mut Context<Self>) {
         self.show_problems(cx);
         let settings = self.config.read(cx).settings();
@@ -177,8 +172,8 @@ impl HolmWindow {
         }
     }
 
-    /// A new notes folder in the settings. The open folder writes its text first. A failed
-    /// write keeps the open folder, also in the settings.
+    /// The open folder writes its text first. A failed write keeps the open folder, also in the
+    /// settings.
     fn change_folder(&mut self, folder: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         let Stage::Open(notes) = &self.stage else {
             self.choose(folder, false, window, cx);
@@ -208,7 +203,6 @@ impl HolmWindow {
         notes.update(cx, |notes, cx| notes.leave(left, cx));
     }
 
-    /// Shows the problems of the settings and the log in the message line.
     fn show_problems(&self, cx: &mut Context<Self>) {
         let problems = [self.config.read(cx).problem(), self.log.problem()]
             .into_iter()
@@ -218,8 +212,7 @@ impl HolmWindow {
         self.message_line.update(cx, |line, cx| line.set_problems(problems, cx));
     }
 
-    /// A close of the window: gives whether it may close now. The open notes folder may keep it
-    /// open for unsaved text.
+    /// The open notes folder may keep the window open for unsaved text.
     fn may_close(&self, window: &Window, cx: &mut Context<Self>) -> bool {
         match &self.stage {
             Stage::Open(notes) => notes.update(cx, |notes, cx| notes.may_close(window, cx)),
@@ -227,7 +220,6 @@ impl HolmWindow {
         }
     }
 
-    /// Runs a key of [`Place::Anywhere`]. Other commands go on to the parts under the window.
     fn run_key(&mut self, Run(command): &Run, window: &mut Window, cx: &mut Context<Self>) {
         match command {
             Command::Quit => self.quit(window, cx),
@@ -292,7 +284,6 @@ impl HolmWindow {
         .detach();
     }
 
-    /// Keeps `folder` in the settings and opens it.
     fn choose(&mut self, folder: PathBuf, create: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.config.update(cx, |config, cx| {
             config.change(
@@ -379,8 +370,7 @@ impl HolmWindow {
     }
 }
 
-/// Asks for a folder in the folder picker. It gives `None` when the user cancels or the picker
-/// fails.
+/// Gives `None` when the user cancels or the picker fails.
 pub(crate) fn pick_folder(cx: &App) -> impl Future<Output = Option<PathBuf>> + 'static {
     let paths = cx.prompt_for_paths(PathPromptOptions {
         files: false,

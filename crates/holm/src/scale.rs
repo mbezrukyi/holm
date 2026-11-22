@@ -1,11 +1,11 @@
 //! The scale of the app: how much bigger or smaller Holm draws the whole window than the
 //! desktop scale. The steps live here, and nothing else knows them.
 
-/// One of the steps of the scale. The default is 100 %.
+/// One of the steps of the scale.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Scale(u16);
 
-/// The steps, the smallest first, with their labels in the settings.
+/// The smallest first, with their labels in the settings.
 const STEPS: [(Scale, &str); 8] = [
     (Scale(80), "80"),
     (Scale(90), "90"),
@@ -24,7 +24,7 @@ impl Default for Scale {
 }
 
 impl Scale {
-    /// The step of `percent`. A value that is not a step gives the default.
+    /// A value that is not a step gives the default.
     pub(crate) fn from_percent(percent: i64) -> Self {
         STEPS
             .iter()
@@ -42,7 +42,7 @@ impl Scale {
         f32::from(self.0) / 100.
     }
 
-    /// The steps with their labels, the smallest first.
+    /// The smallest first.
     pub(crate) fn options() -> &'static [(Self, &'static str)] {
         &STEPS
     }
@@ -54,7 +54,6 @@ impl Scale {
         STEPS.get(next).map(|(step, _)| *step)
     }
 
-    /// Whether the scale is at its end in that direction.
     pub(crate) fn at_end(self, bigger: bool) -> bool {
         self.step(bigger).is_none()
     }

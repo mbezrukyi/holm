@@ -48,7 +48,7 @@ impl ProblemList {
         &self.problems
     }
 
-    /// Shows `problems`. With none, the list closes.
+    /// With none, the list closes.
     pub(crate) fn set_problems(&mut self, problems: Vec<SharedString>, cx: &mut Context<Self>) {
         if self.problems != problems {
             self.cursor = self.cursor.min(problems.len().saturating_sub(1));
@@ -58,7 +58,7 @@ impl ProblemList {
         }
     }
 
-    /// Opens the list, or closes it when it is open. With no problems, it does nothing.
+    /// With no problems, it does nothing.
     pub(crate) fn toggle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.open {
             self.close(window, cx);

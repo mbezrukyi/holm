@@ -15,7 +15,6 @@ use crate::popup::{self, PickEvent, PickList, PickRow};
 use crate::sidebar::Target;
 use crate::text;
 
-/// The result of the picker.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PickerEvent {
     Move { target: Target, folder: FolderPath },
@@ -33,9 +32,8 @@ pub(crate) struct FolderPicker {
 }
 
 impl FolderPicker {
-    /// A picker for `target`, over `folders`. It leaves out the folder of the target.
-    /// For a folder move, it also leaves out that folder and its children. The field gets the
-    /// focus.
+    /// It leaves out the folder of the target. For a folder move, it also leaves out that folder
+    /// and its children. The field gets the focus.
     pub(crate) fn new(target: Target, folders: &[FolderPath], window: &mut Window, cx: &mut Context<Self>) -> Self {
         let (home, inside) = match &target {
             Target::Note(path) => (Some(path.folder().clone()), None),

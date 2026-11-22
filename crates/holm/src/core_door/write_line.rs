@@ -43,14 +43,13 @@ impl IntoFuture for Wake {
     }
 }
 
-/// One job of the line. Its number grows with each job.
+/// Its number grows with each job.
 struct Job<E> {
     number: u64,
     work: Work,
     end: E,
 }
 
-/// The job whose work runs.
 struct RunningJob<E> {
     number: u64,
     end: E,
@@ -67,8 +66,7 @@ pub(super) struct WriteLine<E> {
     changes: ChangeLists,
     jobs: VecDeque<Job<E>>,
     next_number: u64,
-    /// The number of the last job that ended.
-    ended: u64,
+    last_ended: u64,
     /// The last job that is past its budget, until it ends.
     late: Option<u64>,
     /// The work that left the line. Its thread holds the lock while it runs, so the drain
@@ -80,14 +78,14 @@ pub(super) struct WriteLine<E> {
 }
 
 impl<E> WriteLine<E> {
-    /// The line of `core`. `changes` are the change lists of `core`.
+    /// `changes` are the change lists of `core`.
     pub(super) fn new(core: Core, changes: ChangeLists) -> Self {
         Self {
             core,
             changes,
             jobs: VecDeque::new(),
             next_number: 1,
-            ended: 0,
+            last_ended: 0,
             late: None,
             work: Arc::default(),
             running: None,
@@ -95,7 +93,6 @@ impl<E> WriteLine<E> {
         }
     }
 
-    /// Puts a job at the end of the line, and gives its number.
     pub(super) fn push(&mut self, work: Work, end: E) -> u64 {
         let number = self.next_number;
         self.next_number += 1;
@@ -119,11 +116,11 @@ impl<E> WriteLine<E> {
                 break;
             }
             let wait = until
-                .filter(|until| self.ended < *until)
+                .filter(|until| self.last_ended < *until)
                 .map(|_| deadline.saturating_duration_since(Instant::now()));
             let Some(ran) = self.wait(wait, cx) else {
                 if let Some(until) = until
-                    && self.ended < until
+                    && self.last_ended < until
                     && self.late < Some(until)
                 {
                     self.late = Some(until);
@@ -217,8 +214,8 @@ impl<E> WriteLine<E> {
     /// A late job is no longer late once it ends.
     fn end(&mut self, ran: bool) -> Option<Ended<E>> {
         let job = self.running.take()?;
-        self.ended = job.number;
-        if self.late.is_some_and(|late| late <= self.ended) {
+        self.last_ended = job.number;
+        if self.late.is_some_and(|late| late <= self.last_ended) {
             self.late = None;
         }
         ran.then(|| Ended {

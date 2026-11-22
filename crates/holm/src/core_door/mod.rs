@@ -52,18 +52,16 @@ mod write_line;
 /// Each job sends one, also a failed job.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DoorEvent {
-    /// The changes of every revision up to [`CoreDoor::snapshot`], in order, each with
-    /// its source. It is empty when the snapshot did not change.
+    /// The changes of every revision up to [`CoreDoor::snapshot`], in order. It is empty when the
+    /// snapshot did not change.
     changes: Vec<(Source, Change)>,
 }
 
 impl DoorEvent {
-    /// Every change, in order.
     pub(crate) fn changes(&self) -> impl Iterator<Item = &Change> {
         self.changes.iter().map(|(_, change)| change)
     }
 
-    /// Every change with its source, in order.
     pub(crate) fn sourced(&self) -> impl Iterator<Item = (Source, &Change)> {
         self.changes.iter().map(|(source, change)| (*source, change))
     }
@@ -81,7 +79,7 @@ pub(crate) type Then<R> = Box<dyn FnOnce(R, &mut App)>;
 pub(crate) struct Done<T>(Then<Result<T, AppError>>);
 
 impl<T: 'static> Done<T> {
-    /// `step` gets the value. After a failure, it does not run.
+    /// After a failure, `step` does not run.
     pub(crate) fn value(step: impl FnOnce(T, &mut App) + 'static) -> Self {
         Self(Box::new(move |result, cx| {
             if let Ok(value) = result {
@@ -90,8 +88,7 @@ impl<T: 'static> Done<T> {
         }))
     }
 
-    /// `step` gets the result. A failure also sends its [`JobFailed`], so the step does not
-    /// show it.
+    /// A failure also sends its [`JobFailed`], so `step` does not show it.
     pub(crate) fn result(step: impl FnOnce(Result<T, AppError>, &mut App) + 'static) -> Self {
         Self(Box::new(step))
     }
@@ -105,9 +102,8 @@ pub(crate) struct JobFailed(pub(crate) &'static str);
 /// The end of a write of the draft. It comes after the [`DoorEvent`] of the write.
 #[derive(Debug)]
 pub(crate) enum SaveEvent {
-    /// The text of the write is on disk.
     Saved,
-    /// The write failed. The draft keeps the text, and the next job writes it again.
+    /// The draft keeps the text, and the next job writes it again.
     Failed,
     /// The core refused the write of the open note after an outside change. The draft holds
     /// the text, as a disk question does.
@@ -138,9 +134,8 @@ pub(crate) struct CoreDoor {
 }
 
 impl CoreDoor {
-    /// The door to the notes folder at `root`, which `core` opened. A call waits up to `budget`
-    /// for its job. The write line drains when `window` closes, when the app quits, or when the
-    /// entity goes.
+    /// `core` opened the notes folder at `root`. The write line drains when `window` closes, when
+    /// the app quits, or when the entity goes.
     pub(crate) fn new(core: Core, root: PathBuf, budget: Duration, window: &Window, cx: &mut Context<Self>) -> Self {
         cx.on_release(|door, _| door.drain()).detach();
         // The platform window can keep views alive after a close, and with them this entity.
@@ -171,12 +166,12 @@ impl CoreDoor {
         }
     }
 
-    /// The path of the notes folder, as the user chose it.
+    /// As the user chose it.
     pub(crate) fn root(&self) -> &Path {
         &self.root
     }
 
-    /// The facts of the notes folder. It is never older than a write that ended.
+    /// It is never older than a write that ended.
     pub(crate) fn snapshot(&self) -> &Snapshot {
         &self.snapshot
     }
@@ -213,7 +208,7 @@ impl CoreDoor {
         self.save_text(cx);
     }
 
-    /// The version of the draft. It grows with each new editor text.
+    /// It grows with each new editor text.
     pub(crate) fn draft_version(&self) -> u64 {
         self.draft.version()
     }
@@ -256,7 +251,7 @@ impl CoreDoor {
         self.run(Some(number), cx);
     }
 
-    /// Reads the note at `path`, after the writes before it.
+    /// After the writes before it.
     pub(crate) fn read(&mut self, path: NotePath, done: Done<Note>, cx: &mut Context<Self>) {
         self.job(move |core| core.read(&path), done, cx);
     }
@@ -282,7 +277,6 @@ impl CoreDoor {
         self.job(|_| Ok(()), done, cx);
     }
 
-    /// Gives the note at `path` a new title, and gives its new path.
     pub(crate) fn rename_note(&mut self, path: NotePath, title: String, done: Done<NotePath>, cx: &mut Context<Self>) {
         self.job(
             move |core| core.rename_note(&path, &title).map(|info| info.path),
@@ -291,7 +285,6 @@ impl CoreDoor {
         );
     }
 
-    /// Adds or removes one tag of the note at `path`.
     pub(crate) fn change_tag(&mut self, path: NotePath, change: TagChange, done: Done<()>, cx: &mut Context<Self>) {
         self.job(
             move |core| {
@@ -306,12 +299,10 @@ impl CoreDoor {
         );
     }
 
-    /// Pins or unpins the note at `path`.
     pub(crate) fn set_pinned(&mut self, path: NotePath, pinned: bool, done: Done<()>, cx: &mut Context<Self>) {
         self.job(move |core| core.set_pinned(&path, pinned).map(drop), done, cx);
     }
 
-    /// Creates the note `title` in `folder`, with `tag` when it has one, and gives the note.
     pub(crate) fn create_note(
         &mut self,
         folder: FolderPath,
@@ -336,7 +327,7 @@ impl CoreDoor {
         );
     }
 
-    /// Creates the note `title` in `folder`, and gives its id for a link.
+    /// Gives the id of the new note, for a link.
     pub(crate) fn create_linked_note(
         &mut self,
         folder: FolderPath,
@@ -354,7 +345,7 @@ impl CoreDoor {
         );
     }
 
-    /// The id of the note at `path`, for a link. A note with no id gets one.
+    /// A note with no id gets one.
     pub(crate) fn link_id(&mut self, path: NotePath, done: Done<String>, cx: &mut Context<Self>) {
         self.job(move |core| core.link_id(&path).map(|id| id.to_string()), done, cx);
     }
@@ -411,17 +402,17 @@ impl CoreDoor {
         self.job(move |core| core.delete_folder(&path), done, cx);
     }
 
-    /// What a delete of the note at `path` removes, after the writes before it.
+    /// After the writes before it.
     pub(crate) fn note_delete_count(&mut self, path: NotePath, done: Done<DeleteCount>, cx: &mut Context<Self>) {
         self.job(move |core| Ok(core.note_delete_count(&path)), done, cx);
     }
 
-    /// What a delete of the folder at `path` removes, after the writes before it.
+    /// After the writes before it.
     pub(crate) fn folder_delete_count(&mut self, path: FolderPath, done: Done<DeleteCount>, cx: &mut Context<Self>) {
         self.job(move |core| Ok(core.folder_delete_count(&path)), done, cx);
     }
 
-    /// Renames a tag in all notes, and gives the number of changed notes.
+    /// Gives the number of changed notes.
     pub(crate) fn rename_tag(&mut self, from: TagName, to: TagName, done: Done<usize>, cx: &mut Context<Self>) {
         self.job(move |core| core.rename_tag(&from, &to), done, cx);
     }
@@ -446,7 +437,7 @@ impl CoreDoor {
         );
     }
 
-    /// Removes a tag from all notes, and gives the number of changed notes.
+    /// Gives the number of changed notes.
     pub(crate) fn delete_tag(&mut self, tag: TagName, done: Done<usize>, cx: &mut Context<Self>) {
         self.job(move |core| core.delete_tag(&tag), done, cx);
     }
@@ -501,8 +492,7 @@ impl CoreDoor {
         })
     }
 
-    /// The notes that match `query`, in `order`. It does not wait for the line. A failed
-    /// search gives `None`.
+    /// It does not wait for the line. A failed search gives `None`.
     pub(crate) fn search(&self, query: String, order: Order, cx: &mut Context<Self>) -> Task<Option<SearchResults>> {
         let job = self.look(move |core| core.search(&query, order), cx);
         cx.spawn(async move |door, cx| {
@@ -511,8 +501,7 @@ impl CoreDoor {
         })
     }
 
-    /// The headings of the note at `path`. It does not wait for the line. After a failure, it
-    /// gives none.
+    /// It does not wait for the line. After a failure, it gives none.
     pub(crate) fn headings(&self, path: NotePath, cx: &App) -> Task<Vec<String>> {
         self.look(move |core| logged(core.headings(&path), "cannot read the headings"), cx)
     }
@@ -596,7 +585,6 @@ impl CoreDoor {
         self.write_line.push(work, end);
     }
 
-    /// Puts `job` at the end of the write line, and gives its number.
     fn push<T: Send + 'static>(
         &mut self,
         job: impl FnOnce(&Core) -> holm_core::Result<T> + Send + 'static,
@@ -735,7 +723,6 @@ fn logged<T: Default>(result: holm_core::Result<T>, what: &'static str) -> T {
     })
 }
 
-/// Logs `error` and sends its answer.
 fn answer(error: &AppError, cx: &mut Context<CoreDoor>) {
     tracing::warn!(error = %crate::chain(error), "a job failed");
     cx.emit(JobFailed(error.message()));
@@ -753,7 +740,7 @@ fn each_answered<T>(results: Vec<holm_core::Result<T>>, cx: &mut Context<CoreDoo
     results.into_iter().map(|result| answered(result, cx).ok()).collect()
 }
 
-/// Opens the core and gives the note to show first, if any. `create` makes the folder first.
+/// `create` makes the folder first.
 pub(crate) fn open(
     open: &dyn Fn(&Path, &Path) -> holm_core::Result<Core>,
     folder: &Path,

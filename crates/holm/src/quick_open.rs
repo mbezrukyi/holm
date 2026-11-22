@@ -16,14 +16,12 @@ use crate::pick_notes::PickNotes;
 use crate::popup::{self, PickEvent, PickList, PickRow};
 use crate::text;
 
-/// The result of the window.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum QuickOpenEvent {
     Open(NotePath),
     Close,
 }
 
-/// The most rows the window shows.
 const MAX_ROWS: usize = 50;
 
 pub(crate) struct QuickOpen {
@@ -35,7 +33,7 @@ pub(crate) struct QuickOpen {
 }
 
 impl QuickOpen {
-    /// Quick open over `notes`, in their order. The field gets the focus.
+    /// The rows keep the order of `notes`. The field gets the focus.
     pub(crate) fn new(notes: Vec<NoteInfo>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let list = cx.new(|cx| PickList::new(text::QUICK_OPEN, text::NO_MATCH, window, cx));
         let subscription = cx.subscribe(&list, |this, _, event: &PickEvent, cx| match event {

@@ -36,7 +36,6 @@ pub(crate) fn layer(cx: &App) -> Div {
         .bg(cx.theme().overlay)
 }
 
-/// The panel in the layer, `width` wide.
 pub(crate) fn panel(width: Pixels, cx: &App) -> Div {
     let theme = cx.theme();
     v_flex()
@@ -47,15 +46,12 @@ pub(crate) fn panel(width: Pixels, cx: &App) -> Div {
         .rounded(theme.radius)
 }
 
-/// The height of a [`PickList`] row.
 const ROW_HEIGHT: Pixels = px(30.);
-/// The inset of the rows from the edges of the list.
 const LIST_INSET: Pixels = px(4.);
-/// The most height of the rows of a [`PickList`]. A longer list scrolls.
-const LIST_HEIGHT: Pixels = px(300.);
+/// A longer list scrolls.
+const MAX_LIST_HEIGHT: Pixels = px(300.);
 
-/// A row of a [`PickList`]: a label, and some detail on the right in a muted color. A long
-/// label or detail ends in "…".
+/// The detail sits on the right in a muted color. A long label or detail ends in "…".
 #[derive(Clone)]
 pub(crate) struct PickRow {
     label: SharedString,
@@ -72,8 +68,7 @@ impl PickRow {
         }
     }
 
-    /// The row of a note: its title, and its folder as the detail. A note in the root folder
-    /// has no detail.
+    /// The detail is the folder of the note. A note in the root folder has no detail.
     pub(crate) fn note(note: &NoteInfo) -> Self {
         Self {
             detail: folder(&note.path),
@@ -125,7 +120,6 @@ fn folder(note: &NotePath) -> Option<SharedString> {
     (!folder.is_root()).then(|| text::folder_label(folder).into())
 }
 
-/// What a [`PickList`] tells its owner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PickEvent {
     /// The text of the field changed. The owner gives new rows with [`PickList::set_rows`].
@@ -176,17 +170,16 @@ impl PickList {
         }
     }
 
-    /// The text of the field.
     pub(crate) fn query(&self, cx: &App) -> SharedString {
         self.field.read(cx).value()
     }
 
-    /// Puts `query` in the field. It sends no [`PickEvent::Query`].
+    /// It sends no [`PickEvent::Query`].
     pub(crate) fn set_query(&self, query: String, window: &mut Window, cx: &mut Context<Self>) {
         self.field.update(cx, |field, cx| field.set_value(query, window, cx));
     }
 
-    /// Shows `rows`, with the cursor on the first one.
+    /// The cursor goes to the first one.
     pub(crate) fn set_rows(&mut self, rows: Vec<PickRow>, cx: &mut Context<Self>) {
         self.rows = rows.into();
         self.cursor = 0;
@@ -194,7 +187,7 @@ impl PickList {
         cx.notify();
     }
 
-    /// The place of the row under the cursor, or `None` when the list has no rows.
+    /// `None` when the list has no rows.
     pub(crate) fn cursor(&self) -> Option<usize> {
         (self.cursor < self.rows.len()).then_some(self.cursor)
     }
@@ -224,7 +217,7 @@ impl PickList {
     fn list(&self, cx: &Context<Self>) -> Stateful<Div> {
         let count = self.rows.len();
         let full = ROW_HEIGHT * count + LIST_INSET * 2.;
-        let scrolls = full > LIST_HEIGHT;
+        let scrolls = full > MAX_LIST_HEIGHT;
         let rows = uniform_list(
             "rows",
             count,
@@ -256,7 +249,7 @@ impl PickList {
             .id("list")
             .role(Role::ListBox)
             .relative()
-            .h(full.min(LIST_HEIGHT))
+            .h(full.min(MAX_LIST_HEIGHT))
             .when(scrolls, |list| list.pr(Scrollbar::width()))
             .child(rows)
             .when(scrolls, |list| {
@@ -341,8 +334,8 @@ pub(crate) struct Dropdown<T> {
     close: fn(&mut T, &mut Window, &mut Context<T>),
     /// The window bounds of the opener in the last frame.
     opener: Rc<Cell<Bounds<Pixels>>>,
-    /// Whether the popup had the focus in the last frame.
-    held: Rc<Cell<bool>>,
+    /// In the last frame.
+    had_focus: Rc<Cell<bool>>,
     _focus: [Subscription; 2],
 }
 
@@ -355,15 +348,15 @@ impl<T: 'static> Dropdown<T> {
         cx: &mut Context<T>,
     ) -> Self {
         let focus = cx.focus_handle();
-        let held = Rc::new(Cell::new(false));
+        let had_focus = Rc::new(Cell::new(false));
         let focus_in = cx.on_focus_in(&focus, window, {
-            let held = held.clone();
-            move |_, _, _| held.set(true)
+            let had_focus = had_focus.clone();
+            move |_, _, _| had_focus.set(true)
         });
         let focus_out = cx.on_focus_out(&focus, window, {
-            let held = held.clone();
+            let had_focus = had_focus.clone();
             move |_, event, window, cx| {
-                held.set(false);
+                had_focus.set(false);
                 // GPUI calls this during a draw. A notify there asks for no new frame.
                 cx.defer_in(window, close);
                 // The focus still names the blurred part when the frame no longer has it.
@@ -376,7 +369,7 @@ impl<T: 'static> Dropdown<T> {
             focus,
             close,
             opener: Rc::default(),
-            held,
+            had_focus,
             _focus: [focus_in, focus_out],
         }
     }
@@ -410,17 +403,16 @@ impl<T: 'static> Dropdown<T> {
             .relative()
     }
 
-    /// The popup panel under the opener, `width` wide. The owner places it to the left or to
-    /// the right.
+    /// Under the opener. The owner places it to the left or to the right.
     pub(crate) fn panel(&self, width: Pixels, window: &Window, cx: &Context<T>) -> Div {
         self.frame(width, window, cx).absolute().top_full().mt_1()
     }
 
-    /// The popup panel, `width` wide, with no place. The owner places it.
+    /// With no place: the owner places it.
     pub(crate) fn frame(&self, width: Pixels, window: &Window, cx: &Context<T>) -> Div {
         // GPUI tells about a focus move only after the next frame. This hides the panel in
         // that frame already.
-        let left = self.held.get() && !self.focus.contains_focused(window, cx);
+        let left = self.had_focus.get() && !self.focus.contains_focused(window, cx);
         let opener = self.opener.clone();
         let close = self.close;
         panel(width, cx)

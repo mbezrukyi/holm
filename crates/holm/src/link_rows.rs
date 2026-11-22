@@ -6,7 +6,6 @@
 use crate::lowercase::Lowercase;
 use crate::pick_notes::PickNotes;
 
-/// What the field asks for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Query<'a> {
     Titles(&'a str),
@@ -18,8 +17,8 @@ pub(crate) enum Query<'a> {
 }
 
 impl<'a> Query<'a> {
-    /// Reads the field. The first `#` whose text before it is a whole title switches to
-    /// headings. So "C# notes" stays a title, unless a note has the title "C".
+    /// The first `#` whose text before it is a whole title switches to headings. So "C# notes" stays a
+    /// title, unless a note has the title "C".
     pub(crate) fn parse(text: &'a str, notes: &PickNotes) -> Self {
         if let Some(filter) = text.strip_prefix('#') {
             return Self::Headings { note: None, filter };
@@ -48,8 +47,7 @@ impl<'a> Query<'a> {
     }
 }
 
-/// The most note rows the picker shows. The list lays out each row it has, so more rows cost
-/// time with each key.
+/// The list lays out each row it has, so more rows cost time with each key.
 const MAX_NOTES: usize = 50;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -61,7 +59,7 @@ pub(crate) enum LinkRow {
     Create(String),
 }
 
-/// The rows for `query`. `headings` are those of the note that the query names.
+/// `headings` are those of the note that the query names.
 ///
 /// Titles keep the order of `notes` with an empty query. Else the best match comes first.
 /// Only the first [`MAX_NOTES`] titles show. When no title is the query itself, the last row

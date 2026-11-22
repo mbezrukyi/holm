@@ -25,16 +25,15 @@ use crate::name_field::{NameEvent, NameField, NameWrite, Wording};
 use crate::text;
 use crate::text_field;
 
-/// The widest the folders get. More folders are cut from the left.
-const FOLDERS_WIDTH: Pixels = px(240.);
+/// More folders are cut from the left.
+const MAX_FOLDERS_WIDTH: Pixels = px(240.);
 
 const TEXT_SIZE: Pixels = px(12.);
 
-/// The line height of the path. It sets the place of the path in the middle of the tag row.
+/// The line height of the path sets its place in the middle of the tag row.
 const LINE_HEIGHT: Pixels = px(14.);
 
 pub(crate) struct TitleField<T> {
-    /// The path of the open note.
     path: Option<NotePath>,
     write: NameWrite<T>,
     home: FocusHandle,
@@ -52,7 +51,6 @@ impl<T: Clone + 'static> TitleField<T> {
         }
     }
 
-    /// Shows the path of the open note.
     pub(crate) fn show(&mut self, path: Option<NotePath>, cx: &mut Context<Self>) {
         if self.path != path {
             self.path = path;
@@ -96,7 +94,6 @@ impl<T: Clone + 'static> TitleField<T> {
         cx.notify();
     }
 
-    /// Closes the field and shows the title again.
     pub(crate) fn close(&mut self, cx: &mut Context<Self>) {
         if self.field.take().is_some() {
             cx.notify();
@@ -130,7 +127,7 @@ impl<T: Clone + 'static> Render for TitleField<T> {
         let folders = (!folders.is_empty()).then(|| {
             div()
                 .min_w_0()
-                .max_w(FOLDERS_WIDTH)
+                .max_w(MAX_FOLDERS_WIDTH)
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .text_ellipsis_start()

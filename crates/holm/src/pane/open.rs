@@ -8,7 +8,6 @@ use super::{NotePane, step};
 use crate::core_door::Then;
 use crate::window_step::window_step;
 
-/// The opens of the pane.
 #[derive(Default)]
 pub(super) struct Opens {
     last: u64,
@@ -19,7 +18,7 @@ pub(super) struct Opens {
 pub(super) struct Open(u64);
 
 impl Opens {
-    /// Starts a new open. The steps of all older opens do nothing from now on.
+    /// The steps of all older opens do nothing from now on.
     pub(super) fn start(&mut self) -> Open {
         self.last += 1;
         Open(self.last)

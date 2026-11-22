@@ -47,7 +47,6 @@ enum Row {
     IndentLists,
 }
 
-/// The places of the cursor, in order.
 const ROWS: [Row; 8] = [
     Row::Folder,
     Row::Theme,
@@ -65,19 +64,17 @@ const THEMES: [(AppearanceSetting, &str); 3] = [
     (AppearanceSetting::Dark, text::THEME_DARK),
 ];
 
-/// The height of an option button inside its frame: the height of a small button.
+/// The height of a small button.
 const BUTTON_HEIGHT: Pixels = px(22.);
 
-/// The size of the path in the folder button: the size of a path chip.
+/// The text size of the path in the folder button: the size of a path chip.
 const PATH_SIZE: Pixels = px(12.5);
 
 /// Whether the text width is limited.
 const WIDTHS: [(bool, &str); 2] = [(false, text::WIDTH_FULL), (true, text::WIDTH_LIMITED)];
 
-/// The most digits of a width.
-const CHARS_DIGITS: usize = 3;
+const MAX_CHARS_DIGITS: usize = 3;
 
-/// The space between the border of the width box and its text.
 const CHARS_BOX_PAD: Pixels = px(5.);
 
 /// The height of a row of options with its frame. The text width row keeps it with or without
@@ -103,7 +100,6 @@ impl Row {
         }
     }
 
-    /// The switch of a writing help row.
     fn switch(self, help: &mut WritingHelp) -> Option<&mut bool> {
         match self {
             Self::FormatKeys => Some(&mut help.format_keys),
@@ -114,7 +110,7 @@ impl Row {
     }
 }
 
-/// The option after or before `current` in `options`. It wraps at the ends.
+/// It wraps at the ends.
 fn next_option<T: Copy + PartialEq>(options: &[(T, &str)], current: T, forward: bool) -> T {
     let at = options.iter().position(|(option, _)| *option == current);
     let at = list_cursor::step(at, options.len(), forward, |_| true).unwrap_or(0);
@@ -130,7 +126,7 @@ struct CharsDraft {
 }
 
 impl CharsDraft {
-    /// The width `chars`, which the next digit replaces.
+    /// The next digit replaces the whole width.
     fn new(chars: u16) -> Self {
         Self {
             text: chars.to_string(),
@@ -145,7 +141,7 @@ impl CharsDraft {
             self.text.clear();
             self.fresh = false;
         }
-        if self.text.len() < CHARS_DIGITS {
+        if self.text.len() < MAX_CHARS_DIGITS {
             self.text.push(digit);
         }
     }
@@ -155,7 +151,6 @@ impl CharsDraft {
         self.text.pop();
     }
 
-    /// The width, when the text is a number.
     fn chars(&self) -> Option<i64> {
         self.text.parse().ok()
     }
@@ -163,16 +158,15 @@ impl CharsDraft {
 
 pub(crate) struct SettingsDialog {
     config: Entity<Config>,
-    /// The place of the cursor in [`ROWS`].
+    /// An index into [`ROWS`].
     cursor: usize,
     focus: FocusHandle,
-    /// The width on the text width row.
     chars: CharsDraft,
     _config: Subscription,
 }
 
 impl SettingsDialog {
-    /// The dialog with the cursor on the first row. It takes the focus.
+    /// It takes the focus.
     pub(crate) fn new(config: Entity<Config>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
@@ -187,7 +181,6 @@ impl SettingsDialog {
         }
     }
 
-    /// The width of the settings again, as a fresh draft.
     fn reset_chars(&mut self, cx: &App) {
         self.chars = CharsDraft::new(self.config.read(cx).settings().text_width.chars());
     }
@@ -222,8 +215,7 @@ impl SettingsDialog {
         self.config.update(cx, |config, cx| config.change(change, cx));
     }
 
-    /// Opens the folder picker. The picked folder goes to the settings, also after the dialog
-    /// closes.
+    /// The picked folder goes to the settings, also after the dialog closes.
     fn pick_folder(&self, cx: &mut Context<Self>) {
         let picked = window::pick_folder(cx);
         let config = self.config.downgrade();
@@ -243,7 +235,7 @@ impl SettingsDialog {
         ROWS[self.cursor]
     }
 
-    /// Moves the cursor to the next or the previous row. The width shows the settings again.
+    /// The width shows the settings again.
     fn move_cursor(&mut self, forward: bool, cx: &mut Context<Self>) {
         if let Some(at) = list_cursor::step(Some(self.cursor), ROWS.len(), forward, |_| true) {
             self.cursor = at;
@@ -252,7 +244,7 @@ impl SettingsDialog {
         }
     }
 
-    /// Picks the next or the previous option of the row. The options wrap.
+    /// The options wrap.
     fn pick_option(&mut self, forward: bool, cx: &mut App) {
         match self.row() {
             Row::Theme => self.change(
@@ -410,12 +402,11 @@ impl SettingsDialog {
     }
 }
 
-/// The width of the width box: 3 digits of the small text, the caret, the padding and the
-/// border.
+/// 3 digits of the small text, the caret, the padding and the border.
 fn chars_box_width(window: &Window) -> Pixels {
     let style = window.text_style();
     let font_size = rems(0.875).to_pixels(window.rem_size());
-    let digits = "0".repeat(CHARS_DIGITS);
+    let digits = "0".repeat(MAX_CHARS_DIGITS);
     let run = style.to_run(digits.len());
     let digits = window
         .text_system()
@@ -425,8 +416,7 @@ fn chars_box_width(window: &Window) -> Pixels {
     (digits + px(2.) + CHARS_BOX_PAD * 2. + px(2.)).ceil()
 }
 
-/// The format keys the settings show, from the editor key table: Bold, Italic, and the
-/// headings in one chip, like `Ctrl+1–6`.
+/// From the editor key table: Bold, Italic, and the headings in one chip, like `Ctrl+1–6`.
 fn format_keys() -> Vec<String> {
     let keys = |command| {
         editor::shortcuts()
@@ -446,12 +436,12 @@ fn format_keys() -> Vec<String> {
     chips
 }
 
-/// The text of `keys`, like `Ctrl+B`, as the shortcut list shows it.
+/// Like `Ctrl+B`, as the shortcut list shows it.
 fn keys_text(keys: Keys) -> String {
     Kbd::format(&shortcuts::keystroke(keys))
 }
 
-/// The key chips of the format keys row, then a muted "…" for the other keys.
+/// The format key chips, then a muted "…" for the other keys.
 fn format_key_chips(cx: &App) -> impl IntoElement + use<> {
     let theme = cx.theme();
     let chips = format_keys().into_iter().enumerate().map(|(at, keys)| {
@@ -479,7 +469,7 @@ fn format_key_chips(cx: &App) -> impl IntoElement + use<> {
         .child(div().text_xs().text_color(theme.muted_foreground).child("…"))
 }
 
-/// The buttons of a row with options, in one frame. A click picks the option.
+/// A click picks the option.
 ///
 /// The frame draws the outer border, and a line lies between each two buttons. The buttons
 /// have no border, so the chosen one is as wide as the others. Its fill stays inside the outer

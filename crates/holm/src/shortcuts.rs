@@ -21,11 +21,8 @@ pub(crate) enum Place {
     Note,
     /// The sidebar, in the tree or the note list.
     Sidebar,
-    /// The tree of the sidebar.
     Tree,
-    /// The note list of the sidebar.
     NoteList,
-    /// The tag popup under the tag row.
     TagPopup,
     /// The search field of the sidebar.
     SearchField,
@@ -37,18 +34,16 @@ pub(crate) enum Place {
     ListPopup,
     /// A text field, like the name field or the search field.
     TextField,
-    /// The settings dialog.
     Settings,
-    /// The shortcut list.
     ShortcutList,
-    /// A place of the editor. Only [`list`] has it.
+    /// Only [`list`] has it.
     Editor(editor::Place),
 }
 
 impl Place {
-    /// The key context name of this place. The view of the place sets it while it is in the
-    /// place. A [`Place::Note`] key works while the editor has the focus, so it has the
-    /// context of the editor element, like each place of the editor.
+    /// The view of the place sets this context while it is in the place. A [`Place::Note`] key works
+    /// while the editor has the focus, so it has the context of the editor element, like each place
+    /// of the editor.
     pub(crate) const fn key_context(self) -> &'static str {
         match self {
             Self::Anywhere => "Anywhere",
@@ -74,7 +69,7 @@ impl Place {
 #[action(namespace = holm, no_json)]
 pub(crate) struct Run(pub(crate) Command);
 
-/// The group of a shortcut in the shortcut list.
+/// In the shortcut list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Group {
     Text,
@@ -109,16 +104,13 @@ pub(crate) enum Command {
     ShortcutList,
     Quit,
     AppMenu,
-    /// One step of the scale up.
     ScaleUp,
-    /// One step of the scale down.
     ScaleDown,
     EditTitle,
     LinkNote,
     LinkFiles,
     LinkFolders,
     Move,
-    /// Shows the notes of the tree item.
     ShowNotes,
     FocusEditor,
     /// Clears the search, or goes back to the tree.
@@ -480,7 +472,7 @@ const SECOND_KEYS: [(Keys, Command); 2] = [
     (Keys::ctrl("_"), Command::ScaleDown),
 ];
 
-/// The keys of the second keys, each with the place of its command.
+/// Each with the place of its command.
 fn second_keys() -> impl Iterator<Item = (Place, Keys, Command)> {
     SECOND_KEYS.iter().filter_map(|&(keys, command)| {
         let row = ROWS.iter().find(|row| row.command == command)?;
@@ -488,7 +480,7 @@ fn second_keys() -> impl Iterator<Item = (Place, Keys, Command)> {
     })
 }
 
-/// The keys of `command` in the whole window: a [`Place::Anywhere`] or [`Place::Window`] row.
+/// From a [`Place::Anywhere`] or [`Place::Window`] row.
 pub(crate) fn window_keys(command: Command) -> Option<Keys> {
     ROWS.iter()
         .find(|row| matches!(row.place, Place::Anywhere | Place::Window) && row.command == command)
@@ -567,7 +559,7 @@ fn kept_by_text_fields() -> Vec<Keys> {
         .collect()
 }
 
-/// The keystroke the shortcut list shows for `keys`. With [`Shift::Either`] it has no Shift.
+/// As the shortcut list shows it. With [`Shift::Either`] it has no Shift.
 pub(crate) fn keystroke(keys: Keys) -> Keystroke {
     let mut keystroke = Keystroke {
         key: keys.key.to_owned(),

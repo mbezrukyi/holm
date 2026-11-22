@@ -25,13 +25,10 @@ const VERSION: i64 = 1;
 /// The step at index `i` takes a file from version `i` to version `i + 1`.
 const MIGRATIONS: [fn(&mut DocumentMut); 1] = [from_0];
 
-/// The most custom colors the file keeps.
-const CUSTOM_COLORS: usize = 3;
+const MAX_CUSTOM_COLORS: usize = 3;
 
-/// Light or dark mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum AppearanceSetting {
-    /// The mode of the system.
     #[default]
     System,
     Light,
@@ -43,17 +40,17 @@ pub(crate) struct Settings {
     /// `None` until the user picks a folder.
     pub(crate) notes_folder: Option<PathBuf>,
     pub(crate) theme: AppearanceSetting,
-    /// The scale of the app on top of the desktop scale, in the file as a percent.
+    /// On top of the desktop scale, in the file as a percent.
     pub(crate) scale: Scale,
     pub(crate) text_width: TextWidthSetting,
     pub(crate) note_order: Order,
     pub(crate) writing_help: WritingHelp,
-    /// The last custom colors, the newest first.
+    /// The newest first.
     pub(crate) custom_colors: Vec<Color>,
     /// False after "Do not show again" in the delete dialog.
     pub(crate) ask_before_delete: bool,
     pub(crate) sidebar: SidebarSettings,
-    /// The note that was open last.
+    /// Open last.
     pub(crate) last_note: Option<NotePath>,
 }
 
@@ -78,7 +75,6 @@ impl Default for SidebarSettings {
     }
 }
 
-/// The sidebar view as the settings keep it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SavedSidebarView {
     /// The note list of `item`, or else the tree with `item` selected.
@@ -86,7 +82,7 @@ pub(crate) struct SavedSidebarView {
     pub(crate) item: SidebarItem,
 }
 
-/// An item of the tree, as the settings keep it.
+/// An item of the tree.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SidebarItem {
     All,
@@ -112,14 +108,12 @@ impl Default for Settings {
     }
 }
 
-/// The config file and the settings in it.
 #[derive(Debug)]
 pub(crate) struct Config {
     path: PathBuf,
     document: DocumentMut,
     settings: Settings,
     health: Health,
-    /// Whether the last write of the file failed.
     save_failed: bool,
 }
 
@@ -131,7 +125,7 @@ enum Health {
 }
 
 impl Config {
-    /// Reads the file at `path`. A missing file gives the defaults.
+    /// A missing file gives the defaults.
     pub(crate) fn load(path: PathBuf) -> Self {
         let (document, health) = match fs::read_to_string(&path) {
             Ok(text) => parse(&path, &text),
@@ -159,8 +153,7 @@ impl Config {
         &self.settings
     }
 
-    /// The problem of the settings: Holm can't read the file, or the last save failed.
-    /// A good save ends it.
+    /// Holm can't read the file, or the last save failed. A good save ends it.
     pub(crate) fn problem(&self) -> Option<&'static str> {
         (self.health == Health::Broken || self.save_failed).then_some(text::CONFIG_WRITE)
     }
@@ -176,8 +169,8 @@ impl Config {
         }
     }
 
-    /// Keeps `settings` and writes them to the file. It does not write a broken file or a file
-    /// with a newer version. A folder path that is not UTF-8 stays out of the file.
+    /// It does not write a broken file or a file with a newer version. A folder path that is not
+    /// UTF-8 stays out of the file.
     fn save(&mut self, settings: Settings) {
         self.settings = settings;
         if self.health != Health::Writable {
@@ -284,7 +277,7 @@ fn read(document: &DocumentMut) -> Settings {
                         .map(|color| Color::from_hex(color.as_str()?))
                         .collect::<Option<Vec<_>>>()
                 }) {
-                    settings.custom_colors = colors.into_iter().take(CUSTOM_COLORS).collect();
+                    settings.custom_colors = colors.into_iter().take(MAX_CUSTOM_COLORS).collect();
                 }
             }
             "writing_help" => {
@@ -395,7 +388,7 @@ fn item_from(text: &str) -> Option<SidebarItem> {
     }
 }
 
-/// The text of `item` in the file. A folder path that is not UTF-8 gives `all`.
+/// A folder path that is not UTF-8 gives `all`.
 fn item_text(item: &SidebarItem) -> String {
     match item {
         SidebarItem::Folder(path) => match AsRef::<Path>::as_ref(path).to_str() {
@@ -407,7 +400,7 @@ fn item_text(item: &SidebarItem) -> String {
     }
 }
 
-/// The value of a known key, or a log line when the value is bad.
+/// A bad value gives a log line.
 fn get<'a, T>(key: &str, item: &'a Item, value: impl FnOnce(&'a Item) -> Option<T>) -> Option<T> {
     let value = value(item);
     if value.is_none() {
@@ -490,7 +483,7 @@ fn write(document: &mut DocumentMut, settings: &Settings) {
     }
 }
 
-/// Sets a value and keeps the comments around the old one.
+/// Keeps the comments around the old value.
 fn set(table: &mut Table, key: &str, value: Value) {
     match table.get_mut(key).and_then(Item::as_value_mut) {
         Some(old) => {

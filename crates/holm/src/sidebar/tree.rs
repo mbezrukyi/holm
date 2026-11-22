@@ -9,7 +9,7 @@ use super::list::NoteList;
 use crate::config::{SavedSidebarView, SidebarItem};
 use crate::text;
 
-/// An item of the tree. Each item has a note list.
+/// Each item has a note list.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Item {
     All,
@@ -19,7 +19,7 @@ pub(crate) enum Item {
 }
 
 impl Item {
-    /// The item one level up. "All notes" and the top folders and tags have none.
+    /// "All notes" and the top folders and tags have none.
     pub(crate) fn parent(&self) -> Option<Self> {
         match self {
             Self::All => None,
@@ -36,7 +36,6 @@ impl Item {
         }
     }
 
-    /// The notes of the list of this item.
     pub(crate) fn set(&self) -> NoteSet<'_> {
         match self {
             Self::All => NoteSet::All,
@@ -65,7 +64,7 @@ impl Item {
     }
 }
 
-/// The sidebar view: the tree with a selected item, or the note list of an item.
+/// The tree with a selected item, or the note list of an item.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SidebarView {
     Tree(Item),
@@ -116,7 +115,6 @@ impl SidebarView {
     }
 }
 
-/// One row of the tree.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TreeRow {
     pub(crate) item: Item,
@@ -155,7 +153,6 @@ pub(crate) struct Tree {
 }
 
 impl Tree {
-    /// The place of the row of `item` in the rows.
     pub(crate) fn row_of(&self, item: &Item) -> Option<usize> {
         self.rows.iter().position(|row| row.item == *item)
     }
@@ -178,7 +175,6 @@ impl Tree {
         }
     }
 
-    /// The place of the line of `item` in the entries.
     pub(crate) fn entry_of(&self, item: &Item) -> Option<usize> {
         self.entries
             .iter()
@@ -186,7 +182,7 @@ impl Tree {
     }
 }
 
-/// A folder of the tree and the count of notes right in it.
+/// With the count of notes right in it.
 #[derive(Clone, Debug)]
 pub(crate) struct Folder {
     pub(crate) path: FolderPath,
@@ -225,8 +221,8 @@ impl Lists {
         }
     }
 
-    /// The notes of the list of `item`. A folder list has only the notes right in it.
-    /// A tag list also has the notes of its child tags.
+    /// A folder list has only the notes right in it. A tag list also has the notes of its child
+    /// tags.
     pub(crate) fn list(&self, item: &Item) -> NoteList {
         match item.set() {
             NoteSet::All => self.notes.clone(),
@@ -234,7 +230,6 @@ impl Lists {
         }
     }
 
-    /// Whether the lists still have `item`.
     pub(crate) fn has(&self, item: &Item) -> bool {
         match item {
             Item::All => true,

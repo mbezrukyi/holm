@@ -88,7 +88,6 @@ fn fail(error: &AppError) -> ExitCode {
     ExitCode::FAILURE
 }
 
-/// Starts the log and the panic hook, and reads the config.
 fn start() -> Result<Startup, AppError> {
     let state = folder("XDG_STATE_HOME", ".local/state")?;
     let log = log::start(&state);
@@ -124,7 +123,6 @@ fn folder(var: &str, fallback: &str) -> Result<PathBuf, AppError> {
     Ok(base.join("holm"))
 }
 
-/// The error and each of its sources, on one line.
 pub(crate) fn chain(error: &dyn std::error::Error) -> String {
     let mut text = error.to_string();
     let mut source = error.source();

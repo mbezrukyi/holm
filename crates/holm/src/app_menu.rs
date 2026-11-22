@@ -24,7 +24,6 @@ use crate::popup::{self, Dropdown};
 use crate::shortcuts::{self, Command, Place, Run};
 use crate::{shortcut_list, text};
 
-/// The items of the menu, as the commands they run.
 const ITEMS: [Command; 4] = [Command::Settings, Command::ShortcutList, Command::Pin, Command::Quit];
 
 const WIDTH: Pixels = px(240.);
@@ -46,14 +45,13 @@ pub(crate) struct Picked(pub(crate) Command);
 
 struct Open {
     spot: Spot,
-    /// Whether a note is open, so Pin note works.
-    note: bool,
+    /// Pin note works only then.
+    has_open_note: bool,
     /// The part that had the focus before the menu.
     back: Option<FocusHandle>,
 }
 
 pub(crate) struct AppMenu {
-    /// `None` while the menu is closed.
     open: Option<Open>,
     cursor: usize,
     /// The window bounds of the button in the last frame.
@@ -78,9 +76,9 @@ impl AppMenu {
         }
     }
 
-    /// Opens the menu at `spot`, or closes it when it is open. Pin note is off without an
-    /// open `note`.
-    pub(crate) fn toggle(&mut self, spot: Spot, note: bool, window: &mut Window, cx: &mut Context<Self>) {
+    /// Opens the menu at `spot`, or closes it when it is open. Pin note is off unless
+    /// `has_open_note`.
+    pub(crate) fn toggle(&mut self, spot: Spot, has_open_note: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.open.is_some() {
             self.leave(window, cx);
             return;
@@ -91,7 +89,7 @@ impl AppMenu {
         }
         self.open = Some(Open {
             spot,
-            note,
+            has_open_note,
             back: window.focused(cx),
         });
         self.cursor = 0;
@@ -117,7 +115,7 @@ impl AppMenu {
 
     fn works(&self, at: usize) -> bool {
         match ITEMS.get(at) {
-            Some(Command::Pin) => self.open.as_ref().is_some_and(|open| open.note),
+            Some(Command::Pin) => self.open.as_ref().is_some_and(|open| open.has_open_note),
             Some(_) => true,
             None => false,
         }

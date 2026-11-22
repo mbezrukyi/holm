@@ -2,7 +2,6 @@
 
 use std::borrow::Cow;
 
-/// Text in lowercase.
 pub(crate) struct Lowercase<'a>(Cow<'a, str>);
 
 impl Lowercase<'static> {
@@ -18,17 +17,16 @@ impl Lowercase<'_> {
         &self.0
     }
 
-    /// Whether `part` is in this text. It is the match rule of each list that a typed text
-    /// filters, except the fuzzy match of the link picker.
+    /// The match rule of each list that a typed text filters, except the fuzzy match of the link
+    /// picker.
     pub(crate) fn holds(&self, part: &Lowercase<'_>) -> bool {
         self.0.contains(part.as_str())
     }
 }
 
-/// Many texts in lowercase, all in one string, so a list makes them with few allocations.
+/// All in one string, so a list makes them with few allocations.
 pub(crate) struct LowercaseList {
     text: String,
-    /// The end of each text in `text`.
     ends: Vec<usize>,
 }
 
@@ -43,7 +41,7 @@ impl LowercaseList {
         Self { text, ends }
     }
 
-    /// Each text, in the order of `new`.
+    /// In the order of `new`.
     pub(crate) fn iter(&self) -> impl Iterator<Item = Lowercase<'_>> {
         let starts = std::iter::once(0).chain(self.ends.iter().copied());
         starts

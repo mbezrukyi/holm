@@ -12,7 +12,7 @@ use gpui_kit::{
     point, px, relative, size,
 };
 
-/// One part of the row, with its layout in a row with no fold.
+/// With its layout in a row with no fold.
 struct Part {
     element: AnyElement,
     layout: LayoutId,
@@ -22,7 +22,6 @@ pub(crate) struct Fold {
     gap: Pixels,
     lead: Option<AnyElement>,
     items: Vec<AnyElement>,
-    /// Builds the "more" item for the folded items.
     more: Box<dyn Fn(Range<usize>) -> AnyElement>,
     tail: Option<AnyElement>,
 }
@@ -43,20 +42,19 @@ impl Fold {
         }
     }
 
-    /// The item before all others. It never folds.
+    /// It never folds.
     pub(crate) fn lead(mut self, lead: Option<impl IntoElement>) -> Self {
         self.lead = lead.map(IntoElement::into_any_element);
         self
     }
 
-    /// The item at the right end. It never folds.
+    /// It never folds.
     pub(crate) fn tail(mut self, tail: Option<impl IntoElement>) -> Self {
         self.tail = tail.map(IntoElement::into_any_element);
         self
     }
 }
 
-/// The parts in the order of the row.
 pub(crate) struct Parts {
     lead: Option<Part>,
     items: Vec<Part>,
@@ -147,7 +145,6 @@ impl Element for Fold {
         let total = items.len();
         let gap = self.gap;
 
-        // Whether the lead, `shown` items, the "more" item and the tail fit, with gaps.
         let fits = |shown: usize, more: Option<Pixels>| {
             let width = lead
                 .into_iter()

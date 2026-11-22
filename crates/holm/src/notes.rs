@@ -67,7 +67,6 @@ pub(crate) struct NotesView {
 }
 
 impl NotesView {
-    /// The view of `core_door` with `note` open.
     pub(crate) fn new(
         core_door: Entity<CoreDoor>,
         note: Option<Note>,
@@ -157,7 +156,7 @@ impl NotesView {
         }
     }
 
-    /// `F2` on a tag line: shows the sidebar and starts the name field of the tag.
+    /// `F2` on a tag line.
     fn rename_tag_from_line(&mut self, RenameTag(tag): &RenameTag, window: &mut Window, cx: &mut Context<Self>) {
         let tag = tag.clone();
         self.hidden = false;
@@ -229,7 +228,6 @@ impl NotesView {
         });
     }
 
-    /// Opens `next`, or shows the empty pane.
     fn show_next(&mut self, next: Option<NotePath>, _: &mut Window, cx: &mut Context<Self>) {
         self.pane.update(cx, |pane, cx| match next {
             Some(next) => pane.open(next, Leave::Drop, cx),
@@ -296,8 +294,8 @@ impl NotesView {
         }
     }
 
-    /// Shows the dialog for `ask`, and gives `then` whether the user confirmed. After
-    /// "Do not show again", a delete confirms with no dialog.
+    /// `then` gets whether the user confirmed. After "Do not show again", a delete confirms with
+    /// no dialog.
     fn ask(
         &mut self,
         ask: Ask,
@@ -370,7 +368,7 @@ impl NotesView {
         cx.notify();
     }
 
-    /// Ctrl+Shift+S: opens the settings dialog.
+    /// Ctrl+Shift+S.
     fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.before_popup = window.focused(cx);
         let config = self.config.clone();
@@ -387,7 +385,7 @@ impl NotesView {
         cx.notify();
     }
 
-    /// Ctrl+?: opens the shortcut list.
+    /// Ctrl+?.
     fn open_shortcut_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.before_popup = window.focused(cx);
         let list = cx.new(|cx| ShortcutList::new(window, cx));
@@ -403,15 +401,16 @@ impl NotesView {
         cx.notify();
     }
 
-    /// F10 or the button of the sidebar head: opens or closes the app menu. With the sidebar
-    /// hidden, it opens at the window corner, and the sidebar stays hidden.
+    /// F10 or the button of the sidebar head. With the sidebar hidden, it opens at the window
+    /// corner, and the sidebar stays hidden.
     fn toggle_app_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let spot = if self.hidden { Spot::Corner } else { Spot::Button };
-        let note = self.pane.read(cx).path().is_some();
-        self.app_menu.update(cx, |menu, cx| menu.toggle(spot, note, window, cx));
+        let has_open_note = self.pane.read(cx).path().is_some();
+        self.app_menu
+            .update(cx, |menu, cx| menu.toggle(spot, has_open_note, window, cx));
     }
 
-    /// Ctrl+K: opens the link picker.
+    /// Ctrl+K.
     fn open_link_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let done = window_step(window, cx, Self::show_link_picker);
         self.pane.update(cx, |pane, cx| pane.start_link(done, cx));
@@ -470,7 +469,6 @@ impl NotesView {
         cx.notify();
     }
 
-    /// Gives the focus back to `before`, or to the editor.
     fn focus_before(&self, before: Option<FocusHandle>, window: &mut Window, cx: &mut Context<Self>) {
         match before {
             Some(before) => window.focus(&before, cx),
@@ -518,7 +516,7 @@ impl NotesView {
         );
     }
 
-    /// Deletes the target. The pane sends [`PaneEvent::Gone`] when the open note goes with it.
+    /// The pane sends [`PaneEvent::Gone`] when the open note goes with it.
     fn delete(&mut self, target: Target, window: &mut Window, cx: &mut Context<Self>) {
         self.call(
             window,
@@ -531,7 +529,7 @@ impl NotesView {
         );
     }
 
-    /// Ctrl+N: a new note in the folder of the sidebar view, with its tag.
+    /// Ctrl+N: in the folder of the sidebar view, with its tag.
     fn new_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (folder, tag) = self.sidebar.read(cx).new_note_place();
         self.pane.update(cx, |pane, cx| pane.new_note(folder, tag, window, cx));
@@ -544,8 +542,6 @@ impl NotesView {
         cx.notify();
     }
 
-    /// A close of the window: gives whether the window may close now. See
-    /// [`NotePane::may_close`].
     #[cfg(test)]
     pub(crate) fn pane(&self) -> &Entity<NotePane> {
         &self.pane
@@ -584,7 +580,6 @@ impl NotesView {
         window.focus(&self.pane.focus_handle(cx), cx);
     }
 
-    /// Gives the focus to the editor. On the empty pane, the sidebar gets it when it shows.
     fn focus_home(&self, window: &mut Window, cx: &mut Context<Self>) {
         if self.pane.read(cx).path().is_none() && !self.hidden {
             self.focus_sidebar(window, cx);
@@ -599,7 +594,7 @@ impl NotesView {
         }
     }
 
-    /// Ctrl+Shift+L: show the sidebar and focus it, or hide it when it has the focus.
+    /// Ctrl+Shift+L.
     fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let focused = self.sidebar.focus_handle(cx).contains_focused(window, cx);
         if self.hidden {
@@ -615,7 +610,7 @@ impl NotesView {
         cx.notify();
     }
 
-    /// Ctrl+Shift+F: show the sidebar and give its search field the focus.
+    /// Ctrl+Shift+F.
     fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.hidden = false;
         self.sidebar.update(cx, |sidebar, cx| sidebar.focus_search(window, cx));
@@ -623,9 +618,8 @@ impl NotesView {
         cx.notify();
     }
 
-    /// Whether a dialog, a picker, the settings or the shortcut list is open. Then the keys of
-    /// [`Place::Window`] do nothing.
-    fn covered(&self) -> bool {
+    /// While a popup covers the view, the keys of [`Place::Window`] do nothing.
+    fn is_covered(&self) -> bool {
         self.dialog.is_some()
             || self.picker.is_some()
             || self.quick_open.is_some()
@@ -635,12 +629,12 @@ impl NotesView {
     }
 
     fn run_key(&mut self, Run(command): &Run, window: &mut Window, cx: &mut Context<Self>) {
-        if self.covered() || !self.run(*command, window, cx) {
+        if self.is_covered() || !self.run(*command, window, cx) {
             cx.propagate();
         }
     }
 
-    /// Runs `command` of a key or the app menu. Gives whether the view has an action for it.
+    /// `command` comes from a key or the app menu. Gives whether the view has an action for it.
     fn run(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) -> bool {
         match command {
             Command::EditTitle => self.pane.update(cx, |pane, cx| pane.edit_title(window, cx)),
@@ -669,8 +663,6 @@ impl NotesView {
         true
     }
 
-    /// Moves the scale one step up or down, and shows the new scale in the message line. At an
-    /// end the scale stays.
     fn step_scale(&mut self, bigger: bool, cx: &mut Context<Self>) {
         let scale = self.config.read(cx).settings().scale;
         let next = scale.step(bigger).unwrap_or(scale);
@@ -699,7 +691,6 @@ impl NotesView {
         }
     }
 
-    /// Keeps the sidebar view and the open note in the config.
     fn save_place(&mut self, cx: &mut Context<Self>) {
         let sidebar = SidebarSettings {
             width: u32::from(self.width.round()),
@@ -754,7 +745,7 @@ impl Render for NotesView {
             .id("notes")
             .size_full()
             .relative()
-            .when(!self.covered(), |view| view.key_context(Place::Window.key_context()))
+            .when(!self.is_covered(), |view| view.key_context(Place::Window.key_context()))
             .on_action(cx.listener(Self::run_key))
             .on_action(cx.listener(Self::rename_tag_from_line))
             .on_mouse_move(cx.listener(Self::mouse_move))

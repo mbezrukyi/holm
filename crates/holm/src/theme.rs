@@ -27,7 +27,7 @@ pub(crate) const NOTE_LINE: Pixels = px(25.);
 /// The size of the line on the empty pane.
 pub(crate) const EMPTY_LINE: Pixels = px(15.);
 
-/// Adds the UI font and the Holm themes. Call it once, after `gpui_kit::init`.
+/// Call it once, after `gpui_kit::init`.
 pub(crate) fn init(cx: &mut App) {
     let fonts = UI_FONT_FILES.iter().map(|file| Cow::Borrowed(*file)).collect();
     if let Err(error) = cx.text_system().add_fonts(fonts) {
@@ -49,14 +49,12 @@ pub(crate) fn init(cx: &mut App) {
     });
 }
 
-/// Sets light or dark mode, and loads its theme. [`AppearanceSetting::System`] takes the mode
-/// of `window`.
+/// [`AppearanceSetting::System`] takes the mode of `window`.
 pub(crate) fn set_mode(theme: AppearanceSetting, window: &mut Window, cx: &mut App) {
     Ui::change(mode(theme, window), Some(window), cx);
 }
 
-/// Sets light or dark mode when `theme` gives another mode than the current one. Each change
-/// draws every window again.
+/// Changes nothing when the mode stays, because each change draws every window again.
 pub(crate) fn update_mode(theme: AppearanceSetting, window: &mut Window, cx: &mut App) {
     let mode = mode(theme, window);
     if Ui::global(cx).mode != mode {
@@ -75,7 +73,6 @@ fn mode(theme: AppearanceSetting, window: &Window) -> ThemeMode {
     }
 }
 
-/// The editor mode that matches the window.
 pub(crate) fn appearance(cx: &App) -> Appearance {
     if Ui::global(cx).is_dark() {
         Appearance::Dark

@@ -24,15 +24,14 @@ use crate::{popup, text};
 /// The change that the dialog asks about.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Ask {
-    /// Delete a note or a folder. `name` is the title of the note, or the name of the folder.
+    /// A note or a folder. `name` is the title of the note, or the name of the folder.
     Delete { name: String, count: DeleteCount },
-    /// Rename a tag in all notes.
+    /// In all notes.
     RenameTag { from: TagName, to: TagName, notes: usize },
-    /// Remove a tag from all notes.
+    /// From all notes.
     DeleteTag { tag: TagName, notes: usize },
 }
 
-/// The decision of the dialog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Decision {
     pub(crate) confirm: bool,
@@ -43,7 +42,7 @@ pub(crate) struct Dialog {
     ask: Ask,
     do_not_ask: bool,
     focus: FocusHandle,
-    /// It gets the decision. It is gone after the decision.
+    /// Gone after the decision.
     then: Option<Then<Decision>>,
 }
 

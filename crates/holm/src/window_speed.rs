@@ -124,12 +124,12 @@ fn window_speed(cx: &mut TestAppContext) {
     });
 }
 
-/// Presses `key` and runs the tasks one at a time until the pane is `shown`, then draws one
-/// frame. It prints the time.
+/// Presses `key`, runs the tasks one at a time until `shown`, then draws one frame, and prints the
+/// time.
 ///
-/// The check reads the pane and draws no frame, so the time holds only the frames a window
-/// would draw. The test runs the background tasks on this thread too, so the time holds a
-/// write that runs.
+/// The check reads the pane and draws no frame, so the time holds only the frames a window would
+/// draw. The test runs the background tasks on this thread too, so the time holds a write that
+/// runs.
 fn key_until(
     what: &str,
     cx: &mut TestAppContext,
@@ -149,7 +149,6 @@ fn key_until(
     });
 }
 
-/// The note pane of the open notes folder.
 fn pane(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Entity<NotePane> {
     cx.update_window(handle, |root, _, cx| {
         let root = root.downcast::<gpui_kit::base::Root>().unwrap();
@@ -162,7 +161,6 @@ fn pane(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Entity<NotePane> {
     .unwrap()
 }
 
-/// Opens the note with `number` in quick open, until the pane shows it.
 fn quick_open(what: &str, cx: &mut TestAppContext, handle: AnyWindowHandle, number: &'static str) {
     press(cx, handle, "ctrl-shift-o");
     for digit in number.split("") {
@@ -176,8 +174,7 @@ fn quick_open(what: &str, cx: &mut TestAppContext, handle: AnyWindowHandle, numb
     });
 }
 
-/// Ctrl+N and an open of a note, while a tag rename of all notes runs. The budget is zero,
-/// so the rename does not end in the update of its key.
+/// The budget is zero, so the rename does not end in the update of its key.
 #[gpui_kit::test]
 #[ignore = "prints times for a person to read"]
 fn window_speed_during_a_tag_rename(cx: &mut TestAppContext) {

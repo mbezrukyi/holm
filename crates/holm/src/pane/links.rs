@@ -21,7 +21,6 @@ use crate::core_door::{CoreDoor, Done, DoorEvent, Then};
 use crate::link_picker::{LinkChoice, LinkStart};
 use crate::text;
 
-/// What the links tell the pane.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum LinksEvent {
     /// Open another note, at `heading` when it has one.
@@ -41,8 +40,7 @@ pub(super) struct Links {
     core_door: Entity<CoreDoor>,
     editor: Entity<Editor>,
     backlinks: Entity<Backlinks>,
-    /// The path of the open note.
-    note: Option<NotePath>,
+    open_note: Option<NotePath>,
     reading: Option<Task<()>>,
     /// Whether the pick of the link picker changes the link at the cursor, not inserts a new
     /// one.
@@ -78,7 +76,7 @@ impl Links {
             core_door,
             editor,
             backlinks,
-            note: None,
+            open_note: None,
             reading: None,
             replace: false,
             _subscriptions: subscriptions,
@@ -87,14 +85,14 @@ impl Links {
 
     /// Follows the open note to `note`, and reads its links. With no note, it reads nothing.
     pub(super) fn show(&mut self, note: Option<NotePath>, cx: &mut Context<Self>) {
-        self.note = note;
+        self.open_note = note;
         self.read(cx);
     }
 
     /// Opens the system picker for `pick`, and embeds each picked path at the cursor, with no
     /// copy. It shows as an image, a file chip or a folder chip, like a pasted path.
     pub(super) fn pick(&mut self, pick: Pick, cx: &mut Context<Self>) {
-        let Some(note) = self.note.clone() else {
+        let Some(note) = self.open_note.clone() else {
             return;
         };
         let picked = cx.prompt_for_paths(PathPromptOptions {
@@ -132,7 +130,7 @@ impl Links {
     /// text. In a note link, the field starts with its target, and the pick changes that link.
     /// With no open note, it does nothing.
     pub(super) fn start(&mut self, done: impl FnOnce(LinkStart, &mut App) + 'static, cx: &mut Context<Self>) {
-        let Some(open_note) = self.note.clone() else {
+        let Some(open_note) = self.open_note.clone() else {
             return;
         };
         let link = self.editor.read(cx).link_at_cursor();
@@ -154,7 +152,7 @@ impl Links {
     /// the open note. The link goes only into the note that was open at the call. `done` runs
     /// at the end, also with no link.
     pub(super) fn link(&mut self, choice: LinkChoice, done: Then<()>, cx: &mut Context<Self>) {
-        let Some(note) = self.note.clone() else {
+        let Some(note) = self.open_note.clone() else {
             cx.defer(move |cx| done((), cx));
             return;
         };
@@ -196,7 +194,7 @@ impl Links {
 
     /// Puts a link to `target` at the cursor, when `note` is still the open note.
     fn put(&mut self, note: &NotePath, target: &Target, text: &str, cx: &mut Context<Self>) {
-        if self.note.as_ref() != Some(note) {
+        if self.open_note.as_ref() != Some(note) {
             return;
         }
         let replace = self.replace;
@@ -209,7 +207,7 @@ impl Links {
 
     /// Reads the backlinks and the broken note links of the open note, and shows them.
     fn read(&mut self, cx: &mut Context<Self>) {
-        let Some(path) = self.note.clone() else {
+        let Some(path) = self.open_note.clone() else {
             self.reading = None;
             self.backlinks.update(cx, |list, cx| list.show(Vec::new(), cx));
             return;
@@ -221,7 +219,7 @@ impl Links {
             let broken = broken.await;
             links
                 .update(cx, |links, cx| {
-                    if links.note.as_ref() != Some(&path) {
+                    if links.open_note.as_ref() != Some(&path) {
                         return;
                     }
                     links.backlinks.update(cx, |list, cx| list.show(backlinks, cx));
@@ -250,7 +248,7 @@ impl Links {
 
     /// Opens the note at `path` at `heading`, or at the top when the note has no such heading.
     fn open_at(&mut self, path: NotePath, heading: Option<String>, cx: &mut Context<Self>) {
-        if self.note.as_ref() != Some(&path) {
+        if self.open_note.as_ref() != Some(&path) {
             cx.emit(LinksEvent::Open { path, heading });
         } else if let Some(heading) = heading {
             self.editor.update(cx, |editor, cx| editor.show_heading(&heading, cx));
@@ -260,7 +258,7 @@ impl Links {
     /// Copies pasted or dropped files into `attachments/`, and puts a link to each copy at the
     /// cursor.
     fn paste_files(&mut self, files: Vec<PastedFile>, cx: &mut Context<Self>) {
-        let Some(note) = self.note.clone() else {
+        let Some(note) = self.open_note.clone() else {
             return;
         };
         let names = files
@@ -304,7 +302,7 @@ impl Links {
 
 impl EventEmitter<LinksEvent> for Links {}
 
-/// The file name of `path`, for the text of a link to it.
+/// For the text of a link to it.
 fn file_name(path: &Path) -> String {
     path.file_name()
         .map(|name| name.to_string_lossy().into_owned())

@@ -89,8 +89,7 @@ pub(crate) struct TagRow {
     backlinks: Entity<Backlinks>,
     /// Every tag name in the notes folder, for the list.
     known: Vec<TagName>,
-    /// Whether the popup is open.
-    open: bool,
+    is_popup_open: bool,
     /// The line under the cursor. With `None`, `Enter` adds the typed tag.
     cursor: Option<usize>,
     /// The text of the field that the list shows. A change of it drops the cursor.
@@ -132,7 +131,7 @@ impl TagRow {
             title,
             backlinks,
             known: Vec::new(),
-            open: false,
+            is_popup_open: false,
             cursor: None,
             query: String::new(),
             input,
@@ -141,7 +140,6 @@ impl TagRow {
         }
     }
 
-    /// Shows the tags and the pin of the open note.
     pub(crate) fn show(&mut self, tags: &[TagName], pinned: bool, cx: &mut Context<Self>) {
         if self.tags != tags || self.pinned != pinned {
             self.tags = tags.to_vec();
@@ -151,15 +149,12 @@ impl TagRow {
         }
     }
 
-    /// Opens the popup with an empty field and no cursor.
     pub(crate) fn enter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open_at(None, window, cx);
     }
 
-    /// Opens the popup with an empty field and the cursor on `cursor`. It takes the known
-    /// tags for the list from the snapshot.
     fn open_at(&mut self, cursor: Option<usize>, window: &mut Window, cx: &mut Context<Self>) {
-        self.open = true;
+        self.is_popup_open = true;
         self.clear(window, cx);
         self.cursor = cursor.filter(|at| *at < self.tags.len());
         self.input.update(cx, |input, cx| input.focus(window, cx));
@@ -170,12 +165,11 @@ impl TagRow {
     }
 
     fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.open = false;
+        self.is_popup_open = false;
         self.clear(window, cx);
         cx.notify();
     }
 
-    /// Empties the field and drops the cursor.
     fn clear(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.query.clear();
         self.cursor = None;
@@ -186,7 +180,6 @@ impl TagRow {
         self.query.trim()
     }
 
-    /// The lines of the list, from the typed text.
     fn lines(&self) -> Vec<Line> {
         let typed = self.typed();
         let line = |name: &TagName, on| Line::Tag { name: name.clone(), on };
@@ -228,7 +221,6 @@ impl TagRow {
         self.cursor = self.cursor.zip(last).map(|(at, last)| at.min(last));
     }
 
-    /// Adds or removes the tag under the cursor. With no cursor, it adds the typed tag.
     fn choose(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let line = match self.cursor {
             Some(at) => self.lines().get(at).cloned(),
@@ -259,7 +251,7 @@ impl TagRow {
         }
     }
 
-    /// `F2`: dispatches [`RenameTag`] for the tag line under the cursor.
+    /// `F2`.
     fn rename(&self, window: &mut Window, cx: &mut Context<Self>) {
         let line = self.cursor.and_then(|at| self.lines().get(at).cloned());
         if let Some(Line::Tag { name, .. }) = line {
@@ -267,7 +259,7 @@ impl TagRow {
         }
     }
 
-    /// Builds the quiet "+N" chip for a range of folded tags.
+    /// The quiet "+N" chip for a range of folded tags.
     fn more_chip(cx: &Context<Self>) -> impl Fn(Range<usize>) -> AnyElement + 'static {
         let theme = cx.theme();
         let (radius, text, hover) = (theme.radius, theme.muted_foreground, theme.secondary);
@@ -295,7 +287,7 @@ impl TagRow {
         }
     }
 
-    /// The quiet chip of a note with no tags. The row takes its click.
+    /// For a note with no tags. The row takes its click.
     fn add_chip(cx: &Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         div()
@@ -327,7 +319,6 @@ impl TagRow {
         )
     }
 
-    /// The list under the field, while it has lines.
     fn list(&self, cx: &Context<Self>) -> Option<impl IntoElement + use<>> {
         let theme = cx.theme();
         let lines = self.lines();
@@ -380,7 +371,6 @@ impl TagRow {
         )
     }
 
-    /// The popup under the row: the field and the list.
     fn popup(&self, window: &Window, cx: &Context<Self>) -> impl IntoElement {
         self.dropdown
             .panel(POPUP_WIDTH, window, cx)
@@ -403,7 +393,6 @@ impl TagRow {
     }
 }
 
-/// The frame of the tag row.
 fn frame() -> impl StatefulInteractiveElement + ParentElement + Styled + IntoElement {
     h_flex()
         .id("tag-row")
@@ -417,7 +406,7 @@ fn frame() -> impl StatefulInteractiveElement + ParentElement + Styled + IntoEle
         .items_center()
 }
 
-/// The chip of `tag`, the tag at `at` in the row.
+/// `at` is the index of `tag` in the row.
 fn chip(at: usize, tag: &TagName, cx: &App) -> impl InteractiveElement + IntoElement + use<> {
     let theme = cx.theme();
     div()
@@ -435,7 +424,7 @@ fn chip(at: usize, tag: &TagName, cx: &App) -> impl InteractiveElement + IntoEle
         .child(text::tag_label(tag))
 }
 
-/// The tag row of a note with no file yet: its tag, and `title` at the right end.
+/// For a note with no file yet.
 pub(crate) fn new_note_row(tag: Option<&TagName>, title: AnyElement, cx: &App) -> impl IntoElement + use<> {
     let chips = tag.map(|tag| chip(0, tag, cx).into_any_element());
     frame()
@@ -512,6 +501,6 @@ impl Render for TagRow {
             // The row lies in the editor, which sets the note font.
             .font_family(theme.font_family.clone())
             .child(row)
-            .when(self.open, |head| head.child(self.popup(window, cx)))
+            .when(self.is_popup_open, |head| head.child(self.popup(window, cx)))
     }
 }

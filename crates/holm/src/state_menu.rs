@@ -30,7 +30,7 @@ pub(crate) struct State {
     pub(crate) label: SharedString,
     /// One line on why the state is there.
     pub(crate) reason: SharedString,
-    /// The labels of the choices. The first one starts under the cursor.
+    /// The first one starts under the cursor.
     pub(crate) choices: Vec<SharedString>,
 }
 
@@ -67,7 +67,7 @@ impl StateMenu {
         self.state.as_ref()
     }
 
-    /// Takes `state`, or no state with `None`. Another state closes the menu.
+    /// Another state closes the menu.
     pub(crate) fn set_state(&mut self, state: Option<State>, cx: &mut Context<Self>) {
         if self.state != state {
             self.state = state;
@@ -76,7 +76,7 @@ impl StateMenu {
         }
     }
 
-    /// Opens the menu, or closes it when it is open. With no state, it does nothing.
+    /// With no state, it does nothing.
     pub(crate) fn toggle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.open {
             self.close(window, cx);

@@ -31,14 +31,12 @@ const LIST_WIDTH: Pixels = px(260.);
 /// The list scrolls when it is taller than this.
 const LIST_HEIGHT: Pixels = px(280.);
 
-/// The user picked the note at this path, to open it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct OpenBacklink(pub(crate) NotePath);
 
 pub(crate) struct Backlinks {
     notes: Vec<NoteInfo>,
-    /// Whether the list is open.
-    open: bool,
+    is_open: bool,
     cursor: usize,
     scroll: ScrollHandle,
     dropdown: Dropdown<Self>,
@@ -49,14 +47,14 @@ impl Backlinks {
     pub(crate) fn new(text: FocusHandle, window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self {
             notes: Vec::new(),
-            open: false,
+            is_open: false,
             cursor: 0,
             scroll: ScrollHandle::new(),
             dropdown: Dropdown::new(text, |list, _, cx| list.close(cx), window, cx),
         }
     }
 
-    /// Shows `notes` as the backlinks of the open note, in their order.
+    /// Keeps the order of `notes`.
     pub(crate) fn show(&mut self, notes: Vec<NoteInfo>, cx: &mut Context<Self>) {
         if notes == self.notes {
             return;
@@ -78,7 +76,7 @@ impl Backlinks {
         if self.notes.is_empty() {
             return;
         }
-        self.open = true;
+        self.is_open = true;
         self.cursor = 0;
         self.scroll.scroll_to_item(0);
         window.focus(self.dropdown.focus_handle(), cx);
@@ -86,8 +84,8 @@ impl Backlinks {
     }
 
     fn close(&mut self, cx: &mut Context<Self>) {
-        if self.open {
-            self.open = false;
+        if self.is_open {
+            self.is_open = false;
             cx.notify();
         }
     }
@@ -130,13 +128,13 @@ impl Backlinks {
             .text_size(px(12.))
             .text_color(theme.muted_foreground)
             .cursor(CursorStyle::PointingHand)
-            .when(self.open, |button| button.bg(theme.secondary))
+            .when(self.is_open, |button| button.bg(theme.secondary))
             .hover(|button| button.bg(theme.secondary))
             .child(label)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|list, _, window, cx| {
-                    if list.open {
+                    if list.is_open {
                         list.close(cx);
                     } else {
                         list.enter(window, cx);
@@ -148,7 +146,7 @@ impl Backlinks {
             )
     }
 
-    /// The list under the button.
+    /// It shows under the button.
     fn list(&self, window: &Window, cx: &Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let rows = self.notes.iter().enumerate().map(|(at, note)| {
@@ -200,6 +198,6 @@ impl Render for Backlinks {
             .root()
             .ml_auto()
             .child(self.button(cx))
-            .when(self.open, |root| root.child(self.list(window, cx)))
+            .when(self.is_open, |root| root.child(self.list(window, cx)))
     }
 }

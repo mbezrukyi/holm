@@ -4,7 +4,7 @@ use gpui_kit::{Context, Window};
 
 use crate::core_door::Then;
 
-/// A step that runs `step` on the entity of `cx` with its window, while both still exist.
+/// Runs `step` only while the entity of `cx` and its window still exist.
 pub(crate) fn window_step<V: 'static, R: 'static>(
     window: &Window,
     cx: &Context<V>,

@@ -63,14 +63,12 @@ use open::{Open, Opens};
 /// How long the pane waits after the last change before it saves.
 const AUTOSAVE: Duration = Duration::from_millis(500);
 
-/// What the pane tells the app.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PaneEvent {
     /// The pane starts to read this note. It is the open note from now on.
     Opening(NotePath),
     /// The pane shows the note at this path: after an open, a move, or an open that stopped.
     Opened(NotePath),
-    /// The pane shows no note.
     Closed,
     /// The open note at this path is gone, by a Holm delete or another tool, and the pane has
     /// no text to keep. The app must open another note or call [`NotePane::close`]. The pane
@@ -95,7 +93,6 @@ enum DiskQuestion {
     Deleted,
 }
 
-/// A choice in the state menu of a disk question.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Choice {
     KeepMine,
@@ -104,7 +101,7 @@ enum Choice {
 }
 
 impl DiskQuestion {
-    /// The choices in the state menu. The first one starts under the cursor.
+    /// In the state menu. The first one starts under the cursor.
     fn choices(self) -> [Choice; 2] {
         match self {
             Self::Changed => [Choice::KeepMine, Choice::Reload],
@@ -130,10 +127,8 @@ impl DiskQuestion {
     }
 }
 
-/// What the pane shows.
 enum Content {
     Empty,
-    /// The note at this path, in the editor.
     Note(NotePath),
     /// The note after Ctrl+N, before it has a file, in the place of the editor. The editor
     /// keeps the note from before, at `kept`.
@@ -191,8 +186,7 @@ pub(crate) struct NotePane {
     opens: Opens,
     /// The heading to show when the note that opens is ready.
     open_heading: Option<String>,
-    /// A save for a close of the window runs.
-    closing: bool,
+    is_saving_for_close: bool,
     /// The draft version at a close that failed to save. A close at the same version closes,
     /// so typed text stops it.
     close_again: Option<u64>,
@@ -278,7 +272,7 @@ impl NotePane {
             disk: None,
             opens: Opens::default(),
             open_heading: None,
-            closing: false,
+            is_saving_for_close: false,
             close_again: None,
             _subscriptions: subscriptions,
         };
@@ -355,7 +349,7 @@ impl NotePane {
         self.message_line.update(cx, |line, cx| line.show(message, cx));
     }
 
-    /// Sets the disk question. A question holds the text of the note in the draft.
+    /// A question holds the text of the note in the draft.
     fn set_disk(&mut self, disk: Option<DiskQuestion>, cx: &mut Context<Self>) {
         if disk.is_some() {
             self.hold_text(cx);
@@ -468,7 +462,6 @@ impl NotePane {
         self.backlinks.update(cx, |backlinks, cx| backlinks.enter(window, cx));
     }
 
-    /// Pins or unpins the open note.
     pub(crate) fn toggle_pin(&mut self, cx: &mut Context<Self>) {
         let Some(path) = self.content.note().cloned() else {
             return;
@@ -510,17 +503,17 @@ impl NotePane {
     /// pane saves first and closes the window when the save works. When it fails, the answer
     /// asks for a second close. A close with the same text as at that failure gives `true`.
     pub(crate) fn may_close(&mut self, window: &Window, cx: &mut Context<Self>) -> bool {
-        if self.closing {
+        if self.is_saving_for_close {
             return false;
         }
         let version = self.core_door.read(cx).draft_version();
         if !self.unsaved(cx) || self.close_again == Some(version) {
             return true;
         }
-        self.closing = true;
+        self.is_saving_for_close = true;
         let window = window.window_handle();
         let done = step(cx, move |pane, saved: Result<(), NotSaved>, cx| {
-            pane.closing = false;
+            pane.is_saving_for_close = false;
             if saved.is_err() {
                 pane.close_again = Some(version);
                 pane.answer(text::CLOSE_AGAIN, cx);
@@ -557,8 +550,7 @@ impl NotePane {
         })
     }
 
-    /// Takes the end of a write of the editor text. After a failed write, the core door
-    /// keeps the text, so the next job tries again.
+    /// After a failed write, the core door keeps the text, so the next job tries again.
     fn save_end(&mut self, event: &SaveEvent, cx: &mut Context<Self>) {
         match event {
             SaveEvent::Saved => {
@@ -644,13 +636,13 @@ impl NotePane {
         self.next.as_ref().or_else(|| self.content.editor())
     }
 
-    /// Whether the pane shows a new note with no file yet. Speed tests read it with no frame.
+    /// Speed tests read it with no frame.
     #[cfg(test)]
     pub(crate) fn shows_new_note(&self) -> bool {
         matches!(self.content, Content::New { .. })
     }
 
-    /// The note that the user sees. Speed tests read it with no frame.
+    /// Speed tests read it with no frame.
     #[cfg(test)]
     pub(crate) fn shown_note(&self) -> Option<&NotePath> {
         self.content.note()
@@ -757,7 +749,6 @@ impl NotePane {
         }
     }
 
-    /// Gives the open note the title `title`.
     fn rename(&mut self, title: String, done: Then<Result<NotePath, AppError>>, cx: &mut Context<Self>) {
         // With no note, the title field is gone too.
         let Some(path) = self.content.note().cloned() else {
@@ -769,8 +760,8 @@ impl NotePane {
     }
 
     /// Ctrl+N: after the write line writes the unsaved text, shows a new note for `folder`, with
-    /// `tag` when it has one. When the save fails, the pane stays on the note. Another Ctrl+N on a new note
-    /// only gives its field the focus.
+    /// `tag` when it has one. When the save fails, the pane stays on the note. Another Ctrl+N on
+    /// a new note only gives its field the focus.
     pub(crate) fn new_note(
         &mut self,
         folder: FolderPath,
@@ -934,7 +925,7 @@ fn empty_pane(focus: &FocusHandle, cx: &App) -> impl IntoElement {
         )
 }
 
-/// The line break of a note. The editor works with LF only.
+/// The editor works with LF only.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LineEnding {
     Lf,

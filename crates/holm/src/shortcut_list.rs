@@ -23,17 +23,16 @@ use crate::{popup, text};
 /// The groups of each column.
 const COLUMNS: [&[Group]; 2] = [&[Group::Text], &[Group::Note, Group::Sidebar, Group::Window]];
 
-/// The most height of the rows. A longer list scrolls.
-const LIST_HEIGHT: Pixels = px(560.);
+/// A longer list scrolls.
+const MAX_LIST_HEIGHT: Pixels = px(560.);
 
 /// The height around the rows: the title and the padding of the panel, and a margin to the
 /// edges of the window. In a low window, like at a big scale, the rows take the rest.
 const AROUND_LIST: Pixels = px(100.);
 
-/// The least height of the rows in a very low window.
 const MIN_LIST_HEIGHT: Pixels = px(100.);
 
-/// How far `Tab` and `Shift+Tab` scroll: about three rows.
+/// About three rows.
 const SCROLL_STEP: Pixels = px(66.);
 
 /// The text size of a key chip: a little bigger than the `Kbd` default.
@@ -51,8 +50,7 @@ fn title(group: Group) -> &'static str {
     }
 }
 
-/// The heading over the rows of `place`. The rows of the notes view, of the note, and of each
-/// text input have none.
+/// The rows of the notes view, of the note, and of each text input have none.
 fn heading(place: Place) -> Option<&'static str> {
     match place {
         Place::Window | Place::Note | Place::Editor(editor::Place::Text | editor::Place::Editor) => None,
@@ -99,7 +97,7 @@ pub(crate) struct ShortcutList {
 }
 
 impl ShortcutList {
-    /// The list at its top. It takes the focus.
+    /// It takes the focus.
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
@@ -110,7 +108,7 @@ impl ShortcutList {
         }
     }
 
-    /// Scrolls down, or up, by [`SCROLL_STEP`]. It stops at the ends.
+    /// It stops at the ends.
     fn scroll_by(&self, down: bool, cx: &mut Context<Self>) {
         let offset = self.scroll.offset();
         let step = if down { -SCROLL_STEP } else { SCROLL_STEP };
@@ -150,8 +148,7 @@ impl ShortcutList {
         column
     }
 
-    /// The row of the shortcut at `at`. The label never shrinks, so a test can find a label
-    /// that runs into its keys.
+    /// The label never shrinks, so a test can find a label that runs into its keys.
     fn row(&self, at: usize) -> impl IntoElement + use<> {
         let shortcut = self.shortcuts[at];
         let keystroke = shortcuts::keystroke(shortcut.keys);
@@ -181,7 +178,7 @@ impl ShortcutList {
     }
 }
 
-/// The chip of `keys`, as the shortcut list shows it.
+/// As the shortcut list shows it.
 pub(crate) fn key_chip(keys: editor::Keys) -> Kbd {
     Kbd::new(shortcuts::keystroke(keys))
         .outline()
@@ -216,7 +213,7 @@ impl Render for ShortcutList {
             .child(h_flex().items_start().gap_6().children(columns));
         let list = div()
             .relative()
-            .h(LIST_HEIGHT
+            .h(MAX_LIST_HEIGHT
                 .min(window.viewport_size().height - AROUND_LIST)
                 .max(MIN_LIST_HEIGHT))
             .child(rows)

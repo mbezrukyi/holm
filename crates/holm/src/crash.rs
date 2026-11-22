@@ -9,7 +9,7 @@ use std::{fs, io, panic};
 
 const MARK: &str = "crashed";
 
-/// Sets the panic hook. It leaves the mark in `dir`, then runs the hook it replaces.
+/// The hook leaves the mark in `dir`, then runs the hook it replaces.
 pub(crate) fn install(dir: &Path) {
     let mark = dir.join(MARK);
     let previous = panic::take_hook();

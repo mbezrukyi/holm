@@ -47,30 +47,29 @@ use tree::{Entry, Label, Lists, SidebarView, Tree};
 const TREE_ROW: f32 = 28.;
 const NOTE_ROW: f32 = 52.;
 
-/// A note or a folder, for a delete or a move.
+/// For a delete or a move.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Target {
     Note(NotePath),
     Folder(FolderPath),
 }
 
-/// What the sidebar asks of the app.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SidebarEvent {
-    /// Open this note in the editor.
+    /// In the editor.
     Open(NotePath),
     FocusEditor,
     /// Open the title field of the open note.
     RenameNote,
-    /// Delete, with the dialog.
+    /// With the dialog.
     Delete(Target),
-    /// Move, with the folder picker.
+    /// With the folder picker.
     Move(Target),
-    /// Rename a tag in all notes, with the dialog.
+    /// In all notes, with the dialog.
     RenameTag(TagName),
-    /// Remove a tag from all notes, with the dialog.
+    /// From all notes, with the dialog.
     DeleteTag(TagName),
-    /// The sidebar view changed. The app keeps it in the config.
+    /// The app keeps the sidebar view in the config.
     ViewChanged,
     /// Open or close the app menu.
     AppMenu,
@@ -80,24 +79,23 @@ pub(crate) enum SidebarEvent {
 /// a fail.
 pub(crate) type TagRename = Rc<dyn Fn(TagName, String, Then<Result<(), AppError>>, &mut Window, &mut App)>;
 
-/// A name field in the tree: for a folder or a tag after `F2`, or for a new folder.
+/// In the tree: for a folder or a tag after `F2`, or for a new folder.
 struct Naming {
     named: Named,
     field: Entity<NameField<()>>,
     _subscription: Subscription,
 }
 
-/// What a name field names.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Named {
     Folder(FolderPath),
     Tag(TagName),
-    /// A new folder in this parent folder. It exists only after `Enter`.
+    /// The parent folder. The new folder exists only after `Enter`.
     NewFolder(FolderPath),
 }
 
 impl Named {
-    /// What a rename of `item` names. "All notes" has no name.
+    /// For a rename of `item`. "All notes" has no name.
     fn item(item: &Item) -> Option<Self> {
         match item {
             Item::All => None,
@@ -123,7 +121,7 @@ pub(crate) struct Sidebar {
     open: HashSet<Item>,
     tree: Tree,
     list: NoteList,
-    /// The pane, for the open note. The open note is the selected row of a list.
+    /// For the open note, which is the selected row of a list.
     pane: Entity<NotePane>,
     /// The open note after it is gone from the notes folder, with its neighbor in the list
     /// before. The app asks for the next note only after the list lost the gone note.
@@ -203,7 +201,6 @@ impl Sidebar {
         self.menu_button.clone()
     }
 
-    /// The note order of the settings.
     fn order(&self, cx: &App) -> Order {
         self.config.read(cx).settings().note_order
     }
@@ -250,8 +247,7 @@ impl Sidebar {
         }
     }
 
-    /// Builds the lists from the snapshot of the core door. An item that is gone leaves the
-    /// sidebar view and the open items.
+    /// An item that is gone leaves the sidebar view and the open items.
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let snapshot = self.core_door.read(cx).snapshot();
         self.lists = Lists::new(snapshot, self.order(cx));
@@ -271,12 +267,11 @@ impl Sidebar {
         !self.query.is_empty()
     }
 
-    /// Whether the sidebar shows a note list: the list of a tree item, or the search results.
     fn shows_list(&self) -> bool {
         self.searching() || matches!(self.view, SidebarView::List(_))
     }
 
-    /// Searches the notes for the query. A result for an old query is dropped.
+    /// A result for an old query is dropped.
     fn find(&mut self, cx: &mut Context<Self>) {
         if !self.searching() {
             self.finding = None;
@@ -308,7 +303,7 @@ impl Sidebar {
         }));
     }
 
-    /// Ctrl+Shift+F: gives the search field the focus, with its text selected.
+    /// Ctrl+Shift+F. The text of the search field gets selected.
     pub(crate) fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.search.update(cx, |input, cx| {
             input.focus(window, cx);
@@ -316,7 +311,7 @@ impl Sidebar {
         });
     }
 
-    /// Empties the search field, so the last sidebar view shows again. The list gets the focus.
+    /// The last sidebar view shows again, and the list gets the focus.
     fn clear_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.query.clear();
         self.search.update(cx, |input, cx| input.set_value("", window, cx));
@@ -413,17 +408,17 @@ impl Sidebar {
             .cloned()
     }
 
-    /// Every note, in the order of the lists.
+    /// In the order of the lists.
     pub(crate) fn notes(&self) -> impl Iterator<Item = &NoteInfo> {
         self.lists.notes.notes()
     }
 
-    /// Every folder, sorted by path, for the folder picker.
+    /// Sorted by path, for the folder picker.
     pub(crate) fn folders(&self) -> impl Iterator<Item = &FolderPath> {
         self.lists.folders.iter().map(|folder| &folder.path)
     }
 
-    /// Shows the tree with `item` selected, and opens its parents.
+    /// Selects `item`, and opens its parents.
     pub(crate) fn show_in_tree(&mut self, item: Item, cx: &mut Context<Self>) {
         let mut parent = item.parent();
         while let Some(item) = parent {
@@ -498,7 +493,6 @@ impl Sidebar {
         self.open_name_field(Named::NewFolder(parent), None, item, write, window, cx);
     }
 
-    /// What the open name field names.
     fn named(&self) -> Option<Named> {
         self.field.as_ref().map(|naming| naming.named.clone())
     }
@@ -514,7 +508,7 @@ impl Sidebar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.writing(cx) {
+        if self.is_name_field_writing(cx) {
             return;
         }
         if self.searching() {
@@ -602,8 +596,7 @@ impl Sidebar {
         });
     }
 
-    /// Whether the job of a name field runs.
-    fn writing(&self, cx: &App) -> bool {
+    fn is_name_field_writing(&self, cx: &App) -> bool {
         self.field
             .as_ref()
             .is_some_and(|naming| naming.field.read(cx).writing())
@@ -653,7 +646,6 @@ impl Sidebar {
         }
     }
 
-    /// A shortcut of the tree.
     fn tree_command(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let SidebarView::Tree(item) = &self.view else {
             return false;
@@ -697,7 +689,6 @@ impl Sidebar {
         true
     }
 
-    /// A shortcut of the note list.
     fn list_command(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) -> bool {
         match command {
             Command::Next | Command::Previous => {
@@ -885,7 +876,6 @@ impl Sidebar {
             .into_any_element()
     }
 
-    /// The row of the name field for a new folder.
     fn new_folder_row(&self, depth: usize, cx: &App) -> AnyElement {
         let Some(naming) = &self.field else {
             return div().into_any_element();

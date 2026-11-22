@@ -25,7 +25,6 @@ enum Part {
     Path(String),
 }
 
-/// A text of plain parts and paths.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct PathText {
     parts: Vec<Part>,
@@ -48,12 +47,10 @@ impl PathText {
         self
     }
 
-    /// The whole text, with the paths as plain text.
     pub(crate) fn plain_text(&self) -> SharedString {
         self.plain.clone()
     }
 
-    /// An element that wraps the text to its width.
     pub(crate) fn wrapped(&self) -> PathTextElement {
         PathTextElement {
             text: self.clone(),
@@ -61,7 +58,7 @@ impl PathText {
         }
     }
 
-    /// An element that keeps the text in one line, and cuts it to its width.
+    /// Cuts the text to its width.
     pub(crate) fn one_line(&self) -> PathTextElement {
         PathTextElement {
             text: self.clone(),
@@ -100,7 +97,7 @@ enum Mode {
     OneLine,
 }
 
-/// A piece of a row. `x` is from the left of the row, at the left edge of a chip box.
+/// `x` is from the left of the row, at the left edge of a chip box.
 #[derive(Clone, Debug, PartialEq)]
 struct Piece {
     x: Pixels,
@@ -117,7 +114,7 @@ struct WrapRow {
 /// The width of a text, in the chip font when `chip` is true.
 type Measure<'a> = &'a dyn Fn(&str, bool) -> Pixels;
 
-/// The width of a piece, with the padding of a chip.
+/// With the padding of a chip.
 fn piece_width(text: &str, chip: bool, measure: Measure<'_>) -> Pixels {
     if chip {
         measure(text, true) + CHIP_PAD_X * 2.
@@ -126,7 +123,7 @@ fn piece_width(text: &str, chip: bool, measure: Measure<'_>) -> Pixels {
     }
 }
 
-/// Lays out `parts` in rows. With no `width`, the text stays in one row.
+/// With no `width`, the text stays in one row.
 fn lay_out(parts: &[Part], mode: Mode, width: Option<Pixels>, measure: Measure<'_>) -> Vec<WrapRow> {
     let segs: Vec<Piece> = parts
         .iter()
@@ -147,7 +144,7 @@ fn lay_out(parts: &[Part], mode: Mode, width: Option<Pixels>, measure: Measure<'
     }
 }
 
-/// Puts `piece` at the end of `row`. A plain piece joins a plain piece before it.
+/// A plain piece joins a plain piece before it.
 fn push(row: &mut WrapRow, piece: Piece, measure: Measure<'_>) {
     let piece = match row.pieces.pop() {
         Some(mut last) if !last.chip && !piece.chip => {
@@ -265,7 +262,6 @@ fn cut(text: &str, fits: impl Fn(&str) -> bool) -> String {
     with_mark(ends.get(low).copied().unwrap_or(0))
 }
 
-/// The fonts and sizes of a text with path chips.
 #[derive(Clone)]
 pub(crate) struct PathTextStyle {
     font: Font,
@@ -317,7 +313,6 @@ impl PathTextStyle {
     }
 }
 
-/// Draws a [`PathText`].
 pub(crate) struct PathTextElement {
     text: PathText,
     mode: Mode,
@@ -331,7 +326,6 @@ impl IntoElement for PathTextElement {
     }
 }
 
-/// A row with its shaped pieces.
 pub(crate) struct ShapedRow(Vec<(Pixels, ShapedLine, bool)>);
 
 impl Element for PathTextElement {

@@ -21,7 +21,6 @@ use crate::pick_notes::PickNotes;
 use crate::popup::{self, PickEvent, PickList, PickRow};
 use crate::text;
 
-/// What the link picker starts with.
 pub(crate) struct LinkStart {
     notes: Vec<NoteInfo>,
     open_note: NotePath,
@@ -50,17 +49,14 @@ impl LinkStart {
     }
 }
 
-/// The result of the window.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum LinkPickerEvent {
     Pick(LinkChoice),
     Close,
 }
 
-/// The pick of the link picker.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum LinkChoice {
-    /// A note, or a heading in it.
     Note {
         path: NotePath,
         title: String,
@@ -154,7 +150,7 @@ impl LinkPicker {
         })
     }
 
-    /// Finds the rows for the new text. It loads the headings of a note the first time.
+    /// It loads the headings of a note the first time.
     fn query_changed(&mut self, cx: &mut Context<Self>) {
         self.text = self.list.read(cx).query(cx).to_string();
         let query = Query::parse(&self.text, &self.notes);
@@ -188,8 +184,7 @@ impl LinkPicker {
         self.query_changed(cx);
     }
 
-    /// The user changed the text. A `#` typed into a text with no `#` yet fills in the title
-    /// of the note under the cursor.
+    /// A `#` typed into a text with no `#` yet fills in the title of the note under the cursor.
     fn typed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.list.read(cx).query(cx).to_string();
         let one_hash = text.matches('#').count() == 1 && !self.text.contains('#');

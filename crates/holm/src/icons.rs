@@ -44,14 +44,12 @@ impl Icon {
         }
     }
 
-    /// The icon at 16 px in `color`.
     pub(crate) fn view(self, color: Hsla) -> impl IntoElement {
         let icon: Svg = svg().path(self.file().0).size(px(16.)).flex_none();
         icon.text_color(color)
     }
 }
 
-/// The asset source of the app. It holds only the icons.
 pub(crate) struct Icons;
 
 impl AssetSource for Icons {

@@ -1,13 +1,14 @@
 //! The note after Ctrl+N, before it has a title and a file.
 //!
 //! It shows in the place of the editor: the tag row with the tag of the note and an empty
-//! title field. The pane puts it in the text column, so it is at the same place as in the editor. Nothing else takes a click or a key.
+//! title field. The pane puts it in the text column, so it is at the same place as in the
+//! editor. Nothing else takes a click or a key.
 //!
 //! - `Enter` writes `<title>.md`, and sends [`NewNoteEvent::Created`].
 //! - `Esc`, or a fail that is not about the title, sends [`NewNoteEvent::Cancelled`].
+//! - A refused title keeps the field open.
 //!
 //! The note takes the focus while the create job runs, because the editor is hidden.
-//! - A refused title keeps the field open.
 
 use std::rc::Rc;
 
@@ -27,7 +28,6 @@ use crate::title::TitleField;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum NewNoteEvent {
-    /// The note has its file.
     Created(Note),
     /// No file came.
     Cancelled,
@@ -41,7 +41,7 @@ pub(crate) struct NewNote {
 }
 
 impl NewNote {
-    /// A note for `folder` with `tag`, with the focus in its title field.
+    /// The focus starts in its title field.
     pub(crate) fn new(
         core_door: Entity<CoreDoor>,
         folder: FolderPath,

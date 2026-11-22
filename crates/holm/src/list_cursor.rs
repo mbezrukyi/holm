@@ -74,15 +74,14 @@ mod tests {
             prop_assert_eq!(next.is_some(), works.contains(&true));
             if let Some(next) = next {
                 prop_assert!(works[next]);
-                // Each item between the start and `next` does not work.
-                let order: Vec<usize> = match at.filter(|at| *at < len) {
+                let walk_order: Vec<usize> = match at.filter(|at| *at < len) {
                     Some(at) if forward => (at + 1..len).chain(0..=at).collect(),
                     Some(at) => (0..at).rev().chain((at..len).rev()).collect(),
                     None if forward => (0..len).collect(),
                     None => (0..len).rev().collect(),
                 };
-                let first = order.into_iter().find(|&at| works[at]);
-                prop_assert_eq!(first, Some(next));
+                let nearest_working = walk_order.into_iter().find(|&at| works[at]);
+                prop_assert_eq!(nearest_working, Some(next));
             }
         }
     }

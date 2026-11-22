@@ -15,7 +15,7 @@ pub(crate) struct NoteList {
 }
 
 impl NoteList {
-    /// The results of a search, in their order.
+    /// In the order of the results.
     pub(crate) fn new(results: SearchResults) -> Self {
         let (snapshot, paths) = results.into_parts();
         Self {

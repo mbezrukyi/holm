@@ -76,7 +76,6 @@ impl MessageLine {
         cx.notify();
     }
 
-    /// Opens the problem list, or closes it when it is open.
     pub(crate) fn toggle_problems(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.problems.update(cx, |list, cx| list.toggle(window, cx));
     }
@@ -87,14 +86,13 @@ impl MessageLine {
         cx.notify();
     }
 
-    /// Shows `state` on the right, or no state with `None`. Another state closes the state
-    /// menu.
+    /// Shows `state` on the right. Another state closes the state menu.
     pub(crate) fn set_state(&mut self, state: Option<State>, cx: &mut Context<Self>) {
         self.state_menu.update(cx, |menu, cx| menu.set_state(state, cx));
         cx.notify();
     }
 
-    /// Opens the state menu, or closes it when it is open. With no state, it does nothing.
+    /// With no state, it does nothing.
     pub(crate) fn toggle_state_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.state_menu.update(cx, |menu, cx| menu.toggle(window, cx));
     }
@@ -107,7 +105,6 @@ impl MessageLine {
         }
     }
 
-    /// Clears the message.
     fn clear(&mut self, cx: &mut Context<Self>) {
         if self.message.take().is_some() {
             cx.notify();
@@ -149,7 +146,6 @@ impl MessageLine {
             )
     }
 
-    /// The gray mark with the count of the problems.
     fn mark(&self, count: usize, cx: &Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let bounds = self.mark_bounds.clone();

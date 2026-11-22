@@ -33,13 +33,11 @@ impl Fixture {
         }
     }
 
-    /// Writes `text` to a note, like another tool, and tells the core.
     fn write_outside(&self, cx: &mut TestAppContext, note: &str, text: &str) {
         fs::write(self.notes().join(note), text).unwrap();
         self.tell(cx, note);
     }
 
-    /// Deletes a note, like another tool, and tells the core.
     fn delete_outside(&self, cx: &mut TestAppContext, note: &str) {
         fs::remove_file(self.notes().join(note)).unwrap();
         self.tell(cx, note);
@@ -64,7 +62,6 @@ impl Fixture {
         fs::write(self.config(), text).unwrap();
     }
 
-    /// A config file with the notes folder in it.
     fn with_folder(self) -> Self {
         self.write_config(&format!(
             "version = 1\nnotes_folder = {:?}\n",
@@ -73,7 +70,6 @@ impl Fixture {
         self
     }
 
-    /// A start with a log file. `crash_log` is that file after a crash.
     fn startup(&self, crash_log: Option<PathBuf>) -> Startup {
         let feed = self.feed.clone();
         Startup {
@@ -92,8 +88,8 @@ impl Fixture {
     }
 }
 
-/// Opens an active window, as the user sees it. An inactive window sends no focus events.
-/// Each write ends within its budget, as a quick disk does.
+/// An inactive window sends no focus events. Each write ends within its budget, as a quick disk
+/// does.
 fn open(cx: &mut TestAppContext, startup: Startup) -> AnyWindowHandle {
     cx.executor().set_block_on_ticks(usize::MAX..=usize::MAX);
     let opened = cx.update(|cx| {
@@ -112,12 +108,11 @@ fn open(cx: &mut TestAppContext, startup: Startup) -> AnyWindowHandle {
     handle
 }
 
-/// Runs all tasks, so the UI sees the outside changes. The autosave does not run yet.
+/// The autosave does not run yet.
 fn settle(cx: &mut TestAppContext) {
     cx.run_until_parked();
 }
 
-/// Runs the autosave.
 fn autosave(cx: &mut TestAppContext) {
     cx.executor().advance_clock(Duration::from_secs(1));
     cx.run_until_parked();
@@ -128,7 +123,6 @@ fn click(cx: &mut TestAppContext, handle: AnyWindowHandle, id: &'static str) {
     cx.run_until_parked();
 }
 
-/// Draws a frame and reads the screen with `read`.
 fn screen<R>(cx: &mut TestAppContext, handle: AnyWindowHandle, read: impl FnOnce(&mut Window) -> R) -> R {
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
@@ -137,7 +131,7 @@ fn screen<R>(cx: &mut TestAppContext, handle: AnyWindowHandle, read: impl FnOnce
     .unwrap()
 }
 
-/// The message of the folder screen, or `None` when the notes are open.
+/// `None` when the notes are open.
 fn folder_screen(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
     screen(cx, handle, |window| {
         window
@@ -154,7 +148,6 @@ fn empty_pane(cx: &mut TestAppContext, handle: AnyWindowHandle) -> bool {
     })
 }
 
-/// The files in the notes folder, sorted.
 fn files(dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = fs::read_dir(dir)
         .unwrap()
@@ -174,32 +167,31 @@ fn editor_text(cx: &mut TestAppContext, handle: AnyWindowHandle) -> String {
     })
 }
 
-/// The text on the left of the message line.
+/// On the left of the message line.
 fn message(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
     label(cx, handle, "message")
 }
 
-/// The state on the right of the message line.
+/// On the right of the message line.
 fn state(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
     label(cx, handle, "message-state")
 }
 
-/// The gray mark with the count of the problems.
+/// Gray, with the count of the problems.
 fn problem_mark(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
     label(cx, handle, "problem-mark")
 }
 
-/// The rows of the open problem list. The selected one has `*`.
+/// The selected row has `*`.
 fn problem_list(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
     labels(cx, handle, "problem-list", Role::ListBoxOption)
 }
 
-/// The choices of the open state menu. The selected one has `*`.
+/// The selected choice has `*`.
 fn state_menu(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
     labels(cx, handle, "state-menu", Role::ListBoxOption)
 }
 
-/// The reason line of the open state menu.
 fn state_reason(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
     label(cx, handle, "state-reason")
 }
@@ -210,14 +202,13 @@ fn label(cx: &mut TestAppContext, handle: AnyWindowHandle, id: &'static str) -> 
     })
 }
 
-/// Makes the notes folder read-only, so each new file fails. `false` undoes it.
+/// Each new file in `dir` then fails. `false` undoes it.
 fn read_only(dir: &Path, read_only: bool) {
     let mut permissions = fs::metadata(dir).unwrap().permissions();
     permissions.set_readonly(read_only);
     fs::set_permissions(dir, permissions).unwrap();
 }
 
-/// The sorted names in the folder `dir`.
 fn folder_names(dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = fs::read_dir(dir)
         .unwrap()
@@ -301,8 +292,7 @@ fn typing_saves_the_note_with_its_line_breaks(cx: &mut TestAppContext) {
     assert_eq!(read(&note), "---\nid: 01A\n---\r\nzero one\r\ntwo\r\n");
 }
 
-/// A save that waits behind a late job does not write over a change that another tool made
-/// meanwhile. It asks the disk question instead.
+/// The save asks the disk question instead.
 #[gpui_kit::test]
 fn a_save_behind_a_late_job_keeps_an_outside_change(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
@@ -379,7 +369,6 @@ fn an_outside_change_with_unsaved_text_asks_to_reload_or_keep_mine(cx: &mut Test
     autosave(cx);
     assert_eq!(read(&note), "theirs\n", "no autosave during the question");
 
-    // The open menu takes every key, and Esc closes only the menu.
     keys(cx, handle, "ctrl-shift-d");
     assert_eq!(state_menu(cx, handle), ["Keep mine*", "Reload"]);
     assert_eq!(state_reason(cx, handle).as_deref(), Some(text::CHANGED_REASON));
@@ -391,7 +380,6 @@ fn an_outside_change_with_unsaved_text_asks_to_reload_or_keep_mine(cx: &mut Test
     assert_eq!(state(cx, handle).as_deref(), Some(text::CHANGED_ON_DISK));
     assert_eq!(focus(cx, handle), "editor");
 
-    // A click outside the menu closes it, and so does a second click on the state.
     keys(cx, handle, "ctrl-shift-d");
     click(cx, handle, "editor");
     assert_eq!(state_menu(cx, handle), Vec::<String>::new());
@@ -402,7 +390,6 @@ fn an_outside_change_with_unsaved_text_asks_to_reload_or_keep_mine(cx: &mut Test
     assert_eq!(state_menu(cx, handle), Vec::<String>::new());
     assert_eq!(focus(cx, handle), "editor");
 
-    // The menu is right above the state, and its right edge meets the right edge of the state.
     keys(cx, handle, "ctrl-shift-d");
     let menu = bounds_of(cx, handle, "state-menu").unwrap();
     let opener = bounds_of(cx, handle, "message-state").unwrap();
@@ -524,7 +511,6 @@ fn a_broken_config_is_a_problem_in_the_message_line(cx: &mut TestAppContext) {
     assert_eq!(message(cx, handle), Some(text::crashed(&log).to_string()));
     assert_eq!(problem_mark(cx, handle), Some(text::problem_mark(1)));
 
-    // Ctrl+Shift+E works on the folder screen too.
     keys(cx, handle, "ctrl-shift-e");
     assert_eq!(problem_list(cx, handle), [format!("{}*", text::CONFIG_WRITE)]);
     keys(cx, handle, "tab");
@@ -603,7 +589,6 @@ fn a_failed_save_shows_not_saved_until_a_save_works(cx: &mut TestAppContext) {
     assert_eq!(message(cx, handle).as_deref(), Some(text::WRITE));
     assert_eq!(state(cx, handle).as_deref(), Some(text::NOT_SAVED));
 
-    // A second fail does not show the reason again. Ctrl+Shift+D does.
     keys(cx, handle, "right");
     cx.simulate_input(handle, "b");
     autosave(cx);
@@ -614,7 +599,6 @@ fn a_failed_save_shows_not_saved_until_a_save_works(cx: &mut TestAppContext) {
     assert_eq!(message(cx, handle), None);
     assert_eq!(editor_text(cx, handle), "aobld\n", "Ctrl+Shift+D types nothing");
 
-    // A disk question wins over "Not saved", and its state closes the menu.
     fixture.write_outside(cx, "Note.md", "theirs\n");
     assert_eq!(state(cx, handle).as_deref(), Some(text::CHANGED_ON_DISK));
     assert_eq!(state_reason(cx, handle), None);
@@ -625,7 +609,7 @@ fn a_failed_save_shows_not_saved_until_a_save_works(cx: &mut TestAppContext) {
     assert!(read(&note).ends_with("aobld\n"));
 }
 
-/// Asks to close the window, as the title bar does, and gives whether it is still open.
+/// As the title bar does. Gives whether the window is still open.
 fn close(cx: &mut TestAppContext, handle: AnyWindowHandle) -> bool {
     if VisualTestContext::from_window(handle, cx).simulate_close() {
         cx.update_window(handle, |_, window, _| window.remove_window()).unwrap();
@@ -657,7 +641,7 @@ fn a_close_saves_the_typed_text_first(cx: &mut TestAppContext) {
     assert!(read(&note).ends_with("aold\n"));
 }
 
-/// Types `text` in the editor. The keys after it run no autosave, so the text is not saved yet.
+/// The keys after it run no autosave, so the text is not saved yet.
 fn type_unsaved(cx: &mut TestAppContext, handle: AnyWindowHandle, text: &str) {
     assert_eq!(focus(cx, handle), "editor");
     cx.simulate_input(handle, text);
@@ -686,7 +670,6 @@ fn each_pane_action_sees_the_typed_text(cx: &mut TestAppContext) {
     assert!(read(&alpha).ends_with("one two # A\n"), "Ctrl+N");
     keys_now(cx, handle, "escape");
 
-    // The link picker finds the heading that is not saved yet.
     keys_now(cx, handle, "ctrl-end");
     type_unsaved(cx, handle, "## Fresh");
     keys_now(cx, handle, "ctrl-k");
@@ -779,7 +762,6 @@ fn each_sidebar_action_sees_the_typed_text(cx: &mut TestAppContext) {
     assert_eq!(fields(&note).0, Vec::<String>::new());
 }
 
-/// A click on the state between the two closes does not stop the second close.
 #[gpui_kit::test]
 fn a_click_between_two_closes_still_lets_the_second_close_close(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
@@ -935,7 +917,7 @@ fn focus(cx: &mut TestAppContext, handle: AnyWindowHandle) -> &'static str {
     })
 }
 
-/// The labels of the elements with `role` in the part `id`. The chip or row in focus has `*`.
+/// The chip or row in focus has `*`.
 fn labels(cx: &mut TestAppContext, handle: AnyWindowHandle, id: &str, role: Role) -> Vec<String> {
     let id = id.to_owned();
     screen(cx, handle, |window| {
@@ -962,7 +944,7 @@ fn chips(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
     labels(cx, handle, "tag-row", Role::ListItem)
 }
 
-/// The lines of the list in the tag popup. A tag of the note has `✓`, the cursor has `*`.
+/// A tag of the note has `✓`, the cursor has `*`.
 fn options(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
     screen(cx, handle, |window| {
         if window.try_find("tag-options").is_none() {
@@ -990,7 +972,6 @@ fn popup_open(cx: &mut TestAppContext, handle: AnyWindowHandle) -> bool {
     screen(cx, handle, |window| window.try_find("tag-popup").is_some())
 }
 
-/// The tags and the pin in the file of a note.
 fn fields(path: &Path) -> (Vec<String>, bool) {
     let note = holm_markdown::NoteFile::parse(&read(path));
     (note.tags(), note.pinned())
@@ -1000,7 +981,6 @@ fn modified(path: &Path) -> std::time::SystemTime {
     fs::metadata(path).unwrap().modified().unwrap()
 }
 
-/// The question of the open dialog.
 fn question(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
     screen(cx, handle, |window| {
         window
@@ -1126,7 +1106,6 @@ fn tab_and_shift_tab_stay_in_the_editor(cx: &mut TestAppContext) {
     assert_eq!(editor_text(cx, handle), "- a\n- b\n\nend");
     assert_eq!(focus(cx, handle), "editor");
 
-    // Outside a list, Tab types spaces and Shift+Tab does nothing.
     keys(cx, handle, "ctrl-end tab");
     assert_eq!(editor_text(cx, handle), "- a\n- b\n\nend    ");
     assert_eq!(focus(cx, handle), "editor");
@@ -1165,7 +1144,6 @@ fn keys_make_rename_and_move_notes_and_folders(cx: &mut TestAppContext) {
     assert!(notes_dir.join("work/Top.md").is_file());
     assert!(!notes_dir.join("Top.md").exists());
 
-    // The editor follows the move, so the next save goes to the new file.
     keys(cx, handle, "enter");
     cx.simulate_input(handle, "x");
     autosave(cx);
@@ -1173,7 +1151,6 @@ fn keys_make_rename_and_move_notes_and_folders(cx: &mut TestAppContext) {
     assert!(!notes_dir.join("Top.md").exists());
 }
 
-/// Opens a notes folder with the folder `work`, and selects it in the tree.
 fn open_on_work(cx: &mut TestAppContext) -> AnyWindowHandle {
     let fixture = Fixture::new().with_folder();
     fs::create_dir(fixture.notes().join("work")).unwrap();
@@ -1422,7 +1399,6 @@ fn tab_moves_through_the_tag_lines_and_wraps(cx: &mut TestAppContext) {
     assert!(popup_open(cx, handle), "only Esc closes the popup");
 }
 
-/// Whether the tag row is on the screen, with its top inside the window.
 fn tag_row_in_sight(cx: &mut TestAppContext, handle: AnyWindowHandle) -> bool {
     screen(cx, handle, |window| {
         window
@@ -1456,7 +1432,6 @@ fn the_tag_row_scrolls_with_the_text_and_ctrl_shift_t_brings_it_back(cx: &mut Te
     });
     assert!(widest <= crate::tags::CHIP_WIDTH, "a long tag ends with …");
 
-    // The popup opens with no move of the row or its chips.
     let row_shape = |cx: &mut TestAppContext| {
         screen(cx, handle, |window| {
             let mut shape = vec![window.find("tag-row").bounds()];
@@ -1495,7 +1470,6 @@ fn the_tag_row_scrolls_with_the_text_and_ctrl_shift_t_brings_it_back(cx: &mut Te
     assert!(editor_text(cx, handle).ends_with("line 199\nend"));
 }
 
-/// Clicks the chip at `at` in the tag row.
 fn click_chip(cx: &mut TestAppContext, handle: AnyWindowHandle, at: u64) {
     cx.update_window(handle, |_, window, cx| {
         window.click(gpui_kit::ElementId::NamedInteger("tag-chip".into(), at), cx);
@@ -1514,8 +1488,6 @@ fn clicks_open_and_close_the_tag_popup(cx: &mut TestAppContext) {
     .unwrap();
     let handle = open(cx, fixture.startup(None));
 
-    // A click on a chip opens the popup with the cursor on its tag. A click elsewhere in the
-    // row opens it with no cursor.
     click_chip(cx, handle, 0);
     assert_eq!(focus(cx, handle), "tag field");
     assert_eq!(options(cx, handle), ["#work ✓*", "#home ✓"]);
@@ -1532,7 +1504,6 @@ fn clicks_open_and_close_the_tag_popup(cx: &mut TestAppContext) {
     assert_eq!(focus(cx, handle), "tag field");
     assert_eq!(options(cx, handle), ["#work ✓", "#home ✓"]);
 
-    // A click outside the popup closes it, as Esc does.
     let bottom = screen(cx, handle, |window| window.find("editor").bounds().size.height);
     cx.update_window(handle, |_, window, cx| {
         window.click_at(
@@ -1559,7 +1530,6 @@ fn a_note_with_no_tags_shows_the_add_chip(cx: &mut TestAppContext) {
     assert_eq!(chips(cx, handle), Vec::<String>::new());
     let popup_under_row = |cx: &mut TestAppContext| bounds_of(cx, handle, "tag-popup").unwrap().top() >= row.bottom();
 
-    // A click on the chip opens the popup under the row, not over the title.
     click(cx, handle, "tag-add");
     assert_eq!(focus(cx, handle), "tag field");
     assert!(popup_under_row(cx));
@@ -1578,7 +1548,7 @@ fn a_note_with_no_tags_shows_the_add_chip(cx: &mut TestAppContext) {
     assert_eq!(fields(&a).0, ["work"]);
 }
 
-/// The bounds of the part `id`, or `None` when it is not on the screen.
+/// `None` when it is not on the screen.
 fn bounds_of(
     cx: &mut TestAppContext,
     handle: AnyWindowHandle,
@@ -1621,14 +1591,12 @@ fn the_tag_row_stays_on_one_line_and_folds_the_rest_into_a_chip(cx: &mut TestApp
     assert!(more.right() <= count.left());
     assert!(count.right() <= row.right());
 
-    // A narrow window folds more tags.
     cx.simulate_window_resize(handle, gpui_kit::size(gpui_kit::px(560.), gpui_kit::px(600.)));
     cx.run_until_parked();
     let narrow = chips(cx, handle);
     assert!(narrow.len() < shown.len(), "{narrow:?}");
     assert_eq!(bounds_of(cx, handle, "tag-row").unwrap().size.height, one_tag);
 
-    // In a window too narrow for any chip, the count still does not cover the "+N" chip.
     cx.simulate_window_resize(handle, gpui_kit::size(gpui_kit::px(100.), gpui_kit::px(600.)));
     cx.run_until_parked();
     assert_eq!(chips(cx, handle), Vec::<String>::new());
@@ -1638,7 +1606,6 @@ fn the_tag_row_stays_on_one_line_and_folds_the_rest_into_a_chip(cx: &mut TestApp
     cx.simulate_window_resize(handle, gpui_kit::size(gpui_kit::px(560.), gpui_kit::px(600.)));
     cx.run_until_parked();
 
-    // A click on the "+N" chip puts the cursor on the first folded tag.
     click(cx, handle, "tag-more");
     assert_eq!(focus(cx, handle), "tag field");
     let cursor = options(cx, handle).iter().position(|line| line.ends_with('*'));
@@ -1658,7 +1625,6 @@ fn tags_rename_and_delete_in_all_notes_after_the_dialog(cx: &mut TestAppContext)
     let handle = open(cx, fixture.startup(None));
     assert_eq!(chips(cx, handle), ["work"]);
 
-    // The tree: All notes, then the tags home and work.
     keys(cx, handle, "ctrl-shift-l escape tab tab");
     assert_eq!(sidebar(cx, handle), "tree #work");
     keys(cx, handle, "f2");
@@ -1697,7 +1663,6 @@ fn tags_rename_and_delete_in_all_notes_after_the_dialog(cx: &mut TestAppContext)
     assert_eq!(chips(cx, handle), Vec::<String>::new());
     assert!(Config::load(fixture.config()).settings().ask_before_delete);
 
-    // A gone top tag leaves the tree with All notes. The tree has All notes, then the tag home.
     assert_eq!(sidebar(cx, handle), "tree All notes");
     keys(cx, handle, "tab");
     assert_eq!(sidebar(cx, handle), "tree #home");
@@ -1709,7 +1674,6 @@ fn tags_rename_and_delete_in_all_notes_after_the_dialog(cx: &mut TestAppContext)
     keys(cx, handle, "enter");
     assert_eq!(fields(&b).0, Vec::<String>::new());
 
-    // A later save of the open note keeps the new tags.
     keys(cx, handle, "ctrl-shift-l");
     cx.simulate_input(handle, "x");
     autosave(cx);
@@ -1720,25 +1684,24 @@ fn tags_rename_and_delete_in_all_notes_after_the_dialog(cx: &mut TestAppContext)
     );
 }
 
-/// Presses `keys` and runs all tasks, before the sidebar reads the notes again.
+/// Runs the tasks before the sidebar reads the notes again.
 fn keys_now(cx: &mut TestAppContext, handle: AnyWindowHandle, keys: &str) {
     cx.simulate_keystrokes(handle, keys);
     cx.run_until_parked();
 }
 
-/// The rows of the tree. The selected row has `*`.
+/// The selected row has `*`.
 fn tree(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
     labels(cx, handle, "sidebar", Role::TreeItem)
 }
 
-/// Starts the name field on the selected row and types `name` over the old name.
 fn type_new_name(cx: &mut TestAppContext, handle: AnyWindowHandle, name: &str) {
     keys(cx, handle, "f2");
     keys(cx, handle, "ctrl-a");
     cx.simulate_input(handle, name);
 }
 
-/// Presses `key` and runs no task, so a write that it starts has not run yet.
+/// A write that the key starts has not run yet.
 fn press(cx: &mut TestAppContext, handle: AnyWindowHandle, key: &'static str) {
     cx.update_window(handle, |_, window, cx| {
         window.dispatch_keystroke(gpui_kit::Keystroke::parse(key).unwrap(), cx);
@@ -1746,7 +1709,7 @@ fn press(cx: &mut TestAppContext, handle: AnyWindowHandle, key: &'static str) {
     .unwrap();
 }
 
-/// The text of the name field in the tree, with or without the focus.
+/// With or without the focus.
 fn tree_field(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
     screen(cx, handle, |window| {
         window.try_find("sidebar")?;
@@ -1779,7 +1742,6 @@ fn a_late_folder_rename_keeps_the_field_and_shows_writing(cx: &mut TestAppContex
     assert_eq!(tree(cx, handle), ["All notes", "work*", "work/sub"]);
     assert_eq!(state(cx, handle).as_deref(), Some(text::WRITING));
 
-    // The field takes no keys until the write ends.
     press(cx, handle, "escape");
     press(cx, handle, "shift-tab");
     press(cx, handle, "backspace");
@@ -1811,7 +1773,6 @@ fn a_folder_rename_to_a_taken_name_keeps_the_field_and_shows_the_answer(cx: &mut
     assert_eq!(message(cx, handle).as_deref(), Some(text::NAME_TAKEN));
     assert_eq!(folder_names(&notes_dir), ["Top.md", "job", "work"]);
 
-    // The field takes a new name, and the write works.
     keys(cx, handle, "ctrl-a");
     cx.simulate_input(handle, "Work");
     keys(cx, handle, "enter");
@@ -1836,7 +1797,6 @@ fn a_failed_folder_rename_shows_the_old_name_and_the_error(cx: &mut TestAppConte
     assert_eq!(tree(cx, handle), ["All notes", "work*"]);
     assert!(message(cx, handle).is_some());
 
-    // Esc clears the answer, and the sidebar still gets it.
     keys(cx, handle, "escape");
     assert_eq!(message(cx, handle), None);
     assert_eq!(focus(cx, handle), "editor");
@@ -1891,8 +1851,7 @@ fn a_tag_rename_onto_a_tag_merges_into_its_row(cx: &mut TestAppContext) {
     assert_eq!(fields(&notes_dir.join("A.md")).0, ["new"]);
 }
 
-/// Runs the tasks one at a time, and gives the tree before them and after each one that
-/// changes it. A frame can show each of these.
+/// A frame can show each of these steps.
 fn tree_steps(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<Vec<String>> {
     let mut steps = vec![tree(cx, handle)];
     while cx.executor().tick() {
@@ -1904,7 +1863,6 @@ fn tree_steps(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<Vec<Strin
     steps
 }
 
-/// Renames the selected row to `name`, and gives the tree steps of the write.
 fn rename_steps(cx: &mut TestAppContext, handle: AnyWindowHandle, name: &str) -> Vec<Vec<String>> {
     type_new_name(cx, handle, name);
     press(cx, handle, "enter");
@@ -1933,7 +1891,6 @@ fn a_folder_rename_keeps_the_row_selected_in_every_frame(cx: &mut TestAppContext
         [vec!["All notes", "area", "area/bebra", "area/job*", "area/job/sub"],]
     );
 
-    // The open note follows the folder, so the next save goes to the new file.
     assert_eq!(editor_text(cx, handle), "# A\n");
     keys(cx, handle, "ctrl-shift-l");
     cx.simulate_input(handle, "x");
@@ -1990,7 +1947,6 @@ fn a_new_folder_with_a_taken_name_keeps_the_field_and_esc_leaves_nothing(cx: &mu
     keys(cx, handle, "enter");
     assert_eq!(tree_field(cx, handle).as_deref(), Some("Bebra"));
     assert_eq!(message(cx, handle).as_deref(), Some(text::NAME_TAKEN));
-    // The field has the focus again.
     cx.simulate_input(handle, " 2");
     assert_eq!(tree_field(cx, handle).as_deref(), Some("Bebra 2"));
 
@@ -1999,7 +1955,6 @@ fn a_new_folder_with_a_taken_name_keeps_the_field_and_esc_leaves_nothing(cx: &mu
     assert_eq!(tree(cx, handle), ["All notes", "area*", "area/bebra", "area/work"]);
     assert_eq!(folder_names(&notes_dir.join("area")), ["bebra", "work"]);
 
-    // An empty name gets an answer too.
     keys(cx, handle, "ctrl-shift-n enter");
     assert_eq!(tree_field(cx, handle).as_deref(), Some(""));
     assert_eq!(message(cx, handle).as_deref(), Some(text::NAME_EMPTY));
@@ -2093,7 +2048,6 @@ fn a_tag_rename_keeps_the_row_selected_in_every_frame(cx: &mut TestAppContext) {
         [vec!["All notes", "#area", "#area/fresh*", "#area/fresh/x", "#area/new"],]
     );
 
-    // A rename into a tag that exists merges into its row.
     keys(cx, handle, "f2");
     keys(cx, handle, "ctrl-a");
     cx.simulate_input(handle, "area/new");
@@ -2149,7 +2103,7 @@ fn an_outside_rename_of_the_open_note_keeps_it_selected(cx: &mut TestAppContext)
     assert_eq!(note_path(cx, handle).as_deref(), Some("C"));
 }
 
-/// The text of the name field in the sidebar, while it has the focus.
+/// While it has the focus.
 fn name_field(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
     screen(cx, handle, |window| {
         window.try_find("sidebar")?;
@@ -2162,7 +2116,6 @@ fn name_field(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String
     })
 }
 
-/// The text of the field in the link picker.
 fn picker_text(cx: &mut TestAppContext, handle: AnyWindowHandle) -> String {
     screen(cx, handle, |window| {
         window
@@ -2174,7 +2127,7 @@ fn picker_text(cx: &mut TestAppContext, handle: AnyWindowHandle) -> String {
     })
 }
 
-/// A has the tags `home` and `work/holm`, B has `work/holm`. A is open.
+/// A is open.
 fn two_tagged_notes(fixture: &Fixture) -> (PathBuf, PathBuf) {
     let notes_dir = fixture.notes();
     let a = notes_dir.join("A.md");
@@ -2249,7 +2202,7 @@ fn shows(window: &Window, id: &'static str) -> bool {
     window.try_find(id).is_some_and(|element| element.visible())
 }
 
-/// Presses `key` and draws one frame. Work that waits for the end of the draw has not run yet.
+/// Work that waits for the end of the draw has not run yet.
 fn first_frame_has(cx: &mut TestAppContext, handle: AnyWindowHandle, key: &'static str, id: &'static str) -> bool {
     cx.update_window(handle, |_, window, cx| {
         window.dispatch_keystroke(gpui_kit::Keystroke::parse(key).unwrap(), cx);
@@ -2358,7 +2311,7 @@ fn a_folder_delete_selects_the_parent_folder(cx: &mut TestAppContext) {
     );
 }
 
-/// Whether the tree row `label` shows open. `None` means it has no child rows.
+/// `None` means it has no child rows.
 fn expanded(cx: &mut TestAppContext, handle: AnyWindowHandle, label: &str) -> Option<bool> {
     screen(cx, handle, |window| {
         window
@@ -2389,7 +2342,6 @@ fn a_folder_shows_closed_after_its_last_child_folder_is_deleted(cx: &mut TestApp
 
     assert_eq!(tree(cx, handle), ["All notes", "area", "area/work*"]);
     assert_eq!(expanded(cx, handle, "area/work"), None);
-    // Space on a folder with no children does nothing.
     keys(cx, handle, "space");
     assert_eq!(sidebar(cx, handle), "tree area/work");
     assert_eq!(expanded(cx, handle, "area/work"), None);
@@ -2434,7 +2386,6 @@ fn a_child_tag_delete_selects_the_parent_tag_while_it_exists(cx: &mut TestAppCon
     fs::write(&b, "---\ntags:\n  - home/garden\n---\n# B\n").unwrap();
     let handle = open(cx, fixture.startup(None));
 
-    // The tree: All notes, then the tags home and work.
     keys(cx, handle, "ctrl-shift-l escape tab tab space tab");
     assert_eq!(sidebar(cx, handle), "tree #work/holm");
     keys(cx, handle, "delete");
@@ -2491,7 +2442,6 @@ fn search_lists_the_notes_that_match_and_esc_returns(cx: &mut TestAppContext) {
     assert_eq!(editor_text(cx, handle), "# Goals\nread more\n");
     assert_eq!(notes_list(cx, handle), ["Goals*"]);
 
-    // The search also matches tags, and a new search selects the old text.
     keys(cx, handle, "ctrl-shift-f");
     cx.simulate_input(handle, "work");
     settle(cx);
@@ -2502,7 +2452,6 @@ fn search_lists_the_notes_that_match_and_esc_returns(cx: &mut TestAppContext) {
     assert_eq!(sidebar(cx, handle), "tree All notes");
     assert_eq!(focus(cx, handle), "sidebar");
 
-    // A search with no match, and `Esc` in the field.
     keys(cx, handle, "ctrl-shift-f");
     cx.simulate_input(handle, "zebra");
     settle(cx);
@@ -2511,7 +2460,7 @@ fn search_lists_the_notes_that_match_and_esc_returns(cx: &mut TestAppContext) {
     assert_eq!(sidebar(cx, handle), "tree All notes");
     assert_eq!(focus(cx, handle), "sidebar");
 
-    // Ctrl+Shift+F also shows a hidden sidebar. The view is not part of the config.
+    // The view is not part of the config.
     keys(cx, handle, "ctrl-shift-l");
     assert_eq!(sidebar(cx, handle), "hidden");
     keys(cx, handle, "ctrl-shift-f");
@@ -2528,7 +2477,6 @@ fn search_lists_the_notes_that_match_and_esc_returns(cx: &mut TestAppContext) {
     );
     assert!(!settings.sidebar.hidden);
 
-    // The find bar of the editor lets Ctrl+Shift+F through.
     keys(cx, handle, "enter enter");
     keys(cx, handle, "ctrl-f");
     assert_eq!(focus(cx, handle), "editor");
@@ -2536,7 +2484,6 @@ fn search_lists_the_notes_that_match_and_esc_returns(cx: &mut TestAppContext) {
     assert_eq!(focus(cx, handle), "search");
 }
 
-/// The rows of the note list after each task, each change once.
 fn list_steps(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<Vec<String>> {
     let mut steps = vec![notes_list(cx, handle)];
     while cx.executor().tick() {
@@ -2607,18 +2554,15 @@ fn quick_open_opens_a_note_by_its_title(cx: &mut TestAppContext) {
     assert_eq!(focus(cx, handle), "editor");
     assert_eq!(notes_list(cx, handle), ["Plan", "Goals", "Top*"]);
 
-    // `Esc` gives the focus back to the part that had it.
     keys(cx, handle, "ctrl-shift-l ctrl-shift-o escape");
     assert_eq!(focus(cx, handle), "sidebar");
 }
 
-/// Presses `key`, and runs no task.
 fn press_only(cx: &mut TestAppContext, handle: AnyWindowHandle, key: &'static str) {
     cx.dispatch_keystroke(handle, gpui_kit::Keystroke::parse(key).unwrap());
 }
 
-/// The keys that the old note takes while another note opens reach its file, also after keys in
-/// the new note.
+/// Also after keys in the new note, while it opens.
 #[gpui_kit::test]
 fn text_typed_while_another_note_opens_reaches_its_file(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
@@ -2654,7 +2598,7 @@ fn text_typed_while_another_note_opens_reaches_its_file(cx: &mut TestAppContext)
     assert!(read(&fixture.notes().join("Top.md")).ends_with("xy# Top\n"));
 }
 
-/// The folder in each option of the popup `id`, or `None` for an option with no folder.
+/// `None` for an option with no folder.
 fn folders(cx: &mut TestAppContext, handle: AnyWindowHandle, id: &str) -> Vec<Option<String>> {
     let id = id.to_owned();
     screen(cx, handle, |window| {
@@ -2709,7 +2653,6 @@ fn a_click_outside_a_popup_never_reaches_the_parts_under_it(cx: &mut TestAppCont
     three_notes(&fixture.notes());
     let handle = open(cx, fixture.startup(None));
 
-    // Quick open and the link picker close, as Esc does.
     keys(cx, handle, "ctrl-shift-l ctrl-shift-o");
     click_below(cx, handle);
     assert_eq!(question(cx, handle), None);
@@ -2724,7 +2667,6 @@ fn a_click_outside_a_popup_never_reaches_the_parts_under_it(cx: &mut TestAppCont
     assert_eq!(focus(cx, handle), "editor");
     assert_eq!(editor_text(cx, handle), "# Plan\nbuy milk\n");
 
-    // A dialog stays open and keeps the focus.
     keys(cx, handle, "ctrl-shift-l delete");
     let delete = question(cx, handle);
     assert!(delete.is_some());
@@ -2733,7 +2675,6 @@ fn a_click_outside_a_popup_never_reaches_the_parts_under_it(cx: &mut TestAppCont
     assert_eq!(focus(cx, handle), "other");
 }
 
-/// The id in the frontmatter of a note file.
 fn id_of(path: &Path) -> String {
     holm_markdown::NoteFile::parse(&read(path))
         .id()
@@ -2754,7 +2695,7 @@ fn the_link_picker_links_notes_headings_and_new_notes(cx: &mut TestAppContext) {
     assert_eq!(editor_text(cx, handle), "# Alpha\n");
     keys(cx, handle, "ctrl-end");
 
-    // A note link. The note had no id, so it gets one.
+    // The note had no id, so it gets one.
     keys(cx, handle, "ctrl-k");
     assert_eq!(question(cx, handle).as_deref(), Some(text::LINK_TO_NOTE));
     assert_eq!(options(cx), ["Alpha*", "Beta"]);
@@ -2768,7 +2709,6 @@ fn the_link_picker_links_notes_headings_and_new_notes(cx: &mut TestAppContext) {
     let beta = id_of(&notes.join("work/Beta.md"));
     assert_eq!(editor_text(cx, handle), format!("# Alpha\n[Beta](holm:{beta})"));
 
-    // A heading link. A typed `#` fills in the title and switches to its headings.
     cx.simulate_input(handle, " ");
     keys(cx, handle, "ctrl-k");
     cx.simulate_input(handle, "be");
@@ -2787,7 +2727,6 @@ fn the_link_picker_links_notes_headings_and_new_notes(cx: &mut TestAppContext) {
         format!("# Alpha\n[Beta](holm:{beta}) [Bug list](<holm:{beta}#Bug list>)")
     );
 
-    // A new note, in the folder of the open note. The user stays in this note.
     cx.simulate_input(handle, " ");
     keys(cx, handle, "ctrl-k");
     cx.simulate_input(handle, "Gamma");
@@ -2801,7 +2740,6 @@ fn the_link_picker_links_notes_headings_and_new_notes(cx: &mut TestAppContext) {
     assert!(text.starts_with("# Alpha\n"));
     assert!(text.ends_with(&format!(" [Gamma](holm:{gamma})")));
 
-    // In a link, the field starts with its target. Enter changes the target and keeps the text.
     keys(cx, handle, "ctrl-k");
     assert_eq!(options(cx), ["Gamma*"]);
     keys(cx, handle, "ctrl-a backspace");
@@ -2814,7 +2752,6 @@ fn the_link_picker_links_notes_headings_and_new_notes(cx: &mut TestAppContext) {
         editor_text(cx, handle)
     );
 
-    // Esc changes nothing.
     let before = editor_text(cx, handle);
     keys(cx, handle, "ctrl-k");
     cx.simulate_input(handle, "Alpha");
@@ -2838,13 +2775,11 @@ fn links_open_notes_at_headings_and_backlinks_lead_back(cx: &mut TestAppContext)
     let handle = open(cx, fixture.startup(None));
     assert_eq!(backlink_count(cx, handle), None);
 
-    // Ctrl+Enter on a heading link opens the note at the heading.
     keys(cx, handle, "down ctrl-enter");
     assert_eq!(editor_text(cx, handle), "# Beta\n\ntext\n\n## Ideas\n");
     cx.simulate_input(handle, "X");
     assert_eq!(editor_text(cx, handle), "# Beta\n\ntext\n\nX## Ideas\n");
 
-    // The backlinks of Beta lead back to Alpha.
     assert_eq!(backlink_count(cx, handle).as_deref(), Some("← 1 note"));
     // The heading is at the top of the view, so the tag row is out of sight.
     keys(cx, handle, "ctrl-home");
@@ -2859,12 +2794,11 @@ fn links_open_notes_at_headings_and_backlinks_lead_back(cx: &mut TestAppContext)
     assert!(editor_text(cx, handle).starts_with("# Alpha\n"));
     assert_eq!(read(&notes.join("Beta.md")).lines().last(), Some("X## Ideas"));
 
-    // A link to a missing note shows an answer.
     keys(cx, handle, "down down ctrl-enter");
     assert_eq!(message(cx, handle).as_deref(), Some(text::NOTE_GONE));
 }
 
-/// The label of the backlink count button, or `None` with no button.
+/// `None` with no button.
 fn backlink_count(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
     screen(cx, handle, |window| {
         window
@@ -2873,7 +2807,7 @@ fn backlink_count(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<St
     })
 }
 
-/// The notes in the open backlinks list. The cursor has `*`.
+/// The cursor has `*`.
 fn backlinks(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
     labels(cx, handle, "backlinks", Role::ListBoxOption)
 }
@@ -2894,14 +2828,12 @@ fn ctrl_shift_b_opens_the_backlinks_of_the_note(cx: &mut TestAppContext) {
     assert_eq!(backlink_count(cx, handle).as_deref(), Some("← 2 notes"));
     assert!(screen(cx, handle, |window| window.find("tag-row").bounds().size.height) > gpui_kit::px(0.));
 
-    // Esc gives the focus back to the text.
     keys(cx, handle, "ctrl-shift-b");
     assert_eq!(backlinks(cx, handle), ["New*", "Old"]);
     keys(cx, handle, "escape");
     assert_eq!(backlinks(cx, handle), Vec::<String>::new());
     assert_eq!(focus(cx, handle), "editor");
 
-    // Tab wraps, an arrow does nothing, and Enter opens the note.
     keys(cx, handle, "ctrl-shift-b shift-tab");
     assert_eq!(backlinks(cx, handle), ["New", "Old*"]);
     keys(cx, handle, "tab");
@@ -2974,7 +2906,6 @@ fn a_note_with_no_backlinks_has_no_count(cx: &mut TestAppContext) {
     assert_eq!(backlinks(cx, handle), Vec::<String>::new());
     assert_eq!(focus(cx, handle), "editor");
 
-    // A new link from another note makes the count grow.
     fixture.write_outside(cx, "Other.md", "# Other\n[t](holm:01T)\n");
     assert_eq!(backlink_count(cx, handle).as_deref(), Some("← 1 note"));
 }
@@ -3042,12 +2973,10 @@ fn an_empty_folder_shows_the_empty_pane_and_makes_no_note(cx: &mut TestAppContex
     assert_eq!(focus(cx, handle), "sidebar");
     assert_eq!(chips(cx, handle), Vec::<String>::new());
 
-    // The keys that need a note do nothing.
     keys(cx, handle, "ctrl-shift-p ctrl-shift-t ctrl-shift-b ctrl-k");
     assert_eq!(files(&fixture.notes()), Vec::<String>::new());
     assert!(empty_pane(cx, handle));
 
-    // With no sidebar, the window keys still work.
     keys(cx, handle, "ctrl-shift-l");
     assert_eq!(sidebar(cx, handle), "hidden");
     keys(cx, handle, "ctrl-shift-l");
@@ -3247,24 +3176,23 @@ fn a_window_close_keeps_the_name_of_the_open_note(cx: &mut TestAppContext) {
     assert_eq!(settings.last_note, holm_core::NotePath::new("Plans.md"));
 }
 
-/// Ctrl+N, then `title` and Enter.
 fn new_note(cx: &mut TestAppContext, handle: AnyWindowHandle, title: &str) {
     keys(cx, handle, "ctrl-n");
     cx.simulate_input(handle, title);
     keys(cx, handle, "enter");
 }
 
-/// The path at the end of the tag row, like `work › Plans`.
+/// At the end of the tag row, like `work › Plans`.
 fn note_path(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
     label(cx, handle, "note-path")
 }
 
-/// Whether the pane shows a new note with no file yet.
+/// The new note has no file yet.
 fn new_note_open(cx: &mut TestAppContext, handle: AnyWindowHandle) -> bool {
     screen(cx, handle, |window| window.try_find("new-note").is_some())
 }
 
-/// The text of the title field, while it is open.
+/// While it is open.
 fn title_field(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
     screen(cx, handle, |window| {
         window
@@ -3300,7 +3228,6 @@ fn f2_renames_the_note_and_esc_keeps_the_old_title(cx: &mut TestAppContext) {
     assert_eq!(read(&notes.join("work/Goals.md")), "# Spring plans\n");
     assert_eq!(note_path(cx, handle).as_deref(), Some("work › Goals"));
 
-    // The text goes on in the renamed file.
     cx.simulate_input(handle, "x");
     autosave(cx);
     assert!(read(&notes.join("work/Goals.md")).ends_with("---\nx# Spring plans\n"));
@@ -3326,7 +3253,6 @@ fn f2_with_a_taken_title_shows_the_answer_and_keeps_the_field(cx: &mut TestAppCo
     assert_eq!(focus(cx, handle), "title field");
     assert_eq!(files(&notes), ["Ideas.md", "Plans.md"]);
 
-    // F2 in the note list opens the same field.
     keys(cx, handle, "escape ctrl-shift-l f2");
     assert_eq!(focus(cx, handle), "title field");
     assert_eq!(title_field(cx, handle).as_deref(), Some("Plans"));
@@ -3349,7 +3275,6 @@ fn ctrl_n_names_the_note_first_and_esc_leaves_nothing(cx: &mut TestAppContext) {
     assert_eq!(editor_text(cx, handle), "old\n");
     assert_eq!(focus(cx, handle), "editor");
 
-    // A refused title keeps the new note.
     keys(cx, handle, "ctrl-n");
     cx.simulate_input(handle, "old");
     keys(cx, handle, "enter");
@@ -3379,8 +3304,7 @@ fn enter_on_an_empty_title_shows_the_answer_with_no_wait(cx: &mut TestAppContext
     assert_eq!(message(cx, handle).as_deref(), Some(text::NAME_EMPTY));
 }
 
-/// Presses `key`, then runs the tasks one at a time. It gives whether a frame between them
-/// shows the empty pane.
+/// Whether a frame between the tasks that `key` starts shows the empty pane.
 fn empty_pane_in_a_step(cx: &mut TestAppContext, handle: AnyWindowHandle, key: &'static str) -> bool {
     press(cx, handle, key);
     let mut shown = empty_pane(cx, handle);
@@ -3557,7 +3481,7 @@ fn ctrl_n_after_a_refused_title_starts_clean(cx: &mut TestAppContext) {
 #[path = "window_speed.rs"]
 mod speed;
 
-/// Changes the settings, as the settings dialog does.
+/// As the settings dialog does.
 fn change_settings(cx: &mut TestAppContext, handle: AnyWindowHandle, change: impl FnOnce(&mut Settings)) {
     cx.update_window(handle, |root, _, cx| {
         let root = root.downcast::<gpui_kit::base::Root>().unwrap();
@@ -3600,7 +3524,6 @@ fn a_new_note_order_sorts_the_sidebar_at_once(cx: &mut TestAppContext) {
     assert_eq!(notes_list(cx, handle), ["Goals", "Plan*", "Top"]);
 }
 
-/// Opens an empty note, types `text` and presses `key` with `help`. Gives the editor text.
 fn typed_with(cx: &mut TestAppContext, help: WritingHelp, text: &str, key: &str) -> String {
     let fixture = Fixture::new().with_folder();
     fs::write(fixture.notes().join("Note.md"), "").unwrap();
@@ -3638,7 +3561,6 @@ fn indent_lists_off_applies_at_once(cx: &mut TestAppContext) {
     assert_eq!(typed_with(cx, off, "- a", "tab"), "- a    ");
 }
 
-/// A notes folder with the note `Note.md` and the folder `other` with `A.md`.
 fn two_folders() -> (Fixture, PathBuf) {
     let fixture = Fixture::new().with_folder();
     fs::write(fixture.notes().join("Note.md"), "old\n").unwrap();
@@ -3684,7 +3606,6 @@ fn a_new_notes_folder_with_a_failed_save_keeps_the_old_folder(cx: &mut TestAppCo
     let config = Config::load(fixture.config());
     assert_eq!(config.settings().notes_folder, Some(fixture.notes()));
 
-    // The user picks again after the save works.
     read_only(&fixture.notes(), false);
     change_settings(cx, handle, |settings| {
         settings.notes_folder = Some(other.clone());
@@ -3693,7 +3614,7 @@ fn a_new_notes_folder_with_a_failed_save_keeps_the_old_folder(cx: &mut TestAppCo
     assert!(read(&fixture.notes().join("Note.md")).ends_with("\nxold\n"));
 }
 
-/// The rows of the settings dialog. The row with the cursor has `*`.
+/// The row with the cursor has `*`.
 fn setting_rows(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
     labels(cx, handle, "settings", Role::ListItem)
 }
@@ -3797,7 +3718,7 @@ fn each_setting_changes_by_keys_only(cx: &mut TestAppContext) {
     assert_eq!(question(cx, handle).as_deref(), Some(text::SETTINGS));
 }
 
-/// The zoom of the window: the scale of Holm as a factor.
+/// The scale of Holm as a factor.
 fn zoom(cx: &mut TestAppContext, handle: AnyWindowHandle) -> f32 {
     cx.update_window(handle, |_, window, _| window.zoom()).unwrap()
 }
@@ -3828,14 +3749,13 @@ fn text_column(cx: &mut TestAppContext, handle: AnyWindowHandle) -> (f32, f32) {
     })
 }
 
-/// The editor width.
 fn editor_width(cx: &mut TestAppContext, handle: AnyWindowHandle) -> f32 {
     screen(cx, handle, |window| {
         f32::from(window.find("editor").bounds().size.width)
     })
 }
 
-/// The text of the width field of the settings, or `None` when it does not show.
+/// `None` when it does not show.
 fn chars_field(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
     screen(cx, handle, |window| {
         window
@@ -3848,7 +3768,6 @@ fn text_width(fixture: &Fixture) -> crate::text_width::TextWidthSetting {
     Config::load(fixture.config()).settings().text_width
 }
 
-/// A window with a note, and the settings open on the text width row.
 fn open_text_width(cx: &mut TestAppContext) -> (Fixture, AnyWindowHandle) {
     let fixture = Fixture::new().with_folder();
     fs::write(fixture.notes().join("Note.md"), "a\n").unwrap();
@@ -4130,12 +4049,11 @@ fn the_folder_screen_ignores_ctrl_shift_s(cx: &mut TestAppContext) {
     assert_eq!(question(cx, handle), None);
 }
 
-/// The rows of the shortcut list, as "label: keys".
+/// As "label: keys".
 fn shortcut_rows(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
     labels(cx, handle, "shortcuts", Role::ListItem)
 }
 
-/// The top of the first row of the shortcut list.
 fn first_shortcut_top(cx: &mut TestAppContext, handle: AnyWindowHandle) -> gpui_kit::Pixels {
     screen(cx, handle, |window| {
         window.within("shortcuts").find_all_by_role(Role::ListItem)[0]
@@ -4285,12 +4203,11 @@ fn the_folder_screen_ignores_ctrl_question_mark(cx: &mut TestAppContext) {
     assert_eq!(question(cx, handle), None);
 }
 
-/// The rows of the open app menu. The row under the cursor has `*`.
+/// The row under the cursor has `*`.
 fn app_menu(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
     labels(cx, handle, "app-menu", Role::ListBoxOption)
 }
 
-/// Clicks the item at `at` in the app menu.
 fn click_menu_item(cx: &mut TestAppContext, handle: AnyWindowHandle, at: u64) {
     cx.update_window(handle, |_, window, cx| {
         window.click(gpui_kit::ElementId::NamedInteger("menu-item".into(), at), cx);
@@ -4321,7 +4238,6 @@ fn f10_and_the_menu_button_open_the_app_menu_under_the_button(cx: &mut TestAppCo
     assert_eq!(app_menu(cx, handle), Vec::<String>::new());
     assert_eq!(focus(cx, handle), "editor");
 
-    // A second F10 or click closes the menu.
     keys(cx, handle, "f10");
     keys(cx, handle, "f10");
     assert_eq!(app_menu(cx, handle), Vec::<String>::new());
@@ -4332,7 +4248,6 @@ fn f10_and_the_menu_button_open_the_app_menu_under_the_button(cx: &mut TestAppCo
     assert_eq!(app_menu(cx, handle), Vec::<String>::new());
     assert_eq!(focus(cx, handle), "editor");
 
-    // A click outside closes it too.
     click(cx, handle, "app-menu-button");
     click(cx, handle, "editor");
     assert_eq!(app_menu(cx, handle), Vec::<String>::new());
