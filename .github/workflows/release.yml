@@ -1,12 +1,7 @@
 name: release
 
-# Each push to master runs the checks, then release-plz. release-plz opens or updates the release
-# PR. When the merged commit comes from the release PR, it makes the tag and the GitHub release,
-# and the AppImage job adds the AppImage and SHA256SUMS to it.
-
 on:
-  push:
-    branches: [master]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,68 +10,60 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check:
-    uses: ./.github/workflows/check.yml
-
   release:
-    needs: check
     runs-on: ubuntu-22.04
-    # No concurrency group: a cancel could skip a release.
     permissions:
       contents: write
-      pull-requests: read
-    outputs:
-      created: ${{ steps.release-plz.outputs.releases_created }}
-      tag: ${{ steps.release-plz.outputs.releases_created == 'true' && fromJSON(steps.release-plz.outputs.releases)[0].tag || '' }}
-      version: ${{ steps.release-plz.outputs.releases_created == 'true' && fromJSON(steps.release-plz.outputs.releases)[0].version || '' }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: |
+          if [[ $GITHUB_REF != refs/heads/master ]]; then
+            echo "release runs only on master, not $GITHUB_REF" >&2
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          fetch-depth: 0
           persist-credentials: false
       - run: rustup toolchain install
-      - id: release-plz
-        uses: release-plz/action@1fb72a9583c3601c197b3bd6fc6ce50d58e28ef3 # v0.5.148
-        with:
-          command: release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  release-pr:
-    needs: check
-    runs-on: ubuntu-22.04
-    concurrency:
-      group: release-pr
-      cancel-in-progress: false
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - run: rustup toolchain install
-      - uses: release-plz/action@1fb72a9583c3601c197b3bd6fc6ce50d58e28ef3 # v0.5.148
-        with:
-          command: release-pr
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  appimage:
-    needs: release
-    if: needs.release.outputs.created == 'true'
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.release.outputs.tag }}
-      - run: rustup toolchain install
+      - id: version
+        run: |
+          pkgid=$(cargo pkgid --locked -p holm)
+          version=${pkgid##*[#@]}
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "v$version already has a release; bump the version first" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          notes="$RUNNER_TEMP/notes.md"
+          awk -v heading="## $VERSION" '
+            $0 == heading { inside = 1; next }
+            inside && /^## / { exit }
+            inside { print }
+          ' CHANGELOG.md | sed -e '/./,$!d' | sed -e ':a' -e '/^\n*$/{$d;N;ba' -e '}' > "$notes"
+          if [[ ! -s $notes ]]; then
+            echo "CHANGELOG.md has no section ## $VERSION" >&2
+            exit 1
+          fi
+          appimage="Holm-$VERSION-x86_64.AppImage"
+          printf '\nDownload `%s` and `SHA256SUMS`. Check your download: `sha256sum -c SHA256SUMS` and `gh release verify-asset v%s %s -R mbezrukyi/holm`. See [Install](https://github.com/mbezrukyi/holm#install).\n' \
+            "$appimage" "$VERSION" "$appimage" >> "$notes"
       - uses: ./.github/actions/linux-deps
       - run: cargo install --locked --features cli "cargo-about@$(sed -n 's/^cargo_about_version=//p' scripts/check)"
-      - run: packaging/appimage/build.sh "${{ needs.release.outputs.version }}"
-      - run: gh release upload "${{ needs.release.outputs.tag }}" target/appimage/*.AppImage target/appimage/SHA256SUMS target/appimage/THIRD-PARTY-NOTICES.txt
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: packaging/appimage/build.sh "$VERSION"
+      - env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "v$VERSION" \
+            --target "$GITHUB_SHA" \
+            --title "v$VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            "target/appimage/Holm-$VERSION-x86_64.AppImage" \
+            target/appimage/SHA256SUMS \
+            target/appimage/THIRD-PARTY-NOTICES.txt
