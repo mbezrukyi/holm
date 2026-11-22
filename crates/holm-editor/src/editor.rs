@@ -340,7 +340,9 @@ impl Editor {
             _ => LinkForm::Inline,
         };
         let changed = self.model.insert_link(text, target, form);
-        self.report_edit(changed, cx);
+        if changed {
+            self.edited(cx);
+        }
     }
 
     /// Points the link at the cursor to `target`, as one undo step. The link text stays. It returns whether the text
@@ -348,7 +350,9 @@ impl Editor {
     /// [`Changed`] when the text changes.
     pub fn set_link_target(&mut self, target: &Target, cx: &mut Context<Self>) -> bool {
         let changed = self.model.set_link_target(target);
-        self.report_edit(changed, cx);
+        if changed {
+            self.edited(cx);
+        }
         changed
     }
 
@@ -548,7 +552,9 @@ impl Editor {
             Command::Cut => {
                 self.copy(cx);
                 let changed = self.model.remove_selection();
-                self.report_edit(changed, cx);
+                if changed {
+                    self.edited(cx);
+                }
                 return true;
             }
             Command::Paste => {
@@ -571,7 +577,9 @@ impl Editor {
                     None if key == Move::Out => false,
                     None => self.model.type_text(TAB, now),
                 };
-                self.report_edit(changed, cx);
+                if changed {
+                    self.edited(cx);
+                }
                 return true;
             }
             _ if command.is_format_key() && !self.help.format_keys => return false,
@@ -598,7 +606,9 @@ impl Editor {
                         None => return false,
                     },
                 };
-                self.report_edit(changed, cx);
+                if changed {
+                    self.edited(cx);
+                }
                 return true;
             }
         }
@@ -625,7 +635,9 @@ impl Editor {
                 let paint = window.paint;
                 self.color = None;
                 let changed = self.model.toggle_format(paint.format(color));
-                self.report_edit(changed, cx);
+                if changed {
+                    self.edited(cx);
+                }
                 if let Some(color) = color.filter(|c| paint.is_custom(*c))
                     && color::remember(&mut self.custom_colors, color)
                 {
@@ -662,7 +674,9 @@ impl Editor {
         }
         let text = item.and_then(|item| item.text());
         let changed = text.is_some_and(|text| self.model.insert(&text));
-        self.report_edit(changed, cx);
+        if changed {
+            self.edited(cx);
+        }
     }
 
     /// It returns whether the key stops here. Other keys of each text input go on to the app.
@@ -708,12 +722,16 @@ impl Editor {
             "end" => self.move_to_row_edge(Edge::End, selection),
             "backspace" => {
                 let changed = self.model.backspace(Step::Char, now);
-                self.report_edit(changed, cx);
+                if changed {
+                    self.edited(cx);
+                }
                 return true;
             }
             "delete" => {
                 let changed = self.model.delete(Step::Char, now);
-                self.report_edit(changed, cx);
+                if changed {
+                    self.edited(cx);
+                }
                 return true;
             }
             "enter" => {
@@ -722,19 +740,15 @@ impl Editor {
                 } else {
                     self.model.type_text("\n", now)
                 };
-                self.report_edit(changed, cx);
+                if changed {
+                    self.edited(cx);
+                }
                 return true;
             }
             _ => return false,
         }
         self.moved(cx);
         true
-    }
-
-    fn report_edit(&mut self, changed: bool, cx: &mut Context<Self>) {
-        if changed {
-            self.edited(cx);
-        }
     }
 
     fn copy(&self, cx: &mut Context<Self>) {
@@ -1037,7 +1051,9 @@ impl EntityInputHandler for Editor {
         }
         let range = range.map_or_else(|| self.model.selection(), |r| self.range_from_utf16(&r));
         let changed = self.model.type_in(range, text, cx.background_executor().now());
-        self.report_edit(changed, cx);
+        if changed {
+            self.edited(cx);
+        }
     }
 
     fn replace_and_mark_text_in_range(
