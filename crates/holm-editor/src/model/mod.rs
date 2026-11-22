@@ -546,6 +546,7 @@ mod tests {
 
     use super::*;
     use display::plain_chip;
+    use holm_markdown::list::Move;
     use proptest::prelude::*;
 
     fn now() -> Instant {
@@ -915,7 +916,7 @@ mod tests {
         Format(usize),
         Heading(u8),
         Newline,
-        Indent(bool),
+        Indent(Move),
         Undo,
         Redo,
     }
@@ -949,7 +950,7 @@ mod tests {
             (0..FORMATS.len()).prop_map(Op::Format),
             (0..=6u8).prop_map(Op::Heading),
             Just(Op::Newline),
-            any::<bool>().prop_map(Op::Indent),
+            prop_oneof![Just(Move::In), Just(Move::Out)].prop_map(Op::Indent),
             Just(Op::Undo),
             Just(Op::Redo),
         ]
@@ -983,8 +984,8 @@ mod tests {
             Op::Newline => {
                 model.newline(true, *clock);
             }
-            Op::Indent(out) => {
-                model.indent(out);
+            Op::Indent(key) => {
+                model.relist(key);
             }
             Op::Undo => {
                 model.undo();

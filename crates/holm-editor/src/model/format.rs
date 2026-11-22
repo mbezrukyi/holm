@@ -78,19 +78,13 @@ impl Model {
     /// Enter: in a list item it starts the next item and counts the list again, and on an empty item it ends the list.
     /// Elsewhere it types a line break. Returns whether the text changed.
     pub(crate) fn newline(&mut self, continue_lists: bool, now: std::time::Instant) -> bool {
-        let edit = continue_lists
-            .then(|| relist(&self.text, &self.body, self.selection(), Move::Next))
-            .flatten();
-        match edit {
-            Some(edit) => self.apply(edit),
-            None => self.type_text("\n", now),
-        }
+        let changed = continue_lists.then(|| self.relist(Move::Next)).flatten();
+        changed.unwrap_or_else(|| self.type_text("\n", now))
     }
 
-    /// Tab and Shift+Tab: moves each list item that the selection touches one level in or out, with its children, and
-    /// counts the lists it changes again. Returns `None` when the selection touches no list item.
-    pub(crate) fn indent(&mut self, out: bool) -> Option<bool> {
-        let key = if out { Move::Out } else { Move::In };
+    /// A list key, as [`Move`] tells. It counts the lists it changes again. Returns `None` when the selection touches
+    /// no list item.
+    pub(crate) fn relist(&mut self, key: Move) -> Option<bool> {
         let edit = relist(&self.text, &self.body, self.selection(), key)?;
         Some(self.apply(edit))
     }
@@ -247,32 +241,32 @@ mod tests {
         assert_eq!(model.text(), "- one\n");
     }
 
-    fn indented(text: &str, selection: Range<usize>, out: bool) -> Option<String> {
+    fn indented(text: &str, selection: Range<usize>, key: Move) -> Option<String> {
         let mut model = model_with(text, selection);
-        model.indent(out)?;
+        model.relist(key)?;
         Some(model.text().to_owned())
     }
 
     #[test]
     fn tab_makes_an_item_a_child_of_the_item_above() {
-        assert_eq!(indented("- a\n- b", 6..6, false), Some("- a\n  - b".into()));
-        assert_eq!(indented("10. a\n11. b", 8..8, false), Some("10. a\n    1. b".into()));
+        assert_eq!(indented("- a\n- b", 6..6, Move::In), Some("- a\n  - b".into()));
+        assert_eq!(indented("10. a\n11. b", 8..8, Move::In), Some("10. a\n    1. b".into()));
         assert_eq!(
-            indented("- a\n  - b\n- c", 12..12, false),
+            indented("- a\n  - b\n- c", 12..12, Move::In),
             Some("- a\n  - b\n  - c".into())
         );
     }
 
     #[test]
     fn shift_tab_moves_an_item_to_its_parent_level() {
-        assert_eq!(indented("- a\n  - b", 9..9, true), Some("- a\n- b".into()));
-        assert_eq!(indented("- a", 1..1, true), Some("- a".into()));
+        assert_eq!(indented("- a\n  - b", 9..9, Move::Out), Some("- a\n- b".into()));
+        assert_eq!(indented("- a", 1..1, Move::Out), Some("- a".into()));
     }
 
     #[test]
     fn tab_moves_each_selected_item() {
         assert_eq!(
-            indented("- a\n- b\n- c", 4..11, false),
+            indented("- a\n- b\n- c", 4..11, Move::In),
             Some("- a\n  - b\n  - c".into())
         );
     }
@@ -280,10 +274,10 @@ mod tests {
     #[test]
     fn tab_and_shift_tab_count_each_level() {
         let mut model = model_with("1. Milk\n2. Eggs\n3. Bread", 13..13);
-        model.indent(false);
+        model.relist(Move::In);
         assert_eq!(model.text(), "1. Milk\n   1. Eggs\n2. Bread");
         assert_eq!(model.cursor(), 16);
-        model.indent(true);
+        model.relist(Move::Out);
         assert_eq!(model.text(), "1. Milk\n2. Eggs\n3. Bread");
         assert_eq!(model.cursor(), 13);
     }
@@ -297,7 +291,7 @@ mod tests {
     fn a_list_key_is_one_undo_step() {
         let text = "1. a\n2. b\n3. c\n4. d";
         let mut model = model_with(text, 9..9);
-        model.indent(false);
+        model.relist(Move::In);
         assert_eq!(model.text(), "1. a\n   1. b\n2. c\n3. d");
         model.undo();
         assert_eq!((model.text(), model.cursor()), (text, 9));
@@ -310,7 +304,7 @@ mod tests {
     #[test]
     fn the_cursor_stays_on_its_item_when_the_number_grows() {
         let mut model = model_with("9. a\n   1. bc", 12..12);
-        model.indent(true);
+        model.relist(Move::Out);
         assert_eq!((model.text(), model.cursor()), ("9. a\n10. bc", 10));
     }
 
@@ -327,7 +321,7 @@ mod tests {
 
     #[test]
     fn tab_outside_a_list_is_not_an_indent() {
-        assert_eq!(indented("text", 0..0, false), None);
+        assert_eq!(indented("text", 0..0, Move::In), None);
     }
 
     const STYLES: [Format; 5] = [

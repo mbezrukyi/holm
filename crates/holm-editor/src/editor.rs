@@ -10,6 +10,7 @@ use gpui_kit::{
     MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render, ScrollEvent, Styled, TestSupportExt as _,
     UTF16Selection, Window, div, px,
 };
+use holm_markdown::list::Move;
 use holm_markdown::{Color, LinkKind, Target};
 
 use crate::color::{self, ColorWindow, KeyResult, Paint};
@@ -552,11 +553,15 @@ impl Editor {
                 return true;
             }
             Command::Indent | Command::Outdent => {
-                let outdent = command == Command::Outdent;
-                let indented = self.help.indent_lists.then(|| self.model.indent(outdent)).flatten();
+                let key = if command == Command::Outdent {
+                    Move::Out
+                } else {
+                    Move::In
+                };
+                let indented = self.help.indent_lists.then(|| self.model.relist(key)).flatten();
                 let changed = match indented {
                     Some(changed) => changed,
-                    None if outdent => false,
+                    None if key == Move::Out => false,
                     None => self.model.type_text(TAB, now),
                 };
                 self.report_edit(changed, cx);
