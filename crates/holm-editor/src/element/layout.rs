@@ -137,17 +137,19 @@ pub(crate) struct LaidImage {
 /// A file size like `48 KB` or `2.1 MB`, with a no-break space.
 fn file_size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
-    #[allow(clippy::cast_precision_loss, reason = "one decimal is shown")]
-    let mut value = bytes as f64;
+    let bytes = u128::from(bytes);
+    let rounded = |divisor: u128, scale: u128| (bytes * scale + divisor / 2) / divisor;
+    let mut divisor = 1;
     let mut unit = 0;
-    while value >= 999.5 && unit < UNITS.len() - 1 {
-        value /= 1000.;
+    while unit < UNITS.len() - 1 && rounded(divisor, 1) >= 1000 {
+        divisor *= 1000;
         unit += 1;
     }
-    if unit == 0 || value >= 10. {
-        format!("{value:.0}\u{a0}{}", UNITS[unit])
+    let tenths = rounded(divisor, 10);
+    if unit == 0 || tenths >= 100 {
+        format!("{}\u{a0}{}", rounded(divisor, 1), UNITS[unit])
     } else {
-        format!("{value:.1}\u{a0}{}", UNITS[unit])
+        format!("{}.{}\u{a0}{}", tenths / 10, tenths % 10, UNITS[unit])
     }
 }
 
@@ -1160,6 +1162,7 @@ mod tests {
         assert_eq!(file_size(48_000), "48\u{a0}KB");
         assert_eq!(file_size(2_140_000), "2.1\u{a0}MB");
         assert_eq!(file_size(999_999), "1.0\u{a0}MB");
+        assert_eq!(file_size(9_960_000), "10\u{a0}MB");
     }
 
     #[test]
