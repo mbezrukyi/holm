@@ -730,16 +730,26 @@ fn each_answered<T>(results: Vec<holm_core::Result<T>>, cx: &mut Context<CoreDoo
     results.into_iter().map(|result| answered(result, cx).ok()).collect()
 }
 
-/// `create` makes the folder first.
+/// What [`open`] does when the notes folder is missing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MissingFolder {
+    /// Makes the folder first.
+    Make,
+    /// Fails to open.
+    Fail,
+}
+
 pub(crate) fn open(
     open: &dyn Fn(&Path, &Path) -> holm_core::Result<Core>,
     folder: &Path,
     index_dir: &Path,
-    create: bool,
+    missing: MissingFolder,
     last: Option<&NotePath>,
     order: Order,
 ) -> Result<(Core, Option<Note>), AppError> {
-    if create && let Err(error) = std::fs::create_dir_all(folder) {
+    if missing == MissingFolder::Make
+        && let Err(error) = std::fs::create_dir_all(folder)
+    {
         tracing::warn!(path = %folder.display(), %error, "cannot make the notes folder");
     }
     let core = open(folder, index_dir)?;

@@ -22,7 +22,7 @@ use gpui_kit::{
 use holm_core::Core;
 
 use crate::config::{AppearanceSetting, Config};
-use crate::core_door::CoreDoor;
+use crate::core_door::{CoreDoor, MissingFolder};
 use crate::error::AppError;
 use crate::log::Log;
 use crate::message_line::MessageLine;
@@ -154,7 +154,7 @@ impl HolmWindow {
         };
         this.show_problems(cx);
         if let Some(folder) = folder {
-            this.open_folder(folder, false, window, cx);
+            this.open_folder(folder, MissingFolder::Fail, window, cx);
         }
         this
     }
@@ -175,7 +175,7 @@ impl HolmWindow {
     /// The open folder writes its text first. A failed write keeps the open folder, also in the settings.
     fn change_folder(&mut self, folder: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         let Stage::Open(notes) = &self.stage else {
-            self.choose(folder, false, window, cx);
+            self.choose(folder, MissingFolder::Fail, window, cx);
             return;
         };
         if self.leaving {
@@ -188,7 +188,7 @@ impl HolmWindow {
             match new {
                 Some(new) if saved => {
                     if this.folder.as_ref() != Some(&new) {
-                        this.choose(new, false, window, cx);
+                        this.choose(new, MissingFolder::Fail, window, cx);
                     }
                 }
                 _ => {
@@ -239,8 +239,8 @@ impl HolmWindow {
         }
     }
 
-    /// Opens the notes folder and its first note. `create` makes the folder first.
-    fn open_folder(&mut self, folder: PathBuf, create: bool, window: &mut Window, cx: &mut Context<Self>) {
+    /// Opens the notes folder and its first note.
+    fn open_folder(&mut self, folder: PathBuf, missing: MissingFolder, window: &mut Window, cx: &mut Context<Self>) {
         self.folder = Some(folder.clone());
         self.stage = Stage::Opening;
         cx.notify();
@@ -252,7 +252,7 @@ impl HolmWindow {
         let budget = self.write_budget;
         let job = cx.background_spawn({
             let folder = folder.clone();
-            async move { core_door::open(&*open, &folder, &index_dir, create, last.as_ref(), order) }
+            async move { core_door::open(&*open, &folder, &index_dir, missing, last.as_ref(), order) }
         });
         cx.spawn_in(window, async move |this, cx| {
             let result = job.await;
@@ -283,7 +283,7 @@ impl HolmWindow {
         .detach();
     }
 
-    fn choose(&mut self, folder: PathBuf, create: bool, window: &mut Window, cx: &mut Context<Self>) {
+    fn choose(&mut self, folder: PathBuf, missing: MissingFolder, window: &mut Window, cx: &mut Context<Self>) {
         self.config.update(cx, |config, cx| {
             config.change(
                 |settings| {
@@ -293,7 +293,7 @@ impl HolmWindow {
                 cx,
             );
         });
-        self.open_folder(folder, create, window, cx);
+        self.open_folder(folder, missing, window, cx);
     }
 
     fn pick(window: &mut Window, cx: &mut Context<Self>) {
@@ -301,7 +301,7 @@ impl HolmWindow {
         cx.spawn_in(window, async move |this, cx| {
             if let Some(folder) = picked.await {
                 this.update_in(cx, |this, window, cx| {
-                    this.choose(folder, false, window, cx);
+                    this.choose(folder, MissingFolder::Fail, window, cx);
                 })
                 .ok();
             }
@@ -328,7 +328,7 @@ impl HolmWindow {
                                 .child(Button::new("use-default").primary().label(text::USE_DEFAULT).on_click(
                                     cx.listener(|this, _, window, cx| {
                                         let folder = this.default_folder.clone();
-                                        this.choose(folder, true, window, cx);
+                                        this.choose(folder, MissingFolder::Make, window, cx);
                                     }),
                                 ))
                                 .child(pick),
