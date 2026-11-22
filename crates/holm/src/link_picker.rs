@@ -70,8 +70,7 @@ pub(crate) struct LinkPicker {
     core_door: Entity<CoreDoor>,
     notes: PickNotes,
     open_note: NotePath,
-    list: Entity<PickList>,
-    rows: Vec<LinkRow>,
+    list: Entity<PickList<LinkChoice>>,
     /// The note of the heading rows, or `None` for the open note.
     heading_note: Option<usize>,
     /// The headings of each note that the field named.
@@ -95,17 +94,21 @@ impl LinkPicker {
             list.set_query(start.query, window, cx);
             list
         });
-        let subscription = cx.subscribe_in(&list, window, |this, _, event: &PickEvent, window, cx| match event {
-            PickEvent::Query => this.typed(window, cx),
-            PickEvent::Pick(at) => this.pick(*at, cx),
-            PickEvent::Close => cx.emit(LinkPickerEvent::Close),
-        });
+        let subscription =
+            cx.subscribe_in(
+                &list,
+                window,
+                |this, _, event: &PickEvent<LinkChoice>, window, cx| match event {
+                    PickEvent::Query => this.typed(window, cx),
+                    PickEvent::Pick(choice) => cx.emit(LinkPickerEvent::Pick(choice.clone())),
+                    PickEvent::Close => cx.emit(LinkPickerEvent::Close),
+                },
+            );
         let mut this = Self {
             core_door,
             notes: PickNotes::new(start.notes),
             open_note: start.open_note,
             list,
-            rows: Vec::new(),
             heading_note: None,
             headings: HashMap::new(),
             loading: HashSet::new(),
@@ -116,15 +119,9 @@ impl LinkPicker {
         this
     }
 
-    fn pick(&mut self, at: usize, cx: &mut Context<Self>) {
-        if let Some(choice) = self.choice(at) {
-            cx.emit(LinkPickerEvent::Pick(choice));
-        }
-    }
-
-    fn choice(&self, row: usize) -> Option<LinkChoice> {
+    fn choice(&self, row: &LinkRow) -> Option<LinkChoice> {
         let note = |at: usize| self.notes.get(at);
-        Some(match self.rows.get(row)? {
+        Some(match row {
             LinkRow::Note(at) => {
                 let note = note(*at)?;
                 LinkChoice::Note {
@@ -171,8 +168,7 @@ impl LinkPicker {
             }
             None => &[],
         };
-        self.rows = link_rows::rows(query, &self.notes, shown);
-        let shown = self.shown_rows();
+        let shown = self.shown_rows(&link_rows::rows(query, &self.notes, shown));
         self.list.update(cx, |list, cx| list.set_rows(shown, cx));
     }
 
@@ -187,24 +183,28 @@ impl LinkPicker {
         let text = self.list.read(cx).query(cx).to_string();
         let one_hash = text.matches('#').count() == 1 && !self.text.contains('#');
         if one_hash && text.replacen('#', "", 1) == self.text {
-            let cursor = self.list.read(cx).cursor();
-            if let Some(LinkRow::Note(at)) = cursor.and_then(|at| self.rows.get(at)) {
-                let query = Query::text(Some(&self.notes[*at].title), Some(""));
+            let query = match self.list.read(cx).cursor() {
+                Some(LinkChoice::Note {
+                    title, heading: None, ..
+                }) => Some(Query::text(Some(title), Some(""))),
+                _ => None,
+            };
+            if let Some(query) = query {
                 self.list.update(cx, |list, cx| list.set_query(query, window, cx));
             }
         }
         self.query_changed(cx);
     }
 
-    fn shown_rows(&self) -> Vec<PickRow> {
-        self.rows
-            .iter()
+    fn shown_rows(&self, rows: &[LinkRow]) -> Vec<(PickRow, LinkChoice)> {
+        rows.iter()
             .filter_map(|row| {
-                Some(match row {
+                let shown = match row {
                     LinkRow::Note(at) => PickRow::note(self.notes.get(*at)?),
                     LinkRow::Heading(heading) => PickRow::new(heading.clone()),
                     LinkRow::Create(title) => PickRow::new(text::create_note(title)),
-                })
+                };
+                Some((shown, self.choice(row)?))
             })
             .collect()
     }

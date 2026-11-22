@@ -25,9 +25,7 @@ const MAX_ROWS: usize = 50;
 
 pub(crate) struct QuickOpen {
     notes: PickNotes,
-    list: Entity<PickList>,
-    /// The place in `notes` of each row.
-    rows: Vec<usize>,
+    list: Entity<PickList<NotePath>>,
     _list: Subscription,
 }
 
@@ -35,35 +33,26 @@ impl QuickOpen {
     /// The rows keep the order of `notes`. The field gets the focus.
     pub(crate) fn new(notes: Vec<NoteInfo>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let list = cx.new(|cx| PickList::new(text::QUICK_OPEN, text::NO_MATCH, window, cx));
-        let subscription = cx.subscribe(&list, |this, _, event: &PickEvent, cx| match event {
+        let subscription = cx.subscribe(&list, |this, _, event: &PickEvent<NotePath>, cx| match event {
             PickEvent::Query => this.query_changed(cx),
-            PickEvent::Pick(at) => this.open(*at, cx),
+            PickEvent::Pick(path) => cx.emit(QuickOpenEvent::Open(path.clone())),
             PickEvent::Close => cx.emit(QuickOpenEvent::Close),
         });
         let mut this = Self {
             notes: PickNotes::new(notes),
             list,
-            rows: Vec::new(),
             _list: subscription,
         };
         this.query_changed(cx);
         this
     }
 
-    fn open(&mut self, at: usize, cx: &mut Context<Self>) {
-        if let Some(note) = self.rows.get(at).and_then(|at| self.notes.get(*at)) {
-            cx.emit(QuickOpenEvent::Open(note.path.clone()));
-        }
-    }
-
     fn query_changed(&mut self, cx: &mut Context<Self>) {
         let query = self.list.read(cx).query(cx);
-        self.rows = rows(&query, &self.notes);
-        let shown = self
-            .rows
-            .iter()
-            .filter_map(|at| self.notes.get(*at))
-            .map(PickRow::note)
+        let shown = rows(&query, &self.notes)
+            .into_iter()
+            .filter_map(|at| self.notes.get(at))
+            .map(|note| (PickRow::note(note), note.path.clone()))
             .collect();
         self.list.update(cx, |list, cx| list.set_rows(shown, cx));
     }

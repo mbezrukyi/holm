@@ -120,31 +120,31 @@ fn folder(note: &NotePath) -> Option<SharedString> {
     (!folder.is_root()).then(|| text::folder_label(folder).into())
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PickEvent {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum PickEvent<T> {
     /// The text of the field changed. The owner gives new rows with [`PickList::set_rows`].
     Query,
-    /// The user picked the row at this place, with `Enter` or a click.
-    Pick(usize),
+    /// The user picked the row of this item, with `Enter` or a click.
+    Pick(T),
     /// The user pressed `Esc`.
     Close,
 }
 
-/// A search field over a list of rows, for the panel of a small window.
+/// A search field over a list of rows, for the panel of a small window. Each row holds an item `T` of the owner.
 ///
 /// Its keys are the rows of [`Place::Picker`]. `Tab` and `Shift+Tab` move the cursor and wrap. A row under the mouse
 /// gets the cursor too. A list that is too long for the panel scrolls, and its scrollbar takes a lane on the right of
 /// the rows.
-pub(crate) struct PickList {
+pub(crate) struct PickList<T> {
     field: Entity<InputState>,
-    rows: Rc<[PickRow]>,
+    rows: Rc<[(PickRow, T)]>,
     cursor: usize,
     empty: &'static str,
     scroll: UniformListScrollHandle,
     _field: Subscription,
 }
 
-impl PickList {
+impl<T: Clone + 'static> PickList<T> {
     /// An empty list. The field shows `placeholder` and gets the focus. A list with no rows shows `empty`.
     pub(crate) fn new(
         placeholder: impl Into<SharedString>,
@@ -179,20 +179,27 @@ impl PickList {
     }
 
     /// The cursor goes to the first one.
-    pub(crate) fn set_rows(&mut self, rows: Vec<PickRow>, cx: &mut Context<Self>) {
+    pub(crate) fn set_rows(&mut self, rows: Vec<(PickRow, T)>, cx: &mut Context<Self>) {
         self.rows = rows.into();
         self.cursor = 0;
         self.scroll.scroll_to_item(0, ScrollStrategy::Top);
         cx.notify();
     }
 
-    /// `None` when the list has no rows.
-    pub(crate) fn cursor(&self) -> Option<usize> {
-        (self.cursor < self.rows.len()).then_some(self.cursor)
+    /// The item of the row under the cursor. `None` when the list has no rows.
+    pub(crate) fn cursor(&self) -> Option<&T> {
+        self.rows.get(self.cursor).map(|(_, item)| item)
+    }
+
+    fn pick(&self, at: usize, cx: &mut Context<Self>) {
+        if let Some((_, item)) = self.rows.get(at) {
+            cx.emit(PickEvent::Pick(item.clone()));
+        }
     }
 
     fn step(&mut self, toward: Toward, cx: &mut Context<Self>) {
-        if let Some(at) = list_cursor::step(self.cursor(), self.rows.len(), toward, |_| true) {
+        let cursor = (self.cursor < self.rows.len()).then_some(self.cursor);
+        if let Some(at) = list_cursor::step(cursor, self.rows.len(), toward, |_| true) {
             self.cursor = at;
             self.scroll.scroll_to_item(at, ScrollStrategy::Nearest);
             cx.notify();
@@ -203,11 +210,7 @@ impl PickList {
         match command {
             Command::Previous => self.step(Toward::Previous, cx),
             Command::Next => self.step(Toward::Next, cx),
-            Command::Pick => {
-                if let Some(at) = self.cursor() {
-                    cx.emit(PickEvent::Pick(at));
-                }
-            }
+            Command::Pick => self.pick(self.cursor, cx),
             Command::Close => cx.emit(PickEvent::Close),
             _ => cx.propagate(),
         }
@@ -222,7 +225,7 @@ impl PickList {
             count,
             cx.processor(|list, range: std::ops::Range<usize>, _, cx| {
                 range
-                    .filter_map(|at| list.rows.get(at).map(|row| (at, row)))
+                    .filter_map(|at| list.rows.get(at).map(|(row, _)| (at, row)))
                     .map(|(at, row)| {
                         row.view(at, Cursor::of(at, list.cursor), cx)
                             .on_hover(cx.listener(move |list, hovered: &bool, _, cx| {
@@ -231,9 +234,7 @@ impl PickList {
                                     cx.notify();
                                 }
                             }))
-                            .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
-                                cx.emit(PickEvent::Pick(at));
-                            }))
+                            .on_click(cx.listener(move |list, _: &ClickEvent, _, cx| list.pick(at, cx)))
                             .test_support()
                     })
                     .collect::<Vec<_>>()
@@ -266,9 +267,9 @@ impl PickList {
     }
 }
 
-impl EventEmitter<PickEvent> for PickList {}
+impl<T: 'static> EventEmitter<PickEvent<T>> for PickList<T> {}
 
-impl Render for PickList {
+impl<T: Clone + 'static> Render for PickList<T> {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         v_flex()

@@ -24,9 +24,7 @@ pub(crate) struct FolderPicker {
     target: Target,
     /// The root folder first.
     folders: Vec<FolderPath>,
-    list: Entity<PickList>,
-    /// The place in `folders` of each row.
-    rows: Vec<usize>,
+    list: Entity<PickList<FolderPath>>,
     _list: Subscription,
 }
 
@@ -47,44 +45,36 @@ impl FolderPicker {
             Target::Folder(path) => path.last_part().into_owned(),
         };
         let list = cx.new(|cx| PickList::new(text::move_to(&name), text::NO_FOLDER, window, cx));
-        let subscription = cx.subscribe(&list, |this, _, event: &PickEvent, cx| match event {
+        let subscription = cx.subscribe(&list, |this, _, event: &PickEvent<FolderPath>, cx| match event {
             PickEvent::Query => this.query_changed(cx),
-            PickEvent::Pick(at) => this.pick(*at, cx),
+            PickEvent::Pick(folder) => this.pick(folder.clone(), cx),
             PickEvent::Close => cx.emit(PickerEvent::Cancel),
         });
         let mut this = Self {
             target,
             folders,
             list,
-            rows: Vec::new(),
             _list: subscription,
         };
         this.query_changed(cx);
         this
     }
 
-    fn pick(&mut self, at: usize, cx: &mut Context<Self>) {
-        if let Some(folder) = self.rows.get(at).and_then(|at| self.folders.get(*at)) {
-            cx.emit(PickerEvent::Move {
-                target: self.target.clone(),
-                folder: folder.clone(),
-            });
-        }
+    fn pick(&mut self, folder: FolderPath, cx: &mut Context<Self>) {
+        cx.emit(PickerEvent::Move {
+            target: self.target.clone(),
+            folder,
+        });
     }
 
     fn query_changed(&mut self, cx: &mut Context<Self>) {
         let query = Lowercase::new(self.list.read(cx).query(cx).trim());
-        self.rows = self
+        let shown = self
             .folders
             .iter()
-            .enumerate()
-            .filter(|(_, folder)| Lowercase::new(&text::folder_label(folder)).holds(&query))
-            .map(|(at, _)| at)
-            .collect();
-        let shown = self
-            .rows
-            .iter()
-            .map(|at| PickRow::new(text::folder_label(&self.folders[*at])).icon(Icon::Folder))
+            .map(|folder| (text::folder_label(folder), folder))
+            .filter(|(label, _)| Lowercase::new(label).holds(&query))
+            .map(|(label, folder)| (PickRow::new(label).icon(Icon::Folder), folder.clone()))
             .collect();
         self.list.update(cx, |list, cx| list.set_rows(shown, cx));
     }
