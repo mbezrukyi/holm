@@ -65,10 +65,9 @@ struct Planned {
 fn plan(text: &str, body: &Body, selection: Range<usize>, key: Move) -> Option<Plan> {
     let end = floor(text, selection.end.min(text.len()));
     let selection = floor(text, selection.start.min(end))..end;
-    if key == Move::Next {
-        next(text, body, selection)
-    } else {
-        shift(text, body, selection, key == Move::Out)
+    match key {
+        Move::Next => next(text, body, selection),
+        Move::In | Move::Out => shift(text, body, selection, key),
     }
 }
 
@@ -80,7 +79,7 @@ fn floor(text: &str, mut offset: usize) -> usize {
 }
 
 /// Tab and Shift+Tab.
-fn shift(text: &str, body: &Body, selection: Range<usize>, out: bool) -> Option<Plan> {
+fn shift(text: &str, body: &Body, selection: Range<usize>, key: Move) -> Option<Plan> {
     let lines = line_start(text, selection.start)..line_end(text, selection.end);
     let found = path_to(body.blocks(), &|b| {
         is_item(b) && lines.start <= b.range.start && b.range.start <= lines.end
@@ -116,7 +115,7 @@ fn shift(text: &str, body: &Body, selection: Range<usize>, out: bool) -> Option<
     };
     let mut changed = false;
     for id in touched {
-        let moved = if out {
+        let moved = if key == Move::Out {
             move_out(&mut tree, id)
         } else {
             move_in(&mut tree, id)
