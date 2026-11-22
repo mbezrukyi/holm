@@ -3,7 +3,7 @@
 //! A key reads the list tree around the selection from the parse, makes its move on the tree, and writes the lists out
 //! again. Each line keeps its text and gets the indent and the number of its new place.
 
-use std::ops::Range;
+use std::ops::{Add, Range, RangeInclusive, Sub};
 
 use crate::inline::Edit;
 use crate::{Block, BlockKind, Body};
@@ -54,10 +54,10 @@ struct Plan {
 #[cfg_attr(not(test), expect(dead_code, reason = "the tests compare it with the parse"))]
 struct Planned {
     parts: Vec<Part>,
-    /// The lines of the tree in the old text.
-    old: Range<usize>,
-    /// The lines of the tree in the new text.
-    new: Range<usize>,
+    /// The bytes of the tree in the old text.
+    old_region: Range<usize>,
+    /// The bytes of the tree in the new text.
+    new_region: Range<usize>,
     /// The number of quotes around the tree.
     quotes: usize,
 }
@@ -80,9 +80,9 @@ fn floor(text: &str, mut offset: usize) -> usize {
 
 /// Tab and Shift+Tab.
 fn shift(text: &str, body: &Body, selection: Range<usize>, key: Move) -> Option<Plan> {
-    let lines = line_start(text, selection.start)..line_end(text, selection.end);
+    let span = line_start(text, selection.start)..line_end(text, selection.end);
     let found = path_to(body.blocks(), &|b| {
-        is_item(b) && lines.start <= b.range.start && b.range.start <= lines.end
+        is_item(b) && span.start <= b.range.start && b.range.start <= span.end
     });
     let path = if let Some(path) = found {
         path
@@ -99,11 +99,11 @@ fn shift(text: &str, body: &Body, selection: Range<usize>, key: Move) -> Option<
     };
     let (source, lists, item) = Source::around(text, body.blocks(), &path)?;
     let mut tree = source.tree(&lists)?;
-    let touched = if lines.end < source.region.start || source.region.end < lines.start {
+    let touched = if span.end < source.region.start || source.region.end < span.start {
         Vec::new()
     } else {
-        let first = source.line_of(lines.start.max(source.region.start));
-        let last = source.line_of(lines.end.min(source.region.end));
+        let first = source.line_of(span.start.max(source.region.start));
+        let last = source.line_of(span.end.min(source.region.end));
         let mut touched = Vec::new();
         top_items(&tree, &(first..=last), &mut touched);
         touched
@@ -203,7 +203,7 @@ fn next(text: &str, body: &Body, selection: Range<usize>) -> Option<Plan> {
     let task = if task { "[ ] " } else { "" };
     let kept = format!(" {task}{}", &text[selection.end..line.end]);
     let new = Item {
-        id: NEW,
+        id: None,
         prefix: current.prefix.clone(),
         mark: current.mark,
         number: current.number,
@@ -270,10 +270,77 @@ fn chain_at(blocks: &[Block], offset: usize) -> Vec<&Block> {
     chain
 }
 
-/// The width of leading space and tabs, with tab stops of 4.
-fn columns(lead: &str) -> usize {
-    lead.bytes()
-        .fold(0, |col, b| if b == b'\t' { col + 4 - col % 4 } else { col + 1 })
+/// A width on screen, or a place counted from the start of a line, in a monospace font with tab stops of 4.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Column(usize);
+
+const TAB_STOP: usize = 4;
+
+/// The indent at which a line is indented code.
+const CODE_INDENT: Column = Column(4);
+
+impl Column {
+    /// The width of `text`, which has no tabs and only ASCII, like a list marker.
+    fn of_ascii(text: &str) -> Self {
+        debug_assert!(text.is_ascii() && !text.contains('\t'));
+        Self(text.len())
+    }
+
+    fn checked_sub(self, other: Self) -> Option<Self> {
+        self.0.checked_sub(other.0).map(Self)
+    }
+}
+
+impl Add for Column {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self(self.0 + other.0)
+    }
+}
+
+impl Sub for Column {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self {
+        Self(self.0 - other.0)
+    }
+}
+
+/// The width of leading space and tabs.
+fn columns(lead: &str) -> Column {
+    Column(lead.bytes().fold(0, |col, b| {
+        if b == b'\t' {
+            col + TAB_STOP - col % TAB_STOP
+        } else {
+            col + 1
+        }
+    }))
+}
+
+/// The index of a line in [`Source::lines`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct LineIndex(usize);
+
+impl LineIndex {
+    fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
+
+    /// The line above, or `None` for the first line.
+    fn previous(self) -> Option<Self> {
+        self.0.checked_sub(1).map(Self)
+    }
+
+    /// The lines from `self` up to but not with `end`.
+    fn until(self, end: Self) -> impl Iterator<Item = Self> {
+        (self.0..end.0).map(Self)
+    }
+
+    /// The lines from `self` through `last`.
+    fn through(self, last: Self) -> impl Iterator<Item = Self> {
+        (self.0..=last.0).map(Self)
+    }
 }
 
 /// The marker at the start of `line`: its kind, its number and its length.
@@ -295,9 +362,6 @@ fn marker(line: &str) -> Option<(Mark, u64, usize)> {
         _ => None,
     }
 }
-
-/// A line id of an item that a key adds.
-const NEW: usize = usize::MAX;
 
 /// The marker kind of a list. Another bullet or delimiter starts another list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -336,12 +400,12 @@ struct Line {
     /// The quote markers.
     prefix: Range<usize>,
     /// The indent past the content column of the item. `None` for a blank line or a lazy line: it is written as it is.
-    extra: Option<usize>,
+    extra: Option<Column>,
     /// The text after the indent.
     kept: Range<usize>,
     blank: bool,
     /// The width of the indent.
-    lead: usize,
+    lead: Column,
     /// Whether the text could start a block, like a list item, if it were not lazy.
     risky: bool,
     /// Whether the line goes on with the text of the line above, and would start a block, like a list item or indented
@@ -351,17 +415,17 @@ struct Line {
 
 #[derive(Clone, Debug)]
 struct Item {
-    /// The index of the marker line in the source, or [`NEW`].
-    id: usize,
+    /// The marker line in the source. `None` for an item that a key adds.
+    id: Option<LineIndex>,
     /// The quote markers of the marker line.
     prefix: Range<usize>,
     mark: Mark,
     number: u64,
     position: Position,
     /// The indent of the marker past the content column of the parent.
-    rel: usize,
+    rel: Column,
     /// The columns from the end of the marker to the content column.
-    gap: usize,
+    gap: Column,
     /// The marker line after the marker.
     kept: Src,
     /// Whether the marker line has no text.
@@ -446,16 +510,16 @@ impl<'a> Source<'a> {
     /// The tree of `lists`, the lists of the source in order.
     fn tree(&self, lists: &[&Block]) -> Option<Vec<Part>> {
         let mut parts = Vec::new();
-        let mut next = 0;
+        let mut next = LineIndex(0);
         for list in lists {
             let start = self.line_of(list.range.start);
             let end = self.line_of(list_end(list));
             if start < next {
                 return None;
             }
-            parts.extend((next..start).map(|l| Part::Line(self.line(l, 0))));
-            parts.push(Part::List(self.list(list, end, 0)?));
-            next = end + 1;
+            parts.extend(next.until(start).map(|l| Part::Line(self.line(l, Column(0)))));
+            parts.push(Part::List(self.list(list, end, Column(0))?));
+            next = end.next();
         }
         Some(parts)
     }
@@ -476,15 +540,21 @@ impl<'a> Source<'a> {
         }
     }
 
-    fn line_of(&self, offset: usize) -> usize {
-        self.lines
-            .partition_point(|line| line.start <= offset)
-            .saturating_sub(1)
+    fn line_of(&self, offset: usize) -> LineIndex {
+        LineIndex(
+            self.lines
+                .partition_point(|line| line.start <= offset)
+                .saturating_sub(1),
+        )
+    }
+
+    fn span(&self, line: LineIndex) -> &Range<usize> {
+        &self.lines[line.0]
     }
 
     /// Where the quote markers of `line` end.
-    fn prefix_end(&self, line: usize) -> usize {
-        self.quotes_end(&self.lines[line]).0
+    fn prefix_end(&self, line: LineIndex) -> usize {
+        self.quotes_end(self.span(line)).0
     }
 
     /// Where the quote markers of the line `range` end, and how many there are.
@@ -531,7 +601,7 @@ impl<'a> Source<'a> {
     }
 
     /// The indent of the first line with text after the source, when it is in the same quotes.
-    fn next_indent(&self) -> Option<usize> {
+    fn next_indent(&self) -> Option<Column> {
         let mut start = self.region.end + 1;
         while start < self.text.len() {
             let line = start..line_end(self.text, start);
@@ -550,15 +620,15 @@ impl<'a> Source<'a> {
     }
 
     /// The tree of the list `block` that ends on line `last`. Its parent has its content at column `col`.
-    fn list(&self, block: &Block, last: usize, col: usize) -> Option<List> {
+    fn list(&self, block: &Block, last: LineIndex, col: Column) -> Option<List> {
         if !matches!(block.kind, BlockKind::List { .. }) {
             return None;
         }
         let items: Vec<&Block> = block.children.iter().filter(|b| is_item(b)).collect();
-        let firsts: Vec<usize> = items.iter().map(|item| self.line_of(item.range.start)).collect();
+        let firsts: Vec<LineIndex> = items.iter().map(|item| self.line_of(item.range.start)).collect();
         let mut built = Vec::with_capacity(items.len());
         for (k, item) in items.iter().enumerate() {
-            let end = firsts.get(k + 1).map_or(last, |next| next - 1);
+            let end = firsts.get(k + 1).map_or(Some(last), |next| next.previous())?;
             let position = if k == 0 { Position::First } else { Position::Later };
             built.push(self.item(item, firsts[k]..=end, position, col)?);
         }
@@ -569,15 +639,9 @@ impl<'a> Source<'a> {
         })
     }
 
-    fn item(
-        &self,
-        block: &Block,
-        lines: std::ops::RangeInclusive<usize>,
-        position: Position,
-        col: usize,
-    ) -> Option<Item> {
+    fn item(&self, block: &Block, lines: RangeInclusive<LineIndex>, position: Position, col: Column) -> Option<Item> {
         let (head, last) = (*lines.start(), *lines.end());
-        let line = self.lines[head].clone();
+        let line = self.span(head).clone();
         let prefix_end = self.prefix_end(head);
         // The range of an item can start in its indent.
         let from = block.range.start.max(prefix_end);
@@ -598,9 +662,9 @@ impl<'a> Source<'a> {
         let (mark, number, width) = marker(&self.text[at..line.end])?;
         let after = &self.text[at + width..line.end];
         let gap = gap(after)?;
-        let content = indent + width + gap;
+        let content = indent + Column::of_ascii(&self.text[at..at + width]) + gap;
         let mut parts = Vec::new();
-        let mut next = head + 1;
+        let mut next = head.next();
         for child in block
             .children
             .iter()
@@ -611,13 +675,13 @@ impl<'a> Source<'a> {
             if start < next {
                 return None;
             }
-            parts.extend((next..start).map(|l| Part::Line(self.line(l, content))));
+            parts.extend(next.until(start).map(|l| Part::Line(self.line(l, content))));
             parts.push(Part::List(self.list(child, end, content)?));
-            next = end + 1;
+            next = end.next();
         }
-        parts.extend((next..=last).map(|l| Part::Line(self.line(l, content))));
+        parts.extend(next.through(last).map(|l| Part::Line(self.line(l, content))));
         Some(Item {
-            id: head,
+            id: Some(head),
             prefix: line.start..prefix_end,
             mark,
             number,
@@ -630,8 +694,8 @@ impl<'a> Source<'a> {
         })
     }
 
-    fn line(&self, line: usize, content: usize) -> Line {
-        let range = self.lines[line].clone();
+    fn line(&self, line: LineIndex, content: Column) -> Line {
+        let range = self.span(line).clone();
         let prefix_end = self.prefix_end(line);
         let rest = &self.text[prefix_end..range.end];
         let ws = rest.bytes().take_while(|b| *b == b' ' || *b == b'\t').count();
@@ -645,11 +709,11 @@ impl<'a> Source<'a> {
         };
         let starts_item = marker(&rest[ws..])
             .is_some_and(|(_, _, width)| rest[ws + width..].is_empty() || rest[ws + width..].starts_with([' ', '\t']));
-        let after_text = line > 0 && {
-            let above = self.prefix_end(line - 1);
-            !self.text[above..self.lines[line - 1].end].trim().is_empty()
-        };
-        let continues = !blank && after_text && (starts_item || extra.is_some_and(|e| e >= 4));
+        let after_text = line.previous().is_some_and(|above| {
+            let text_start = self.prefix_end(above);
+            !self.text[text_start..self.span(above).end].trim().is_empty()
+        });
+        let continues = !blank && after_text && (starts_item || extra.is_some_and(|e| e >= CODE_INDENT));
         Line {
             prefix: range.start..prefix_end,
             extra,
@@ -683,8 +747,8 @@ impl<'a> Source<'a> {
         let start = self.region.start;
         let planned = Planned {
             parts: tree,
-            old: self.region.clone(),
-            new: start..start + new.len(),
+            old_region: self.region.clone(),
+            new_region: start..start + new.len(),
             quotes: self.quotes,
         };
         Plan {
@@ -699,12 +763,12 @@ impl<'a> Source<'a> {
 }
 
 /// Pushes the ids of the items that start on `lines` and have no such item above them.
-fn top_items(parts: &[Part], lines: &std::ops::RangeInclusive<usize>, ids: &mut Vec<usize>) {
+fn top_items(parts: &[Part], lines: &RangeInclusive<LineIndex>, ids: &mut Vec<LineIndex>) {
     for part in parts {
         if let Part::List(list) = part {
             for item in &list.items {
-                if lines.contains(&item.id) {
-                    ids.push(item.id);
+                if let Some(id) = item.id.filter(|id| lines.contains(id)) {
+                    ids.push(id);
                 } else {
                     top_items(&item.parts, lines, ids);
                 }
@@ -714,11 +778,11 @@ fn top_items(parts: &[Part], lines: &std::ops::RangeInclusive<usize>, ids: &mut 
 }
 
 /// The way to the item `id`: the part of each list and the item in it, from the top.
-fn find(parts: &[Part], id: usize) -> Option<Vec<(usize, usize)>> {
+fn find(parts: &[Part], id: LineIndex) -> Option<Vec<(usize, usize)>> {
     for (p, part) in parts.iter().enumerate() {
         if let Part::List(list) = part {
             for (i, item) in list.items.iter().enumerate() {
-                if item.id == id {
+                if item.id == Some(id) {
                     return Some(vec![(p, i)]);
                 }
                 if let Some(mut path) = find(&item.parts, id) {
@@ -743,7 +807,7 @@ fn parts_mut<'p>(mut parts: &'p mut Vec<Part>, path: &[(usize, usize)]) -> Optio
 }
 
 /// Tab on the item `id`. `None` when it is the first item of its list.
-fn move_in(tree: &mut Vec<Part>, id: usize) -> Option<()> {
+fn move_in(tree: &mut Vec<Part>, id: LineIndex) -> Option<()> {
     let path = find(tree, id)?;
     let (&(p, i), up) = path.split_last()?;
     if i == 0 {
@@ -772,7 +836,7 @@ fn move_in(tree: &mut Vec<Part>, id: usize) -> Option<()> {
         }
         _ => {
             above.parts.extend(blanks);
-            item.rel = 0;
+            item.rel = Column(0);
             above.parts.push(Part::List(List {
                 mark: item.mark,
                 renumber: true,
@@ -784,14 +848,15 @@ fn move_in(tree: &mut Vec<Part>, id: usize) -> Option<()> {
 }
 
 /// The columns from the end of a marker to the content column, for the marker line text `after`.
-fn gap(after: &str) -> Option<usize> {
+fn gap(after: &str) -> Option<Column> {
     let spaces = after.bytes().take_while(|b| *b == b' ').count();
-    if spaces == after.len() || spaces > 4 {
-        Some(1)
+    let width = Column(spaces);
+    if spaces == after.len() || width > CODE_INDENT {
+        Some(Column(1))
     } else if spaces == 0 {
         None
     } else {
-        Some(spaces)
+        Some(width)
     }
 }
 
@@ -817,7 +882,7 @@ fn trailing_blanks(parts: &mut Vec<Part>) -> Vec<Part> {
 }
 
 /// Shift+Tab on the item `id`. `None` when it is at the top level.
-fn move_out(tree: &mut Vec<Part>, id: usize) -> Option<()> {
+fn move_out(tree: &mut Vec<Part>, id: LineIndex) -> Option<()> {
     let path = find(tree, id)?;
     let (&(p, i), up) = path.split_last()?;
     let (&(pp, pi), top) = up.split_last()?;
@@ -947,10 +1012,10 @@ fn merge_lists(parts: &mut Vec<Part>) {
 
 /// Where a line of the old text went.
 struct Placed {
-    old_line: usize,
+    old_start: usize,
     /// Where its kept text starts. `None` for a new line.
     old_keep: Option<usize>,
-    new_line: usize,
+    new_start: usize,
     new_keep: usize,
 }
 
@@ -963,13 +1028,13 @@ struct Writer<'a> {
     /// its laziness.
     broken: bool,
     /// The content column of the last top item, when the tree ends with an item.
-    last: Option<usize>,
+    last: Option<Column>,
     /// What the last line holds.
     above: Above,
     /// How many items hold the part that is being written.
     depth: usize,
     /// The content column of the top item that is being written.
-    top: usize,
+    top: Column,
 }
 
 /// What a written line holds.
@@ -994,19 +1059,19 @@ impl<'a> Writer<'a> {
             last: None,
             above,
             depth: 0,
-            top: 0,
+            top: Column(0),
         };
-        writer.last = writer.parts(tree, 0);
-        writer.keeps.sort_by_key(|keep| keep.old_line);
+        writer.last = writer.parts(tree, Column(0));
+        writer.keeps.sort_by_key(|keep| keep.old_start);
         writer
     }
 
     /// Writes `parts` at the content column `col`. Gives the content column of the last item, past `col`, when the
     /// parts end with an item.
-    fn parts(&mut self, parts: &[Part], col: usize) -> Option<usize> {
+    fn parts(&mut self, parts: &[Part], col: Column) -> Option<Column> {
         // The content column of the item above, past `col`. An item at it or past it would be a child of that item. An
         // empty item ends at a blank line, and then takes nothing.
-        let mut above: Option<(usize, bool)> = None;
+        let mut above: Option<(Column, bool)> = None;
         for part in parts {
             match part {
                 Part::Line(line) => {
@@ -1026,7 +1091,7 @@ impl<'a> Writer<'a> {
                 }
                 Part::List(list) => {
                     for (item, number) in list.items.iter().zip(numbers(list)) {
-                        let rel = above.map_or(item.rel, |(above, _)| item.rel.min(above - 1));
+                        let rel = above.map_or(item.rel, |(above, _)| item.rel.min(above - Column(1)));
                         let content = self.item(item, rel, list.mark, number, col);
                         above = if ends_at_blank(item) && !item.parts.is_empty() {
                             None
@@ -1050,17 +1115,17 @@ impl<'a> Writer<'a> {
         start
     }
 
-    fn spaces(&mut self, count: usize) {
-        self.out.extend(std::iter::repeat_n(' ', count));
+    fn spaces(&mut self, width: Column) {
+        self.out.extend(std::iter::repeat_n(' ', width.0));
     }
 
     /// Writes `item` with its marker `rel` columns past `col`, and gives its content column past `col`.
-    fn item(&mut self, item: &Item, rel: usize, mark: Mark, number: u64, col: usize) -> usize {
+    fn item(&mut self, item: &Item, rel: Column, mark: Mark, number: u64, col: Column) -> Column {
         if item.empty && self.above == Above::Lazy {
             self.broken = true;
         }
         self.above = if item.empty { Above::Nothing } else { Above::Text };
-        let new_line = self.begin(&item.prefix);
+        let new_start = self.begin(&item.prefix);
         let indent = col + rel;
         self.spaces(indent);
         let marker = mark.text(number);
@@ -1077,12 +1142,12 @@ impl<'a> Writer<'a> {
             }
         };
         self.keeps.push(Placed {
-            old_line: item.prefix.start,
+            old_start: item.prefix.start,
             old_keep,
-            new_line,
+            new_start,
             new_keep,
         });
-        let content = indent + marker.len() + item.gap;
+        let content = indent + Column::of_ascii(&marker) + item.gap;
         if self.depth == 0 {
             self.top = content;
         }
@@ -1092,8 +1157,8 @@ impl<'a> Writer<'a> {
         content - col
     }
 
-    fn line(&mut self, line: &Line, col: usize) {
-        let new_line = self.begin(&line.prefix);
+    fn line(&mut self, line: &Line, col: Column) {
+        let new_start = self.begin(&line.prefix);
         if let Some(extra) = line.extra {
             self.spaces(col + extra);
         } else if !line.blank && line.risky && line.lead >= self.top {
@@ -1114,9 +1179,9 @@ impl<'a> Writer<'a> {
         let new_keep = self.out.len();
         self.out.push_str(&self.text[line.kept.clone()]);
         self.keeps.push(Placed {
-            old_line: line.prefix.start,
+            old_start: line.prefix.start,
             old_keep: Some(line.kept.start),
-            new_line,
+            new_start,
             new_keep,
         });
     }
@@ -1124,15 +1189,15 @@ impl<'a> Writer<'a> {
     /// The offset in the written text of `offset` in the old text, from the start of the region.
     fn map(&self, offset: usize) -> usize {
         let keeps: Vec<&Placed> = self.keeps.iter().filter(|k| k.old_keep.is_some()).collect();
-        let at = keeps.partition_point(|k| k.old_line <= offset).saturating_sub(1);
+        let at = keeps.partition_point(|k| k.old_start <= offset).saturating_sub(1);
         let Some(keep) = keeps.get(at) else {
             return 0;
         };
-        let old_keep = keep.old_keep.unwrap_or(keep.old_line);
+        let old_keep = keep.old_keep.unwrap_or(keep.old_start);
         if offset >= old_keep {
             keep.new_keep + offset - old_keep
         } else {
-            keep.new_keep - (old_keep - offset).min(keep.new_keep - keep.new_line)
+            keep.new_keep - (old_keep - offset).min(keep.new_keep - keep.new_start)
         }
     }
 }
@@ -1185,8 +1250,8 @@ mod tests {
             .collect()
     }
 
-    /// The tree of the lists that the parse of `text` has on the lines `lines`.
-    fn parsed(text: &str, lines: &Range<usize>, quotes: usize) -> Result<Vec<Part>, String> {
+    /// The tree of the lists that the parse of `text` has in `region`.
+    fn parsed(text: &str, region: &Range<usize>, quotes: usize) -> Result<Vec<Part>, String> {
         let body = Body::parse(text);
         let mut blocks = body.blocks();
         let overlaps = |b: &Block| {
@@ -1195,12 +1260,12 @@ mod tests {
             } else {
                 b.range.end
             };
-            b.range.start <= lines.end && lines.start <= end
+            b.range.start <= region.end && region.start <= end
         };
         for _ in 0..quotes {
             blocks = &blocks.iter().find(|b| overlaps(b)).ok_or("no quote")?.children;
         }
-        let source = Source::lines(text, lines.clone(), quotes);
+        let source = Source::lines(text, region.clone(), quotes);
         let blocks: Vec<&Block> = blocks.iter().filter(|b| overlaps(b)).collect();
         if let Some(block) = blocks.iter().find(|b| !matches!(b.kind, BlockKind::List { .. })) {
             return Err(format!("not a list: {:?}", block.kind));
@@ -1236,8 +1301,8 @@ mod tests {
     }
 
     /// The text of each line without its quote markers, indent and list marker.
-    fn words(text: &str, lines: &Range<usize>) -> Vec<String> {
-        text[lines.clone()]
+    fn words(text: &str, region: &Range<usize>) -> Vec<String> {
+        text[region.clone()]
             .lines()
             .map(|line| {
                 let line = line.trim_start_matches(['>', ' ', '\t']);
@@ -1325,7 +1390,7 @@ mod tests {
             if has_empty_head(&text, &planned.parts, Level::Top) {
                 return Ok(());
             }
-            let after = parsed(&new, &planned.new, planned.quotes);
+            let after = parsed(&new, &planned.new_region, planned.quotes);
             prop_assert!(after.is_ok(), "{:?} in {new:?} after {key:?} on {text:?}", after.err());
             let after = after.unwrap_or_default();
             prop_assert_eq!(
@@ -1334,7 +1399,7 @@ mod tests {
                 "{:?} on {:?} gives {:?}", key, text, new
             );
             if key != Move::Next {
-                prop_assert_eq!(words(&text, &planned.old), words(&new, &planned.new));
+                prop_assert_eq!(words(&text, &planned.old_region), words(&new, &planned.new_region));
             }
         }
     }
