@@ -2,10 +2,10 @@ use std::fmt::Write as _;
 use std::fs;
 use std::ops::Range;
 
-use holm_markdown::{Block, Body};
+use holm_markdown::{Block, Body, OffsetRange, SourceOffset};
 
-fn show(text: &str, range: &Range<usize>) -> String {
-    format!("{range:?} {:?}", &text[range.clone()])
+fn show(text: &str, range: &Range<SourceOffset>) -> String {
+    format!("{range:?} {:?}", &text[range.bytes()])
 }
 
 fn blocks(out: &mut String, text: &str, blocks: &[Block], depth: usize) {

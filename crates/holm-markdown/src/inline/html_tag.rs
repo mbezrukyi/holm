@@ -1,8 +1,8 @@
 use super::Kind;
-use crate::Color;
+use crate::{Color, JoinedOffset};
 
 pub(super) enum HtmlTag {
-    Open(&'static str, Kind),
+    Open(&'static str, Kind<JoinedOffset>),
     Close(&'static str),
 }
 

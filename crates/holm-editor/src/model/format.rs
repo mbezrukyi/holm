@@ -3,14 +3,14 @@ use std::ops::Range;
 pub(crate) use holm_markdown::inline::Format;
 use holm_markdown::inline::{Edit as MarkdownEdit, restyle};
 use holm_markdown::list::{Move, relist};
-use holm_markdown::{Block, BlockKind};
+use holm_markdown::{Block, BlockKind, OffsetRange, SourceOffset};
 
 use super::{Edit, Group, Model, map_offset};
 
 impl Model {
     /// With no selection, it works at the cursor. A color key sets its color. Returns whether the text changed.
     pub(crate) fn toggle_format(&mut self, format: Format) -> bool {
-        let Some(edit) = restyle(&self.text, &self.body, self.selection(), format) else {
+        let Some(edit) = restyle(&self.text, &self.body, SourceOffset::range(self.selection()), format) else {
             return false;
         };
         self.apply(edit)
@@ -19,11 +19,11 @@ impl Model {
     /// The selection keeps its direction.
     fn apply(&mut self, edit: MarkdownEdit) -> bool {
         let ends = if self.is_reversed() {
-            (edit.selection.end, edit.selection.start)
+            (edit.selection.end.get(), edit.selection.start.get())
         } else {
-            (edit.selection.start, edit.selection.end)
+            (edit.selection.start.get(), edit.selection.end.get())
         };
-        self.edit(vec![(edit.range, edit.text)], ends, Group::Alone, None)
+        self.edit(vec![(edit.range.bytes(), edit.text)], ends, Group::Alone, None)
     }
 }
 
@@ -84,7 +84,7 @@ impl Model {
     /// A list key, as [`Move`] tells. It counts the lists it changes again. Returns `None` when the selection touches
     /// no list item.
     pub(crate) fn relist(&mut self, key: Move) -> Option<bool> {
-        let edit = relist(&self.text, &self.body, self.selection(), key)?;
+        let edit = relist(&self.text, &self.body, SourceOffset::range(self.selection()), key)?;
         Some(self.apply(edit))
     }
 
@@ -121,13 +121,13 @@ impl Model {
 fn collect_tasks(blocks: &[Block], lines: &Range<usize>, boxes: &mut Vec<Range<usize>>) {
     for block in blocks
         .iter()
-        .filter(|b| b.range.start <= lines.end && lines.start <= b.range.end)
+        .filter(|b| b.range.start.get() <= lines.end && lines.start <= b.range.end.get())
     {
         if let BlockKind::Item { task: Some(task) } = &block.kind
-            && lines.start <= task.range.start
-            && task.range.start <= lines.end
+            && lines.start <= task.range.start.get()
+            && task.range.start.get() <= lines.end
         {
-            boxes.push(task.range.clone());
+            boxes.push(task.range.bytes());
         }
         collect_tasks(&block.children, lines, boxes);
     }

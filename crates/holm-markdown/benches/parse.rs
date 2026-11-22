@@ -1,6 +1,6 @@
 //! Speed of [`Body::parse`] on a 1 MB note.
 
-use holm_markdown::Body;
+use holm_markdown::{Body, SourceOffset};
 
 fn main() {
     divan::main();
@@ -108,8 +108,8 @@ fn reparse_after_one_key(bencher: divan::Bencher<'_, '_>) {
     let at = text.floor_char_boundary(text.len() / 2);
     bencher.bench_local(|| {
         text.insert(at, 'a');
-        body.reparse(divan::black_box(&text), at..at, 1);
+        body.reparse(divan::black_box(&text), SourceOffset::range(at..at), 1);
         text.remove(at);
-        body.reparse(divan::black_box(&text), at..at + 1, 0);
+        body.reparse(divan::black_box(&text), SourceOffset::range(at..at + 1), 0);
     });
 }

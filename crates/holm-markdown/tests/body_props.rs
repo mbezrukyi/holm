@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use holm_markdown::{Block, Body};
+use holm_markdown::{Block, Body, SourceOffset};
 use proptest::prelude::*;
 
 /// To reach the edge cases more often than random text.
@@ -149,18 +149,18 @@ fn check_reparse(old: &str, range: Range<usize>, new: &str) {
     let mut body = Body::parse(old);
     let mut text = old.to_owned();
     text.replace_range(range.clone(), new);
-    body.reparse(&text, range, new.len());
+    body.reparse(&text, SourceOffset::range(range), new.len());
     assert_same(&text, &body);
 }
 
-fn assert_range(text: &str, range: &Range<usize>) {
+fn assert_range(text: &str, range: &Range<SourceOffset>) {
     assert!(range.start <= range.end, "{range:?}");
-    assert!(range.end <= text.len(), "{range:?}");
-    assert!(text.is_char_boundary(range.start), "{range:?}");
-    assert!(text.is_char_boundary(range.end), "{range:?}");
+    assert!(range.end.get() <= text.len(), "{range:?}");
+    assert!(text.is_char_boundary(range.start.get()), "{range:?}");
+    assert!(text.is_char_boundary(range.end.get()), "{range:?}");
 }
 
-fn assert_blocks(text: &str, blocks: &[Block], parent: &Range<usize>) {
+fn assert_blocks(text: &str, blocks: &[Block], parent: &Range<SourceOffset>) {
     for block in blocks {
         assert_range(text, &block.range);
         assert!(
@@ -174,7 +174,7 @@ fn assert_blocks(text: &str, blocks: &[Block], parent: &Range<usize>) {
 
 fn check(text: &str) {
     let body = Body::parse(text);
-    assert_blocks(text, body.blocks(), &(0..text.len()));
+    assert_blocks(text, body.blocks(), &SourceOffset::range(0..text.len()));
     for span in body.spans() {
         assert_range(text, &span.range);
         assert!(!span.range.is_empty());

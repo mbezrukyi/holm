@@ -11,7 +11,7 @@ use std::fmt::Write as _;
 use std::fs;
 
 use holm_markdown::inline::{Kind, Node};
-use holm_markdown::{BlockKind, Body};
+use holm_markdown::{BlockKind, Body, OffsetRange};
 
 /// Examples that need a named entity outside the small table below.
 const NAMED_ENTITIES: [u32; 3] = [25, 32, 41];
@@ -120,8 +120,8 @@ fn text_html(source: &str) -> String {
 fn plain(text: &str, nodes: &[Node], out: &mut String) {
     for node in nodes {
         match &node.kind {
-            Kind::Text => out.push_str(&text_html(&text[node.source.clone()])),
-            Kind::Code => out.push_str(&escape(&text[node.content.clone()].replace('\n', " "))),
+            Kind::Text => out.push_str(&text_html(&text[node.source.bytes()])),
+            Kind::Code => out.push_str(&escape(&text[node.content.bytes()].replace('\n', " "))),
             Kind::HardBreak => out.push('\n'),
             Kind::Html => {}
             _ => plain(text, &node.children, out),
@@ -133,15 +133,15 @@ fn render(text: &str, nodes: &[Node], out: &mut String) {
     for node in nodes {
         let tag = match &node.kind {
             Kind::Text => {
-                out.push_str(&text_html(&text[node.source.clone()]));
+                out.push_str(&text_html(&text[node.source.bytes()]));
                 continue;
             }
-            Kind::Link(_) if text.as_bytes()[node.source.start] == b'<' => {
-                let _ = write!(out, "<a>{}</a>", escape(&text[node.content.clone()]));
+            Kind::Link(_) if text.as_bytes()[node.source.start.get()] == b'<' => {
+                let _ = write!(out, "<a>{}</a>", escape(&text[node.content.bytes()]));
                 continue;
             }
             Kind::Code => {
-                let code = text[node.content.clone()].replace('\n', " ");
+                let code = text[node.content.bytes()].replace('\n', " ");
                 let _ = write!(out, "<code>{}</code>", escape(&code));
                 continue;
             }
@@ -150,7 +150,7 @@ fn render(text: &str, nodes: &[Node], out: &mut String) {
                 continue;
             }
             Kind::Html => {
-                out.push_str(&text[node.source.clone()]);
+                out.push_str(&text[node.source.bytes()]);
                 continue;
             }
             Kind::Image(_) => {
@@ -167,15 +167,15 @@ fn render(text: &str, nodes: &[Node], out: &mut String) {
             Kind::Underline | Kind::Color(_) => "",
         };
         // A style from an HTML tag stays as its tags.
-        let raw = text.as_bytes()[node.source.start] == b'<' && !matches!(node.kind, Kind::Link(_));
+        let raw = text.as_bytes()[node.source.start.get()] == b'<' && !matches!(node.kind, Kind::Link(_));
         if raw {
-            out.push_str(&text[node.source.start..node.content.start]);
+            out.push_str(&text[(node.source.start..node.content.start).bytes()]);
         } else {
             let _ = write!(out, "<{tag}>");
         }
         render(text, &node.children, out);
         if raw {
-            out.push_str(&text[node.content.end..node.source.end]);
+            out.push_str(&text[(node.content.end..node.source.end).bytes()]);
         } else {
             let _ = write!(out, "</{tag}>");
         }

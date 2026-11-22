@@ -12,7 +12,7 @@ use std::collections::HashSet;
 use std::ops::Range;
 use std::time::Instant;
 
-use holm_markdown::{Body, Target};
+use holm_markdown::{Body, SourceOffset, Target};
 use ropey::{LineType, Rope};
 
 pub(crate) use caret::{Affinity, Caret, Direction, GoalRow, Selection};
@@ -208,7 +208,8 @@ impl Model {
 
     fn reparse(&mut self) {
         if let Some((old, new_end)) = self.changed.take() {
-            self.body.reparse(&self.text, old.clone(), new_end - old.start);
+            self.body
+                .reparse(&self.text, SourceOffset::range(old.clone()), new_end - old.start);
         }
     }
 

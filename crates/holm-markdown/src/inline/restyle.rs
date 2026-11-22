@@ -8,7 +8,7 @@ use std::ops::Range;
 use super::parse::{Defs, parse};
 use super::{Container, Kind, Leaf, Node};
 use super::{html_tag, scan};
-use crate::{BlockKind, Body, Color};
+use crate::{BlockKind, Body, Color, JoinedOffset, NewOffset, OffsetRange, SourceOffset};
 
 /// A format key: the inline style it adds or removes, or the color it sets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,10 +36,10 @@ pub enum Format {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Edit {
     /// The replaced source.
-    pub range: Range<usize>,
+    pub range: Range<SourceOffset>,
     pub text: String,
-    /// The selection in the new text. It covers the same visible text as before.
-    pub selection: Range<usize>,
+    /// It covers the same visible text as the selection before.
+    pub selection: Range<NewOffset>,
 }
 
 /// `body` is the parse of `text`.
@@ -50,16 +50,17 @@ pub struct Edit {
 /// styles.
 ///
 /// ```
-/// use holm_markdown::Body;
 /// use holm_markdown::inline::{Format, restyle};
+/// use holm_markdown::{Body, SourceOffset};
 ///
 /// let text = "Write the report";
-/// let edit = restyle(text, &Body::parse(text), 0..5, Format::Bold).unwrap();
+/// let edit = restyle(text, &Body::parse(text), SourceOffset::range(0..5), Format::Bold).unwrap();
 /// assert_eq!(edit.text, "**Write**");
-/// assert_eq!(edit.range, 0..5);
+/// assert_eq!(edit.range, SourceOffset::range(0..5));
 /// ```
-pub fn restyle(text: &str, body: &Body, selection: Range<usize>, format: Format) -> Option<Edit> {
-    let selection = selection.start.min(text.len())..selection.end.min(text.len());
+pub fn restyle(text: &str, body: &Body, selection: Range<SourceOffset>, format: Format) -> Option<Edit> {
+    let text_end = SourceOffset::new(text.len());
+    let selection = selection.start.min(text_end)..selection.end.min(text_end);
     if selection.is_empty() {
         return at_cursor(text, body, selection.start, format);
     }
@@ -80,10 +81,10 @@ fn keeps_blocks(text: &str, body: &Body, edit: &Edit) -> bool {
         return true;
     }
     let old = blocks[first].range.start..blocks[last - 1].range.end;
-    let mut new = text[old.start..edit.range.start].to_owned();
+    let mut new = text[(old.start..edit.range.start).bytes()].to_owned();
     new.push_str(&edit.text);
-    new.push_str(&text[edit.range.end..old.end]);
-    let (before, after) = (Body::parse(&text[old]), Body::parse(&new));
+    new.push_str(&text[(edit.range.end..old.end).bytes()]);
+    let (before, after) = (Body::parse(&text[old.bytes()]), Body::parse(&new));
     before.leaves().len() == after.leaves().len() && same_shape(before.blocks(), after.blocks())
 }
 
@@ -92,7 +93,7 @@ fn same_shape(a: &[crate::Block], b: &[crate::Block]) -> bool {
         BlockKind::Item { task } => BlockKind::Item {
             task: task.as_ref().map(|t| crate::Task {
                 state: t.state,
-                range: 0..0,
+                range: Range::default(),
             }),
         },
         other => other.clone(),
@@ -153,7 +154,7 @@ impl Look {
         !matches!(self, Self::Emphasis | Self::Strong)
     }
 
-    fn of(kind: &Kind) -> Option<Self> {
+    fn of<O>(kind: &Kind<O>) -> Option<Self> {
         Some(match kind {
             Kind::Emphasis => Self::Emphasis,
             Kind::Strong => Self::Strong,
@@ -279,7 +280,7 @@ struct Mark {
     look: Look,
     spelling: Spelling,
     /// The content of the old node. `None` for a new style.
-    node: Option<Range<usize>>,
+    node: Option<Range<JoinedOffset>>,
     /// How many pieces the old node had.
     count: usize,
 }
@@ -309,13 +310,13 @@ impl Class {
 /// A piece of visible text, or a whole code span, link, image, HTML tag or line break.
 #[derive(Clone, Debug)]
 struct Piece {
-    /// The old source, in the joined text.
-    src: Range<usize>,
+    /// The old source.
+    src: Range<JoinedOffset>,
     class: Class,
     /// The new source, when it is not the old one.
     text: Option<String>,
     /// For a code span: the code without its ticks.
-    inner: Range<usize>,
+    inner: Range<JoinedOffset>,
     /// The styles, the outer one first.
     marks: Vec<Mark>,
     selected: bool,
@@ -336,13 +337,19 @@ impl Piece {
     }
 
     fn source<'a>(&'a self, joined: &'a str) -> &'a str {
-        self.text.as_deref().unwrap_or(&joined[self.src.clone()])
+        self.text.as_deref().unwrap_or(&joined[self.src.bytes()])
     }
 }
 
 /// Splits `nodes` into pieces. Text splits into words, spaces and other chars, and also at `cuts`. An escape or an
 /// entity is never split.
-fn flatten(joined: &str, nodes: &[Node], cuts: &Range<usize>, marks: &mut Vec<Mark>, out: &mut Vec<Piece>) {
+fn flatten(
+    joined: &str,
+    nodes: &[Node<JoinedOffset>],
+    cuts: &Range<JoinedOffset>,
+    marks: &mut Vec<Mark>,
+    out: &mut Vec<Piece>,
+) {
     for node in nodes {
         let class = match &node.kind {
             Kind::Text => {
@@ -360,8 +367,8 @@ fn flatten(joined: &str, nodes: &[Node], cuts: &Range<usize>, marks: &mut Vec<Ma
                 marks.push(Mark {
                     look,
                     spelling: Spelling::of(
-                        &joined[node.source.start..node.content.start],
-                        &joined[node.content.end..node.source.end],
+                        &joined[(node.source.start..node.content.start).bytes()],
+                        &joined[(node.content.end..node.source.end).bytes()],
                     ),
                     node: Some(node.content.clone()),
                     count: 0,
@@ -382,19 +389,25 @@ fn flatten(joined: &str, nodes: &[Node], cuts: &Range<usize>, marks: &mut Vec<Ma
     }
 }
 
-fn split_text(joined: &str, range: Range<usize>, cuts: &Range<usize>, marks: &[Mark], out: &mut Vec<Piece>) {
+fn split_text(
+    joined: &str,
+    range: Range<JoinedOffset>,
+    cuts: &Range<JoinedOffset>,
+    marks: &[Mark],
+    out: &mut Vec<Piece>,
+) {
     let b = joined.as_bytes();
     let mut start = range.start;
     let mut class = None;
     let mut i = range.start;
     let mut last_unit_start = range.start;
     while i < range.end {
-        let (len, unit) = if b[i] == b'\\' && b.get(i + 1).is_some_and(u8::is_ascii_punctuation) {
+        let (len, unit) = if b[i.get()] == b'\\' && b.get(i.get() + 1).is_some_and(u8::is_ascii_punctuation) {
             (2, Class::Punct)
-        } else if let Some(len) = entity_len(&b[i..range.end]) {
+        } else if let Some(len) = entity_len(&b[(i..range.end).bytes()]) {
             (len, Class::Punct)
         } else {
-            let c = joined[i..].chars().next().unwrap_or(' ');
+            let c = joined[i.get()..].chars().next().unwrap_or(' ');
             let unit = if c.is_whitespace() {
                 Class::Space
             } else if c.is_alphanumeric() {
@@ -419,7 +432,7 @@ fn split_text(joined: &str, range: Range<usize>, cuts: &Range<usize>, marks: &[M
     }
 }
 
-fn push_text(out: &mut Vec<Piece>, src: Range<usize>, class: Option<Class>, marks: &[Mark]) {
+fn push_text(out: &mut Vec<Piece>, src: Range<JoinedOffset>, class: Option<Class>, marks: &[Mark]) {
     out.push(Piece {
         inner: src.clone(),
         src,
@@ -468,14 +481,14 @@ impl Action {
 struct Work<'a> {
     leaf: &'a Leaf,
     joined: String,
-    nodes: Vec<Node>,
-    selection: Range<usize>,
+    nodes: Vec<Node<JoinedOffset>>,
+    selection: Range<JoinedOffset>,
     /// All pieces of the leaf, with all their styles.
     pieces: Vec<Piece>,
 }
 
 impl<'a> Work<'a> {
-    fn new(text: &str, leaf: &'a Leaf, defs: &Defs, selection: &Range<usize>) -> Self {
+    fn new(text: &str, leaf: &'a Leaf, defs: &Defs, selection: &Range<SourceOffset>) -> Self {
         let joined = leaf.joined(text).into_owned();
         let nodes = parse(&joined, defs);
         let selection = leaf.to_joined(selection.start)..leaf.to_joined(selection.end);
@@ -490,10 +503,10 @@ impl<'a> Work<'a> {
     }
 }
 
-fn pieces_of(joined: &str, nodes: &[Node], selection: &Range<usize>) -> Vec<Piece> {
+fn pieces_of(joined: &str, nodes: &[Node<JoinedOffset>], selection: &Range<JoinedOffset>) -> Vec<Piece> {
     let mut pieces = Vec::new();
     flatten(joined, nodes, selection, &mut Vec::new(), &mut pieces);
-    let mut counts: HashMap<Range<usize>, usize> = HashMap::new();
+    let mut counts: HashMap<Range<JoinedOffset>, usize> = HashMap::new();
     for node in pieces.iter().flat_map(|p| &p.marks).filter_map(|m| m.node.clone()) {
         *counts.entry(node).or_default() += 1;
     }
@@ -511,10 +524,10 @@ fn pieces_of(joined: &str, nodes: &[Node], selection: &Range<usize>) -> Vec<Piec
 /// The new source of one leaf part.
 struct Change {
     /// The old source.
-    old: Range<usize>,
+    old: Range<SourceOffset>,
     new: String,
-    /// For each piece: its old source in the joined text of the leaf, its new source in `new`, and its text.
-    pieces: Vec<(Range<usize>, Range<usize>, PieceText)>,
+    /// For each piece: its old source, its new source in `new`, and its text.
+    pieces: Vec<(Range<JoinedOffset>, Range<usize>, PieceText)>,
     /// The leaf, to map a source offset into its joined text.
     leaf: Leaf,
 }
@@ -526,7 +539,7 @@ enum PieceText {
     Rewritten,
 }
 
-fn change(text: &str, body: &Body, selection: &Range<usize>, format: Format) -> Option<Vec<Change>> {
+fn change(text: &str, body: &Body, selection: &Range<SourceOffset>, format: Format) -> Option<Vec<Change>> {
     let leaves = body.leaves();
     let first = leaves.partition_point(|leaf| leaf.range().end < selection.start);
     let works: Vec<Work<'_>> = leaves[first..]
@@ -608,7 +621,7 @@ fn write_region(
     }
     let region = list[range.start].source.start..list[range.end - 1].source.end;
     let mut pieces = pieces_of(&work.joined, &list[range], &work.selection);
-    let start = if region.start == 0 || work.joined.as_bytes()[region.start - 1] == b'\n' {
+    let start = if region.start == JoinedOffset::default() || work.joined.as_bytes()[region.start.get() - 1] == b'\n' {
         Start::LineStart
     } else {
         Start::MidLine
@@ -634,7 +647,7 @@ fn write_region(
         Action::Set(family, color) => color.map(|c| family.look(c)),
         _ => None,
     };
-    let breaks = work.joined[region.clone()].matches('\n').count();
+    let breaks = work.joined[region.bytes()].matches('\n').count();
     let mut tried = HashSet::new();
     for policy in Policy::all(target) {
         let mut writer = Writer {
@@ -650,18 +663,18 @@ fn write_region(
             continue;
         }
         let mut joined = work.joined.clone();
-        joined.replace_range(region.clone(), &out);
+        joined.replace_range(region.bytes(), &out);
         let nodes = parse(&joined, body.defs());
-        let mut got = pieces_of(&joined, &nodes, &(0..0));
+        let mut got = pieces_of(&joined, &nodes, &Range::default());
         trim_edges(&mut got);
         if flat(&joined, &got) != wanted {
             continue;
         }
-        if out == work.joined[region.clone()] {
+        if out == work.joined[region.bytes()] {
             return Some(Rewrite::Unchanged);
         }
         let change = source_change(text, work, &region, &out, &pieces, &at, policy.escape);
-        if !keeps_blocks(text, body, &join(text, std::slice::from_ref(&change), 0..0)) {
+        if !keeps_blocks(text, body, &join(text, std::slice::from_ref(&change), Range::default())) {
             continue;
         }
         return Some(Rewrite::Changed(change));
@@ -670,8 +683,12 @@ fn write_region(
 }
 
 /// The part of the tree to write again: the path to a list of nodes, and a range in it.
-fn region(nodes: &[Node], selection: &Range<usize>, action: Action) -> Option<(Vec<usize>, Range<usize>)> {
-    let overlaps = |n: &Node| n.source.start < selection.end && selection.start < n.source.end;
+fn region(
+    nodes: &[Node<JoinedOffset>],
+    selection: &Range<JoinedOffset>,
+    action: Action,
+) -> Option<(Vec<usize>, Range<usize>)> {
+    let overlaps = |n: &Node<JoinedOffset>| n.source.start < selection.end && selection.start < n.source.end;
     let mut path = Vec::new();
     let mut list = nodes;
     let range = loop {
@@ -704,7 +721,7 @@ fn region(nodes: &[Node], selection: &Range<usize>, action: Action) -> Option<(V
 
 /// The range with the style nodes next to it, so that runs of one style can join. Then the text nodes next to it join
 /// too, so that the last try can escape their marker chars.
-fn widen(list: &[Node], mut range: Range<usize>) -> Range<usize> {
+fn widen(list: &[Node<JoinedOffset>], mut range: Range<usize>) -> Range<usize> {
     while range.start > 0 && Look::of(&list[range.start - 1].kind).is_some() {
         range.start -= 1;
     }
@@ -748,8 +765,12 @@ fn act(
         }
         Action::RemoveCode => {
             for piece in pieces.iter_mut().filter(|p| p.selected && p.class == Class::Code) {
-                let start = if piece.src.start == 0 { start } else { Start::MidLine };
-                let code = &joined[piece.inner.clone()];
+                let start = if piece.src.start == JoinedOffset::default() {
+                    start
+                } else {
+                    Start::MidLine
+                };
+                let code = &joined[piece.inner.bytes()];
                 piece.text = Some(escape(code, start, container));
                 piece.class = Class::Punct;
             }
@@ -764,12 +785,12 @@ fn act(
             let mut code = String::new();
             for piece in part {
                 match piece.class {
-                    Class::Code => code.push_str(&joined[piece.inner.clone()]),
-                    Class::Html => code.push_str(&joined[piece.src.clone()]),
+                    Class::Code => code.push_str(&joined[piece.inner.bytes()]),
+                    Class::Html => code.push_str(&joined[piece.src.bytes()]),
                     _ if container == Container::TableCell => {
-                        code.push_str(&unescape_but_pipes(&joined[piece.src.clone()]));
+                        code.push_str(&unescape_but_pipes(&joined[piece.src.bytes()]));
                     }
-                    _ => code.push_str(&scan::unescape(&joined[piece.src.clone()])),
+                    _ => code.push_str(&scan::unescape(&joined[piece.src.bytes()])),
                 }
             }
             let marks: Vec<Mark> = part[0]
@@ -1182,20 +1203,20 @@ impl Writer<'_> {
     }
 }
 
-/// The change in source offsets for the new text `out` of `region` in a leaf.
+/// The change for the new text `out` of `region` in a leaf.
 fn source_change(
     text: &str,
     work: &Work<'_>,
-    region: &Range<usize>,
+    region: &Range<JoinedOffset>,
     out: &str,
     pieces: &[Piece],
     at: &[Range<usize>],
     escape: Escape,
 ) -> Change {
     let leaf = work.leaf;
-    let mut line = work.joined[..region.start].matches('\n').count();
+    let mut line = work.joined[..region.start.get()].matches('\n').count();
     let mut new = String::with_capacity(out.len());
-    // The source offset of each offset in `out`.
+    // The offset in `new` of each offset in `out`.
     let mut offsets = Vec::with_capacity(out.len() + 1);
     for (i, c) in out.char_indices() {
         offsets.resize(i + 1, new.len());
@@ -1234,29 +1255,32 @@ enum End {
     End,
 }
 
-/// Where the source offset `pos` lands in the new text. An offset in a changed part keeps its place in the visible
-/// text.
-fn map(changes: &[Change], pos: usize, end: End) -> usize {
+/// Where `pos` lands in the new text. An offset in a changed part keeps its place in the visible text.
+fn map(changes: &[Change], pos: SourceOffset, end: End) -> NewOffset {
     let mut delta = 0_isize;
     for change in changes {
         if pos < change.old.start {
             break;
         }
         if pos <= change.old.end {
-            let start = change.old.start.saturating_add_signed(delta);
-            return start + map_in(change, change.leaf.to_joined(pos), end);
+            return moved(change.old.start, delta) + map_in(change, change.leaf.to_joined(pos), end);
         }
-        delta += signed(change.new.len()) - signed(change.old.len());
+        delta += signed(change.new.len()) - signed(change.old.end - change.old.start);
     }
-    pos.saturating_add_signed(delta)
+    moved(pos, delta)
+}
+
+/// Where `pos` lands when the text before it grows by `delta` bytes.
+fn moved(pos: SourceOffset, delta: isize) -> NewOffset {
+    NewOffset::new(pos.get().saturating_add_signed(delta))
 }
 
 fn signed(n: usize) -> isize {
     isize::try_from(n).unwrap_or(isize::MAX)
 }
 
-/// The offset in `change.new` of the joined offset `pos` of its leaf.
-fn map_in(change: &Change, pos: usize, end: End) -> usize {
+/// The offset in `change.new` of `pos` in its leaf.
+fn map_in(change: &Change, pos: JoinedOffset, end: End) -> usize {
     match end {
         End::Start => {
             let Some((old, new, text)) = change.pieces.iter().find(|(old, _, _)| old.end > pos) else {
@@ -1281,17 +1305,17 @@ fn map_in(change: &Change, pos: usize, end: End) -> usize {
     }
 }
 
-fn join(text: &str, changes: &[Change], selection: Range<usize>) -> Edit {
+fn join(text: &str, changes: &[Change], selection: Range<NewOffset>) -> Edit {
     let start = changes[0].old.start;
     let end = changes[changes.len() - 1].old.end;
     let mut new = String::new();
     let mut at = start;
     for change in changes {
-        new.push_str(&text[at..change.old.start]);
+        new.push_str(&text[(at..change.old.start).bytes()]);
         new.push_str(&change.new);
         at = change.old.end;
     }
-    let old = &text[start..end];
+    let old = &text[(start..end).bytes()];
     let prefix = common_len(old.chars(), new.chars());
     let suffix = common_len(old[prefix..].chars().rev(), new[prefix..].chars().rev());
     Edit {
@@ -1307,7 +1331,7 @@ fn common_len(a: impl Iterator<Item = char>, b: impl Iterator<Item = char>) -> u
 }
 
 /// A key with no selection: on the word at `cursor`, or an empty marker pair between words.
-fn at_cursor(text: &str, body: &Body, cursor: usize, format: Format) -> Option<Edit> {
+fn at_cursor(text: &str, body: &Body, cursor: SourceOffset, format: Format) -> Option<Edit> {
     let leaves = body.leaves();
     let i = leaves.partition_point(|leaf| leaf.range().end < cursor);
     let leaf = leaves.get(i).filter(|leaf| leaf.range().start <= cursor);
@@ -1316,7 +1340,7 @@ fn at_cursor(text: &str, body: &Body, cursor: usize, format: Format) -> Option<E
     };
     let joined = leaf.joined(text);
     let nodes = parse(&joined, body.defs());
-    let pieces = pieces_of(&joined, &nodes, &(0..0));
+    let pieces = pieces_of(&joined, &nodes, &Range::default());
     let pos = leaf.to_joined(cursor);
     let inside = pieces
         .iter()
@@ -1359,15 +1383,15 @@ fn at_cursor(text: &str, body: &Body, cursor: usize, format: Format) -> Option<E
 }
 
 /// An empty marker pair at `cursor`, when spaces or line ends stand on both sides.
-fn pair(text: &str, body: &Body, cursor: usize, format: Format) -> Option<Edit> {
-    let before = text[..cursor].chars().next_back();
-    let after = text[cursor..].chars().next();
+fn pair(text: &str, body: &Body, cursor: SourceOffset, format: Format) -> Option<Edit> {
+    let before = text[..cursor.get()].chars().next_back();
+    let after = text[cursor.get()..].chars().next();
     let blank = |c: Option<char>| c.is_none_or(char::is_whitespace);
     if !blank(before) || !blank(after) || in_raw_block(body.blocks(), cursor) {
         return None;
     }
     let (pair, half) = format.pair()?;
-    let inner = cursor + half;
+    let inner = NewOffset::unmoved(cursor) + half;
     Some(Edit {
         range: cursor..cursor,
         text: pair,
@@ -1375,7 +1399,7 @@ fn pair(text: &str, body: &Body, cursor: usize, format: Format) -> Option<Edit> 
     })
 }
 
-fn in_raw_block(blocks: &[crate::Block], cursor: usize) -> bool {
+fn in_raw_block(blocks: &[crate::Block], cursor: SourceOffset) -> bool {
     blocks.iter().any(|block| {
         (block.range.start <= cursor && cursor <= block.range.end)
             && (matches!(block.kind, BlockKind::Code { .. } | BlockKind::Html) || in_raw_block(&block.children, cursor))

@@ -6,7 +6,7 @@
 use std::ops::{Add, Range, RangeInclusive, Sub};
 
 use crate::inline::Edit;
-use crate::{Block, BlockKind, Body};
+use crate::{Block, BlockKind, Body, NewOffset, OffsetRange, SourceOffset};
 
 /// What a list key does. See [`relist`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,17 +29,17 @@ pub enum Move {
 /// Gives `None` outside a list item, and for Enter before the text of the item.
 ///
 /// ```
-/// use holm_markdown::Body;
 /// use holm_markdown::list::{Move, relist};
+/// use holm_markdown::{Body, NewOffset, OffsetRange, SourceOffset};
 ///
 /// let text = "1. Milk\n2. Eggs\n3. Bread";
-/// let edit = relist(text, &Body::parse(text), 20..20, Move::In).unwrap();
+/// let edit = relist(text, &Body::parse(text), SourceOffset::range(20..20), Move::In).unwrap();
 /// let mut new = text.to_owned();
-/// new.replace_range(edit.range, &edit.text);
+/// new.replace_range(edit.range.bytes(), &edit.text);
 /// assert_eq!(new, "1. Milk\n2. Eggs\n   1. Bread");
-/// assert_eq!(edit.selection, 23..23);
+/// assert_eq!(edit.selection, NewOffset::range(23..23));
 /// ```
-pub fn relist(text: &str, body: &Body, selection: Range<usize>, key: Move) -> Option<Edit> {
+pub fn relist(text: &str, body: &Body, selection: Range<SourceOffset>, key: Move) -> Option<Edit> {
     Some(plan(text, body, selection, key)?.edit)
 }
 
@@ -54,16 +54,16 @@ struct Plan {
 #[cfg_attr(not(test), expect(dead_code, reason = "the tests compare it with the parse"))]
 struct Planned {
     parts: Vec<Part>,
-    /// The bytes of the tree in the old text.
-    old_region: Range<usize>,
-    /// The bytes of the tree in the new text.
-    new_region: Range<usize>,
+    /// The tree in the old text.
+    old_region: Range<SourceOffset>,
+    /// The tree in the new text.
+    new_region: Range<NewOffset>,
     /// The number of quotes around the tree.
     quotes: usize,
 }
 
-fn plan(text: &str, body: &Body, selection: Range<usize>, key: Move) -> Option<Plan> {
-    let end = floor(text, selection.end.min(text.len()));
+fn plan(text: &str, body: &Body, selection: Range<SourceOffset>, key: Move) -> Option<Plan> {
+    let end = floor(text, selection.end.min(SourceOffset::new(text.len())));
     let selection = floor(text, selection.start.min(end))..end;
     match key {
         Move::Next => next(text, body, selection),
@@ -71,15 +71,15 @@ fn plan(text: &str, body: &Body, selection: Range<usize>, key: Move) -> Option<P
     }
 }
 
-fn floor(text: &str, mut offset: usize) -> usize {
-    while !text.is_char_boundary(offset) {
+fn floor(text: &str, mut offset: SourceOffset) -> SourceOffset {
+    while !text.is_char_boundary(offset.get()) {
         offset -= 1;
     }
     offset
 }
 
 /// Tab and Shift+Tab.
-fn shift(text: &str, body: &Body, selection: Range<usize>, key: Move) -> Option<Plan> {
+fn shift(text: &str, body: &Body, selection: Range<SourceOffset>, key: Move) -> Option<Plan> {
     let span = line_start(text, selection.start)..line_end(text, selection.end);
     let found = path_to(body.blocks(), &|b| {
         is_item(b) && span.start <= b.range.start && b.range.start <= span.end
@@ -130,24 +130,24 @@ fn shift(text: &str, body: &Body, selection: Range<usize>, key: Move) -> Option<
     if writer.broken || source.captures(&writer) {
         return Some(nothing(selection));
     }
-    let start = source.region.start;
+    let start = NewOffset::unmoved(source.region.start);
     let selection = start + writer.map(selection.start)..start + writer.map(selection.end);
     Some(source.finish(writer, tree, selection))
 }
 
-fn nothing(selection: Range<usize>) -> Plan {
+fn nothing(selection: Range<SourceOffset>) -> Plan {
     Plan {
         edit: Edit {
             range: selection.start..selection.start,
             text: String::new(),
-            selection,
+            selection: NewOffset::unmoved(selection.start)..NewOffset::unmoved(selection.end),
         },
         tree: None,
     }
 }
 
 /// Enter.
-fn next(text: &str, body: &Body, selection: Range<usize>) -> Option<Plan> {
+fn next(text: &str, body: &Body, selection: Range<SourceOffset>) -> Option<Plan> {
     let line = line_start(text, selection.start)..line_end(text, selection.start);
     if selection.end > line.end {
         return None;
@@ -167,7 +167,7 @@ fn next(text: &str, body: &Body, selection: Range<usize>) -> Option<Plan> {
     let Src::Old(kept) = current.kept.clone() else {
         return None;
     };
-    let after = &text[kept.start..line.end];
+    let after = &text[(kept.start..line.end).bytes()];
     let spaces = after.bytes().take_while(|b| *b == b' ').count();
     let task = ["[ ] ", "[x] ", "[X] "]
         .iter()
@@ -178,9 +178,9 @@ fn next(text: &str, body: &Body, selection: Range<usize>) -> Option<Plan> {
     }
     if content == line.end && selection.end == line.end {
         // A blank line ends the list. Without it, typed text joins the item above.
-        let quote = &text[line.start..source.prefix_end(id)];
+        let quote = &text[(line.start..source.prefix_end(id)).bytes()];
         let lines = format!("{}\n{quote}", quote.trim_end());
-        let cursor = line.start + lines.len();
+        let cursor = NewOffset::unmoved(line.start) + lines.len();
         return Some(Plan {
             edit: Edit {
                 range: line,
@@ -190,7 +190,7 @@ fn next(text: &str, body: &Body, selection: Range<usize>) -> Option<Plan> {
             tree: None,
         });
     }
-    let rest = text[selection.end..line.end].trim().is_empty();
+    let rest = text[(selection.end..line.end).bytes()].trim().is_empty();
     let parts = &current.parts;
     let lazy_or_blank = |part: &Part| matches!(part, Part::Line(line) if line.extra.is_none());
     if rest && parts.first().is_some_and(lazy_or_blank) && !parts.iter().all(Part::is_blank) {
@@ -199,9 +199,9 @@ fn next(text: &str, body: &Body, selection: Range<usize>) -> Option<Plan> {
         return None;
     }
     current.kept = Src::Old(kept.start..selection.start);
-    current.empty = no_text(&text[kept.start..selection.start]);
+    current.empty = no_text(&text[(kept.start..selection.start).bytes()]);
     let task = if task { "[ ] " } else { "" };
-    let kept = format!(" {task}{}", &text[selection.end..line.end]);
+    let kept = format!(" {task}{}", &text[(selection.end..line.end).bytes()]);
     let new = Item {
         id: None,
         prefix: current.prefix.clone(),
@@ -224,12 +224,12 @@ fn next(text: &str, body: &Body, selection: Range<usize>) -> Option<Plan> {
         .keeps
         .iter()
         .find(|keep| keep.old_keep.is_none())
-        .map(|keep| source.region.start + keep.new_keep + 1 + task.len())?;
+        .map(|keep| NewOffset::unmoved(source.region.start) + keep.new_keep + 1 + task.len())?;
     Some(source.finish(writer, tree, cursor..cursor))
 }
 
 /// Where the last item of the list `block` ends. The range of a list can end in the indent of the next line.
-fn list_end(block: &Block) -> usize {
+fn list_end(block: &Block) -> SourceOffset {
     block.children.last().map_or(block.range.end, |item| item.range.end)
 }
 
@@ -237,12 +237,14 @@ fn is_item(block: &Block) -> bool {
     matches!(block.kind, BlockKind::Item { .. })
 }
 
-fn line_start(text: &str, offset: usize) -> usize {
-    text[..offset].rfind('\n').map_or(0, |at| at + 1)
+fn line_start(text: &str, offset: SourceOffset) -> SourceOffset {
+    SourceOffset::new(text[..offset.get()].rfind('\n').map_or(0, |at| at + 1))
 }
 
-fn line_end(text: &str, offset: usize) -> usize {
-    text[offset..].find('\n').map_or(text.len(), |at| offset + at)
+fn line_end(text: &str, offset: SourceOffset) -> SourceOffset {
+    text[offset.get()..]
+        .find('\n')
+        .map_or(SourceOffset::new(text.len()), |at| offset + at)
 }
 
 /// The blocks from the top level down to the first block in document order that `pick` takes.
@@ -260,7 +262,7 @@ fn path_to<'b>(blocks: &'b [Block], pick: &dyn Fn(&Block) -> bool) -> Option<Vec
 }
 
 /// The blocks that hold `offset`, from the top level inward.
-fn chain_at(blocks: &[Block], offset: usize) -> Vec<&Block> {
+fn chain_at(blocks: &[Block], offset: SourceOffset) -> Vec<&Block> {
     let mut chain = Vec::new();
     let mut level = blocks;
     while let Some(block) = level.iter().find(|b| b.range.start <= offset && offset <= b.range.end) {
@@ -390,7 +392,7 @@ impl Mark {
 
 #[derive(Clone, Debug)]
 enum Src {
-    Old(Range<usize>),
+    Old(Range<SourceOffset>),
     New(String),
 }
 
@@ -398,11 +400,11 @@ enum Src {
 #[derive(Clone, Debug)]
 struct Line {
     /// The quote markers.
-    prefix: Range<usize>,
+    prefix: Range<SourceOffset>,
     /// The indent past the content column of the item. `None` for a blank line or a lazy line: it is written as it is.
     extra: Option<Column>,
     /// The text after the indent.
-    kept: Range<usize>,
+    kept: Range<SourceOffset>,
     blank: bool,
     /// The width of the indent.
     lead: Column,
@@ -418,7 +420,7 @@ struct Item {
     /// The marker line in the source. `None` for an item that a key adds.
     id: Option<LineIndex>,
     /// The quote markers of the marker line.
-    prefix: Range<usize>,
+    prefix: Range<SourceOffset>,
     mark: Mark,
     number: u64,
     position: Position,
@@ -463,8 +465,8 @@ impl Part {
 /// The lines of the outermost list around an item.
 struct Source<'a> {
     text: &'a str,
-    region: Range<usize>,
-    lines: Vec<Range<usize>>,
+    region: Range<SourceOffset>,
+    lines: Vec<Range<SourceOffset>>,
     /// The number of quotes around the list.
     quotes: usize,
 }
@@ -524,10 +526,10 @@ impl<'a> Source<'a> {
         Some(parts)
     }
 
-    fn lines(text: &'a str, region: Range<usize>, quotes: usize) -> Self {
+    fn lines(text: &'a str, region: Range<SourceOffset>, quotes: usize) -> Self {
         let mut lines = Vec::new();
         let mut start = region.start;
-        for (at, _) in text[region.clone()].match_indices('\n') {
+        for (at, _) in text[region.bytes()].match_indices('\n') {
             lines.push(start..region.start + at);
             start = region.start + at + 1;
         }
@@ -540,7 +542,7 @@ impl<'a> Source<'a> {
         }
     }
 
-    fn line_of(&self, offset: usize) -> LineIndex {
+    fn line_of(&self, offset: SourceOffset) -> LineIndex {
         LineIndex(
             self.lines
                 .partition_point(|line| line.start <= offset)
@@ -548,47 +550,48 @@ impl<'a> Source<'a> {
         )
     }
 
-    fn span(&self, line: LineIndex) -> &Range<usize> {
+    fn span(&self, line: LineIndex) -> &Range<SourceOffset> {
         &self.lines[line.0]
     }
 
     /// Where the quote markers of `line` end.
-    fn prefix_end(&self, line: LineIndex) -> usize {
+    fn prefix_end(&self, line: LineIndex) -> SourceOffset {
         self.quotes_end(self.span(line)).0
     }
 
     /// Where the quote markers of the line `range` end, and how many there are.
-    fn quotes_end(&self, range: &Range<usize>) -> (usize, usize) {
+    fn quotes_end(&self, range: &Range<SourceOffset>) -> (SourceOffset, usize) {
         let bytes = self.text.as_bytes();
-        let mut at = range.start;
+        let end = range.end.get();
+        let mut at = range.start.get();
         let mut count = 0;
         for _ in 0..self.quotes {
             let mut p = at;
-            while p < range.end && bytes[p] == b' ' {
+            while p < end && bytes[p] == b' ' {
                 p += 1;
             }
-            if p < range.end && bytes[p] == b'>' {
+            if p < end && bytes[p] == b'>' {
                 at = p + 1;
                 count += 1;
-                if at < range.end && bytes[at] == b' ' {
+                if at < end && bytes[at] == b' ' {
                     at += 1;
                 }
             } else {
                 break;
             }
         }
-        (at, count)
+        (SourceOffset::new(at), count)
     }
 
     /// What the line before the source holds. After its text, as after lazy text, an empty item would not start an
     /// item.
     fn above(&self) -> Above {
-        if self.region.start == 0 {
+        if self.region.start == SourceOffset::default() {
             return Above::Nothing;
         }
         let line = line_start(self.text, self.region.start - 1)..self.region.start - 1;
         let (at, count) = self.quotes_end(&line);
-        if count >= self.quotes && !self.text[at..line.end].trim().is_empty() {
+        if count >= self.quotes && !self.text[(at..line.end).bytes()].trim().is_empty() {
             Above::Lazy
         } else {
             Above::Nothing
@@ -603,13 +606,13 @@ impl<'a> Source<'a> {
     /// The indent of the first line with text after the source, when it is in the same quotes.
     fn next_indent(&self) -> Option<Column> {
         let mut start = self.region.end + 1;
-        while start < self.text.len() {
+        while start.get() < self.text.len() {
             let line = start..line_end(self.text, start);
             let (at, count) = self.quotes_end(&line);
             if count < self.quotes {
                 return None;
             }
-            let rest = &self.text[at..line.end];
+            let rest = &self.text[(at..line.end).bytes()];
             let ws = rest.bytes().take_while(|b| *b == b' ' || *b == b'\t').count();
             if ws < rest.len() {
                 return Some(columns(&rest[..ws]));
@@ -646,23 +649,23 @@ impl<'a> Source<'a> {
         // The range of an item can start in its indent.
         let from = block.range.start.max(prefix_end);
         let at = from
-            + self.text[from..line.end.max(from)]
+            + self.text[(from..line.end.max(from)).bytes()]
                 .bytes()
                 .take_while(|b| *b == b' ' || *b == b'\t')
                 .count();
         if !(prefix_end..line.end).contains(&at) {
             return None;
         }
-        let lead = &self.text[prefix_end..at];
+        let lead = &self.text[(prefix_end..at).bytes()];
         if !lead.bytes().all(|b| b == b' ' || b == b'\t') {
             return None;
         }
         let indent = columns(lead);
         let rel = indent.checked_sub(col)?;
-        let (mark, number, width) = marker(&self.text[at..line.end])?;
-        let after = &self.text[at + width..line.end];
+        let (mark, number, width) = marker(&self.text[(at..line.end).bytes()])?;
+        let after = &self.text[(at + width..line.end).bytes()];
         let gap = gap(after)?;
-        let content = indent + Column::of_ascii(&self.text[at..at + width]) + gap;
+        let content = indent + Column::of_ascii(&self.text[(at..at + width).bytes()]) + gap;
         let mut parts = Vec::new();
         let mut next = head.next();
         for child in block
@@ -697,7 +700,7 @@ impl<'a> Source<'a> {
     fn line(&self, line: LineIndex, content: Column) -> Line {
         let range = self.span(line).clone();
         let prefix_end = self.prefix_end(line);
-        let rest = &self.text[prefix_end..range.end];
+        let rest = &self.text[(prefix_end..range.end).bytes()];
         let ws = rest.bytes().take_while(|b| *b == b' ' || *b == b'\t').count();
         let lead = columns(&rest[..ws]);
         let blank = ws == rest.len();
@@ -711,7 +714,7 @@ impl<'a> Source<'a> {
             .is_some_and(|(_, _, width)| rest[ws + width..].is_empty() || rest[ws + width..].starts_with([' ', '\t']));
         let after_text = line.previous().is_some_and(|above| {
             let text_start = self.prefix_end(above);
-            !self.text[text_start..self.span(above).end].trim().is_empty()
+            !self.text[(text_start..self.span(above).end).bytes()].trim().is_empty()
         });
         let continues = !blank && after_text && (starts_item || extra.is_some_and(|e| e >= CODE_INDENT));
         Line {
@@ -726,8 +729,8 @@ impl<'a> Source<'a> {
     }
 
     /// The edit that puts the written tree in place of the region. Only the changed middle goes in the edit.
-    fn finish(self, writer: Writer<'_>, tree: Vec<Part>, selection: Range<usize>) -> Plan {
-        let old = &self.text[self.region.clone()];
+    fn finish(self, writer: Writer<'_>, tree: Vec<Part>, selection: Range<NewOffset>) -> Plan {
+        let old = &self.text[self.region.bytes()];
         let new = writer.out;
         let mut prefix = old.bytes().zip(new.bytes()).take_while(|(a, b)| a == b).count();
         while !old.is_char_boundary(prefix) {
@@ -748,7 +751,7 @@ impl<'a> Source<'a> {
         let planned = Planned {
             parts: tree,
             old_region: self.region.clone(),
-            new_region: start..start + new.len(),
+            new_region: NewOffset::unmoved(start)..NewOffset::unmoved(start) + new.len(),
             quotes: self.quotes,
         };
         Plan {
@@ -1012,10 +1015,12 @@ fn merge_lists(parts: &mut Vec<Part>) {
 
 /// Where a line of the old text went.
 struct Placed {
-    old_start: usize,
+    old_start: SourceOffset,
     /// Where its kept text starts. `None` for a new line.
-    old_keep: Option<usize>,
+    old_keep: Option<SourceOffset>,
+    /// From the start of the written text.
     new_start: usize,
+    /// From the start of the written text.
     new_keep: usize,
 }
 
@@ -1105,13 +1110,13 @@ impl<'a> Writer<'a> {
         above.map(|(content, _)| content)
     }
 
-    fn begin(&mut self, prefix: &Range<usize>) -> usize {
+    fn begin(&mut self, prefix: &Range<SourceOffset>) -> usize {
         if self.started {
             self.out.push('\n');
         }
         self.started = true;
         let start = self.out.len();
-        self.out.push_str(&self.text[prefix.clone()]);
+        self.out.push_str(&self.text[prefix.bytes()]);
         start
     }
 
@@ -1133,7 +1138,7 @@ impl<'a> Writer<'a> {
         let new_keep = self.out.len();
         let old_keep = match &item.kept {
             Src::Old(range) => {
-                self.out.push_str(&self.text[range.clone()]);
+                self.out.push_str(&self.text[range.bytes()]);
                 Some(range.start)
             }
             Src::New(text) => {
@@ -1177,7 +1182,7 @@ impl<'a> Writer<'a> {
             Above::Text
         };
         let new_keep = self.out.len();
-        self.out.push_str(&self.text[line.kept.clone()]);
+        self.out.push_str(&self.text[line.kept.bytes()]);
         self.keeps.push(Placed {
             old_start: line.prefix.start,
             old_keep: Some(line.kept.start),
@@ -1187,7 +1192,7 @@ impl<'a> Writer<'a> {
     }
 
     /// The offset in the written text of `offset` in the old text, from the start of the region.
-    fn map(&self, offset: usize) -> usize {
+    fn map(&self, offset: SourceOffset) -> usize {
         let keeps: Vec<&Placed> = self.keeps.iter().filter(|k| k.old_keep.is_some()).collect();
         let at = keeps.partition_point(|k| k.old_start <= offset).saturating_sub(1);
         let Some(keep) = keeps.get(at) else {
@@ -1195,7 +1200,7 @@ impl<'a> Writer<'a> {
         };
         let old_keep = keep.old_keep.unwrap_or(keep.old_start);
         if offset >= old_keep {
-            keep.new_keep + offset - old_keep
+            keep.new_keep + (offset - old_keep)
         } else {
             keep.new_keep - (old_keep - offset).min(keep.new_keep - keep.new_start)
         }
@@ -1232,14 +1237,14 @@ mod tests {
             .iter()
             .filter(|part| !part.is_blank())
             .map(|part| match part {
-                Part::Line(line) => Shape::Line(text[line.kept.clone()].trim().to_owned()),
+                Part::Line(line) => Shape::Line(text[line.kept.bytes()].trim().to_owned()),
                 Part::List(list) => Shape::List(
                     list.items
                         .iter()
                         .zip(numbers(list))
                         .map(|(item, number)| {
                             let kept = match &item.kept {
-                                Src::Old(range) => &text[range.clone()],
+                                Src::Old(range) => &text[range.bytes()],
                                 Src::New(new) => new.as_str(),
                             };
                             (list.mark.text(number), kept.trim().to_owned(), shape(text, &item.parts))
@@ -1251,7 +1256,7 @@ mod tests {
     }
 
     /// The tree of the lists that the parse of `text` has in `region`.
-    fn parsed(text: &str, region: &Range<usize>, quotes: usize) -> Result<Vec<Part>, String> {
+    fn parsed(text: &str, region: &Range<SourceOffset>, quotes: usize) -> Result<Vec<Part>, String> {
         let body = Body::parse(text);
         let mut blocks = body.blocks();
         let overlaps = |b: &Block| {
@@ -1289,7 +1294,7 @@ mod tests {
                 return false;
             };
             let head = &list.items[0];
-            let empty = matches!(&head.kept, Src::Old(r) if text[r.clone()].trim().is_empty())
+            let empty = matches!(&head.kept, Src::Old(r) if text[r.bytes()].trim().is_empty())
                 || matches!(&head.kept, Src::New(new) if new.trim().is_empty());
             let empty_head = empty && !(level == Level::Top && k == 0);
             empty_head
@@ -1377,20 +1382,20 @@ mod tests {
             let selection = a.min(b)..a.max(b);
             let key = [Move::In, Move::Out, Move::Next][key];
             let body = Body::parse(&text);
-            let Some(plan) = plan(&text, &body, selection, key) else {
+            let Some(plan) = plan(&text, &body, SourceOffset::range(selection), key) else {
                 return Ok(());
             };
             let mut new = text.clone();
-            new.replace_range(plan.edit.range.clone(), &plan.edit.text);
-            prop_assert!(new.is_char_boundary(plan.edit.selection.start));
-            prop_assert!(plan.edit.selection.end <= new.len());
+            new.replace_range(plan.edit.range.bytes(), &plan.edit.text);
+            prop_assert!(new.is_char_boundary(plan.edit.selection.start.get()));
+            prop_assert!(plan.edit.selection.end.get() <= new.len());
             let Some(planned) = plan.tree else {
                 return Ok(());
             };
             if has_empty_head(&text, &planned.parts, Level::Top) {
                 return Ok(());
             }
-            let after = parsed(&new, &planned.new_region, planned.quotes);
+            let after = parsed(&new, &SourceOffset::range(planned.new_region.bytes()), planned.quotes);
             prop_assert!(after.is_ok(), "{:?} in {new:?} after {key:?} on {text:?}", after.err());
             let after = after.unwrap_or_default();
             prop_assert_eq!(
@@ -1399,7 +1404,7 @@ mod tests {
                 "{:?} on {:?} gives {:?}", key, text, new
             );
             if key != Move::Next {
-                prop_assert_eq!(words(&text, &planned.old_region), words(&new, &planned.new_region));
+                prop_assert_eq!(words(&text, &planned.old_region.bytes()), words(&new, &planned.new_region.bytes()));
             }
         }
     }

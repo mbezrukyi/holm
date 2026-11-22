@@ -2,7 +2,7 @@ use std::fmt::Write as _;
 use std::ops::Range;
 
 use holm_markdown::inline::{Format, Kind, Node, restyle};
-use holm_markdown::{BlockKind, Body, Color, Style};
+use holm_markdown::{BlockKind, Body, Color, OffsetRange, SourceOffset, Style};
 use proptest::prelude::*;
 
 const FORMATS: [Format; 6] = [
@@ -40,14 +40,14 @@ struct Shown {
 fn shown(text: &str) -> Vec<Shown> {
     let body = Body::parse(text);
     text.char_indices()
-        .filter(|(at, _)| !body.hidden().iter().any(|r| r.contains(at)))
+        .filter(|(at, _)| !body.hidden().iter().any(|r| r.contains(&SourceOffset::new(*at))))
         .map(|(at, c)| Shown {
             at,
             c,
             styles: body
                 .spans()
                 .iter()
-                .filter(|s| s.range.contains(&at))
+                .filter(|s| s.range.contains(&SourceOffset::new(at)))
                 .map(|s| s.style)
                 .collect(),
         })
@@ -60,12 +60,13 @@ fn visible(text: &str) -> String {
 
 /// The text after the key, or `None` when the key does nothing.
 fn press(text: &str, selection: Range<usize>, format: Format) -> Option<(String, Range<usize>)> {
-    let edit = restyle(text, &Body::parse(text), selection, format)?;
+    let edit = restyle(text, &Body::parse(text), SourceOffset::range(selection), format)?;
     let mut new = text.to_owned();
-    new.replace_range(edit.range.clone(), &edit.text);
-    assert!(new.is_char_boundary(edit.selection.start) && new.is_char_boundary(edit.selection.end));
-    assert!(edit.selection.start <= edit.selection.end && edit.selection.end <= new.len());
-    Some((new, edit.selection))
+    new.replace_range(edit.range.bytes(), &edit.text);
+    let selection = edit.selection.bytes();
+    assert!(new.is_char_boundary(selection.start) && new.is_char_boundary(selection.end));
+    assert!(selection.start <= selection.end && selection.end <= new.len());
+    Some((new, selection))
 }
 
 fn find(text: &str, part: &str) -> Range<usize> {
@@ -390,13 +391,13 @@ fn check_color(text: &str, selection: Range<usize>, format: Format) {
 
 /// The source of each link and image.
 fn links(body: &Body) -> Vec<Range<usize>> {
-    body.links().iter().map(|l| l.range.clone()).collect()
+    body.links().iter().map(|l| l.range.bytes()).collect()
 }
 
 fn atom_ranges(nodes: &[Node], out: &mut Vec<Range<usize>>) {
     for node in nodes {
         if matches!(node.kind, Kind::Html | Kind::Link(_) | Kind::Image(_) | Kind::Code) {
-            out.push(node.source.clone());
+            out.push(node.source.bytes());
         }
         atom_ranges(&node.children, out);
     }

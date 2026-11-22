@@ -3,7 +3,7 @@ use std::collections::hash_map::Entry;
 use std::hash::BuildHasher as _;
 use std::path::Path;
 
-use holm_markdown::{Body, NoteFile, Target};
+use holm_markdown::{Body, NoteFile, OffsetRange, SourceOffset, Target};
 
 use crate::model::{FileTarget, Link, LinkTarget, Note, NoteId};
 use crate::{AbsolutePath, FolderPath, LinkPath, NotePath, Result, Snapshot};
@@ -163,13 +163,13 @@ pub(crate) fn relink(
     // A link can hold an embedded file, so the list is not always in text order.
     edits.sort_by_key(|(range, _)| range.start);
     let mut out = String::with_capacity(body.len());
-    let mut last = 0;
+    let mut last = SourceOffset::default();
     for (range, dest) in edits {
-        out.push_str(&body[last..range.start]);
+        out.push_str(&body[(last..range.start).bytes()]);
         out.push_str(&dest);
         last = range.end;
     }
-    out.push_str(&body[last..]);
+    out.push_str(&body[last.get()..]);
     note.set_body(&out);
     Some(note.to_string())
 }

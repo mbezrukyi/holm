@@ -1,18 +1,18 @@
 use std::ops::Range;
 
-use holm_markdown::Body;
 use holm_markdown::list::{Move, relist};
+use holm_markdown::{Body, OffsetRange, SourceOffset};
 
 /// The text and the selection after `key`. The selection is given and returned with `|` for the cursor, or two `|`
 /// around the selected text.
 fn key(marked: &str, key: Move) -> String {
     let (text, selection) = unmark(marked);
-    let Some(edit) = relist(&text, &Body::parse(&text), selection, key) else {
+    let Some(edit) = relist(&text, &Body::parse(&text), SourceOffset::range(selection), key) else {
         return NO_EDIT.to_owned();
     };
     let mut new = text;
-    new.replace_range(edit.range, &edit.text);
-    mark(&new, &edit.selection)
+    new.replace_range(edit.range.bytes(), &edit.text);
+    mark(&new, &edit.selection.bytes())
 }
 
 const NO_EDIT: &str = "no edit";

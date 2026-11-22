@@ -3,10 +3,11 @@
 
 use std::ops::Range;
 
-use holm_markdown::{Block, Body};
+use holm_markdown::{Block, Body, OffsetRange, SourceOffset};
 use libfuzzer_sys::fuzz_target;
 
-fn check(text: &str, range: &Range<usize>) {
+fn check(text: &str, range: &Range<SourceOffset>) {
+    let range = range.bytes();
     assert!(range.start <= range.end && range.end <= text.len());
     assert!(text.is_char_boundary(range.start) && text.is_char_boundary(range.end));
 }

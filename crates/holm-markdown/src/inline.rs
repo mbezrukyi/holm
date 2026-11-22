@@ -13,22 +13,24 @@ use std::ops::Range;
 pub(crate) use parse::{Defs, Scratch};
 pub use restyle::{Edit, Format, restyle};
 
-use crate::{Color, Target};
+use crate::{Color, JoinedOffset, OffsetRange, SourceOffset, Target};
 
+/// `O` is the kind of offset. The parser gives offsets into the joined lines of a leaf, and a [`Leaf`] maps them to
+/// [`SourceOffset`]s.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Node {
-    pub kind: Kind,
+pub struct Node<O = SourceOffset> {
+    pub kind: Kind<O>,
     /// The whole source of the node, with its markers.
-    pub source: Range<usize>,
+    pub source: Range<O>,
     /// The source between the markers. For a node with no markers it is the same as `source`.
-    pub content: Range<usize>,
+    pub content: Range<O>,
     /// The nodes inside a style, a link or an image, in order.
-    pub children: Vec<Node>,
+    pub children: Vec<Node<O>>,
 }
 
 /// The marker spelling is the source outside the content.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Kind {
+pub enum Kind<O = SourceOffset> {
     /// Plain text. Backslash escapes and entities stay as written.
     Text,
     /// `*text*`, `_text_`, `<i>` or `<em>`.
@@ -46,9 +48,9 @@ pub enum Kind {
     /// `` `code` ``. The content has no ticks, and no space that the code rules remove.
     Code,
     /// A link or an autolink. Its content is the link text.
-    Link(Box<Destination>),
+    Link(Box<Destination<O>>),
     /// An image or an embedded file. Its content is the alt text.
-    Image(Box<Destination>),
+    Image(Box<Destination<O>>),
     /// A line break: a backslash or two spaces at the end of a line.
     HardBreak,
     /// Raw HTML that is not a Holm style HTML tag, or one with no partner.
@@ -56,18 +58,53 @@ pub enum Kind {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Destination {
+pub struct Destination<O = SourceOffset> {
     /// `None` when the destination is empty.
     pub target: Option<Target>,
     /// The destination as written, with its `< >`. It is `None` for a reference link.
-    pub range: Option<Range<usize>>,
+    pub range: Option<Range<O>>,
+}
+
+impl<O> Node<O> {
+    /// The node with each offset mapped by `to`.
+    fn map<P>(self, to: &impl Fn(O) -> P) -> Node<P> {
+        let kind = match self.kind {
+            Kind::Link(dest) => Kind::Link(Box::new(dest.map(to))),
+            Kind::Image(dest) => Kind::Image(Box::new(dest.map(to))),
+            Kind::Text => Kind::Text,
+            Kind::Emphasis => Kind::Emphasis,
+            Kind::Strong => Kind::Strong,
+            Kind::Strikethrough => Kind::Strikethrough,
+            Kind::Highlight(color) => Kind::Highlight(color),
+            Kind::Underline => Kind::Underline,
+            Kind::Color(color) => Kind::Color(color),
+            Kind::Code => Kind::Code,
+            Kind::HardBreak => Kind::HardBreak,
+            Kind::Html => Kind::Html,
+        };
+        Node {
+            kind,
+            source: to(self.source.start)..to(self.source.end),
+            content: to(self.content.start)..to(self.content.end),
+            children: self.children.into_iter().map(|child| child.map(to)).collect(),
+        }
+    }
+}
+
+impl<O> Destination<O> {
+    fn map<P>(self, to: &impl Fn(O) -> P) -> Destination<P> {
+        Destination {
+            target: self.target,
+            range: self.range.map(|range| to(range.start)..to(range.end)),
+        }
+    }
 }
 
 /// Where the text of a leaf block lies in the source. [`crate::Body::inline`] gives its tree.
 #[derive(Clone, Debug)]
 pub struct Leaf {
     /// The source from the start of the first line to the end of the last one.
-    range: Range<usize>,
+    range: Range<SourceOffset>,
     /// All lines, when quote markers, an indent or `\r` stand between them. Without a list, the source of the leaf is
     /// its joined text.
     lines: Box<[Line]>,
@@ -84,29 +121,29 @@ pub(crate) enum Container {
 /// One line of a leaf with a gap between its lines.
 #[derive(Clone, Debug)]
 struct Line {
-    source: Range<usize>,
-    /// Where the line starts in the joined text.
-    joined: usize,
+    source: Range<SourceOffset>,
+    /// Where the line starts.
+    joined: JoinedOffset,
 }
 
 impl Leaf {
     /// The leaf of the text in `segments`. There is at least one segment, and they are in order.
-    pub(crate) fn new(text: &str, segments: &[Range<usize>], container: Container) -> Self {
-        let start = segments.first().map_or(0, |s| s.start);
+    pub(crate) fn new(text: &str, segments: &[Range<SourceOffset>], container: Container) -> Self {
+        let start = segments.first().map_or(SourceOffset::default(), |s| s.start);
         let end = segments.last().map_or(start, |s| s.end);
         let one_piece = segments
             .windows(2)
-            .all(|w| w[1].start == w[0].end + 1 && text.as_bytes()[w[0].end] == b'\n');
+            .all(|w| w[1].start == w[0].end + 1 && text.as_bytes()[w[0].end.get()] == b'\n');
         let mut lines = Vec::new();
         if !one_piece {
             lines.reserve_exact(segments.len());
-            let mut at = 0;
+            let mut at = JoinedOffset::default();
             for segment in segments {
                 lines.push(Line {
                     source: segment.clone(),
                     joined: at,
                 });
-                at += segment.len() + 1;
+                at += segment.end - segment.start + 1;
             }
         }
         Self {
@@ -121,8 +158,8 @@ impl Leaf {
         parse::is_plain(&self.joined(text))
     }
 
-    /// The inline tree in source offsets, with the buffers of earlier parses. With `plain`, it also writes the plain
-    /// text for a heading link.
+    /// The inline tree, with the buffers of earlier parses. With `plain`, it also writes the plain text for a heading
+    /// link.
     pub(crate) fn parse(
         &self,
         text: &str,
@@ -142,31 +179,27 @@ impl Leaf {
         self.to_source_nodes(nodes)
     }
 
-    /// In source offsets.
     pub(crate) fn tree(&self, text: &str, defs: &Defs) -> Vec<Node> {
         self.parse(text, defs, &mut Scratch::default(), None)
     }
 
-    fn to_source_nodes(&self, mut nodes: Vec<Node>) -> Vec<Node> {
-        if self.lines.len() > 1 {
-            for node in &mut nodes {
-                self.map_node(node);
-            }
-        } else if self.range.start != 0 {
-            for node in &mut nodes {
-                shift_node(node, self.range.start);
-            }
+    fn to_source_nodes(&self, nodes: Vec<Node<JoinedOffset>>) -> Vec<Node> {
+        let nodes = nodes.into_iter();
+        if self.lines.is_empty() {
+            let start = self.range.start;
+            nodes.map(|node| node.map(&|joined| start + joined.get())).collect()
+        } else {
+            nodes.map(|node| node.map(&|joined| self.to_source(joined))).collect()
         }
-        nodes
     }
 
     /// The source from the start of the first line to the end of the last one.
-    pub fn range(&self) -> Range<usize> {
+    pub fn range(&self) -> Range<SourceOffset> {
         self.range.clone()
     }
 
-    /// Moves every source offset by `to`.
-    pub(crate) fn shift(&mut self, to: &impl Fn(usize) -> usize) {
+    /// Moves every offset by `to`.
+    pub(crate) fn shift(&mut self, to: &impl Fn(SourceOffset) -> SourceOffset) {
         self.range = to(self.range.start)..to(self.range.end);
         for line in &mut self.lines {
             line.source = to(line.source.start)..to(line.source.end);
@@ -180,14 +213,14 @@ impl Leaf {
     /// The text of the lines joined with `\n`. The parser and the format keys work on it.
     pub(crate) fn joined<'a>(&self, text: &'a str) -> Cow<'a, str> {
         if self.lines.is_empty() {
-            return Cow::Borrowed(&text[self.range.clone()]);
+            return Cow::Borrowed(&text[self.range.bytes()]);
         }
-        let mut joined = String::with_capacity(self.range().len());
+        let mut joined = String::with_capacity(self.range.end - self.range.start);
         for (i, line) in self.lines.iter().enumerate() {
             if i > 0 {
                 joined.push('\n');
             }
-            joined.push_str(&text[line.source.clone()]);
+            joined.push_str(&text[line.source.bytes()]);
         }
         Cow::Owned(joined)
     }
@@ -197,71 +230,44 @@ impl Leaf {
         if self.lines.is_empty() {
             return "\n";
         }
-        &text[self.lines[i].source.end..self.lines[i + 1].source.start]
+        &text[(self.lines[i].source.end..self.lines[i + 1].source.start).bytes()]
     }
 
-    pub(crate) fn to_source(&self, joined: usize) -> usize {
+    pub(crate) fn to_source(&self, joined: JoinedOffset) -> SourceOffset {
         if self.lines.is_empty() {
-            return self.range.start + joined.min(self.range.len());
+            return self.range.start + joined.get().min(self.range.end - self.range.start);
         }
         let i = self
             .lines
             .partition_point(|line| line.joined <= joined)
             .saturating_sub(1);
         let line = &self.lines[i];
-        line.source.start + (joined - line.joined).min(line.source.len())
+        line.source.start + (joined - line.joined).min(line.source.end - line.source.start)
     }
 
     /// An offset between two lines lands on the line break.
-    pub(crate) fn to_joined(&self, source: usize) -> usize {
+    pub(crate) fn to_joined(&self, source: SourceOffset) -> JoinedOffset {
         if self.lines.is_empty() {
-            return source.clamp(self.range.start, self.range.end) - self.range.start;
+            return JoinedOffset::new(source.clamp(self.range.start, self.range.end) - self.range.start);
         }
         let i = self.lines.partition_point(|line| line.source.start <= source);
         let Some(i) = i.checked_sub(1) else {
-            return 0;
+            return JoinedOffset::default();
         };
         let line = &self.lines[i];
         line.joined + (source.min(line.source.end) - line.source.start)
     }
-
-    fn map_node(&self, node: &mut Node) {
-        node.source = self.to_source(node.source.start)..self.to_source(node.source.end);
-        node.content = self.to_source(node.content.start)..self.to_source(node.content.end);
-        if let Kind::Link(dest) | Kind::Image(dest) = &mut node.kind
-            && let Some(range) = &mut dest.range
-        {
-            *range = self.to_source(range.start)..self.to_source(range.end);
-        }
-        for child in &mut node.children {
-            self.map_node(child);
-        }
-    }
-}
-
-fn shift_node(node: &mut Node, by: usize) {
-    let shift = |r: &mut Range<usize>| *r = r.start + by..r.end + by;
-    shift(&mut node.source);
-    shift(&mut node.content);
-    if let Kind::Link(dest) | Kind::Image(dest) = &mut node.kind
-        && let Some(range) = &mut dest.range
-    {
-        shift(range);
-    }
-    for child in &mut node.children {
-        shift_node(child, by);
-    }
 }
 
 /// The text a reader sees: no markers, escapes, HTML or images. Line breaks become spaces.
-fn plain_text(joined: &str, nodes: &[Node], out: &mut String) {
+fn plain_text(joined: &str, nodes: &[Node<JoinedOffset>], out: &mut String) {
     for node in nodes {
         match &node.kind {
             Kind::Text => {
-                let text = scan::unescape(&joined[node.source.clone()]);
+                let text = scan::unescape(&joined[node.source.bytes()]);
                 out.push_str(&decode_entities(&text).replace('\n', " "));
             }
-            Kind::Code => out.push_str(&joined[node.content.clone()].replace('\n', " ")),
+            Kind::Code => out.push_str(&joined[node.content.bytes()].replace('\n', " ")),
             Kind::HardBreak => out.push(' '),
             Kind::Html | Kind::Image(_) => {}
             _ => plain_text(joined, &node.children, out),

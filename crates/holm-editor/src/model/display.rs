@@ -1,7 +1,8 @@
 use std::ops::Range;
 
 use holm_markdown::{
-    Alignment, Block, BlockKind, CalloutKind, CodeStyle, Color, LinkKind, Style, TablePart, Target, TaskState,
+    Alignment, Block, BlockKind, CalloutKind, CodeStyle, Color, LinkKind, OffsetRange, Style, TablePart, Target,
+    TaskState,
 };
 
 use super::Model;
@@ -205,14 +206,14 @@ impl Model {
             }
         }
         let chain = self.blocks_of_line(&source);
-        let from = chain.first().map_or(source.start, |b| b.range.start);
+        let from = chain.first().map_or(source.start, |b| b.range.start.get());
 
         // Code blocks and tables show their whole source while the selection touches them.
         let whole = chain
             .iter()
             .find(|b| matches!(b.kind, BlockKind::Code { .. } | BlockKind::Table { .. }));
         let syntax = match whole {
-            Some(block) => self.syntax_of(&block.range),
+            Some(block) => self.syntax_of(&block.range.bytes()),
             None => self.syntax_of(&source),
         };
 
@@ -237,7 +238,7 @@ impl Model {
         let mut mark = None;
         let mut list_prefix = None;
         if matches!(kind, LineKind::Text) {
-            if let Some(item) = items.last().filter(|i| self.line_of(i.range.start) == line) {
+            if let Some(item) = items.last().filter(|i| self.line_of(i.range.start.get()) == line) {
                 let (found, end) = self.mark(item);
                 mark = (syntax == Syntax::Hidden).then_some(found);
                 list_prefix = Some(source.start..end);
@@ -307,7 +308,7 @@ impl Model {
     /// nested block can start after the line start.
     fn probe(&self, line: &Range<usize>) -> usize {
         let hidden = self.body.hidden();
-        let first = hidden.partition_point(|h| h.end <= line.start);
+        let first = hidden.partition_point(|h| h.end.get() <= line.start);
         let mut in_hidden = hidden[first..].iter().peekable();
         let mut first_text = None;
         for (at, c) in self.text[line.clone()].char_indices() {
@@ -316,10 +317,10 @@ impl Model {
             }
             let at = line.start + at;
             first_text.get_or_insert(at);
-            while in_hidden.peek().is_some_and(|h| h.end <= at) {
+            while in_hidden.peek().is_some_and(|h| h.end.get() <= at) {
                 in_hidden.next();
             }
-            if in_hidden.peek().is_none_or(|h| h.start > at) {
+            if in_hidden.peek().is_none_or(|h| h.start.get() > at) {
                 return at;
             }
         }
@@ -331,11 +332,11 @@ impl Model {
         let mut chain = Vec::new();
         let mut blocks = self.body.blocks();
         loop {
-            let ix = blocks.partition_point(|b| b.range.start <= offset);
+            let ix = blocks.partition_point(|b| b.range.start.get() <= offset);
             let Some(block) = ix
                 .checked_sub(1)
                 .map(|ix| &blocks[ix])
-                .filter(|b| offset <= b.range.end)
+                .filter(|b| offset <= b.range.end.get())
             else {
                 return chain;
             };
@@ -358,10 +359,12 @@ impl Model {
                     return self.code_kind(line, block, language.as_deref(), *style);
                 }
                 BlockKind::Table { alignments } if syntax == Syntax::Hidden => {
-                    return self.table_kind(source, chain[0].range.start, block, alignments, chips);
+                    return self.table_kind(source, chain[0].range.start.get(), block, alignments, chips);
                 }
                 BlockKind::Rule if syntax == Syntax::Hidden => return LineKind::Rule,
-                BlockKind::Callout(kind) if syntax == Syntax::Hidden && self.line_of(block.range.start) == line => {
+                BlockKind::Callout(kind)
+                    if syntax == Syntax::Hidden && self.line_of(block.range.start.get()) == line =>
+                {
                     return LineKind::CalloutTitle(*kind);
                 }
                 _ => {}
@@ -372,8 +375,8 @@ impl Model {
 
     fn code_kind(&self, line: usize, block: &Block, language: Option<&str>, style: CodeStyle) -> LineKind {
         let fenced = style == CodeStyle::Fenced;
-        let first = self.line_of(block.range.start);
-        let last = self.line_of(block.range.end);
+        let first = self.line_of(block.range.start.get());
+        let last = self.line_of(block.range.end.get());
         let last_range = self.line_range(last);
         let closing = self.text[last_range.clone()].trim();
         let closed = fenced
@@ -381,14 +384,14 @@ impl Model {
             && closing.len() >= 3
             && (closing.bytes().all(|b| b == b'`') || closing.bytes().all(|b| b == b'~'));
         let start = if fenced {
-            (self.line_range(first).end + 1).min(block.range.end)
+            (self.line_range(first).end + 1).min(block.range.end.get())
         } else {
             self.line_range(first).start
         };
         let end = if closed {
             last_range.start.saturating_sub(1).max(start)
         } else {
-            block.range.end.max(start)
+            block.range.end.get().max(start)
         };
         LineKind::Code {
             language: language.unwrap_or_default().to_owned(),
@@ -412,7 +415,7 @@ impl Model {
         let row = table
             .children
             .iter()
-            .find(|row| line.start <= row.range.start && row.range.start <= line.end);
+            .find(|row| line.start <= row.range.start.get() && row.range.start.get() <= line.end);
         let Some(row) = row else {
             return LineKind::TableRule;
         };
@@ -421,9 +424,9 @@ impl Model {
             .iter()
             .zip(alignments.iter().copied().chain(std::iter::repeat(Alignment::None)))
             .map(|(cell, alignment)| {
-                let text = &self.text[cell.range.clone()];
-                let start = cell.range.start + text.len() - text.trim_start().len();
-                let end = cell.range.start + text.trim_end().len();
+                let text = &self.text[cell.range.bytes()];
+                let start = cell.range.start.get() + text.len() - text.trim_start().len();
+                let end = cell.range.start.get() + text.trim_end().len();
                 Cell {
                     shown: self.shown(&(start..end.max(start)), from, Syntax::Hidden, None, chips),
                     alignment,
@@ -435,7 +438,7 @@ impl Model {
                 BlockKind::TableRow { part } => part,
                 _ => TablePart::Body,
             },
-            table: table.range.clone(),
+            table: table.range.bytes(),
             cells,
         }
     }
@@ -443,26 +446,26 @@ impl Model {
     /// The marker of a list item, and the end of the marker with its spaces.
     fn mark(&self, item: &Block) -> (Mark, usize) {
         let bytes = self.text.as_bytes();
-        let start = item.range.start;
+        let start = item.range.start.get();
         let mut end = start;
-        while end < item.range.end && bytes[end].is_ascii_digit() {
+        while end < item.range.end.get() && bytes[end].is_ascii_digit() {
             end += 1;
         }
         let mut mark = if end > start {
-            end = (end + 1).min(item.range.end);
+            end = (end + 1).min(item.range.end.get());
             Mark::Number(self.text[start..end].to_owned())
         } else {
-            end = (start + 1).min(item.range.end);
+            end = (start + 1).min(item.range.end.get());
             Mark::Bullet
         };
         if let BlockKind::Item { task: Some(task) } = &item.kind {
             mark = Mark::Task {
                 state: task.state,
-                range: task.range.clone(),
+                range: task.range.bytes(),
             };
-            end = task.range.end;
+            end = task.range.end.get();
         }
-        while end < item.range.end && matches!(bytes[end], b' ' | b'\t') {
+        while end < item.range.end.get() && matches!(bytes[end], b' ' | b'\t') {
             end += 1;
         }
         (mark, end)
@@ -479,15 +482,16 @@ impl Model {
         chips: &[ChipLink<'_>],
     ) -> Shown {
         let spans = self.body.spans();
-        let spans: Vec<_> = spans
-            [spans.partition_point(|s| s.range.start < from)..spans.partition_point(|s| s.range.start < range.end)]
+        let spans: Vec<_> = spans[spans.partition_point(|s| s.range.start.get() < from)
+            ..spans.partition_point(|s| s.range.start.get() < range.end)]
             .iter()
-            .filter(|s| s.range.end > range.start)
+            .filter(|s| s.range.end.get() > range.start)
             .collect();
         let hidden = self.body.hidden();
         let mut hidden: Vec<_> = hidden
-            [hidden.partition_point(|h| h.start < from)..hidden.partition_point(|h| h.start < range.end)]
+            [hidden.partition_point(|h| h.start.get() < from)..hidden.partition_point(|h| h.start.get() < range.end)]
             .iter()
+            .map(OffsetRange::bytes)
             .filter(|h| h.end > range.start)
             .map(|h| h.start.max(range.start)..h.end.min(range.end))
             .collect();
@@ -495,7 +499,7 @@ impl Model {
 
         let mut cuts = vec![range.start, range.end];
         for span in &spans {
-            cuts.extend([span.range.start, span.range.end]);
+            cuts.extend([span.range.start.get(), span.range.end.get()]);
         }
         for h in &hidden {
             cuts.extend([h.start, h.end]);
@@ -529,7 +533,7 @@ impl Model {
             };
             for span in spans
                 .iter()
-                .filter(|s| s.range.start <= piece.start && piece.end <= s.range.end)
+                .filter(|s| s.range.start.get() <= piece.start && piece.end <= s.range.end.get())
             {
                 look.add(span.style);
             }
@@ -548,12 +552,12 @@ impl Model {
     /// The range, the target and the text of each embedded file link in `line`.
     fn files_in(&self, line: &Range<usize>) -> Vec<(Range<usize>, &str, &str)> {
         let links = self.body.links();
-        links
-            [links.partition_point(|l| l.range.start < line.start)..links.partition_point(|l| l.range.start < line.end)]
+        links[links.partition_point(|l| l.range.start.get() < line.start)
+            ..links.partition_point(|l| l.range.start.get() < line.end)]
             .iter()
             .filter(|link| link.kind == LinkKind::Embedded)
             .filter_map(|link| match &link.target {
-                Target::File(path) => Some((link.range.clone(), path.as_str(), &self.text[link.text.clone()])),
+                Target::File(path) => Some((link.range.bytes(), path.as_str(), &self.text[link.text.bytes()])),
                 _ => None,
             })
             .collect()

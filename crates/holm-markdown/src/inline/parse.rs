@@ -7,8 +7,8 @@ use std::ops::Range;
 use super::html_tag::{self, HtmlTag};
 use super::scan::{self, Autolink, InlineLink};
 use super::{Destination, Kind, Node};
-use crate::LinkKind;
 use crate::body::link;
+use crate::{JoinedOffset, LinkKind, OffsetRange};
 
 /// The link reference definitions of a note: each normalized label with its destination.
 #[derive(Clone, Debug, Default)]
@@ -25,7 +25,7 @@ impl Defs {
 }
 
 /// `text` is one leaf block.
-pub(crate) fn parse(text: &str, defs: &Defs) -> Vec<Node> {
+pub(crate) fn parse(text: &str, defs: &Defs) -> Vec<Node<JoinedOffset>> {
     parse_with(text, defs, &mut Scratch::default())
 }
 
@@ -38,7 +38,7 @@ pub(crate) struct Scratch {
     no_closer: Vec<usize>,
 }
 
-pub(crate) fn parse_with(text: &str, defs: &Defs, scratch: &mut Scratch) -> Vec<Node> {
+pub(crate) fn parse_with(text: &str, defs: &Defs, scratch: &mut Scratch) -> Vec<Node<JoinedOffset>> {
     if is_plain(text) {
         return if text.is_empty() {
             Vec::new()
@@ -105,7 +105,7 @@ const HEAD: usize = 0;
 const NONE: usize = usize::MAX;
 
 enum Item {
-    Node(Node),
+    Node(Node<JoinedOffset>),
     Delim(Delim),
     /// `[` or `![`.
     Bracket(Bracket),
@@ -270,11 +270,11 @@ impl Parser<'_> {
         at
     }
 
-    fn push_node(&mut self, kind: Kind, source: Range<usize>, content: Range<usize>) {
+    fn push_node(&mut self, kind: Kind<JoinedOffset>, source: Range<usize>, content: Range<usize>) {
         self.push(Item::Node(Node {
             kind,
-            source,
-            content,
+            source: JoinedOffset::range(source),
+            content: JoinedOffset::range(content),
             children: Vec::new(),
         }));
     }
@@ -327,13 +327,14 @@ impl Parser<'_> {
             Autolink::Email => Some(link::Target::Web(format!("mailto:{dest}"))),
             Autolink::Uri => link::target(dest),
         };
+        let content = JoinedOffset::range(content);
         let destination = Destination {
             target,
             range: Some(content.clone()),
         };
         self.push(Item::Node(Node {
             kind: Kind::Link(Box::new(destination)),
-            source,
+            source: JoinedOffset::range(source),
             content: content.clone(),
             children: vec![Node {
                 kind: Kind::Text,
@@ -392,8 +393,8 @@ impl Parser<'_> {
         };
         self.slots[at].item = Item::Node(Node {
             kind,
-            source: start..end,
-            content,
+            source: JoinedOffset::range(start..end),
+            content: JoinedOffset::range(content),
             children,
         });
         self.brackets.pop();
@@ -410,7 +411,7 @@ impl Parser<'_> {
     }
 
     /// The link that follows the link text `content` and its `]` at `p`.
-    fn link_after(&self, content: Range<usize>, p: usize) -> Option<(usize, Destination)> {
+    fn link_after(&self, content: Range<usize>, p: usize) -> Option<(usize, Destination<JoinedOffset>)> {
         let text = self.text;
         let b = text.as_bytes();
         if b.get(p + 1) == Some(&b'(')
@@ -423,7 +424,7 @@ impl Parser<'_> {
                 .unwrap_or(written);
             let destination = Destination {
                 target: link::target(&scan::unescape(bare)),
-                range: Some(dest),
+                range: Some(JoinedOffset::range(dest)),
             };
             return Some((end, destination));
         }
@@ -505,8 +506,8 @@ impl Parser<'_> {
             let children = finish(self.text, self.take_after(oi, ci));
             let node = Node {
                 kind,
-                source: o_end - n..c_start + n,
-                content: o_end..c_start,
+                source: JoinedOffset::range(o_end - n..c_start + n),
+                content: JoinedOffset::range(o_end..c_start),
                 children,
             };
             self.insert_after(oi, Item::Node(node));
@@ -574,7 +575,7 @@ impl Parser<'_> {
     }
 
     /// Takes the items between `from` and `to` out of the list, as nodes. `NONE` is the end.
-    fn take_after(&mut self, from: usize, to: usize) -> Vec<Node> {
+    fn take_after(&mut self, from: usize, to: usize) -> Vec<Node<JoinedOffset>> {
         let mut nodes = Vec::new();
         let mut at = self.slots[from].next;
         while at != to {
@@ -635,7 +636,8 @@ fn code_content(b: &[u8], inner: Range<usize>) -> Range<usize> {
     }
 }
 
-fn text_node(range: Range<usize>) -> Node {
+fn text_node(range: Range<usize>) -> Node<JoinedOffset> {
+    let range = JoinedOffset::range(range);
     Node {
         kind: Kind::Text,
         source: range.clone(),
@@ -644,7 +646,7 @@ fn text_node(range: Range<usize>) -> Node {
     }
 }
 
-fn finish(text: &str, mut nodes: Vec<Node>) -> Vec<Node> {
+fn finish(text: &str, mut nodes: Vec<Node<JoinedOffset>>) -> Vec<Node<JoinedOffset>> {
     nodes.dedup_by(|next, last| {
         let touch =
             matches!((&last.kind, &next.kind), (Kind::Text, Kind::Text)) && last.source.end == next.source.start;
@@ -658,18 +660,18 @@ fn finish(text: &str, mut nodes: Vec<Node>) -> Vec<Node> {
 }
 
 /// Pairs Holm's HTML tags among sibling nodes. Tags that cross another node do not pair. Both stay raw HTML.
-fn pair_tags(text: &str, nodes: Vec<Node>) -> Vec<Node> {
+fn pair_tags(text: &str, nodes: Vec<Node<JoinedOffset>>) -> Vec<Node<JoinedOffset>> {
     if !nodes.iter().any(|n| matches!(n.kind, Kind::Html)) {
         return nodes;
     }
-    let mut out: Vec<Node> = Vec::with_capacity(nodes.len());
-    let mut open: Vec<(&'static str, usize, Kind)> = Vec::new();
+    let mut out: Vec<Node<JoinedOffset>> = Vec::with_capacity(nodes.len());
+    let mut open: Vec<(&'static str, usize, Kind<JoinedOffset>)> = Vec::new();
     for node in nodes {
         if !matches!(node.kind, Kind::Html) {
             out.push(node);
             continue;
         }
-        match html_tag::read(&text[node.source.clone()]) {
+        match html_tag::read(&text[node.source.bytes()]) {
             Some(HtmlTag::Open(name, kind)) => {
                 open.push((name, out.len(), kind));
                 out.push(node);
@@ -681,7 +683,7 @@ fn pair_tags(text: &str, nodes: Vec<Node>) -> Vec<Node> {
                 };
                 let (_, at, kind) = open.swap_remove(k);
                 open.truncate(k);
-                let children: Vec<Node> = out.drain(at + 1..).collect();
+                let children: Vec<Node<JoinedOffset>> = out.drain(at + 1..).collect();
                 let Some(tag) = out.pop() else {
                     continue;
                 };

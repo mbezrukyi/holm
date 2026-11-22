@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::ops::Range;
 
-use holm_markdown::{Link, LinkKind, Target, escape_text};
+use holm_markdown::{Link, LinkKind, OffsetRange, Target, escape_text};
 
 use super::{Group, Model, map_offset};
 
@@ -40,29 +40,29 @@ impl Model {
             .headings()
             .iter()
             .find(|heading| heading.text == name)
-            .map(|heading| heading.range.start)
+            .map(|heading| heading.range.start.get())
     }
 
     /// The innermost link whose source holds `offset`. With none, a link that ends at `offset`.
     pub(crate) fn link_at(&self, offset: usize) -> Option<&Link> {
         let links = self.body.links();
-        let before = &links[..links.partition_point(|l| l.range.start <= offset)];
+        let before = &links[..links.partition_point(|l| l.range.start.get() <= offset)];
         // Links are in order of their start, so the innermost one comes first from the back.
         before
             .iter()
             .rev()
-            .find(|l| offset < l.range.end)
-            .or_else(|| before.iter().rev().find(|l| l.range.end == offset))
+            .find(|l| offset < l.range.end.get())
+            .or_else(|| before.iter().rev().find(|l| l.range.end.get() == offset))
     }
 
     /// The link that holds the link text `piece` of a line that starts at `line_start`.
     pub(super) fn link_over(&self, piece: &Range<usize>, line_start: usize) -> Option<&Link> {
         let links = self.body.links();
-        links[..links.partition_point(|l| l.range.start <= piece.start)]
+        links[..links.partition_point(|l| l.range.start.get() <= piece.start)]
             .iter()
             .rev()
-            .take_while(|l| l.range.end >= line_start)
-            .find(|l| l.kind == LinkKind::Plain && piece.end <= l.range.end)
+            .take_while(|l| l.range.end.get() >= line_start)
+            .find(|l| l.kind == LinkKind::Plain && piece.end <= l.range.end.get())
     }
 
     /// The selected source becomes the link text. With no selection, the link text is `text`.
@@ -110,7 +110,10 @@ impl Model {
     /// Writes `target` in place of the target of the link at the cursor. The link text stays. It does nothing for a
     /// reference link, whose target is in its definition.
     pub(crate) fn set_link_target(&mut self, target: &Target) -> bool {
-        let Some(range) = self.link_at(self.cursor()).and_then(|link| link.target_range.clone()) else {
+        let Some(range) = self
+            .link_at(self.cursor())
+            .and_then(|link| link.target_range.as_ref().map(OffsetRange::bytes))
+        else {
             return false;
         };
         let edits = vec![(range, target.to_destination())];
