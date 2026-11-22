@@ -479,7 +479,11 @@ impl Editor {
         if let Some(find) = &mut self.find
             && key == "backspace"
         {
-            find.pop(control);
+            if control {
+                find.clear();
+            } else {
+                find.pop();
+            }
             find.refresh(&mut self.model);
             self.jumped(Reveal::Middle, cx);
             return true;

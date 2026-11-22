@@ -36,13 +36,13 @@ impl Find {
         self.query.push_str(text.lines().next().unwrap_or_default());
     }
 
-    /// Removes the last char, or the whole query with `all`.
-    pub(crate) fn pop(&mut self, all: bool) {
-        if all {
-            self.query.clear();
-        } else {
-            self.query.pop();
-        }
+    /// Removes the last char.
+    pub(crate) fn pop(&mut self) {
+        self.query.pop();
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.query.clear();
     }
 
     /// Selects the first match from the origin on.
