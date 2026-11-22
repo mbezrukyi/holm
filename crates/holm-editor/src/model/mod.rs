@@ -533,14 +533,30 @@ impl Model {
         }
     }
 
-    /// For the platform text input.
-    pub(crate) fn offset_to_utf16(&self, offset: usize) -> usize {
-        self.rope.byte_to_utf16_idx(offset.min(self.text.len()))
+    pub(crate) fn offset_to_utf16(&self, offset: usize) -> Utf16Offset {
+        Utf16Offset(self.rope.byte_to_utf16_idx(offset.min(self.text.len())))
     }
 
-    /// For the platform text input.
-    pub(crate) fn utf16_to_offset(&self, offset: usize) -> usize {
-        self.rope.utf16_to_byte_idx(offset.min(self.rope.len_utf16()))
+    pub(crate) fn utf16_to_offset(&self, utf16: Utf16Offset) -> usize {
+        self.rope.utf16_to_byte_idx(utf16.0.min(self.rope.len_utf16()))
+    }
+}
+
+/// An offset in UTF-16 code units, as the platform text input counts. The text counts bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Utf16Offset(usize);
+
+impl Utf16Offset {
+    pub(crate) fn range_from_platform(range: Range<usize>) -> Range<Self> {
+        Self(range.start)..Self(range.end)
+    }
+
+    pub(crate) fn range_to_platform(range: Range<Self>) -> Range<usize> {
+        range.start.0..range.end.0
+    }
+
+    pub(crate) fn to_platform(self) -> usize {
+        self.0
     }
 }
 
@@ -901,8 +917,8 @@ mod tests {
     #[test]
     fn utf16_offsets_round_trip() {
         let model = Model::new("a🙂b");
-        assert_eq!(model.offset_to_utf16(5), 3);
-        assert_eq!(model.utf16_to_offset(3), 5);
+        assert_eq!(model.offset_to_utf16(5), Utf16Offset(3));
+        assert_eq!(model.utf16_to_offset(Utf16Offset(3)), 5);
     }
 
     fn text() -> impl Strategy<Value = String> {

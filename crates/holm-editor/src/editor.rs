@@ -19,7 +19,7 @@ use crate::files::{FileKind, LinkedFiles};
 use crate::find::{Erase, Find, Toward};
 use crate::highlight::{self, Highlighter};
 use crate::ink;
-use crate::model::{Affinity, Caret, Direction, Format, GoalRow, LinkForm, Model, Selection, Step};
+use crate::model::{Affinity, Caret, Direction, Format, GoalRow, LinkForm, Model, Selection, Step, Utf16Offset};
 use crate::shortcuts::{Command, Place, Run};
 
 /// Spaces that Tab types outside a list.
@@ -941,11 +941,11 @@ impl Editor {
         cx.notify();
     }
 
-    fn utf16_range(&self, range: &Range<usize>) -> Range<usize> {
+    fn utf16_range(&self, range: &Range<usize>) -> Range<Utf16Offset> {
         self.model.offset_to_utf16(range.start)..self.model.offset_to_utf16(range.end)
     }
 
-    fn range_from_utf16(&self, range: &Range<usize>) -> Range<usize> {
+    fn range_from_utf16(&self, range: Range<Utf16Offset>) -> Range<usize> {
         self.model.utf16_to_offset(range.start)..self.model.utf16_to_offset(range.end)
     }
 }
@@ -1007,9 +1007,9 @@ impl EntityInputHandler for Editor {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<String> {
-        let range = self.range_from_utf16(&range);
-        adjusted_range.replace(self.utf16_range(&range));
-        Some(self.model.text()[range].to_owned())
+        let bytes = self.range_from_utf16(Utf16Offset::range_from_platform(range));
+        adjusted_range.replace(Utf16Offset::range_to_platform(self.utf16_range(&bytes)));
+        Some(self.model.text()[bytes].to_owned())
     }
 
     fn selected_text_range(
@@ -1019,7 +1019,7 @@ impl EntityInputHandler for Editor {
         _cx: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
         Some(UTF16Selection {
-            range: self.utf16_range(&self.model.selection()),
+            range: Utf16Offset::range_to_platform(self.utf16_range(&self.model.selection())),
             reversed: self.model.is_reversed(),
         })
     }
@@ -1048,7 +1048,10 @@ impl EntityInputHandler for Editor {
             self.jumped(Reveal::Middle, cx);
             return;
         }
-        let range = range.map_or_else(|| self.model.selection(), |r| self.range_from_utf16(&r));
+        let range = range.map_or_else(
+            || self.model.selection(),
+            |range| self.range_from_utf16(Utf16Offset::range_from_platform(range)),
+        );
         let changed = self.model.type_in(range, text, cx.background_executor().now());
         if changed {
             self.edited(cx);
@@ -1083,17 +1086,17 @@ impl EntityInputHandler for Editor {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<usize> {
-        Some(self.model.offset_to_utf16(self.offset_at(point)?))
+        Some(self.model.offset_to_utf16(self.offset_at(point)?).to_platform())
     }
 
     fn set_selected_text_range(&mut self, range_utf16: Range<usize>, _window: &mut Window, cx: &mut Context<Self>) {
-        let range = self.range_from_utf16(&range_utf16);
+        let range = self.range_from_utf16(Utf16Offset::range_from_platform(range_utf16));
         self.model.select(range);
         cx.notify();
     }
 
     fn text_length_utf16(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> Option<usize> {
-        Some(self.model.offset_to_utf16(self.model.text().len()))
+        Some(self.model.offset_to_utf16(self.model.text().len()).to_platform())
     }
 }
 

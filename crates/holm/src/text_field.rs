@@ -254,14 +254,14 @@ impl TextField {
         }
     }
 
-    fn utf16_offset(&self, offset: usize) -> usize {
-        self.text[..offset].encode_utf16().count()
+    fn utf16_offset(&self, offset: usize) -> Utf16Offset {
+        Utf16Offset(self.text[..offset].encode_utf16().count())
     }
 
-    fn offset_from_utf16(&self, offset: usize) -> usize {
+    fn offset_from_utf16(&self, utf16: Utf16Offset) -> usize {
         let mut count = 0;
         for (at, char) in self.text.char_indices() {
-            if count >= offset {
+            if count >= utf16.0 {
                 return at;
             }
             count += char.len_utf16();
@@ -269,8 +269,30 @@ impl TextField {
         self.text.len()
     }
 
-    fn range_from_utf16(&self, range: &Range<usize>) -> Range<usize> {
+    fn utf16_range(&self, range: &Range<usize>) -> Range<Utf16Offset> {
+        self.utf16_offset(range.start)..self.utf16_offset(range.end)
+    }
+
+    fn range_from_utf16(&self, range: Range<Utf16Offset>) -> Range<usize> {
         self.offset_from_utf16(range.start)..self.offset_from_utf16(range.end)
+    }
+}
+
+/// An offset in UTF-16 code units, as the platform text input counts. The text counts bytes.
+#[derive(Clone, Copy)]
+struct Utf16Offset(usize);
+
+impl Utf16Offset {
+    fn range_from_platform(range: Range<usize>) -> Range<Self> {
+        Self(range.start)..Self(range.end)
+    }
+
+    fn range_to_platform(range: Range<Self>) -> Range<usize> {
+        range.start.0..range.end.0
+    }
+
+    fn to_platform(self) -> usize {
+        self.0
     }
 }
 
@@ -312,15 +334,14 @@ impl EntityInputHandler for TextField {
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<String> {
-        let range = self.range_from_utf16(&range);
-        adjusted_range.replace(self.utf16_offset(range.start)..self.utf16_offset(range.end));
-        Some(self.text[range].to_owned())
+        let bytes = self.range_from_utf16(Utf16Offset::range_from_platform(range));
+        adjusted_range.replace(Utf16Offset::range_to_platform(self.utf16_range(&bytes)));
+        Some(self.text[bytes].to_owned())
     }
 
     fn selected_text_range(&mut self, _: bool, _: &mut Window, _: &mut Context<Self>) -> Option<UTF16Selection> {
-        let selection = self.selection();
         Some(UTF16Selection {
-            range: self.utf16_offset(selection.start)..self.utf16_offset(selection.end),
+            range: Utf16Offset::range_to_platform(self.utf16_range(&self.selection())),
             reversed: self.head < self.anchor,
         })
     }
@@ -346,7 +367,10 @@ impl EntityInputHandler for TextField {
         if text.is_empty() {
             return;
         }
-        let range = range.map_or_else(|| self.selection(), |range| self.range_from_utf16(&range));
+        let range = range.map_or_else(
+            || self.selection(),
+            |range| self.range_from_utf16(Utf16Offset::range_from_platform(range)),
+        );
         self.replace(range, &text, cx);
     }
 
@@ -369,7 +393,7 @@ impl EntityInputHandler for TextField {
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
         let shaped = self.shaped.as_ref()?;
-        let range = self.range_from_utf16(&range);
+        let range = self.range_from_utf16(Utf16Offset::range_from_platform(range));
         Some(shaped.span(shaped.line.x_for_index(range.start), shaped.line.x_for_index(range.end)))
     }
 
@@ -379,7 +403,7 @@ impl EntityInputHandler for TextField {
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<usize> {
-        Some(self.utf16_offset(self.offset_at(position)))
+        Some(self.utf16_offset(self.offset_at(position)).to_platform())
     }
 }
 
