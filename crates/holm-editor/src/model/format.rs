@@ -77,9 +77,8 @@ impl Model {
 
     /// Enter: in a list item it starts the next item and counts the list again, and on an empty item it ends the list.
     /// Elsewhere it types a line break. Returns whether the text changed.
-    pub(crate) fn newline(&mut self, continue_lists: bool, now: std::time::Instant) -> bool {
-        let changed = continue_lists.then(|| self.relist(Move::Next)).flatten();
-        changed.unwrap_or_else(|| self.type_text("\n", now))
+    pub(crate) fn newline(&mut self, now: std::time::Instant) -> bool {
+        self.relist(Move::Next).unwrap_or_else(|| self.type_text("\n", now))
     }
 
     /// A list key, as [`Move`] tells. It counts the lists it changes again. Returns `None` when the selection touches
@@ -206,7 +205,7 @@ mod tests {
 
     fn enter(text: &str, at: usize) -> (String, usize) {
         let mut model = model_with(text, at..at);
-        model.newline(true, Instant::now());
+        model.newline(Instant::now());
         (model.text().to_owned(), model.cursor())
     }
 
@@ -232,13 +231,6 @@ mod tests {
         assert_eq!(enter("text", 4), ("text\n".into(), 5));
         assert_eq!(enter("```\n- a\n```", 7), ("```\n- a\n\n```".into(), 8));
         assert_eq!(enter("- one", 1), ("-\n one".into(), 2));
-    }
-
-    #[test]
-    fn enter_without_the_list_help_is_a_line_break() {
-        let mut model = model_with("- one", 5..5);
-        model.newline(false, Instant::now());
-        assert_eq!(model.text(), "- one\n");
     }
 
     fn indented(text: &str, selection: Range<usize>, key: Move) -> Option<String> {
@@ -295,7 +287,7 @@ mod tests {
         assert_eq!(model.text(), "1. a\n   1. b\n2. c\n3. d");
         model.undo();
         assert_eq!((model.text(), model.cursor()), (text, 9));
-        model.newline(true, Instant::now());
+        model.newline(Instant::now());
         assert_eq!(model.text(), "1. a\n2. b\n3. \n4. c\n5. d");
         model.undo();
         assert_eq!((model.text(), model.cursor()), (text, 9));

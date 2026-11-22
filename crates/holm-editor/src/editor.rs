@@ -710,7 +710,11 @@ impl Editor {
                 return true;
             }
             "enter" => {
-                let changed = self.model.newline(self.help.continue_lists, now);
+                let changed = if self.help.continue_lists {
+                    self.model.newline(now)
+                } else {
+                    self.model.type_text("\n", now)
+                };
                 self.report_edit(changed, cx);
                 return true;
             }

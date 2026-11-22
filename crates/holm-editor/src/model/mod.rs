@@ -982,7 +982,7 @@ mod tests {
                 model.toggle_heading(level);
             }
             Op::Newline => {
-                model.newline(true, *clock);
+                model.newline(*clock);
             }
             Op::Indent(key) => {
                 model.relist(key);
