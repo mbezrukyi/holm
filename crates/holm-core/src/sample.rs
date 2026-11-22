@@ -242,7 +242,7 @@ impl Random {
 
     /// A number from 0 up to 1, without 1.
     fn fraction(&mut self) -> f64 {
-        f64::from(u32::try_from(self.next() >> 32).unwrap_or(0)) / f64::from(u32::MAX)
+        f64::from(u32::try_from(self.next() >> 32).unwrap_or(0)) / (f64::from(u32::MAX) + 1.0)
     }
 
     fn pick<'a>(&mut self, items: &[&'a str]) -> &'a str {
