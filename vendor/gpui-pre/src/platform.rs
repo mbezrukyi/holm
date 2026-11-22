@@ -1,3 +1,7 @@
+// HOLM PATCH: this file is changed from gpui-pre 0.3.11 for the window zoom of Holm. The bounds
+// that the input handler gives the platform are multiplied by the zoom, in the lines marked "Holm
+// zoom". See the note at the top of `src/window.rs`.
+
 mod app_menu;
 mod keyboard;
 mod keystroke;

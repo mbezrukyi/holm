@@ -1,3 +1,9 @@
+// HOLM PATCH: this file is changed from gpui-pre-linux 0.3.11. X11 file drop positions are divided
+// by the screen scale, like other pointer positions. The rest of this crate is gpui-pre-linux
+// 0.3.11.
+//
+// Remove the copy when a gpui-pre-linux release has the fix.
+
 use anyhow::{Context as _, anyhow};
 use ashpd::WindowIdentifier;
 use calloop::{

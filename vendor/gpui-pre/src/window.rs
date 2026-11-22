@@ -1,4 +1,5 @@
-// HOLM PATCH: a window zoom for the scale of Holm. The rest of this crate is gpui-pre 0.3.11.
+// HOLM PATCH: this file is changed from gpui-pre 0.3.11 to add a window zoom for the scale of
+// Holm. `src/platform.rs` is changed for it too. The rest of this crate is gpui-pre 0.3.11.
 //
 // The zoom multiplies the scale factor of the platform and divides the content size, so the
 // whole window grows or shrinks and stays sharp. Each input position from the platform is
