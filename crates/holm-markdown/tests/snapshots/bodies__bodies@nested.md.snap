@@ -10,7 +10,7 @@ Quote 0..22 "> - > deep\n>   > quote"
       Quote 4..22 "> deep\n>   > quote"
         Paragraph 6..22 "deep\n>   > quote"
 Quote 24..51 "> ```\n> code in quote\n> ```"
-  Code { language: None, fenced: true } 26..51 "```\n> code in quote\n> ```"
+  Code { language: None, style: Fenced } 26..51 "```\n> code in quote\n> ```"
 Quote 53..73 "> # Heading in quote"
   Heading { level: 1 } 55..73 "# Heading in quote"
 --- spans ---

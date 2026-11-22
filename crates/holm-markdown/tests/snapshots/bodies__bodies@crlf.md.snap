@@ -7,7 +7,7 @@ input_file: crates/holm-markdown/tests/bodies/crlf.md
 Heading { level: 1 } 0..7 "# Title"
 Quote 11..26 "> quote\r\n> line"
   Paragraph 13..26 "quote\r\n> line"
-Code { language: None, fenced: true } 30..44 "```\r\ncode\r\n```"
+Code { language: None, style: Fenced } 30..44 "```\r\ncode\r\n```"
 --- spans ---
 --- hidden ---
 0..2 "# "

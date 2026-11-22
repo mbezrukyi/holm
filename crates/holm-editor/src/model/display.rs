@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use holm_markdown::{Alignment, Block, BlockKind, CalloutKind, Color, LinkKind, Style, Target, TaskState};
+use holm_markdown::{Alignment, Block, BlockKind, CalloutKind, CodeStyle, Color, LinkKind, Style, Target, TaskState};
 
 use super::Model;
 
@@ -344,8 +344,8 @@ impl Model {
     ) -> LineKind {
         for block in chain.iter().rev() {
             match &block.kind {
-                BlockKind::Code { language, fenced } => {
-                    return self.code_kind(line, block, language.as_deref(), *fenced);
+                BlockKind::Code { language, style } => {
+                    return self.code_kind(line, block, language.as_deref(), *style);
                 }
                 BlockKind::Table { alignments } if syntax == Syntax::Hidden => {
                     return self.table_kind(source, chain[0].range.start, block, alignments, chips);
@@ -360,7 +360,8 @@ impl Model {
         LineKind::Text
     }
 
-    fn code_kind(&self, line: usize, block: &Block, language: Option<&str>, fenced: bool) -> LineKind {
+    fn code_kind(&self, line: usize, block: &Block, language: Option<&str>, style: CodeStyle) -> LineKind {
+        let fenced = style == CodeStyle::Fenced;
         let first = self.line_of(block.range.start);
         let last = self.line_of(block.range.end);
         let last_range = self.line_range(last);

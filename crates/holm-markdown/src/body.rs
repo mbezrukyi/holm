@@ -71,8 +71,7 @@ pub enum BlockKind {
     Code {
         /// The first word after the opening fence.
         language: Option<String>,
-        /// An indented code block has no fences.
-        fenced: bool,
+        style: CodeStyle,
     },
     /// A table. Its children are [`BlockKind::TableRow`] blocks.
     Table {
@@ -87,6 +86,14 @@ pub enum BlockKind {
     Html,
     /// A thematic break like `---`.
     Rule,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CodeStyle {
+    /// Between fences like ```` ``` ````.
+    Fenced,
+    /// Indented by four spaces, with no fences.
+    Indented,
 }
 
 /// The kind of a GitHub callout.
@@ -645,11 +652,11 @@ impl<'a> Walker<'a> {
             Tag::CodeBlock(kind) => Some(match kind {
                 CodeBlockKind::Fenced(info) => BlockKind::Code {
                     language: info.split_whitespace().next().map(str::to_owned),
-                    fenced: true,
+                    style: CodeStyle::Fenced,
                 },
                 CodeBlockKind::Indented => BlockKind::Code {
                     language: None,
-                    fenced: false,
+                    style: CodeStyle::Indented,
                 },
             }),
             Tag::HtmlBlock => Some(BlockKind::Html),
@@ -705,7 +712,10 @@ impl<'a> Walker<'a> {
         let range = self.trim_line_breaks(&frame.range);
         match &kind {
             BlockKind::Heading { .. } => self.hide_heading_syntax(&range, &frame),
-            BlockKind::Code { fenced: true, .. } => self.hide_fences(&range, frame.last),
+            BlockKind::Code {
+                style: CodeStyle::Fenced,
+                ..
+            } => self.hide_fences(&range, frame.last),
             BlockKind::Quote => self.hide_quote_markers(&range),
             BlockKind::Callout(_) => {
                 self.hide(range.start..self.line_end(range.start, range.end));
