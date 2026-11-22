@@ -426,7 +426,6 @@ mod tests {
     fn a_note_with_a_file_link_is_read_at_its_new_path() {
         let link = Link {
             target: LinkTarget::File(PathBuf::from("b.png")),
-            embedded: true,
         };
         let facts = Facts::new(
             vec![(

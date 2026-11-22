@@ -3,7 +3,7 @@ use std::collections::hash_map::Entry;
 use std::hash::BuildHasher as _;
 use std::path::{Component, Path, PathBuf};
 
-use holm_markdown::{Body, LinkKind, NoteFile, Target};
+use holm_markdown::{Body, NoteFile, Target};
 
 use crate::model::{Link, LinkTarget, Note, NoteId};
 use crate::{FolderPath, NotePath, Result, Snapshot};
@@ -46,7 +46,6 @@ pub(crate) fn links(root: &Path, note: &Note) -> Vec<Link> {
                 Target::File(file) => LinkTarget::File(resolve(root, folder, file)),
                 Target::Web(address) => LinkTarget::Web(address.clone()),
             },
-            embedded: link.kind == LinkKind::Embedded,
         })
         .collect()
 }

@@ -25,7 +25,6 @@ fn links_everywhere(folder: &mut Folder, path: &str) -> Vec<Link> {
 fn file(path: &str) -> Link {
     Link {
         target: LinkTarget::File(PathBuf::from(path)),
-        embedded: false,
     }
 }
 

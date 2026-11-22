@@ -219,7 +219,7 @@ fn links_give_every_link_of_a_note_in_order() {
 ![img](attachments/a.png) [up](../x.pdf) [out](/etc/hosts) [web](https://example.com)
 ";
     let folder = Folder::new(&[("work/a.md", body)]);
-    let link = |target, embedded| Link { target, embedded };
+    let link = |target| Link { target };
     let file = |path: &str| LinkTarget::File(PathBuf::from(path));
 
     let links = folder.core.snapshot().links(&note_path("work/a.md")).to_vec();
@@ -235,11 +235,11 @@ fn links_give_every_link_of_a_note_in_order() {
     assert_eq!(
         links[2..],
         [
-            link(LinkTarget::Heading("Top".to_owned()), false),
-            link(file("work/attachments/a.png"), true),
-            link(file("x.pdf"), false),
-            link(file("/etc/hosts"), false),
-            link(LinkTarget::Web("https://example.com".to_owned()), false),
+            link(LinkTarget::Heading("Top".to_owned())),
+            link(file("work/attachments/a.png")),
+            link(file("x.pdf")),
+            link(file("/etc/hosts")),
+            link(LinkTarget::Web("https://example.com".to_owned())),
         ]
     );
     assert_eq!(

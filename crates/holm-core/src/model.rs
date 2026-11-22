@@ -122,8 +122,6 @@ impl Tag {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Link {
     pub target: LinkTarget,
-    /// Whether it is `![..](..)`: an image or a file chip.
-    pub embedded: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

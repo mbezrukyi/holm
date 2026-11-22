@@ -27,7 +27,7 @@ mod search;
 const FILE: &str = "index.sqlite";
 /// Change this number with each change to [`SCHEMA`], to [`search::SCHEMA`], or to what a column holds. An index with
 /// another number is rebuilt.
-const SHAPE: i32 = 10;
+const SHAPE: i32 = 11;
 
 const SCHEMA: &str = "
 CREATE TABLE notes (
@@ -59,7 +59,6 @@ CREATE TABLE links (
     kind TEXT NOT NULL,
     target BLOB NOT NULL,
     heading TEXT,
-    embedded INTEGER NOT NULL,
     PRIMARY KEY (note, pos)
 );
 CREATE INDEX links_target ON links (kind, target);
@@ -134,11 +133,11 @@ impl Index {
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             let mut statement = conn.prepare_cached(
-                "SELECT kind, target, heading, embedded, notes.path FROM links
+                "SELECT kind, target, heading, notes.path FROM links
                 JOIN notes ON notes.key = links.note ORDER BY links.note, pos",
             )?;
             let mut links: HashMap<NotePath, Vec<Link>> = HashMap::new();
-            let rows = statement.query_map([], |row| Ok((note_path(&mut reader, row, 4)?, link(row)?)))?;
+            let rows = statement.query_map([], |row| Ok((note_path(&mut reader, row, 3)?, link(row)?)))?;
             for row in rows {
                 let (note, link) = row?;
                 links.entry(note).or_default().push(link);
@@ -357,8 +356,8 @@ fn write_links(conn: &Connection, key: i64, links: &[Link]) -> Result<(), Fail> 
     conn.prepare_cached("DELETE FROM links WHERE note = ?1")?
         .execute([key])?;
     let mut add_link = conn.prepare_cached(
-        "INSERT INTO links (note, pos, kind, target, heading, embedded)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO links (note, pos, kind, target, heading)
+        VALUES (?1, ?2, ?3, ?4, ?5)",
     )?;
     for (pos, link) in (0_i64..).zip(links) {
         let (kind, target, heading) = match &link.target {
@@ -367,7 +366,7 @@ fn write_links(conn: &Connection, key: i64, links: &[Link]) -> Result<(), Fail> 
             LinkTarget::File(file) => ("file", bytes(file), None),
             LinkTarget::Web(address) => ("web", Value::Text(address.clone()), None),
         };
-        add_link.execute(params![key, pos, kind, target, heading, link.embedded])?;
+        add_link.execute(params![key, pos, kind, target, heading])?;
     }
     Ok(())
 }
@@ -434,10 +433,7 @@ fn link(row: &rusqlite::Row<'_>) -> rusqlite::Result<Link> {
         "file" => LinkTarget::File(path(row.get(1)?)),
         _ => LinkTarget::Web(text()?),
     };
-    Ok(Link {
-        target,
-        embedded: row.get(3)?,
-    })
+    Ok(Link { target })
 }
 
 fn bytes(path: impl AsRef<Path>) -> Value {
