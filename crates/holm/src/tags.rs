@@ -40,7 +40,7 @@ use crate::core_door::CoreDoor;
 use crate::fold::Fold;
 use crate::list_cursor::{self, Toward};
 use crate::lowercase::Lowercase;
-use crate::popup::{self, Dropdown};
+use crate::popup::{self, Cursor, Dropdown};
 use crate::shortcuts::{Command, Place, Run};
 use crate::text;
 use crate::title::TitleField;
@@ -330,7 +330,6 @@ impl TagRow {
                 .child(text::ON_THIS_NOTE)
         });
         let rows = lines.into_iter().enumerate().map(|(at, line)| {
-            let current = self.cursor == Some(at);
             let (label, mark, toggled) = match line {
                 Line::Tag { name, on } => (
                     text::tag_label(&name),
@@ -339,22 +338,26 @@ impl TagRow {
                 ),
                 Line::Add(name) => (text::add_tag_line(&name), "+", None),
             };
-            popup::option(ElementId::NamedInteger("tag-option".into(), at as u64), current, cx)
-                .aria_label(label.clone())
-                .when_some(toggled, StatefulInteractiveElement::aria_toggled)
-                .flex()
-                .items_center()
-                .gap_2()
-                .child(div().w(px(12.)).flex_none().text_color(theme.primary).child(mark))
-                .child(div().flex_1().min_w_0().truncate().child(label))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |row, _, window, cx| {
-                        row.cursor = Some(at);
-                        row.choose(window, cx);
-                    }),
-                )
-                .test_support()
+            popup::option(
+                ElementId::NamedInteger("tag-option".into(), at as u64),
+                Cursor::of(at, self.cursor),
+                cx,
+            )
+            .aria_label(label.clone())
+            .when_some(toggled, StatefulInteractiveElement::aria_toggled)
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(div().w(px(12.)).flex_none().text_color(theme.primary).child(mark))
+            .child(div().flex_1().min_w_0().truncate().child(label))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |row, _, window, cx| {
+                    row.cursor = Some(at);
+                    row.choose(window, cx);
+                }),
+            )
+            .test_support()
         });
         Some(
             v_flex().border_t_1().border_color(theme.border).children(label).child(

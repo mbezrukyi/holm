@@ -19,7 +19,7 @@ use holm_core::NotePath;
 use holm_core::model::NoteInfo;
 
 use crate::list_cursor::{self, Toward};
-use crate::popup::{self, Dropdown};
+use crate::popup::{self, Cursor, Dropdown};
 use crate::shortcuts::{Command, Place, Run};
 use crate::text;
 
@@ -156,7 +156,7 @@ impl Backlinks {
         let rows = self.notes.iter().enumerate().map(|(at, note)| {
             popup::option(
                 ElementId::NamedInteger("backlink".into(), at as u64),
-                self.cursor == at,
+                Cursor::of(at, self.cursor),
                 cx,
             )
             .aria_label(note.title.clone())

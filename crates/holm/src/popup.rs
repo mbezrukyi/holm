@@ -79,13 +79,13 @@ impl PickRow {
         self
     }
 
-    fn view(&self, at: usize, current: bool, cx: &App) -> Stateful<Div> {
+    fn view(&self, at: usize, cursor: Cursor, cx: &App) -> Stateful<Div> {
         let theme = cx.theme();
         h_flex()
             .id(ElementId::NamedInteger("row".into(), at as u64))
             .role(Role::ListBoxOption)
             .aria_label(self.label.clone())
-            .aria_selected(current)
+            .aria_selected(cursor == Cursor::On)
             .h(ROW_HEIGHT)
             .w_full()
             .px_2()
@@ -93,7 +93,9 @@ impl PickRow {
             .text_sm()
             .rounded(theme.radius)
             .cursor_default()
-            .when(current, |row| row.bg(theme.accent).text_color(theme.accent_foreground))
+            .when(cursor == Cursor::On, |row| {
+                row.bg(theme.accent).text_color(theme.accent_foreground)
+            })
             .children(self.icon.map(|icon| Icon::view(icon, theme.muted_foreground)))
             .child(div().min_w(px(48.)).truncate().child(self.label.clone()))
             .children(self.detail.clone().map(|detail| {
@@ -222,7 +224,7 @@ impl PickList {
                 range
                     .filter_map(|at| list.rows.get(at).map(|row| (at, row)))
                     .map(|(at, row)| {
-                        row.view(at, at == list.cursor, cx)
+                        row.view(at, Cursor::of(at, list.cursor), cx)
                             .on_hover(cx.listener(move |list, hovered: &bool, _, cx| {
                                 if *hovered && list.cursor != at {
                                     list.cursor = at;
@@ -300,21 +302,37 @@ pub(crate) fn options() -> Div {
     v_flex().p_1().gap(px(2.))
 }
 
-/// A row of [`options`]. The row under the cursor, `current`, has the selection color.
-pub(crate) fn option(id: impl Into<ElementId>, current: bool, cx: &App) -> Stateful<Div> {
+/// Whether a row of a list is under the cursor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Cursor {
+    On,
+    Off,
+}
+
+impl Cursor {
+    /// Of the row `at`, with the cursor on the row `cursor`.
+    pub(crate) fn of(at: usize, cursor: impl Into<Option<usize>>) -> Self {
+        if cursor.into() == Some(at) { Self::On } else { Self::Off }
+    }
+}
+
+/// A row of [`options`]. The row under the cursor has the selection color.
+pub(crate) fn option(id: impl Into<ElementId>, cursor: Cursor, cx: &App) -> Stateful<Div> {
     let theme = cx.theme();
     // The row corners follow the panel corners across the inset.
     let radius = (theme.radius - px(2.)).max(px(0.));
     div()
         .id(id)
         .role(Role::ListBoxOption)
-        .aria_selected(current)
+        .aria_selected(cursor == Cursor::On)
         .px_2()
         .py_1()
         .rounded(radius)
         .cursor(CursorStyle::PointingHand)
-        .when(current, |row| row.bg(theme.selection))
-        .when(!current, |row| row.hover(|row| row.bg(theme.secondary)))
+        .map(|row| match cursor {
+            Cursor::On => row.bg(theme.selection),
+            Cursor::Off => row.hover(|row| row.bg(theme.secondary)),
+        })
 }
 
 /// A popup under a part of a row, the opener. Its owner `T` decides when it is open.

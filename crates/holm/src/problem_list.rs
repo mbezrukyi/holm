@@ -14,7 +14,7 @@ use gpui_kit::{
 };
 
 use crate::list_cursor::{self, Toward};
-use crate::popup::{self, Dropdown};
+use crate::popup::{self, Cursor, Dropdown};
 use crate::shortcuts::{Command, Place, Run};
 
 const WIDTH: f32 = 240.;
@@ -108,7 +108,7 @@ impl Render for ProblemList {
         let rows = self.problems.iter().enumerate().map(|(at, problem)| {
             popup::option(
                 ElementId::NamedInteger("problem".into(), at as u64),
-                self.cursor == at,
+                Cursor::of(at, self.cursor),
                 cx,
             )
             .aria_label(problem.clone())

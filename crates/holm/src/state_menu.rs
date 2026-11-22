@@ -17,7 +17,7 @@ use gpui_kit::{
 };
 
 use crate::list_cursor::{self, Toward};
-use crate::popup::{self, Dropdown};
+use crate::popup::{self, Cursor, Dropdown};
 use crate::shortcuts::{Command, Place, Run};
 
 const WIDTH: f32 = 280.;
@@ -139,7 +139,7 @@ impl Render for StateMenu {
         let rows = state.choices.iter().enumerate().map(|(at, choice)| {
             popup::option(
                 ElementId::NamedInteger("state-choice".into(), at as u64),
-                self.cursor == at,
+                Cursor::of(at, self.cursor),
                 cx,
             )
             .aria_label(choice.clone())

@@ -19,7 +19,7 @@ use gpui_kit::{
 };
 
 use crate::list_cursor::{self, Toward};
-use crate::popup::{self, Dropdown};
+use crate::popup::{self, Cursor, Dropdown};
 use crate::shortcuts::{self, Command, Place, Run};
 use crate::{shortcut_list, text};
 
@@ -167,7 +167,7 @@ impl Render for AppMenu {
             let works = self.works(at);
             let id = ElementId::NamedInteger("menu-item".into(), at as u64);
             let row = if works {
-                popup::option(id, self.cursor == at, cx).on_mouse_down(
+                popup::option(id, Cursor::of(at, self.cursor), cx).on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |menu, _, window, cx| menu.pick(at, window, cx)),
                 )
