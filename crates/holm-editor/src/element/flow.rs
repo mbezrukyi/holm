@@ -284,6 +284,8 @@ impl FlowLine {
         let lead = seen.len() - seen.trim_start_matches(' ').len();
         let mut narrowest = px(0.);
         let mut start = 0;
+        // GPUI's line wrapper breaks with this segmenter and these options, so these are the breaks it can take. The
+        // workspace keeps `icu_segmenter` at gpui-pre's version and features.
         let breaks = LineSegmenter::new_for_non_complex_scripts(LineBreakOptions::default())
             .segment_str(&seen)
             .filter(|&at| at > lead || at == seen.len());

@@ -19,7 +19,6 @@ holm-editor-test = { path = "crates/holm-editor-test" }
 
 gpui-kit = { version = "=0.9.0", default-features = false }
 fontdb = "0.23"
-# The same version and features as in gpui-pre, so table columns find the breaks its line wrapper takes.
 icu_segmenter = { version = "2.3", default-features = false, features = ["compiled_data"] }
 futures-channel = "0.3"
 futures-core = "0.3"
@@ -30,12 +29,10 @@ jiff = { version = "0.2", default-features = false, features = ["std", "tz-syste
 notify = { version = "8.2", default-features = false }
 num-traits = { version = "0.2", default-features = false }
 pulldown-cmark = { version = "0.13", default-features = false }
-# The same version as in gpui-component.
 ropey = { version = "=2.0.0-beta.1", default-features = false, features = ["metric_lines_lf", "metric_utf16"] }
 rusqlite = { version = "0.41", default-features = false, features = ["bundled", "cache"] }
 rustix = { version = "1.1", default-features = false, features = ["fs", "std"] }
 sha2 = { version = "0.10", default-features = false }
-# The same versions and features as the `syntect` feature of gpui-component.
 syntect = { version = "5.3.0", default-features = false, features = ["parsing", "default-syntaxes", "regex-fancy"] }
 tempfile = "3"
 thiserror = "2"
@@ -72,9 +69,5 @@ missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 
 [patch.crates-io]
-# A copy of gpui-pre-linux 0.3.11 with one fix: X11 file drop positions are divided by the
-# screen scale, like other pointer positions. Remove it when a release has the fix.
 gpui-pre-linux = { path = "vendor/gpui-pre-linux" }
-# A copy of gpui-pre 0.3.11 with a window zoom for the scale of Holm. See the note at the top of
-# its `src/window.rs`.
 gpui-pre = { path = "vendor/gpui-pre" }
