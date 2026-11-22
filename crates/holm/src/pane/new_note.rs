@@ -12,9 +12,9 @@
 use std::rc::Rc;
 
 use gpui_kit::{
-    AppContext as _, Context, Entity, EventEmitter, FocusHandle, InteractiveElement as _,
-    IntoElement, MouseButton, ParentElement as _, Render, Role, StatefulInteractiveElement as _,
-    Styled as _, Subscription, TestSupportExt as _, Window, div,
+    AppContext as _, Context, Entity, EventEmitter, FocusHandle, InteractiveElement as _, IntoElement, MouseButton,
+    ParentElement as _, Render, Role, StatefulInteractiveElement as _, Styled as _, Subscription, TestSupportExt as _,
+    Window, div,
 };
 use holm_core::model::Note;
 use holm_core::{FolderPath, TagName};

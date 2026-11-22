@@ -101,11 +101,9 @@ impl UndoStep {
         let joined = match self.group {
             Group::Alone => false,
             Group::Typing => {
-                let new_word = last.inserted.ends_with(char::is_whitespace)
-                    && !new.inserted.starts_with(char::is_whitespace);
-                let joins = new.removed.is_empty()
-                    && new.start == last.start + last.inserted.len()
-                    && !new_word;
+                let new_word =
+                    last.inserted.ends_with(char::is_whitespace) && !new.inserted.starts_with(char::is_whitespace);
+                let joins = new.removed.is_empty() && new.start == last.start + last.inserted.len() && !new_word;
                 if joins {
                     last.inserted.push_str(&new.inserted);
                 }

@@ -51,10 +51,7 @@ fn keys_one_to_six_set_a_palette_text_color() {
         let mut app = app();
         let (editor, cx) = word(&mut app);
         cx.simulate_keystrokes(&format!("ctrl-t {key}"));
-        assert_eq!(
-            text(&editor, cx),
-            format!("a <span style=\"color: {hex}\">word</span>")
-        );
+        assert_eq!(text(&editor, cx), format!("a <span style=\"color: {hex}\">word</span>"));
     }
 }
 
@@ -63,10 +60,7 @@ fn ctrl_m_sets_a_palette_highlight_color() {
     let mut app = app();
     let (editor, cx) = word(&mut app);
     cx.simulate_keystrokes("ctrl-m 5");
-    assert_eq!(
-        text(&editor, cx),
-        "a <mark style=\"background: #c6dbf2\">word</mark>"
-    );
+    assert_eq!(text(&editor, cx), "a <mark style=\"background: #c6dbf2\">word</mark>");
 }
 
 #[test]
@@ -75,10 +69,7 @@ fn a_key_closes_the_window_so_typing_edits_the_text_again() {
     let (editor, cx) = word(&mut app);
     cx.simulate_keystrokes("ctrl-t 2 end");
     cx.simulate_input("!");
-    assert_eq!(
-        text(&editor, cx),
-        "a <span style=\"color: #a85d12\">word</span>!"
-    );
+    assert_eq!(text(&editor, cx), "a <span style=\"color: #a85d12\">word</span>!");
 }
 
 #[test]
@@ -102,10 +93,7 @@ fn keys_seven_to_nine_take_the_custom_colors() {
     with_custom(&editor, cx, &custom);
     let sent = sent(&editor, cx);
     cx.simulate_keystrokes("ctrl-t 8");
-    assert_eq!(
-        text(&editor, cx),
-        "a <span style=\"color: #222222\">word</span>"
-    );
+    assert_eq!(text(&editor, cx), "a <span style=\"color: #222222\">word</span>");
     assert_eq!(*sent.borrow(), [vec![custom[1], custom[0], custom[2]]]);
 }
 
@@ -131,10 +119,7 @@ fn plus_opens_the_hex_field_and_enter_takes_the_value() {
     cx.simulate_keystrokes("backspace");
     cx.simulate_input("C4");
     cx.simulate_keystrokes("enter");
-    assert_eq!(
-        text(&editor, cx),
-        "a <span style=\"color: #12abc4\">word</span>"
-    );
+    assert_eq!(text(&editor, cx), "a <span style=\"color: #12abc4\">word</span>");
     assert_eq!(*sent.borrow(), [vec![color("#12abc4")]]);
 }
 
@@ -143,10 +128,7 @@ fn a_digit_key_in_the_hex_field_types_the_digit() {
     let mut app = app();
     let (editor, cx) = word(&mut app);
     cx.simulate_keystrokes("ctrl-t + 1 2 3 enter");
-    assert_eq!(
-        text(&editor, cx),
-        "a <span style=\"color: #112233\">word</span>"
-    );
+    assert_eq!(text(&editor, cx), "a <span style=\"color: #112233\">word</span>");
 }
 
 #[test]
@@ -155,10 +137,7 @@ fn the_hex_field_takes_three_digits_and_a_paste() {
     let (editor, cx) = word(&mut app);
     cx.write_to_clipboard(ClipboardItem::new_string("#0a0".to_owned()));
     cx.simulate_keystrokes("ctrl-m + ctrl-v enter");
-    assert_eq!(
-        text(&editor, cx),
-        "a <mark style=\"background: #00aa00\">word</mark>"
-    );
+    assert_eq!(text(&editor, cx), "a <mark style=\"background: #00aa00\">word</mark>");
 }
 
 #[test]
@@ -171,10 +150,7 @@ fn enter_on_a_short_hex_value_keeps_the_field() {
     assert_eq!(text(&editor, cx), "a word");
     cx.simulate_input("3");
     cx.simulate_keystrokes("enter");
-    assert_eq!(
-        text(&editor, cx),
-        "a <span style=\"color: #112233\">word</span>"
-    );
+    assert_eq!(text(&editor, cx), "a <span style=\"color: #112233\">word</span>");
 }
 
 #[test]
@@ -185,10 +161,7 @@ fn a_palette_color_in_the_hex_field_is_not_a_custom_color() {
     cx.simulate_keystrokes("ctrl-t +");
     cx.simulate_input("b5442c");
     cx.simulate_keystrokes("enter");
-    assert_eq!(
-        text(&editor, cx),
-        "a <span style=\"color: #b5442c\">word</span>"
-    );
+    assert_eq!(text(&editor, cx), "a <span style=\"color: #b5442c\">word</span>");
     assert!(sent.borrow().is_empty());
 }
 

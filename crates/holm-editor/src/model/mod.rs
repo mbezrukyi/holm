@@ -19,9 +19,7 @@ use holm_markdown::{Body, Target};
 use ropey::{LineType, Rope};
 
 pub(crate) use caret::{Caret, GoalRow};
-pub(crate) use display::{
-    Cell, Chip, DisplayLine, Embed, Highlight, LineKind, Look, Mark, Quote, Run,
-};
+pub(crate) use display::{Cell, Chip, DisplayLine, Embed, Highlight, LineKind, Look, Mark, Quote, Run};
 pub(crate) use format::Format;
 pub(crate) use history::Group;
 use history::{Ends, History, TextChange, UndoStep};
@@ -212,8 +210,7 @@ impl Model {
     /// Parses the text again after the splices.
     fn reparse(&mut self) {
         if let Some((old, new_end)) = self.changed.take() {
-            self.body
-                .reparse(&self.text, old.clone(), new_end - old.start);
+            self.body.reparse(&self.text, old.clone(), new_end - old.start);
         }
     }
 
@@ -275,12 +272,7 @@ impl Model {
         let text = lf_only(text);
         let range = self.selection();
         let cursor = range.start + text.len();
-        self.edit(
-            vec![(range, text.into_owned())],
-            (cursor, cursor),
-            Group::Alone,
-            None,
-        )
+        self.edit(vec![(range, text.into_owned())], (cursor, cursor), Group::Alone, None)
     }
 
     /// Puts in `text` in place of the whole text, as one undo step. The cursor stays near its
@@ -301,19 +293,11 @@ impl Model {
             .take(max_suffix)
             .take_while(|(a, b)| a == b)
             .count();
-        while !self.text.is_char_boundary(old.len() - suffix)
-            || !text.is_char_boundary(new.len() - suffix)
-        {
+        while !self.text.is_char_boundary(old.len() - suffix) || !text.is_char_boundary(new.len() - suffix) {
             suffix -= 1;
         }
-        let edits = vec![(
-            prefix..old.len() - suffix,
-            text[prefix..new.len() - suffix].to_owned(),
-        )];
-        let ends = (
-            map_offset(&edits, self.anchor),
-            map_offset(&edits, self.cursor()),
-        );
+        let edits = vec![(prefix..old.len() - suffix, text[prefix..new.len() - suffix].to_owned())];
+        let ends = (map_offset(&edits, self.anchor), map_offset(&edits, self.cursor()));
         self.edit(edits, ends, Group::Alone, None)
     }
 
@@ -569,8 +553,7 @@ impl Model {
 
     /// The UTF-16 offset as a source offset, for the platform text input.
     pub(crate) fn utf16_to_offset(&self, offset: usize) -> usize {
-        self.rope
-            .utf16_to_byte_idx(offset.min(self.rope.len_utf16()))
+        self.rope.utf16_to_byte_idx(offset.min(self.rope.len_utf16()))
     }
 }
 
@@ -734,10 +717,7 @@ mod tests {
         let start = now();
         let mut model = Model::new("");
         for (ix, c) in "one two".chars().enumerate() {
-            model.type_text(
-                &c.to_string(),
-                start + Duration::from_millis(ix as u64 * 100),
-            );
+            model.type_text(&c.to_string(), start + Duration::from_millis(ix as u64 * 100));
         }
         assert!(model.undo());
         assert_eq!(model.text(), "one ");
@@ -881,10 +861,7 @@ mod tests {
         let bang = text.find('!').unwrap_or_default();
         assert_eq!(line.to_source(chip.range.start), bang);
         assert_eq!(line.to_display(bang + 3), chip.range.start);
-        assert_eq!(
-            line.to_source(chip.range.end),
-            text.find(" now").unwrap_or_default()
-        );
+        assert_eq!(line.to_source(chip.range.end), text.find(" now").unwrap_or_default());
     }
 
     #[test]

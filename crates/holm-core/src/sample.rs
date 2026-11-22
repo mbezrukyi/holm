@@ -124,15 +124,13 @@ const COMMON: &[&str] = &[
 ];
 
 const ONSETS: &[&str] = &[
-    "b", "c", "d", "f", "g", "h", "j", "k", "l", "m", "n", "p", "r", "s", "t", "v", "w", "z", "br",
-    "ch", "cl", "dr", "fl", "gr", "pl", "pr", "sh", "sl", "st", "th", "tr", "wh", "wr", "",
+    "b", "c", "d", "f", "g", "h", "j", "k", "l", "m", "n", "p", "r", "s", "t", "v", "w", "z", "br", "ch", "cl", "dr",
+    "fl", "gr", "pl", "pr", "sh", "sl", "st", "th", "tr", "wh", "wr", "",
 ];
 /// The syllables of a made-up word, so most words have one or two.
 const SYLLABLES: [u32; 6] = [1, 1, 2, 2, 2, 3];
 const VOWELS: &[&str] = &["a", "e", "i", "o", "u", "ai", "ea", "ee", "oo", "ou", "y"];
-const CODAS: &[&str] = &[
-    "", "", "", "n", "r", "s", "t", "l", "m", "nd", "st", "ck", "ng",
-];
+const CODAS: &[&str] = &["", "", "", "n", "r", "s", "t", "l", "m", "nd", "st", "ck", "ng"];
 
 /// Fills the empty folder `dir` with [`NOTES`] notes in [`FOLDERS`] folders.
 ///
@@ -254,8 +252,7 @@ impl Random {
     }
 
     fn pick<'a>(&mut self, items: &[&'a str]) -> &'a str {
-        let at = usize::try_from(self.below(u32::try_from(items.len()).unwrap_or(u32::MAX)))
-            .unwrap_or(0);
+        let at = usize::try_from(self.below(u32::try_from(items.len()).unwrap_or(u32::MAX))).unwrap_or(0);
         items[at]
     }
 }

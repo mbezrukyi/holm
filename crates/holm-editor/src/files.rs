@@ -71,9 +71,7 @@ mod tests {
     use super::*;
 
     fn data(name: &str) -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests")
-            .join(name)
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join(name)
     }
 
     #[test]
@@ -83,10 +81,7 @@ mod tests {
         let size = path.metadata().map(|meta| meta.len()).unwrap_or_default();
         assert_eq!(FileKind::of(&path), FileKind::File(size));
         assert_eq!(FileKind::of(&data("data/gone.pdf")), FileKind::Missing);
-        assert!(matches!(
-            FileKind::of(&data("data/cat.png")),
-            FileKind::Image(_)
-        ));
+        assert!(matches!(FileKind::of(&data("data/cat.png")), FileKind::Image(_)));
     }
 
     #[test]

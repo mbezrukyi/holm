@@ -77,10 +77,7 @@ impl Frontmatter {
     }
 
     fn raw(&self, key: Key) -> Option<&str> {
-        self.entries
-            .iter()
-            .find(|e| e.key == Some(key))
-            .map(|e| e.raw.as_str())
+        self.entries.iter().find(|e| e.key == Some(key)).map(|e| e.raw.as_str())
     }
 
     pub(crate) fn id(&self) -> Option<String> {
@@ -93,11 +90,7 @@ impl Frontmatter {
         // A quoted "true" is a string in YAML, not a bool.
         self.raw(Key::Pinned).is_some_and(|raw| {
             let value = value(raw).trim_start();
-            !value.starts_with(['"', '\''])
-                && matches!(
-                    read_scalar(value, false).0.as_str(),
-                    "true" | "True" | "TRUE"
-                )
+            !value.starts_with(['"', '\'']) && matches!(read_scalar(value, false).0.as_str(), "true" | "True" | "TRUE")
         })
     }
 
@@ -122,13 +115,7 @@ impl Frontmatter {
                 .rposition(|e| e.key.is_some_and(|k| k < key))
                 .map_or(0, |i| i + 1)
         });
-        self.entries.insert(
-            at,
-            Entry {
-                raw,
-                key: Some(key),
-            },
-        );
+        self.entries.insert(at, Entry { raw, key: Some(key) });
     }
 
     pub(crate) fn write_id(id: &str, line_ending: &str) -> String {
@@ -136,12 +123,8 @@ impl Frontmatter {
     }
 
     pub(crate) fn write_tags(tags: &[String], line_ending: &str) -> String {
-        let items = tags
-            .iter()
-            .map(|tag| format!("  - {}{line_ending}", write_scalar(tag)));
-        std::iter::once(format!("tags:{line_ending}"))
-            .chain(items)
-            .collect()
+        let items = tags.iter().map(|tag| format!("  - {}{line_ending}", write_scalar(tag)));
+        std::iter::once(format!("tags:{line_ending}")).chain(items).collect()
     }
 
     pub(crate) fn write_pinned(line_ending: &str) -> String {

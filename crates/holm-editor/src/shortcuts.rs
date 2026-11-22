@@ -68,11 +68,7 @@ impl Keys {
     /// matches the key, so `+` matches on each layout.
     pub fn matches(&self, keystroke: &Keystroke) -> bool {
         let modifiers = keystroke.modifiers;
-        if modifiers.alt
-            || modifiers.platform
-            || modifiers.function
-            || modifiers.control != self.ctrl
-        {
+        if modifiers.alt || modifiers.platform || modifiers.function || modifiers.control != self.ctrl {
             return false;
         }
         let shift = match self.shift {
@@ -86,12 +82,7 @@ impl Keys {
     /// The GPUI bindings of these keys in `context`, a key context predicate. `action` makes the
     /// action of each binding from whether its keystroke has Shift, so [`Shift::Either`] makes
     /// two bindings. A keystroke that GPUI cannot parse makes none.
-    pub fn bindings<A: Action>(
-        self,
-        context: &str,
-        action: impl Fn(bool) -> A,
-        cx: &App,
-    ) -> Vec<KeyBinding> {
+    pub fn bindings<A: Action>(self, context: &str, action: impl Fn(bool) -> A, cx: &App) -> Vec<KeyBinding> {
         let predicate = KeyBindingContextPredicate::parse(context).ok().map(Rc::new);
         let shifts: &[bool] = match self.shift {
             Shift::Up => &[false],
@@ -114,9 +105,7 @@ impl Keys {
     pub fn overlaps(&self, other: &Keys) -> bool {
         self.key == other.key
             && self.ctrl == other.ctrl
-            && (self.shift == other.shift
-                || self.shift == Shift::Either
-                || other.shift == Shift::Either)
+            && (self.shift == other.shift || self.shift == Shift::Either || other.shift == Shift::Either)
     }
 }
 
@@ -286,13 +275,7 @@ pub struct Shortcut {
     pub label: &'static str,
 }
 
-const fn row(
-    place: Place,
-    keys: Keys,
-    command: Command,
-    group: Group,
-    label: &'static str,
-) -> Shortcut {
+const fn row(place: Place, keys: Keys, command: Command, group: Group, label: &'static str) -> Shortcut {
     Shortcut {
         place,
         keys,
@@ -307,13 +290,7 @@ use Group as G;
 use Place as P;
 
 const SHORTCUTS: &[Shortcut] = &[
-    row(
-        P::Text,
-        Keys::ctrl("a"),
-        C::SelectAll,
-        G::Text,
-        "Select all",
-    ),
+    row(P::Text, Keys::ctrl("a"), C::SelectAll, G::Text, "Select all"),
     row(P::Text, Keys::ctrl("c"), C::Copy, G::Text, "Copy"),
     row(P::Text, Keys::ctrl("x"), C::Cut, G::Text, "Cut"),
     row(P::Text, Keys::ctrl("v"), C::Paste, G::Text, "Paste"),
@@ -321,35 +298,11 @@ const SHORTCUTS: &[Shortcut] = &[
     row(P::Editor, Keys::ctrl("y"), C::Redo, G::Text, "Redo"),
     row(P::Editor, Keys::ctrl("b"), C::Bold, G::Text, "Bold"),
     row(P::Editor, Keys::ctrl("i"), C::Italic, G::Text, "Italic"),
-    row(
-        P::Editor,
-        Keys::ctrl("u"),
-        C::Underline,
-        G::Text,
-        "Underline",
-    ),
-    row(
-        P::Editor,
-        Keys::ctrl("d"),
-        C::Strikethrough,
-        G::Text,
-        "Strikethrough",
-    ),
-    row(
-        P::Editor,
-        Keys::ctrl("h"),
-        C::Highlight,
-        G::Text,
-        "Highlight",
-    ),
+    row(P::Editor, Keys::ctrl("u"), C::Underline, G::Text, "Underline"),
+    row(P::Editor, Keys::ctrl("d"), C::Strikethrough, G::Text, "Strikethrough"),
+    row(P::Editor, Keys::ctrl("h"), C::Highlight, G::Text, "Highlight"),
     row(P::Editor, Keys::ctrl("e"), C::Code, G::Text, "Code"),
-    row(
-        P::Editor,
-        Keys::ctrl("t"),
-        C::TextColor,
-        G::Text,
-        "Text color",
-    ),
+    row(P::Editor, Keys::ctrl("t"), C::TextColor, G::Text, "Text color"),
     row(
         P::Editor,
         Keys::ctrl("m"),
@@ -357,69 +310,15 @@ const SHORTCUTS: &[Shortcut] = &[
         G::Text,
         "Highlight color",
     ),
-    row(
-        P::Editor,
-        Keys::ctrl("1"),
-        C::Heading(1),
-        G::Text,
-        "Heading 1",
-    ),
-    row(
-        P::Editor,
-        Keys::ctrl("2"),
-        C::Heading(2),
-        G::Text,
-        "Heading 2",
-    ),
-    row(
-        P::Editor,
-        Keys::ctrl("3"),
-        C::Heading(3),
-        G::Text,
-        "Heading 3",
-    ),
-    row(
-        P::Editor,
-        Keys::ctrl("4"),
-        C::Heading(4),
-        G::Text,
-        "Heading 4",
-    ),
-    row(
-        P::Editor,
-        Keys::ctrl("5"),
-        C::Heading(5),
-        G::Text,
-        "Heading 5",
-    ),
-    row(
-        P::Editor,
-        Keys::ctrl("6"),
-        C::Heading(6),
-        G::Text,
-        "Heading 6",
-    ),
-    row(
-        P::Editor,
-        Keys::ctrl("0"),
-        C::Heading(0),
-        G::Text,
-        "Plain line",
-    ),
-    row(
-        P::Editor,
-        Keys::ctrl("l"),
-        C::Tasks,
-        G::Text,
-        "Check or uncheck a task",
-    ),
-    row(
-        P::Editor,
-        Keys::plain("tab"),
-        C::Indent,
-        G::Text,
-        "Indent a list item",
-    ),
+    row(P::Editor, Keys::ctrl("1"), C::Heading(1), G::Text, "Heading 1"),
+    row(P::Editor, Keys::ctrl("2"), C::Heading(2), G::Text, "Heading 2"),
+    row(P::Editor, Keys::ctrl("3"), C::Heading(3), G::Text, "Heading 3"),
+    row(P::Editor, Keys::ctrl("4"), C::Heading(4), G::Text, "Heading 4"),
+    row(P::Editor, Keys::ctrl("5"), C::Heading(5), G::Text, "Heading 5"),
+    row(P::Editor, Keys::ctrl("6"), C::Heading(6), G::Text, "Heading 6"),
+    row(P::Editor, Keys::ctrl("0"), C::Heading(0), G::Text, "Plain line"),
+    row(P::Editor, Keys::ctrl("l"), C::Tasks, G::Text, "Check or uncheck a task"),
+    row(P::Editor, Keys::plain("tab"), C::Indent, G::Text, "Indent a list item"),
     row(
         P::Editor,
         Keys::plain("tab").shift(Shift::Down),
@@ -469,27 +368,9 @@ const SHORTCUTS: &[Shortcut] = &[
         G::Text,
         "Delete the word right",
     ),
-    row(
-        P::Editor,
-        Keys::ctrl("enter"),
-        C::OpenLink,
-        G::Note,
-        "Open the link",
-    ),
-    row(
-        P::Editor,
-        Keys::ctrl("f"),
-        C::Find,
-        G::Note,
-        "Find in the note",
-    ),
-    row(
-        P::Find,
-        Keys::plain("enter"),
-        C::NextMatch,
-        G::Note,
-        "Next match",
-    ),
+    row(P::Editor, Keys::ctrl("enter"), C::OpenLink, G::Note, "Open the link"),
+    row(P::Editor, Keys::ctrl("f"), C::Find, G::Note, "Find in the note"),
+    row(P::Find, Keys::plain("enter"), C::NextMatch, G::Note, "Next match"),
     row(
         P::Find,
         Keys::plain("enter").shift(Shift::Down),
@@ -595,13 +476,7 @@ const SHORTCUTS: &[Shortcut] = &[
         G::Text,
         "Apply the hex color",
     ),
-    row(
-        P::HexField,
-        Keys::ctrl("v"),
-        C::Paste,
-        G::Text,
-        "Paste a hex color",
-    ),
+    row(P::HexField, Keys::ctrl("v"), C::Paste, G::Text, "Paste a hex color"),
     row(
         P::HexField,
         Keys::plain("escape").shift(Shift::Either),
@@ -618,9 +493,7 @@ pub(crate) fn bind(cx: &mut App) {
         .flat_map(|shortcut| {
             let command = shortcut.command;
             let context = shortcut.place.binding_context();
-            shortcut
-                .keys
-                .bindings(context, |shift| Run { command, shift }, cx)
+            shortcut.keys.bindings(context, |shift| Run { command, shift }, cx)
         })
         .collect();
     cx.bind_keys(bindings);
@@ -657,16 +530,11 @@ mod tests {
         cx.update(|cx| {
             for shortcut in SHORTCUTS {
                 let command = shortcut.command;
-                let bindings = shortcut.keys.bindings(
-                    shortcut.place.binding_context(),
-                    |shift| Run { command, shift },
-                    cx,
-                );
-                let count = if shortcut.keys.shift == Shift::Either {
-                    2
-                } else {
-                    1
-                };
+                let bindings =
+                    shortcut
+                        .keys
+                        .bindings(shortcut.place.binding_context(), |shift| Run { command, shift }, cx);
+                let count = if shortcut.keys.shift == Shift::Either { 2 } else { 1 };
                 assert_eq!(bindings.len(), count, "{shortcut:?}");
                 assert!(
                     bindings.iter().all(|binding| binding.predicate().is_some()),

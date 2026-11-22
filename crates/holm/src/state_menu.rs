@@ -13,10 +13,9 @@ use std::rc::Rc;
 
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::{
-    Anchor, Bounds, Context, ElementId, EventEmitter, FocusHandle, InteractiveElement as _,
-    IntoElement, MouseButton, ParentElement, Pixels, Render, Role, SharedString,
-    StatefulInteractiveElement as _, Styled, TestSupportExt as _, Window, anchored, deferred, div,
-    point, px,
+    Anchor, Bounds, Context, ElementId, EventEmitter, FocusHandle, InteractiveElement as _, IntoElement, MouseButton,
+    ParentElement, Pixels, Render, Role, SharedString, StatefulInteractiveElement as _, Styled, TestSupportExt as _,
+    Window, anchored, deferred, div, point, px,
 };
 
 use crate::list_cursor;
@@ -83,8 +82,7 @@ impl StateMenu {
             self.close(window, cx);
         } else if self.state.is_some() {
             let back = window.focused(cx).unwrap_or_else(|| self.idle.clone());
-            let dropdown =
-                Dropdown::new(back, Self::close, window, cx).with_opener(self.opener.clone());
+            let dropdown = Dropdown::new(back, Self::close, window, cx).with_opener(self.opener.clone());
             window.focus(dropdown.focus_handle(), cx);
             self.dropdown = Some(dropdown);
             self.open = true;
@@ -132,10 +130,7 @@ impl EventEmitter<StatePick> for StateMenu {}
 
 impl Render for StateMenu {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let (Some(dropdown), Some(state)) = (
-            self.dropdown.as_ref().filter(|_| self.open),
-            self.state.as_ref(),
-        ) else {
+        let (Some(dropdown), Some(state)) = (self.dropdown.as_ref().filter(|_| self.open), self.state.as_ref()) else {
             return div().into_any_element();
         };
         let theme = cx.theme();

@@ -11,9 +11,9 @@
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Context, CursorStyle, ElementId, EventEmitter, FocusHandle, InteractiveElement as _,
-    IntoElement, MouseButton, ParentElement, Pixels, Render, Role, ScrollHandle,
-    StatefulInteractiveElement as _, Styled, TestSupportExt as _, Window, div, px,
+    Context, CursorStyle, ElementId, EventEmitter, FocusHandle, InteractiveElement as _, IntoElement, MouseButton,
+    ParentElement, Pixels, Render, Role, ScrollHandle, StatefulInteractiveElement as _, Styled, TestSupportExt as _,
+    Window, div, px,
 };
 use holm_core::NotePath;
 use holm_core::model::NoteInfo;
@@ -161,10 +161,7 @@ impl Backlinks {
             .test_support()
             .truncate()
             .child(note.title.clone())
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |list, _, _, cx| list.pick(at, cx)),
-            )
+            .on_mouse_down(MouseButton::Left, cx.listener(move |list, _, _, cx| list.pick(at, cx)))
         });
         self.dropdown
             .panel(LIST_WIDTH, window, cx)

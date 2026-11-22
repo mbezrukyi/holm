@@ -72,9 +72,7 @@ fn press(text: &str, selection: Range<usize>, format: Format) -> Option<(String,
 
 /// The selection of the first `part` in `text`.
 fn find(text: &str, part: &str) -> Range<usize> {
-    let start = text
-        .find(part)
-        .unwrap_or_else(|| panic!("no {part:?} in {text:?}"));
+    let start = text.find(part).unwrap_or_else(|| panic!("no {part:?} in {text:?}"));
     start..start + part.len()
 }
 
@@ -83,11 +81,7 @@ fn steps(text: &str, keys: &[(&str, Format)]) -> String {
     let mut out = format!("{text}\n");
     let mut text = text.to_owned();
     for (part, format) in keys {
-        let selection = if part.is_empty() {
-            0..0
-        } else {
-            find(&text, part)
-        };
+        let selection = if part.is_empty() { 0..0 } else { find(&text, part) };
         match press(&text, selection, *format) {
             Some((new, selection)) => {
                 let _ = writeln!(out, "{format:?} on {part:?}: {new}   [{}]", &new[selection]);
@@ -106,10 +100,7 @@ fn known_cases() {
     use Format::{Bold, Code, Highlight, Italic, Strikethrough, Underline};
     let cases = [
         // The five cases that broke the old keys.
-        steps(
-            "==Write the report==",
-            &[("Writ", Highlight), ("Writ", Highlight)],
-        ),
+        steps("==Write the report==", &[("Writ", Highlight), ("Writ", Highlight)]),
         steps("**==Writ==**==e the report==", &[("Writ", Bold)]),
         steps("==*Writ*==*e the report*", &[("Writ", Highlight)]),
         steps("*==Writ==e the report*", &[("Writ", Italic)]),
@@ -136,10 +127,7 @@ fn known_cases() {
         steps("**a b** c", &[("b** c", Code)]),
         steps("<u>a **b</u> c**", &[("a", Underline)]),
         steps("> a *b\n> c* d", &[("a *b\n> c* d", Underline)]),
-        steps(
-            "| a | b |\n|---|---|\n| c | d |",
-            &[("a | b |\n|---|---|\n| c", Bold)],
-        ),
+        steps("| a | b |\n|---|---|\n| c | d |", &[("a | b |\n|---|---|\n| c", Bold)]),
         steps("- [ ] task\n- next", &[("task\n- next", Highlight)]),
     ];
     insta::assert_snapshot!(cases.join("\n"));
@@ -195,26 +183,17 @@ fn color_keys() {
             &[
                 ("word here", TextColor(Some(RED))),
                 ("here", TextColor(Some(BLUE))),
-                (
-                    "ord</span> <span style=\"color: #3a66a0\">he",
-                    TextColor(None),
-                ),
+                ("ord</span> <span style=\"color: #3a66a0\">he", TextColor(None)),
             ],
         ),
         steps(
             "a <span style=\"color: #b5442c\">word</span>",
-            &[
-                ("word", TextColor(Some(RED))),
-                ("wo", TextColor(Some(BLUE))),
-            ],
+            &[("word", TextColor(Some(RED))), ("wo", TextColor(Some(BLUE)))],
         ),
         steps("a **word** b", &[("a **word** b", TextColor(Some(RED)))]),
         steps(
             "a ==word== b",
-            &[
-                ("wor", HighlightColor(Some(BLUE))),
-                ("a", HighlightColor(None)),
-            ],
+            &[("wor", HighlightColor(Some(BLUE))), ("a", HighlightColor(None))],
         ),
         steps(
             "<mark style=\"background: #3a66a0\">all</mark> of it",
@@ -301,10 +280,7 @@ fn check_press(text: &str, selection: Range<usize>, format: Format) {
     let touches_link = links(&body)
         .iter()
         .any(|r| r.start < selection.end && selection.start < r.end);
-    let picked: Vec<&Shown> = old
-        .iter()
-        .filter(|s| selected(s.at) && !s.c.is_whitespace())
-        .collect();
+    let picked: Vec<&Shown> = old.iter().filter(|s| selected(s.at) && !s.c.is_whitespace()).collect();
     if picked.is_empty() || touches_link {
         return;
     }
@@ -383,9 +359,7 @@ fn check_color(text: &str, selection: Range<usize>, format: Format) {
     for leaf in body.leaves() {
         atom_ranges(&body.inline(text, leaf), &mut raw);
     }
-    let touches_raw = raw
-        .iter()
-        .any(|r| r.start < selection.end && selection.start < r.end);
+    let touches_raw = raw.iter().any(|r| r.start < selection.end && selection.start < r.end);
     if touches_raw || text.contains(['\\', '&', '`']) {
         return;
     }
@@ -414,18 +388,8 @@ fn check_color(text: &str, selection: Range<usize>, format: Format) {
         }
         let mut colors: Vec<Style> = new.styles.iter().copied().filter(family).collect();
         colors.dedup();
-        assert_eq!(
-            colors,
-            wanted.into_iter().collect::<Vec<_>>(),
-            "{why} at {}",
-            old.at
-        );
-        assert_eq!(
-            others(&new.styles),
-            others(&old.styles),
-            "{why} at {}",
-            old.at
-        );
+        assert_eq!(colors, wanted.into_iter().collect::<Vec<_>>(), "{why} at {}", old.at);
+        assert_eq!(others(&new.styles), others(&old.styles), "{why} at {}", old.at);
     }
 }
 
@@ -436,10 +400,7 @@ fn links(body: &Body) -> Vec<Range<usize>> {
 
 fn atom_ranges(nodes: &[Node], out: &mut Vec<Range<usize>>) {
     for node in nodes {
-        if matches!(
-            node.kind,
-            Kind::Html | Kind::Link(_) | Kind::Image(_) | Kind::Code
-        ) {
+        if matches!(node.kind, Kind::Html | Kind::Link(_) | Kind::Image(_) | Kind::Code) {
             out.push(node.source.clone());
         }
         atom_ranges(&node.children, out);

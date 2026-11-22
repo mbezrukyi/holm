@@ -9,9 +9,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use common::{FONT_SIZE, LINE_HEIGHT, MARGIN, advance, app, column_x, open};
-use gpui_kit::{
-    Entity, EntityInputHandler as _, Modifiers, Pixels, Point, VisualTestContext, point, px,
-};
+use gpui_kit::{Entity, EntityInputHandler as _, Modifiers, Pixels, Point, VisualTestContext, point, px};
 use holm_editor::{Editor, OpenFile};
 
 const WIDTH: Pixels = px(600.);
@@ -35,11 +33,7 @@ fn code_fences_hide_until_the_cursor_enters_the_block() {
     let (editor, cx) = open(&mut app, "a\n```\ncode\n```\nb", WIDTH, HEIGHT);
     // Away from the cursor each fence takes half a line.
     let fence = LINE_HEIGHT * 0.5;
-    click(
-        cx,
-        0.2,
-        LINE_HEIGHT + fence + LINE_HEIGHT + fence + LINE_HEIGHT * 0.5,
-    );
+    click(cx, 0.2, LINE_HEIGHT + fence + LINE_HEIGHT + fence + LINE_HEIGHT * 0.5);
     cx.simulate_input("X");
     assert_eq!(text(&editor, cx), "a\n```\ncode\n```\nXb");
 
@@ -56,12 +50,7 @@ fn code_fences_hide_until_the_cursor_enters_the_block() {
 #[test]
 fn a_table_shows_its_source_while_the_cursor_is_inside() {
     let mut app = app();
-    let (editor, cx) = open(
-        &mut app,
-        "a\n\n| x | y |\n|---|---|\n| 1 | 2 |",
-        WIDTH,
-        HEIGHT,
-    );
+    let (editor, cx) = open(&mut app, "a\n\n| x | y |\n|---|---|\n| 1 | 2 |", WIDTH, HEIGHT);
     // In the grid a row is a line and a bit high, and the `|---|` line takes no space.
     let row = LINE_HEIGHT * 1.3;
     click(cx, 0.2, LINE_HEIGHT * 2. + row + row * 0.5);
@@ -130,20 +119,10 @@ fn a_too_wide_table_wraps_its_long_text_and_keeps_short_words_whole() {
     let mut app = app();
     let (editor, cx) = open(&mut app, FLEX_TABLE, WIDTH, TALL);
     let places = char_places(&editor, cx, (WIDTH, TALL));
-    for word in [
-        "Property",
-        "Axis",
-        "cross",
-        "justify-",
-        "space-",
-        "Distributes",
-    ] {
+    for word in ["Property", "Axis", "cross", "justify-", "space-", "Distributes"] {
         assert_eq!(on_one_row(&places, word), Some(true), "{word} breaks");
     }
-    assert_eq!(
-        on_one_row(&places, "Distributes leftover main-axis space"),
-        Some(false)
-    );
+    assert_eq!(on_one_row(&places, "Distributes leftover main-axis space"), Some(false));
     // The table stays inside the text column.
     let end = FLEX_TABLE.find("margin hacks").expect("in the table") + "margin hacks".len();
     let last = places
@@ -170,10 +149,7 @@ fn a_table_that_fits_keeps_each_cell_on_one_row() {
 /// The middle of the task box on the line that starts at `top`.
 fn task_box(top: Pixels) -> gpui_kit::Point<Pixels> {
     let area = FONT_SIZE * 1.6;
-    point(
-        MARGIN + area / 2. - FONT_SIZE * 0.1,
-        top + LINE_HEIGHT * 0.5,
-    )
+    point(MARGIN + area / 2. - FONT_SIZE * 0.1, top + LINE_HEIGHT * 0.5)
 }
 
 #[test]
@@ -224,12 +200,7 @@ fn a_file_link_shows_as_a_chip_in_its_line() {
 #[test]
 fn ctrl_click_on_a_file_chip_sends_open_file() {
     let mut app = app();
-    let (editor, cx) = open(
-        &mut app,
-        "a\n\nSee ![report.pdf](report.pdf) now",
-        WIDTH,
-        HEIGHT,
-    );
+    let (editor, cx) = open(&mut app, "a\n\nSee ![report.pdf](report.pdf) now", WIDTH, HEIGHT);
     let opened = opened_files(&editor, cx);
     // "See ", then the chip, with its name after the icon.
     let name = point(column_x(cx, 12.5), LINE_HEIGHT * 2.5);

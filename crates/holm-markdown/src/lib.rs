@@ -13,8 +13,8 @@ mod tag;
 mod yaml;
 
 pub use body::{
-    Alignment, Block, BlockKind, Body, CalloutKind, Color, Heading, Link, Span, Style, Target,
-    Task, escape_text, unescape_text,
+    Alignment, Block, BlockKind, Body, CalloutKind, Color, Heading, Link, Span, Style, Target, Task, escape_text,
+    unescape_text,
 };
 pub use note::{LineEnding, NoteFile};
 pub use tag::normalize_tag;

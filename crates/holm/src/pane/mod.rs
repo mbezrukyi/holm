@@ -37,9 +37,8 @@ use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::{Theme as Ui, h_flex, v_flex};
 use gpui_kit::{
     App, AppContext as _, Context, Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
-    InteractiveElement as _, IntoElement, ParentElement, Render, Role,
-    StatefulInteractiveElement as _, Styled, Subscription, Task, TestSupportExt as _, Window, div,
-    px,
+    InteractiveElement as _, IntoElement, ParentElement, Render, Role, StatefulInteractiveElement as _, Styled,
+    Subscription, Task, TestSupportExt as _, Window, div, px,
 };
 use holm_core::model::{Change, Note, NoteInfo, Source};
 use holm_core::{FolderPath, NotePath, TagName};
@@ -215,25 +214,14 @@ impl NotePane {
         let backlinks = cx.new(|cx| Backlinks::new(text.clone(), window, cx));
         let pane = cx.weak_entity();
         let rename: NameWrite<NotePath> = Rc::new(move |title, done, _, cx| {
-            pane.update(cx, |pane, cx| pane.rename(title, done, cx))
-                .ok();
+            pane.update(cx, |pane, cx| pane.rename(title, done, cx)).ok();
         });
         let title = cx.new(|_| TitleField::new(rename, text.clone()));
-        let tag_row = cx.new(|cx| {
-            TagRow::new(
-                core_door.clone(),
-                title.clone(),
-                backlinks.clone(),
-                text,
-                window,
-                cx,
-            )
-        });
+        let tag_row = cx.new(|cx| TagRow::new(core_door.clone(), title.clone(), backlinks.clone(), text, window, cx));
         editor.update(cx, |editor, cx| {
             editor.set_start(Some(tag_row.clone().into()), cx);
         });
-        let links =
-            cx.new(|cx| Links::new(core_door.clone(), editor.clone(), backlinks.clone(), cx));
+        let links = cx.new(|cx| Links::new(core_door.clone(), editor.clone(), backlinks.clone(), cx));
         let subscriptions = vec![
             cx.subscribe(&core_door, |pane, _, event: &DoorEvent, cx| {
                 pane.follow(event, cx);
@@ -261,14 +249,10 @@ impl NotePane {
             cx.subscribe(&line, |pane, _, StatePick(at): &StatePick, cx| {
                 pane.choose(*at, cx);
             }),
-            cx.subscribe_in(
-                &backlinks,
-                window,
-                |pane, _, OpenBacklink(path), window, cx| {
-                    window.focus(&pane.editor.focus_handle(cx), cx);
-                    pane.open(path.clone(), Leave::Keep, cx);
-                },
-            ),
+            cx.subscribe_in(&backlinks, window, |pane, _, OpenBacklink(path), window, cx| {
+                window.focus(&pane.editor.focus_handle(cx), cx);
+                pane.open(path.clone(), Leave::Keep, cx);
+            }),
             Self::take_settings(&editor, config, cx),
             cx.observe_global::<Ui>(|pane, cx| {
                 let appearance = theme::appearance(cx);
@@ -326,11 +310,9 @@ impl NotePane {
         self.show_fields(cx);
         self.set_disk(None, cx);
         if !reload && let Some(heading) = self.open_heading.take() {
-            self.editor
-                .update(cx, |editor, cx| editor.show_heading(&heading, cx));
+            self.editor.update(cx, |editor, cx| editor.show_heading(&heading, cx));
         }
-        self.links
-            .update(cx, |links, cx| links.show(Some(path), cx));
+        self.links.update(cx, |links, cx| links.show(Some(path), cx));
         cx.notify();
     }
 
@@ -343,8 +325,7 @@ impl NotePane {
     /// Drops the open note and its text, with no save.
     fn drop_note(&mut self, cx: &mut Context<Self>) {
         if let Some(path) = self.content.editor().cloned() {
-            self.core_door
-                .update(cx, |core_door, _| core_door.drop_text(&path));
+            self.core_door.update(cx, |core_door, _| core_door.drop_text(&path));
         }
         self.title.update(cx, TitleField::close);
         self.content = Content::Empty;
@@ -371,8 +352,7 @@ impl NotePane {
 
     /// Shows a one-time error in the message line.
     fn answer(&self, message: &'static str, cx: &mut Context<Self>) {
-        self.message_line
-            .update(cx, |line, cx| line.show(message, cx));
+        self.message_line.update(cx, |line, cx| line.show(message, cx));
     }
 
     /// Sets the disk question. A question holds the text of the note in the draft.
@@ -386,8 +366,7 @@ impl NotePane {
 
     fn hold_text(&self, cx: &mut Context<Self>) {
         if let Some(path) = self.content.editor() {
-            self.core_door
-                .update(cx, |core_door, _| core_door.hold_text(path));
+            self.core_door.update(cx, |core_door, _| core_door.hold_text(path));
         }
     }
 
@@ -403,8 +382,7 @@ impl NotePane {
             }),
             (None, None) => None,
         };
-        self.message_line
-            .update(cx, |line, cx| line.set_state(state, cx));
+        self.message_line.update(cx, |line, cx| line.set_state(state, cx));
     }
 
     /// Takes the pick at `at` in the state menu of the disk question.
@@ -433,11 +411,7 @@ impl NotePane {
 
     /// Ctrl+K: gives `done` what the link picker starts with. See [`Links::start`]. With no
     /// note in the editor, it does nothing.
-    pub(crate) fn start_link(
-        &mut self,
-        done: impl FnOnce(LinkStart, &mut App) + 'static,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn start_link(&mut self, done: impl FnOnce(LinkStart, &mut App) + 'static, cx: &mut Context<Self>) {
         if self.content.note().is_some() {
             self.links.update(cx, |links, cx| links.start(done, cx));
         }
@@ -447,8 +421,7 @@ impl NotePane {
     /// [`Links::link`]. With no note in the editor, it does nothing. `done` runs at the end.
     pub(crate) fn link(&mut self, choice: LinkChoice, done: Then<()>, cx: &mut Context<Self>) {
         if self.content.note().is_some() {
-            self.links
-                .update(cx, |links, cx| links.link(choice, done, cx));
+            self.links.update(cx, |links, cx| links.link(choice, done, cx));
         } else {
             cx.defer(move |cx| done((), cx));
         }
@@ -457,8 +430,7 @@ impl NotePane {
     /// Shows the tags and the pin of the open note from the snapshot.
     fn show_fields(&mut self, cx: &mut Context<Self>) {
         let path = self.content.editor().cloned();
-        self.title
-            .update(cx, |title, cx| title.show(path.clone(), cx));
+        self.title.update(cx, |title, cx| title.show(path.clone(), cx));
         let Some(path) = path else {
             return;
         };
@@ -466,8 +438,7 @@ impl NotePane {
             self.last_info = Some(info.clone());
         }
         if let Some(info) = &self.last_info {
-            self.tag_row
-                .update(cx, |row, cx| row.show(&info.tags, info.pinned, cx));
+            self.tag_row.update(cx, |row, cx| row.show(&info.tags, info.pinned, cx));
         }
     }
 
@@ -494,8 +465,7 @@ impl NotePane {
         if self.content.note().is_none() {
             return;
         }
-        self.backlinks
-            .update(cx, |backlinks, cx| backlinks.enter(window, cx));
+        self.backlinks.update(cx, |backlinks, cx| backlinks.enter(window, cx));
     }
 
     /// Pins or unpins the open note.
@@ -516,10 +486,7 @@ impl NotePane {
     /// Gives the editor text to the draft of the core door, and saves it soon.
     fn edited(&mut self, cx: &mut Context<Self>) {
         if let Some(path) = self.content.editor().cloned() {
-            let body = self
-                .ending
-                .to_disk(self.editor.read(cx).text())
-                .into_owned();
+            let body = self.ending.to_disk(self.editor.read(cx).text()).into_owned();
             self.core_door
                 .update(cx, |core_door, cx| core_door.set_text(path, body, cx));
         }
@@ -560,9 +527,7 @@ impl NotePane {
             } else {
                 // The close handler of the window may still run, so the window goes later.
                 cx.spawn(async move |_, cx| {
-                    window
-                        .update(cx, |_, window, _| window.remove_window())
-                        .ok();
+                    window.update(cx, |_, window, _| window.remove_window()).ok();
                 })
                 .detach();
             }
@@ -574,11 +539,7 @@ impl NotePane {
 
     /// Gives the writing help and the text width of `config` to `editor`, now and after each
     /// change.
-    fn take_settings(
-        editor: &Entity<Editor>,
-        config: &Entity<Config>,
-        cx: &mut Context<Self>,
-    ) -> Subscription {
+    fn take_settings(editor: &Entity<Editor>, config: &Entity<Config>, cx: &mut Context<Self>) -> Subscription {
         let give = |editor: &Entity<Editor>, config: &Entity<Config>, cx: &mut Context<Self>| {
             let settings = config.read(cx).settings();
             let (help, width) = (settings.writing_help, settings.text_width.text_width());
@@ -722,8 +683,7 @@ impl NotePane {
             }
             Leave::Drop => {
                 if let Some(gone) = self.content.editor().cloned() {
-                    self.core_door
-                        .update(cx, |core_door, _| core_door.drop_text(&gone));
+                    self.core_door.update(cx, |core_door, _| core_door.drop_text(&gone));
                 }
                 self.read_note(path, open, cx);
             }
@@ -781,8 +741,7 @@ impl NotePane {
         cx.emit(PaneEvent::Opened(new.clone()));
         if other_folder {
             let folder = Some(self.core_door.read(cx).root().join(new.folder()));
-            self.editor
-                .update(cx, |editor, cx| editor.set_folder(folder, cx));
+            self.editor.update(cx, |editor, cx| editor.set_folder(folder, cx));
         }
         if other_folder && !unsaved {
             self.reload(cx);
@@ -799,12 +758,7 @@ impl NotePane {
     }
 
     /// Gives the open note the title `title`.
-    fn rename(
-        &mut self,
-        title: String,
-        done: Then<Result<NotePath, AppError>>,
-        cx: &mut Context<Self>,
-    ) {
+    fn rename(&mut self, title: String, done: Then<Result<NotePath, AppError>>, cx: &mut Context<Self>) {
         // With no note, the title field is gone too.
         let Some(path) = self.content.note().cloned() else {
             return;
@@ -830,25 +784,21 @@ impl NotePane {
         }
         self.stop_opening(cx);
         let open = self.opens.start();
-        let start = open.window_step(
-            window,
-            cx,
-            move |pane, saved: Result<(), NotSaved>, window, cx| {
-                if saved.is_err() {
-                    return;
-                }
-                pane.title.update(cx, TitleField::close);
-                let core_door = pane.core_door.clone();
-                let note = cx.new(|cx| NewNote::new(core_door, folder, tag, window, cx));
-                let subscription = cx.subscribe_in(&note, window, Self::new_note_event);
-                pane.content = Content::New {
-                    note,
-                    kept: pane.content.editor().cloned(),
-                    _subscription: subscription,
-                };
-                cx.notify();
-            },
-        );
+        let start = open.window_step(window, cx, move |pane, saved: Result<(), NotSaved>, window, cx| {
+            if saved.is_err() {
+                return;
+            }
+            pane.title.update(cx, TitleField::close);
+            let core_door = pane.core_door.clone();
+            let note = cx.new(|cx| NewNote::new(core_door, folder, tag, window, cx));
+            let subscription = cx.subscribe_in(&note, window, Self::new_note_event);
+            pane.content = Content::New {
+                note,
+                kept: pane.content.editor().cloned(),
+                _subscription: subscription,
+            };
+            cx.notify();
+        });
         self.core_door
             .update(cx, |core_door, cx| core_door.wait_saved(start, cx));
     }

@@ -28,8 +28,7 @@ impl PickNotes {
 
     /// The place of the note whose title is `text`.
     pub(crate) fn position(&self, text: &Lowercase<'_>) -> Option<usize> {
-        self.titles()
-            .position(|title| title.as_str() == text.as_str())
+        self.titles().position(|title| title.as_str() == text.as_str())
     }
 }
 

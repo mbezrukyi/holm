@@ -14,9 +14,9 @@ use std::rc::Rc;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Anchor, Bounds, Context, ElementId, EventEmitter, FocusHandle, InteractiveElement as _,
-    IntoElement, MouseButton, ParentElement, Pixels, Render, Role, StatefulInteractiveElement as _,
-    Styled, TestSupportExt as _, Window, anchored, deferred, div, point, px,
+    Anchor, Bounds, Context, ElementId, EventEmitter, FocusHandle, InteractiveElement as _, IntoElement, MouseButton,
+    ParentElement, Pixels, Render, Role, StatefulInteractiveElement as _, Styled, TestSupportExt as _, Window,
+    anchored, deferred, div, point, px,
 };
 
 use crate::list_cursor;
@@ -25,12 +25,7 @@ use crate::shortcuts::{self, Command, Place, Run};
 use crate::{shortcut_list, text};
 
 /// The items of the menu, as the commands they run.
-const ITEMS: [Command; 4] = [
-    Command::Settings,
-    Command::ShortcutList,
-    Command::Pin,
-    Command::Quit,
-];
+const ITEMS: [Command; 4] = [Command::Settings, Command::ShortcutList, Command::Pin, Command::Quit];
 
 const WIDTH: Pixels = px(240.);
 /// The space between the menu and its button, or the window corner.
@@ -79,20 +74,13 @@ impl AppMenu {
             open: None,
             cursor: 0,
             button: button.clone(),
-            dropdown: Dropdown::new(text, |menu, _, cx| menu.close(cx), window, cx)
-                .with_opener(button),
+            dropdown: Dropdown::new(text, |menu, _, cx| menu.close(cx), window, cx).with_opener(button),
         }
     }
 
     /// Opens the menu at `spot`, or closes it when it is open. Pin note is off without an
     /// open `note`.
-    pub(crate) fn toggle(
-        &mut self,
-        spot: Spot,
-        note: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn toggle(&mut self, spot: Spot, note: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.open.is_some() {
             self.leave(window, cx);
             return;
@@ -150,8 +138,7 @@ impl AppMenu {
             Command::Next | Command::Previous => {
                 let forward = *command == Command::Next;
                 let works = |at| self.works(at);
-                if let Some(at) = list_cursor::step(Some(self.cursor), ITEMS.len(), forward, works)
-                {
+                if let Some(at) = list_cursor::step(Some(self.cursor), ITEMS.len(), forward, works) {
                     self.cursor = at;
                 }
             }
@@ -186,12 +173,7 @@ impl Render for AppMenu {
                 )
             } else {
                 // The shape of an option, with no hover and no click.
-                div()
-                    .id(id)
-                    .role(Role::ListBoxOption)
-                    .px_2()
-                    .py_1()
-                    .text_color(muted)
+                div().id(id).role(Role::ListBoxOption).px_2().py_1().text_color(muted)
             }
             .aria_label(label)
             .test_support()

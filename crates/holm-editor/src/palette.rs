@@ -79,10 +79,7 @@ mod tests {
     #[test]
     fn every_palette_color_has_one_dark_tone() {
         for color in TEXT.iter().chain(&HIGHLIGHT) {
-            let tones = DARK_TONES
-                .iter()
-                .filter(|(light, _)| light == color)
-                .count();
+            let tones = DARK_TONES.iter().filter(|(light, _)| light == color).count();
             assert_eq!(tones, 1, "{color}");
         }
     }

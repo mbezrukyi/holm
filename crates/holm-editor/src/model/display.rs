@@ -180,22 +180,14 @@ pub(crate) enum Mark {
 impl Model {
     /// Line `line` as the screen shows it. `embed` tells how an embedded file with a target
     /// shows.
-    pub(crate) fn display_line(
-        &self,
-        line: usize,
-        embed: &mut dyn FnMut(&str) -> Embed,
-    ) -> DisplayLine {
+    pub(crate) fn display_line(&self, line: usize, embed: &mut dyn FnMut(&str) -> Embed) -> DisplayLine {
         let source = self.line_range(line);
         let mut images = Vec::new();
         let mut chips = Vec::new();
         for (range, target, name) in self.files_in(&source) {
             match embed(target) {
                 Embed::Image => images.push(target.to_owned()),
-                Embed::Chip => chips.push(ChipLink {
-                    range,
-                    target,
-                    name,
-                }),
+                Embed::Chip => chips.push(ChipLink { range, target, name }),
             }
         }
         let chain = self.blocks_of_line(&source);
@@ -247,13 +239,7 @@ impl Model {
                 start: source.start,
                 ..Shown::default()
             },
-            _ => self.shown(
-                &source,
-                from,
-                raw,
-                list_prefix.clone().filter(|_| !raw),
-                &chips,
-            ),
+            _ => self.shown(&source, from, raw, list_prefix.clone().filter(|_| !raw), &chips),
         };
 
         DisplayLine {
@@ -367,13 +353,7 @@ impl Model {
         LineKind::Text
     }
 
-    fn code_kind(
-        &self,
-        line: usize,
-        block: &Block,
-        language: Option<&str>,
-        fenced: bool,
-    ) -> LineKind {
+    fn code_kind(&self, line: usize, block: &Block, language: Option<&str>, fenced: bool) -> LineKind {
         let first = self.line_of(block.range.start);
         let last = self.line_of(block.range.end);
         let last_range = self.line_range(last);
@@ -418,12 +398,7 @@ impl Model {
         let cells = row
             .children
             .iter()
-            .zip(
-                alignments
-                    .iter()
-                    .copied()
-                    .chain(std::iter::repeat(Alignment::None)),
-            )
+            .zip(alignments.iter().copied().chain(std::iter::repeat(Alignment::None)))
             .map(|(cell, alignment)| {
                 let text = &self.text[cell.range.clone()];
                 let start = cell.range.start + text.len() - text.trim_start().len();
@@ -480,14 +455,14 @@ impl Model {
         chips: &[ChipLink<'_>],
     ) -> Shown {
         let spans = self.body.spans();
-        let spans: Vec<_> = spans[spans.partition_point(|s| s.range.start < from)
-            ..spans.partition_point(|s| s.range.start < range.end)]
+        let spans: Vec<_> = spans
+            [spans.partition_point(|s| s.range.start < from)..spans.partition_point(|s| s.range.start < range.end)]
             .iter()
             .filter(|s| s.range.end > range.start)
             .collect();
         let hidden = self.body.hidden();
-        let mut hidden: Vec<_> = hidden[hidden.partition_point(|h| h.start < from)
-            ..hidden.partition_point(|h| h.start < range.end)]
+        let mut hidden: Vec<_> = hidden
+            [hidden.partition_point(|h| h.start < from)..hidden.partition_point(|h| h.start < range.end)]
             .iter()
             .filter(|h| h.end > range.start)
             .map(|h| h.start.max(range.start)..h.end.min(range.end))
@@ -502,10 +477,7 @@ impl Model {
             cuts.extend([h.start, h.end]);
         }
         let chips: &[ChipLink<'_>] = if raw { &[] } else { chips };
-        let mut chips = chips
-            .iter()
-            .filter(|chip| range.contains(&chip.range.start))
-            .peekable();
+        let mut chips = chips.iter().filter(|chip| range.contains(&chip.range.start)).peekable();
         cuts.extend(chips.clone().map(|chip| chip.range.start));
         cuts.retain(|cut| range.contains(cut) || *cut == range.end);
         cuts.sort_unstable();
@@ -520,9 +492,7 @@ impl Model {
             while let Some(chip) = chips.next_if(|chip| chip.range.start <= piece.start) {
                 shown.push_chip(chip, range.end);
             }
-            let syntax = hidden
-                .iter()
-                .any(|h| h.start <= piece.start && piece.end <= h.end);
+            let syntax = hidden.iter().any(|h| h.start <= piece.start && piece.end <= h.end);
             if syntax && !raw {
                 continue;
             }
@@ -549,16 +519,12 @@ impl Model {
     /// The range, the target and the text of each embedded file link in `line`.
     fn files_in(&self, line: &Range<usize>) -> Vec<(Range<usize>, &str, &str)> {
         let links = self.body.links();
-        links[links.partition_point(|l| l.range.start < line.start)
-            ..links.partition_point(|l| l.range.start < line.end)]
+        links
+            [links.partition_point(|l| l.range.start < line.start)..links.partition_point(|l| l.range.start < line.end)]
             .iter()
             .filter(|link| link.embedded)
             .filter_map(|link| match &link.target {
-                Target::File(path) => Some((
-                    link.range.clone(),
-                    path.as_str(),
-                    &self.text[link.text.clone()],
-                )),
+                Target::File(path) => Some((link.range.clone(), path.as_str(), &self.text[link.text.clone()])),
                 _ => None,
             })
             .collect()
@@ -631,11 +597,7 @@ impl Shown {
 
     /// The source offset for a screen offset. Between two visible parts it picks the later one.
     pub(crate) fn to_source(&self, display: usize) -> usize {
-        let Some(ix) = self
-            .segments
-            .partition_point(|s| s.display <= display)
-            .checked_sub(1)
-        else {
+        let Some(ix) = self.segments.partition_point(|s| s.display <= display).checked_sub(1) else {
             return self.start;
         };
         let segment = self.segments[ix];
@@ -644,11 +606,7 @@ impl Shown {
 
     /// The screen offset for a source offset. Hidden source maps to the next visible text.
     pub(crate) fn to_display(&self, source: usize) -> usize {
-        let Some(ix) = self
-            .segments
-            .partition_point(|s| s.source <= source)
-            .checked_sub(1)
-        else {
+        let Some(ix) = self.segments.partition_point(|s| s.source <= source).checked_sub(1) else {
             return 0;
         };
         let segment = self.segments[ix];
@@ -709,12 +667,7 @@ mod tests {
             0,
         );
         let line = model.display_line(2, &mut plain_chip);
-        let names: Vec<_> = line
-            .shown
-            .chips
-            .iter()
-            .map(|chip| chip.name.as_str())
-            .collect();
+        let names: Vec<_> = line.shown.chips.iter().map(|chip| chip.name.as_str()).collect();
         assert_eq!(names, ["photo.png", "", "a_b.toml"]);
         assert_eq!(line.shown.chips[0].target, "attachments/photo-3fa9c2e1.png");
     }
@@ -753,10 +706,7 @@ mod tests {
         let inside = model_at(text, 12);
         assert!(inside.display_line(1, &mut plain_chip).raw);
         assert!(inside.display_line(3, &mut plain_chip).raw);
-        assert_eq!(
-            inside.display_line(1, &mut plain_chip).shown.text,
-            "```rust"
-        );
+        assert_eq!(inside.display_line(1, &mut plain_chip).shown.text, "```rust");
     }
 
     #[test]
@@ -787,10 +737,7 @@ mod tests {
     fn a_callout_shows_its_name_and_its_quote() {
         let model = model_at("a\n\n> [!tip]\n> Use it.\n", 0);
         let title = model.display_line(2, &mut plain_chip);
-        assert!(matches!(
-            title.kind,
-            LineKind::CalloutTitle(CalloutKind::Tip)
-        ));
+        assert!(matches!(title.kind, LineKind::CalloutTitle(CalloutKind::Tip)));
         let body = model.display_line(3, &mut plain_chip);
         assert_eq!(body.quotes, [Quote::Callout(CalloutKind::Tip)]);
         assert_eq!(body.shown.text, "Use it.");

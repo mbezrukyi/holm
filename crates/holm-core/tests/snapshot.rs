@@ -49,10 +49,7 @@ fn no_step<T>(core: &Core, write: impl FnOnce(&Core) -> Result<T>) -> Result<T> 
 
 #[test]
 fn note_writes_show_in_the_snapshot_after_them() {
-    let folder = Folder::new(&[
-        ("work/.keep.md", ""),
-        ("Plans.md", "---\nid: P\n---\n# Plans\n"),
-    ]);
+    let folder = Folder::new(&[("work/.keep.md", ""), ("Plans.md", "---\nid: P\n---\n# Plans\n")]);
     let core = &folder.core;
 
     let (note, snapshot) = one_step(core, |core| core.create(&folder_path("work"), "Untitled"));
@@ -65,14 +62,9 @@ fn note_writes_show_in_the_snapshot_after_them() {
         core.save(&note.info.path, "# Ideas\n[plans](holm:P)\n", None)
     });
     assert_eq!(titles(&snapshot), ["Plans", "Untitled"]);
-    assert_eq!(
-        paths(snapshot.backlinks(&note_path("Plans.md"))),
-        ["work/Untitled.md"]
-    );
+    assert_eq!(paths(snapshot.backlinks(&note_path("Plans.md"))), ["work/Untitled.md"]);
 
-    let (info, snapshot) = one_step(core, |core| {
-        core.rename_note(&note_path("work/Untitled.md"), "Ideas")
-    });
+    let (info, snapshot) = one_step(core, |core| core.rename_note(&note_path("work/Untitled.md"), "Ideas"));
     assert_eq!(info.path, note_path("work/Ideas.md"));
     assert_eq!(
         paths(snapshot.notes(NoteSet::In(&folder_path("work")), Order::Title)),
@@ -86,10 +78,7 @@ fn note_writes_show_in_the_snapshot_after_them() {
         paths(snapshot.notes(NoteSet::In(&folder_path("")), Order::Title)),
         ["Ideas.md", "Plans.md"]
     );
-    assert_eq!(
-        paths(snapshot.backlinks(&note_path("Plans.md"))),
-        ["Ideas.md"]
-    );
+    assert_eq!(paths(snapshot.backlinks(&note_path("Plans.md"))), ["Ideas.md"]);
 
     let (_, snapshot) = one_step(core, |core| {
         core.add_tag(&note_path("Ideas.md"), &tag_name("work/holm"))
@@ -103,9 +92,7 @@ fn note_writes_show_in_the_snapshot_after_them() {
     let (_, snapshot) = one_step(core, |core| core.set_pinned(&note_path("Plans.md"), true));
     assert_eq!(titles(&snapshot), ["Plans", "Ideas"]);
 
-    let (count, snapshot) = one_step(core, |core| {
-        core.rename_tag(&tag_name("work"), &tag_name("home"))
-    });
+    let (count, snapshot) = one_step(core, |core| core.rename_tag(&tag_name("work"), &tag_name("home")));
     assert_eq!(count, 1);
     assert_eq!(tag_names(&snapshot), ["home"]);
 
@@ -119,10 +106,7 @@ fn note_writes_show_in_the_snapshot_after_them() {
     let plans = core.read(&note_path("Plans.md")).unwrap();
     fs::remove_file(folder.path("Plans.md")).unwrap();
     let (_, snapshot) = one_step(core, |core| core.restore(&plans));
-    assert_eq!(
-        snapshot.note_with_id("P").unwrap().path,
-        note_path("Plans.md")
-    );
+    assert_eq!(snapshot.note_with_id("P").unwrap().path, note_path("Plans.md"));
 }
 
 #[test]
@@ -131,10 +115,7 @@ fn link_id_shows_the_new_id_in_the_snapshot() {
 
     let (id, snapshot) = one_step(&folder.core, |core| core.link_id(&note_path("a.md")));
 
-    assert_eq!(
-        snapshot.note_with_id(id.as_str()).unwrap().path,
-        note_path("a.md")
-    );
+    assert_eq!(snapshot.note_with_id(id.as_str()).unwrap().path, note_path("a.md"));
 }
 
 #[test]
@@ -193,23 +174,12 @@ fn a_save_with_the_same_text_keeps_the_revision() {
     let folder = Folder::new(&[("A.md", "---\nid: A\ntags: [x]\n---\n# A\n")]);
     let note = folder.core.read(&note_path("A.md")).unwrap();
 
-    let written = no_step(&folder.core, |core| {
-        core.save(&note_path("A.md"), &note.body, None)
-    });
+    let written = no_step(&folder.core, |core| core.save(&note_path("A.md"), &note.body, None));
 
     assert_eq!(written.unwrap(), note);
-    no_step(&folder.core, |core| {
-        core.add_tag(&note_path("A.md"), &tag_name("x"))
-    })
-    .unwrap();
-    no_step(&folder.core, |core| {
-        core.remove_tag(&note_path("A.md"), &tag_name("y"))
-    })
-    .unwrap();
-    no_step(&folder.core, |core| {
-        core.rename_note(&note_path("A.md"), "A")
-    })
-    .unwrap();
+    no_step(&folder.core, |core| core.add_tag(&note_path("A.md"), &tag_name("x"))).unwrap();
+    no_step(&folder.core, |core| core.remove_tag(&note_path("A.md"), &tag_name("y"))).unwrap();
+    no_step(&folder.core, |core| core.rename_note(&note_path("A.md"), "A")).unwrap();
 }
 
 #[test]
@@ -220,9 +190,7 @@ fn a_failed_write_keeps_the_revision() {
         core.add_tag(&note_path("missing.md"), &tag_name("x"))
     });
     assert!(written.is_err());
-    let written = no_step(&folder.core, |core| {
-        core.create_folder(&folder_path("missing"), "x")
-    });
+    let written = no_step(&folder.core, |core| core.create_folder(&folder_path("missing"), "x"));
     assert!(written.is_err());
 }
 
@@ -266,19 +234,11 @@ fn paths_first_matching_keep_and_counts_agree_with_the_note_lists() {
             let notes = snapshot.notes(set, order);
             let expected: Vec<NotePath> = notes.iter().map(|note| note.path.clone()).collect();
             assert_eq!(snapshot.paths(set, order), expected, "{set:?} {order:?}");
-            assert_eq!(
-                snapshot.first(set, order),
-                notes.first(),
-                "{set:?} {order:?}"
-            );
+            assert_eq!(snapshot.first(set, order), notes.first(), "{set:?} {order:?}");
             assert_eq!(snapshot.matching(set).count(), notes.len(), "{set:?}");
         }
         let all = snapshot.paths(NoteSet::All, Order::Title);
-        assert_eq!(
-            snapshot.keep(&all, set),
-            snapshot.paths(set, Order::Title),
-            "{set:?}"
-        );
+        assert_eq!(snapshot.keep(&all, set), snapshot.paths(set, Order::Title), "{set:?}");
         if let NoteSet::In(folder) = set {
             assert_eq!(
                 snapshot.folder_counts().get(folder).copied().unwrap_or(0),
@@ -302,10 +262,7 @@ fn the_walk_of_the_nested_tags_gives_each_tag_before_its_child_tags() {
     ]);
     let tags = folder.core.snapshot().tags();
     let names: Vec<&str> = Tag::walk(&tags).map(|tag| tag.name.as_str()).collect();
-    assert_eq!(
-        names,
-        ["home", "work", "work/deep", "work/deep/x", "work/holm"]
-    );
+    assert_eq!(names, ["home", "work", "work/deep", "work/deep/x", "work/holm"]);
 }
 
 #[test]
@@ -324,10 +281,7 @@ fn note_or_first_gives_the_note_while_it_exists_or_else_the_first_note() {
         path(snapshot.note_or_first(Some(&gone), Order::Title)),
         Some("A.md".into())
     );
-    assert_eq!(
-        path(snapshot.note_or_first(None, Order::Title)),
-        Some("A.md".into())
-    );
+    assert_eq!(path(snapshot.note_or_first(None, Order::Title)), Some("A.md".into()));
     let empty = Folder::new(&[]).core.snapshot();
     assert_eq!(empty.note_or_first(Some(&b), Order::Title), None);
 }

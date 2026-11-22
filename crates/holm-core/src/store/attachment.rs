@@ -65,22 +65,11 @@ impl Store {
 
     /// Saves a pasted image in the format `extension` into the attachment folder, and returns
     /// its path from the folder of `note`, for a link.
-    pub(crate) fn paste_image(
-        &self,
-        note: &NotePath,
-        extension: &str,
-        bytes: &[u8],
-    ) -> Result<PathBuf> {
+    pub(crate) fn paste_image(&self, note: &NotePath, extension: &str, bytes: &[u8]) -> Result<PathBuf> {
         self.attach(note, PASTED_IMAGE, Some(extension), bytes)
     }
 
-    fn attach(
-        &self,
-        note: &NotePath,
-        stem: &str,
-        ext: Option<&str>,
-        content: impl io::Read,
-    ) -> Result<PathBuf> {
+    fn attach(&self, note: &NotePath, stem: &str, ext: Option<&str>, content: impl io::Read) -> Result<PathBuf> {
         let file = self.add_attachment(stem, ext, content)?;
         Ok(crate::links::link(&self.root, note, &file))
     }
@@ -94,12 +83,7 @@ impl Store {
     ///
     /// When a file with that name is there, it keeps that file and drops the new copy.
     /// It makes the folder when it is missing.
-    fn add_attachment(
-        &self,
-        stem: &str,
-        ext: Option<&str>,
-        content: impl io::Read,
-    ) -> Result<PathBuf> {
+    fn add_attachment(&self, stem: &str, ext: Option<&str>, content: impl io::Read) -> Result<PathBuf> {
         let Some(folder) = folder() else {
             return Err(write_error(&self.root, io::ErrorKind::InvalidInput.into()));
         };
@@ -123,8 +107,7 @@ impl Store {
             inner: content,
             hash: Sha256::new(),
         };
-        let file =
-            temp_file(&dir, &mut hashed, None, None).map_err(|source| write_error(&dir, source))?;
+        let file = temp_file(&dir, &mut hashed, None, None).map_err(|source| write_error(&dir, source))?;
         let hash = hashed.hash.finalize();
         let mut name = file_stem(stem);
         name.push('-');

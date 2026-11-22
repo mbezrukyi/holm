@@ -123,9 +123,7 @@ pub(crate) fn plan(facts: &Facts, nodes: &Nodes, files: Vec<(NotePath, Stamp)>) 
         .collect();
     let mut reads: Vec<(bool, &NotePath)> = found
         .iter()
-        .filter(|(path, stamp)| {
-            (known.get(*path) != Some(stamp) || named.contains(path)) && !done.contains(path)
-        })
+        .filter(|(path, stamp)| (known.get(*path) != Some(stamp) || named.contains(path)) && !done.contains(path))
         .map(|(path, _)| (!known.contains_key(path), path))
         .collect();
     reads.sort_unstable();
@@ -287,10 +285,7 @@ impl<'a> Owners<'a> {
 
 /// The gone paths and new paths that are one file at a new place: the same file name
 /// and stamp, with no other gone or new path that has both.
-fn pairs<'a>(
-    left: &[(&'a NotePath, Stamp)],
-    joined: &[(&'a NotePath, Stamp)],
-) -> Vec<(&'a NotePath, &'a NotePath)> {
+fn pairs<'a>(left: &[(&'a NotePath, Stamp)], joined: &[(&'a NotePath, Stamp)]) -> Vec<(&'a NotePath, &'a NotePath)> {
     type Key<'a> = (&'a OsStr, Stamp);
     type Sides<'a> = (Vec<&'a NotePath>, Vec<&'a NotePath>);
     let mut sides: HashMap<Key<'a>, Sides<'a>> = HashMap::new();
@@ -365,13 +360,7 @@ mod tests {
                 .iter()
                 .map(|(at, id, stamp)| {
                     let hash = ContentHash::default();
-                    (
-                        info(at, *id),
-                        Vec::new(),
-                        *stamp,
-                        hash,
-                        LinkSource::default(),
-                    )
+                    (info(at, *id), Vec::new(), *stamp, hash, LinkSource::default())
                 })
                 .collect(),
             Vec::new(),
@@ -398,11 +387,7 @@ mod tests {
             .iter()
             .map(|put| {
                 let info = &put.note.info;
-                (
-                    info.path.to_string(),
-                    info.id.as_ref().map(NoteId::as_str),
-                    put.copy,
-                )
+                (info.path.to_string(), info.id.as_ref().map(NoteId::as_str), put.copy)
             })
             .collect()
     }
@@ -466,10 +451,7 @@ mod tests {
 
         let settled = plan.decide(&facts, vec![read("work/a.md", Some("A"), stamp(5), false)]);
         assert_eq!(settled.removed, [path("a.md")]);
-        assert_eq!(
-            put_ids(&settled),
-            [("work/a.md".to_owned(), Some("A"), false)]
-        );
+        assert_eq!(put_ids(&settled), [("work/a.md".to_owned(), Some("A"), false)]);
         assert_eq!(
             changes(&facts, settled),
             [Change::Moved {
@@ -496,10 +478,7 @@ mod tests {
         assert_eq!(settled.removed, Vec::<NotePath>::new());
         assert_eq!(
             put_ids(&settled),
-            [
-                ("z.md".to_owned(), Some("A"), false),
-                ("a.md".to_owned(), None, true),
-            ]
+            [("z.md".to_owned(), Some("A"), false), ("a.md".to_owned(), None, true),]
         );
     }
 

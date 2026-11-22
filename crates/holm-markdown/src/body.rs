@@ -5,8 +5,7 @@ pub(crate) mod link;
 use std::ops::Range;
 
 use pulldown_cmark::{
-    Alignment as CmarkAlignment, BlockQuoteKind, CodeBlockKind, Event, HeadingLevel, Options,
-    Parser, Tag, TagEnd,
+    Alignment as CmarkAlignment, BlockQuoteKind, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd,
 };
 
 pub use link::{Target, escape_text, unescape_text};
@@ -306,9 +305,7 @@ impl Body {
         let mut first = blocks
             .partition_point(|block| block.range.end < old.start)
             .saturating_sub(1);
-        while first > 0
-            && !is_blank_gap(&text[blocks[first - 1].range.end..blocks[first].range.start])
-        {
+        while first > 0 && !is_blank_gap(&text[blocks[first - 1].range.end..blocks[first].range.start]) {
             first -= 1;
         }
         let start = if first == 0 {
@@ -319,8 +316,7 @@ impl Body {
 
         // The first block whose whole line comes after the edit.
         let mut after = blocks.partition_point(|block| block.range.start <= old.end);
-        while after < blocks.len() && line_start(text, moved(blocks[after].range.start)) <= new_end
-        {
+        while after < blocks.len() && line_start(text, moved(blocks[after].range.start)) <= new_end {
             after += 1;
         }
         let (old_stop, stop) = match blocks.get(after + 1) {
@@ -330,9 +326,7 @@ impl Body {
             }
             None => (self.len, text.len()),
         };
-        let defs_after = self
-            .def_ranges
-            .partition_point(|range| range.start < old_stop);
+        let defs_after = self.def_ranges.partition_point(|range| range.start < old_stop);
         if self.def_ranges.partition_point(|range| range.start < start) != defs_after {
             return false;
         }
@@ -497,24 +491,14 @@ impl Moves for Leaf {
 
 /// Puts `new` in place of the items in `range` of a list sorted by start, and moves the items
 /// after them by `to`.
-fn replace<T: Moves>(
-    list: &mut Vec<T>,
-    new: Vec<T>,
-    range: Range<usize>,
-    to: &impl Fn(usize) -> usize,
-) {
+fn replace<T: Moves>(list: &mut Vec<T>, new: Vec<T>, range: Range<usize>, to: &impl Fn(usize) -> usize) {
     let lo = list.partition_point(|item| item.start() < range.start);
     let hi = list.partition_point(|item| item.start() < range.end);
     splice(list, lo..hi, new, to);
 }
 
 /// Puts `new` in place of `list[range]`, and moves the items after them by `to`.
-fn splice<T: Moves>(
-    list: &mut Vec<T>,
-    range: Range<usize>,
-    new: Vec<T>,
-    to: &impl Fn(usize) -> usize,
-) {
+fn splice<T: Moves>(list: &mut Vec<T>, range: Range<usize>, new: Vec<T>, to: &impl Fn(usize) -> usize) {
     let after = range.start + new.len();
     list.splice(range, new);
     for item in &mut list[after..] {
@@ -671,9 +655,7 @@ impl<'a> Walker<'a> {
                     level: heading_level(level),
                 })
             }
-            Tag::BlockQuote(kind) => Some(kind.map_or(BlockKind::Quote, |kind| {
-                BlockKind::Callout(callout_kind(kind))
-            })),
+            Tag::BlockQuote(kind) => Some(kind.map_or(BlockKind::Quote, |kind| BlockKind::Callout(callout_kind(kind)))),
             Tag::CodeBlock(kind) => Some(match kind {
                 CodeBlockKind::Fenced(info) => BlockKind::Code {
                     language: info.split_whitespace().next().map(str::to_owned),
@@ -721,11 +703,7 @@ impl<'a> Walker<'a> {
     }
 
     fn end(&mut self) {
-        if self
-            .leaf
-            .as_ref()
-            .is_some_and(|leaf| leaf.depth == self.frames.len())
-        {
+        if self.leaf.as_ref().is_some_and(|leaf| leaf.depth == self.frames.len()) {
             self.close_leaf();
         }
         let Some(frame) = self.frames.pop() else {
@@ -760,10 +738,7 @@ impl<'a> Walker<'a> {
         if leaf.first < leaf.last {
             self.segments.clear();
             segments(self.text, leaf.first..leaf.last, &mut self.segments);
-            self.parse_leaf(
-                Leaf::new(self.text, &self.segments, leaf.table),
-                leaf.heading,
-            );
+            self.parse_leaf(Leaf::new(self.text, &self.segments, leaf.table), leaf.heading);
         }
     }
 
@@ -879,11 +854,7 @@ impl<'a> Walker<'a> {
                     b'>' => {
                         seen += 1;
                         if seen == want {
-                            let end = if bytes.get(i + 1) == Some(&b' ') {
-                                i + 2
-                            } else {
-                                i + 1
-                            };
+                            let end = if bytes.get(i + 1) == Some(&b' ') { i + 2 } else { i + 1 };
                             self.hide(i..end.min(range.end));
                             break;
                         }
@@ -985,13 +956,7 @@ impl<'a> Walker<'a> {
         }
     }
 
-    fn push_link(
-        &mut self,
-        range: Range<usize>,
-        text: Range<usize>,
-        dest: Destination,
-        embedded: bool,
-    ) {
+    fn push_link(&mut self, range: Range<usize>, text: Range<usize>, dest: Destination, embedded: bool) {
         if let Some(target) = dest.target {
             self.body.links.push(Link {
                 range,
@@ -1015,11 +980,7 @@ impl<'a> Walker<'a> {
     }
 
     fn push_block(&mut self, block: Block) {
-        let frame = self
-            .frames
-            .iter_mut()
-            .rev()
-            .find(|frame| frame.kind.is_some());
+        let frame = self.frames.iter_mut().rev().find(|frame| frame.kind.is_some());
         match frame {
             Some(frame) => frame.children.push(block),
             None => self.body.blocks.push(block),

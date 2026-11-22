@@ -71,18 +71,12 @@ fn the_cursor_stays_on_its_item_below_other_text() {
 
 #[test]
 fn tab_in_the_middle_counts_the_rest_again() {
-    assert_eq!(
-        tab("1. Milk\n2. Eg|gs\n3. Bread"),
-        "1. Milk\n   1. Eg|gs\n2. Bread"
-    );
+    assert_eq!(tab("1. Milk\n2. Eg|gs\n3. Bread"), "1. Milk\n   1. Eg|gs\n2. Bread");
 }
 
 #[test]
 fn tab_joins_the_sub_list_of_the_item_above() {
-    assert_eq!(
-        tab("1. a\n   1. b\n2. |c\n3. d"),
-        "1. a\n   1. b\n   2. |c\n2. d"
-    );
+    assert_eq!(tab("1. a\n   1. b\n2. |c\n3. d"), "1. a\n   1. b\n   2. |c\n2. d");
 }
 
 #[test]
@@ -93,10 +87,7 @@ fn a_moved_item_takes_the_delimiter_of_the_list_it_joins() {
 
 #[test]
 fn shift_tab_takes_the_next_number_of_the_list_above() {
-    assert_eq!(
-        shift_tab("1. a\n   1. b\n   2. |c\n2. d"),
-        "1. a\n   1. b\n2. |c\n3. d"
-    );
+    assert_eq!(shift_tab("1. a\n   1. b\n   2. |c\n2. d"), "1. a\n   1. b\n2. |c\n3. d");
 }
 
 #[test]
@@ -135,10 +126,7 @@ fn numbered_items_under_bullets() {
 #[test]
 fn items_in_a_quote() {
     assert_eq!(tab("> 1. a\n> 2. |b"), "> 1. a\n>    1. |b");
-    assert_eq!(
-        shift_tab("> 1. a\n>    1. |b\n> 2. c"),
-        "> 1. a\n> 2. |b\n> 3. c"
-    );
+    assert_eq!(shift_tab("> 1. a\n>    1. |b\n> 2. c"), "> 1. a\n> 2. |b\n> 3. c");
     assert_eq!(enter("> 1. a|\n> 2. b"), "> 1. a\n> 2. |\n> 3. b");
 }
 
@@ -151,10 +139,7 @@ fn the_cursor_stays_on_its_item_when_the_number_grows() {
 
 #[test]
 fn an_item_moves_with_its_children_and_later_paragraphs() {
-    assert_eq!(
-        tab("- a\n- |b\n  - c\n\n  more"),
-        "- a\n  - |b\n    - c\n\n    more"
-    );
+    assert_eq!(tab("- a\n- |b\n  - c\n\n  more"), "- a\n  - |b\n    - c\n\n    more");
     assert_eq!(
         shift_tab("1. a\n   1. |b\n      - c\n\n      more"),
         "1. a\n2. |b\n   - c\n\n   more"

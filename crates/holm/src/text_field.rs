@@ -18,12 +18,12 @@ use std::ops::Range;
 
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::{
-    App, Bounds, ClipboardItem, ContentMask, Context, Element, ElementId, ElementInputHandler,
-    Entity, EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId,
-    InspectorElementId, InteractiveElement as _, IntoElement, KeyDownEvent, Keystroke, LayoutId,
-    MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement as _, Pixels, Point, Render, Role,
-    ShapedLine, SharedString, StatefulInteractiveElement as _, Style, Styled as _, Subscription,
-    TestSupportExt as _, TextAlign, UTF16Selection, Window, div, fill, point, px, size,
+    App, Bounds, ClipboardItem, ContentMask, Context, Element, ElementId, ElementInputHandler, Entity,
+    EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, InspectorElementId,
+    InteractiveElement as _, IntoElement, KeyDownEvent, Keystroke, LayoutId, MouseButton, MouseDownEvent,
+    MouseMoveEvent, ParentElement as _, Pixels, Point, Render, Role, ShapedLine, SharedString,
+    StatefulInteractiveElement as _, Style, Styled as _, Subscription, TestSupportExt as _, TextAlign, UTF16Selection,
+    Window, div, fill, point, px, size,
 };
 use holm_editor::shortcuts::Command as TextCommand;
 
@@ -143,17 +143,11 @@ impl TextField {
     }
 
     fn previous(&self, at: usize) -> usize {
-        self.text[..at]
-            .char_indices()
-            .next_back()
-            .map_or(0, |(at, _)| at)
+        self.text[..at].char_indices().next_back().map_or(0, |(at, _)| at)
     }
 
     fn next(&self, at: usize) -> usize {
-        self.text[at..]
-            .chars()
-            .next()
-            .map_or(at, |char| at + char.len_utf8())
+        self.text[at..].chars().next().map_or(at, |char| at + char.len_utf8())
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -224,9 +218,7 @@ impl TextField {
             if self.text.is_empty() {
                 0
             } else {
-                shaped
-                    .line
-                    .closest_index_for_x(position.x - shaped.origin.x)
+                shaped.line.closest_index_for_x(position.x - shaped.origin.x)
             }
         })
     }
@@ -294,10 +286,7 @@ impl Render for TextField {
             .on_action(cx.listener(Self::run))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_move(cx.listener(Self::mouse_move))
-            .on_mouse_up(
-                MouseButton::Left,
-                cx.listener(|field, _, _, _| field.selecting = false),
-            )
+            .on_mouse_up(MouseButton::Left, cx.listener(|field, _, _, _| field.selecting = false))
             .child(Line(Source::Field(cx.entity())))
     }
 }
@@ -316,12 +305,7 @@ impl EntityInputHandler for TextField {
         Some(self.text[range].to_owned())
     }
 
-    fn selected_text_range(
-        &mut self,
-        _: bool,
-        _: &mut Window,
-        _: &mut Context<Self>,
-    ) -> Option<UTF16Selection> {
+    fn selected_text_range(&mut self, _: bool, _: &mut Window, _: &mut Context<Self>) -> Option<UTF16Selection> {
         let selection = self.selection();
         Some(UTF16Selection {
             range: self.utf16_offset(selection.start)..self.utf16_offset(selection.end),
@@ -375,10 +359,7 @@ impl EntityInputHandler for TextField {
     ) -> Option<Bounds<Pixels>> {
         let shaped = self.shaped.as_ref()?;
         let range = self.range_from_utf16(&range);
-        Some(shaped.span(
-            shaped.line.x_for_index(range.start),
-            shaped.line.x_for_index(range.end),
-        ))
+        Some(shaped.span(shaped.line.x_for_index(range.start), shaped.line.x_for_index(range.end)))
     }
 
     fn character_index_for_point(
@@ -435,9 +416,7 @@ impl Element for Line {
         let style = window.text_style();
         let (text, color) = match &self.0 {
             Source::Field(field) => match field.read(cx) {
-                field if field.text.is_empty() => {
-                    (field.placeholder.clone(), cx.theme().muted_foreground)
-                }
+                field if field.text.is_empty() => (field.placeholder.clone(), cx.theme().muted_foreground),
                 field => (SharedString::from(field.text.clone()), style.color),
             },
             Source::Text(text) => (text.clone(), style.color),
@@ -446,9 +425,7 @@ impl Element for Line {
         let line_height = window.line_height();
         let mut run = style.to_run(text.len());
         run.color = color;
-        let line = window
-            .text_system()
-            .shape_line(text, font_size, &[run], None);
+        let line = window.text_system().shape_line(text, font_size, &[run], None);
         // The room after the text holds the caret. Rounding up keeps the text in the bounds
         // that the layout rounds to device pixels.
         let scale = window.scale_factor();
@@ -493,14 +470,7 @@ impl Element for Line {
             Source::Text(_) => {
                 shaped
                     .line
-                    .paint(
-                        bounds.origin,
-                        shaped.line_height,
-                        TextAlign::Left,
-                        None,
-                        window,
-                        cx,
-                    )
+                    .paint(bounds.origin, shaped.line_height, TextAlign::Left, None, window, cx)
                     .ok();
                 return;
             }
@@ -527,8 +497,7 @@ impl Element for Line {
         scroll = scroll.min(caret).min(width - view).max(px(0.));
         shaped.origin = bounds.origin - point(scroll, px(0.));
         let x = |at: usize| shaped.line.x_for_index(at);
-        let selected = (!empty && !selection.is_empty())
-            .then(|| shaped.span(x(selection.start), x(selection.end)));
+        let selected = (!empty && !selection.is_empty()).then(|| shaped.span(x(selection.start), x(selection.end)));
         let shaped = shaped.clone();
         entity.update(cx, |field, _| {
             field.scroll = scroll;
@@ -541,14 +510,7 @@ impl Element for Line {
             }
             shaped
                 .line
-                .paint(
-                    shaped.origin,
-                    shaped.line_height,
-                    TextAlign::Left,
-                    None,
-                    window,
-                    cx,
-                )
+                .paint(shaped.origin, shaped.line_height, TextAlign::Left, None, window, cx)
                 .ok();
             if focused && selected.is_none() {
                 window.paint_quad(fill(shaped.span(caret, caret + CARET_WIDTH), caret_color));
@@ -563,16 +525,12 @@ mod tests {
 
     use super::*;
 
-    fn field<'a>(
-        cx: &'a mut TestAppContext,
-        text: &str,
-    ) -> (Entity<TextField>, &'a mut VisualTestContext) {
+    fn field<'a>(cx: &'a mut TestAppContext, text: &str) -> (Entity<TextField>, &'a mut VisualTestContext) {
         cx.update(|cx| {
             gpui_kit::init(cx);
             crate::shortcuts::bind(cx);
         });
-        let (field, cx) =
-            cx.add_window_view(|window, cx| TextField::new("f", "F", text, window, cx));
+        let (field, cx) = cx.add_window_view(|window, cx| TextField::new("f", "F", text, window, cx));
         cx.update(|window, cx| window.focus(&field.focus_handle(cx), cx));
         (field, cx)
     }

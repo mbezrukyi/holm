@@ -57,14 +57,10 @@ impl Open {
         cx: &Context<NotePane>,
         step_fn: impl FnOnce(&mut NotePane, R, &mut Window, &mut Context<NotePane>) + 'static,
     ) -> Then<R> {
-        window_step(
-            window,
-            cx,
-            move |pane: &mut NotePane, result, window, cx| {
-                if pane.opens.current() == self {
-                    step_fn(pane, result, window, cx);
-                }
-            },
-        )
+        window_step(window, cx, move |pane: &mut NotePane, result, window, cx| {
+            if pane.opens.current() == self {
+                step_fn(pane, result, window, cx);
+            }
+        })
     }
 }

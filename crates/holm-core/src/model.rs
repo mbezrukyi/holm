@@ -90,17 +90,11 @@ impl NoteSet<'_> {
     }
 
     /// Whether the set holds the note at `path`. It calls `note` only when the path can't tell.
-    pub(crate) fn holds_at<'n>(
-        self,
-        path: &NotePath,
-        note: impl FnOnce() -> Option<&'n NoteInfo>,
-    ) -> bool {
+    pub(crate) fn holds_at<'n>(self, path: &NotePath, note: impl FnOnce() -> Option<&'n NoteInfo>) -> bool {
         match self {
             Self::All => true,
             Self::In(folder) => path.is_in(folder),
-            Self::WithTag(tag) => {
-                note().is_some_and(|note| note.tags.iter().any(|name| tag.holds(name)))
-            }
+            Self::WithTag(tag) => note().is_some_and(|note| note.tags.iter().any(|name| tag.holds(name))),
         }
     }
 }

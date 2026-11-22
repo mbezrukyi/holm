@@ -20,10 +20,7 @@ use super::{Fixture, autosave, keys, open, press, screen, settle, sidebar, type_
 fn time(what: &str, run: impl FnOnce()) {
     let start = Instant::now();
     run();
-    println!(
-        "{what:>32} {:8.2} ms",
-        start.elapsed().as_secs_f64() * 1000.
-    );
+    println!("{what:>32} {:8.2} ms", start.elapsed().as_secs_f64() * 1000.);
 }
 
 /// Types `key` in the search field and draws the new rows. It prints the time on the UI thread
@@ -52,11 +49,7 @@ fn search_key(cx: &mut TestAppContext, handle: AnyWindowHandle, key: &'static st
         format!("search key {key}, UI thread"),
         ms(total.saturating_sub(background))
     );
-    println!(
-        "{:>32} {:8.2} ms",
-        format!("search key {key}, key to rows"),
-        ms(total)
-    );
+    println!("{:>32} {:8.2} ms", format!("search key {key}, key to rows"), ms(total));
 }
 
 #[gpui_kit::test]
@@ -160,12 +153,7 @@ fn key_until(
 fn pane(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Entity<NotePane> {
     cx.update_window(handle, |root, _, cx| {
         let root = root.downcast::<gpui_kit::base::Root>().unwrap();
-        let holm = root
-            .read(cx)
-            .view()
-            .clone()
-            .downcast::<HolmWindow>()
-            .unwrap();
+        let holm = root.read(cx).view().clone().downcast::<HolmWindow>().unwrap();
         match &holm.read(cx).stage {
             Stage::Open(notes) => notes.read(cx).pane().clone(),
             _ => panic!("the notes folder is not open"),
@@ -184,8 +172,7 @@ fn quick_open(what: &str, cx: &mut TestAppContext, handle: AnyWindowHandle, numb
     }
     let title = format!("Note {number}");
     key_until(what, cx, handle, "enter", move |pane| {
-        pane.shown_note()
-            .is_some_and(|path| path.title() == title.as_str())
+        pane.shown_note().is_some_and(|path| path.title() == title.as_str())
     });
 }
 
@@ -202,13 +189,7 @@ fn window_speed_during_a_tag_rename(cx: &mut TestAppContext) {
     };
     let handle = open(cx, startup);
 
-    key_until(
-        "Ctrl+N, empty line",
-        cx,
-        handle,
-        "ctrl-n",
-        NotePane::shows_new_note,
-    );
+    key_until("Ctrl+N, empty line", cx, handle, "ctrl-n", NotePane::shows_new_note);
     keys(cx, handle, "escape");
     quick_open("open a note, empty line", cx, handle, "4321");
 
@@ -219,13 +200,7 @@ fn window_speed_during_a_tag_rename(cx: &mut TestAppContext) {
     type_new_name(cx, handle, "zone");
     keys(cx, handle, "enter");
     press(cx, handle, "enter");
-    key_until(
-        "Ctrl+N, tag rename",
-        cx,
-        handle,
-        "ctrl-n",
-        NotePane::shows_new_note,
-    );
+    key_until("Ctrl+N, tag rename", cx, handle, "ctrl-n", NotePane::shows_new_note);
     cx.run_until_parked();
     keys(cx, handle, "escape");
 

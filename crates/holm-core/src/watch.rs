@@ -141,13 +141,8 @@ impl Feed {
         let mut batch = Batch::new();
         for path in paths {
             let path = path.as_ref();
-            if !path
-                .components()
-                .all(|part| matches!(part, Component::Normal(_)))
-            {
-                return Err(Error::BadPath {
-                    path: path.to_owned(),
-                });
+            if !path.components().all(|part| matches!(part, Component::Normal(_))) {
+                return Err(Error::BadPath { path: path.to_owned() });
             }
             batch.insert(path.to_owned());
         }

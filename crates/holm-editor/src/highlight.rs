@@ -59,11 +59,11 @@ impl Highlighter {
         let mut hasher = DefaultHasher::new();
         (language, code).hash(&mut hasher);
         let key = hasher.finish();
-        if let Some(entry) = self.cache.get(&key).and_then(|entries| {
-            entries
-                .iter()
-                .find(|e| e.language == language && e.code == code)
-        }) {
+        if let Some(entry) = self
+            .cache
+            .get(&key)
+            .and_then(|entries| entries.iter().find(|e| e.language == language && e.code == code))
+        {
             return entry.tokens.clone();
         }
         if self.len >= CACHE_LIMIT {

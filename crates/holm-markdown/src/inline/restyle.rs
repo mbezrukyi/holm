@@ -217,9 +217,7 @@ impl Format {
             Self::Highlight => delim("===="),
             Self::Code => delim("``"),
             Self::TextColor(color) => color.map(|c| Look::Color(c).default_spelling().pair()),
-            Self::HighlightColor(color) => {
-                color.map(|c| Look::Highlight(Some(c)).default_spelling().pair())
-            }
+            Self::HighlightColor(color) => color.map(|c| Look::Highlight(Some(c)).default_spelling().pair()),
         }
     }
 }
@@ -264,10 +262,7 @@ impl Spelling {
 
     /// The empty pair, and the length of its first half.
     fn pair(&self) -> (String, usize) {
-        (
-            format!("{}{}", self.open(), self.close()),
-            self.open().len(),
-        )
+        (format!("{}{}", self.open(), self.close()), self.open().len())
     }
 
     /// `*` and `_`, or `**` and `__`, swapped.
@@ -351,13 +346,7 @@ impl Piece {
 
 /// Splits `nodes` into pieces. Text splits into words, spaces and other chars, and also at
 /// `cuts`. An escape or an entity is never split.
-fn flatten(
-    joined: &str,
-    nodes: &[Node],
-    cuts: &Range<usize>,
-    marks: &mut Vec<Mark>,
-    out: &mut Vec<Piece>,
-) {
+fn flatten(joined: &str, nodes: &[Node], cuts: &Range<usize>, marks: &mut Vec<Mark>, out: &mut Vec<Piece>) {
     for node in nodes {
         let class = match &node.kind {
             Kind::Text => {
@@ -397,13 +386,7 @@ fn flatten(
     }
 }
 
-fn split_text(
-    joined: &str,
-    range: Range<usize>,
-    cuts: &Range<usize>,
-    marks: &[Mark],
-    out: &mut Vec<Piece>,
-) {
+fn split_text(joined: &str, range: Range<usize>, cuts: &Range<usize>, marks: &[Mark], out: &mut Vec<Piece>) {
     let b = joined.as_bytes();
     let mut start = range.start;
     let mut class = None;
@@ -481,9 +464,7 @@ impl Action {
     fn removes(self, look: Look) -> bool {
         match self {
             Self::Remove(removed) => removed == look,
-            Self::Set(family, color) => {
-                family.has(look) && color.map(|c| family.look(c)) != Some(look)
-            }
+            Self::Set(family, color) => family.has(look) && color.map(|c| family.look(c)) != Some(look),
             _ => false,
         }
     }
@@ -519,11 +500,7 @@ fn pieces_of(joined: &str, nodes: &[Node], selection: &Range<usize>) -> Vec<Piec
     let mut pieces = Vec::new();
     flatten(joined, nodes, selection, &mut Vec::new(), &mut pieces);
     let mut counts: HashMap<Range<usize>, usize> = HashMap::new();
-    for node in pieces
-        .iter()
-        .flat_map(|p| &p.marks)
-        .filter_map(|m| m.node.clone())
-    {
+    for node in pieces.iter().flat_map(|p| &p.marks).filter_map(|m| m.node.clone()) {
         *counts.entry(node).or_default() += 1;
     }
     for mark in pieces.iter_mut().flat_map(|p| &mut p.marks) {
@@ -549,23 +526,14 @@ struct Change {
     leaf: Leaf,
 }
 
-fn change(
-    text: &str,
-    body: &Body,
-    selection: &Range<usize>,
-    format: Format,
-) -> Option<Vec<Change>> {
+fn change(text: &str, body: &Body, selection: &Range<usize>, format: Format) -> Option<Vec<Change>> {
     let leaves = body.leaves();
     let first = leaves.partition_point(|leaf| leaf.range().end < selection.start);
     let works: Vec<Work<'_>> = leaves[first..]
         .iter()
         .take_while(|leaf| leaf.range().start <= selection.end)
         .map(|leaf| Work::new(text, leaf, body.defs(), selection))
-        .filter(|work| {
-            work.pieces
-                .iter()
-                .any(|p| p.selected && !p.class.is_blank())
-        })
+        .filter(|work| work.pieces.iter().any(|p| p.selected && !p.class.is_blank()))
         .collect();
     let selected = || {
         works
@@ -658,12 +626,7 @@ fn write_region(
         p.marks.splice(0..0, outer.iter().cloned());
         p
     }));
-    wanted.extend(
-        work.pieces
-            .iter()
-            .filter(|p| p.src.start >= region.end)
-            .cloned(),
-    );
+    wanted.extend(work.pieces.iter().filter(|p| p.src.start >= region.end).cloned());
     trim_edges(&mut wanted);
     let wanted = flat(&work.joined, &wanted);
     let target = match action {
@@ -708,11 +671,7 @@ fn write_region(
 }
 
 /// The part of the tree to write again: the path to a list of nodes, and a range in it.
-fn region(
-    nodes: &[Node],
-    selection: &Range<usize>,
-    action: Action,
-) -> Option<(Vec<usize>, Range<usize>)> {
+fn region(nodes: &[Node], selection: &Range<usize>, action: Action) -> Option<(Vec<usize>, Range<usize>)> {
     let overlaps = |n: &Node| n.source.start < selection.end && selection.start < n.source.end;
     let mut path = Vec::new();
     let mut list = nodes;
@@ -750,10 +709,7 @@ fn widen(list: &[Node], mut range: Range<usize>) -> Range<usize> {
     while range.start > 0 && Look::of(&list[range.start - 1].kind).is_some() {
         range.start -= 1;
     }
-    while list
-        .get(range.end)
-        .is_some_and(|n| Look::of(&n.kind).is_some())
-    {
+    while list.get(range.end).is_some_and(|n| Look::of(&n.kind).is_some()) {
         range.end += 1;
     }
     if range.start > 0 && list[range.start - 1].kind == Kind::Text {
@@ -785,10 +741,7 @@ fn act(
             }
         }
         Action::RemoveCode => {
-            for piece in pieces
-                .iter_mut()
-                .filter(|p| p.selected && p.class == Class::Code)
-            {
+            for piece in pieces.iter_mut().filter(|p| p.selected && p.class == Class::Code) {
                 let start = at_line_start && piece.src.start == 0;
                 let code = &joined[piece.inner.clone()];
                 piece.text = Some(escape(code, start, table));
@@ -796,17 +749,10 @@ fn act(
             }
         }
         Action::AddCode => {
-            let first = pieces
-                .iter()
-                .position(|p| p.selected && !p.class.is_blank())?;
-            let last = pieces
-                .iter()
-                .rposition(|p| p.selected && !p.class.is_blank())?;
+            let first = pieces.iter().position(|p| p.selected && !p.class.is_blank())?;
+            let last = pieces.iter().rposition(|p| p.selected && !p.class.is_blank())?;
             let part = &pieces[first..=last];
-            if part
-                .iter()
-                .any(|p| matches!(p.class, Class::Link | Class::Break))
-            {
+            if part.iter().any(|p| matches!(p.class, Class::Link | Class::Break)) {
                 return None;
             }
             let mut code = String::new();
@@ -917,10 +863,7 @@ fn escape(code: &str, at_line_start: bool, table: bool) -> String {
 }
 
 fn unescape_but_pipes(text: &str) -> String {
-    text.split("\\|")
-        .map(scan::unescape)
-        .collect::<Vec<_>>()
-        .join("\\|")
+    text.split("\\|").map(scan::unescape).collect::<Vec<_>>().join("\\|")
 }
 
 /// Takes a style off the blank pieces at the ends of each of its runs. A run that is still
@@ -1025,10 +968,7 @@ fn same_looks(a: &[Look], b: &[Look]) -> bool {
 
 /// How a try writes the markers.
 #[derive(Clone, Copy, Debug)]
-#[allow(
-    clippy::struct_excessive_bools,
-    reason = "each bool is one choice of a try"
-)]
+#[allow(clippy::struct_excessive_bools, reason = "each bool is one choice of a try")]
 struct Policy {
     /// The style that may become an HTML tag, or every style when `all_html`.
     html: Option<Look>,
@@ -1055,9 +995,7 @@ impl Policy {
         ] {
             for cut_changed in [true, false] {
                 for reverse in [false, true] {
-                    for (swap_emphasis, swap_strong) in
-                        [(false, false), (true, false), (false, true), (true, true)]
-                    {
+                    for (swap_emphasis, swap_strong) in [(false, false), (true, false), (false, true), (true, true)] {
                         all.push(Self {
                             html,
                             all_html,
@@ -1113,10 +1051,7 @@ impl Writer<'_> {
                 let source = piece.source(self.joined);
                 if self.policy.escape && piece.class == Class::Punct && piece.text.is_none() {
                     escape_markers(source, &mut self.out);
-                } else if self.policy.escape
-                    && piece.class == Class::Html
-                    && html_tag::read(source).is_some()
-                {
+                } else if self.policy.escape && piece.class == Class::Html && html_tag::read(source).is_some() {
                     // A lone Holm tag could pair with a new one.
                     self.out.push('\\');
                     self.out.push_str(source);
@@ -1134,8 +1069,7 @@ impl Writer<'_> {
                 && let Some(cut) = self.crossing(i, end, look, open, b)
             {
                 end = cut;
-                while end > i + 1 && !look.shows_on_space() && self.pieces[end - 1].class.is_blank()
-                {
+                while end > i + 1 && !look.shows_on_space() && self.pieces[end - 1].class.is_blank() {
                     end -= 1;
                 }
             }
@@ -1268,8 +1202,7 @@ fn signed(n: usize) -> isize {
 fn map_in(change: &Change, pos: usize, end: End) -> usize {
     match end {
         End::Start => {
-            let Some((old, new, text)) = change.pieces.iter().find(|(old, _, _)| old.end > pos)
-            else {
+            let Some((old, new, text)) = change.pieces.iter().find(|(old, _, _)| old.end > pos) else {
                 return change.new.len();
             };
             if *text && old.start <= pos {
@@ -1279,12 +1212,7 @@ fn map_in(change: &Change, pos: usize, end: End) -> usize {
             }
         }
         End::End => {
-            let Some((old, new, text)) = change
-                .pieces
-                .iter()
-                .rev()
-                .find(|(old, _, _)| old.start < pos)
-            else {
+            let Some((old, new, text)) = change.pieces.iter().rev().find(|(old, _, _)| old.start < pos) else {
                 return 0;
             };
             if *text && pos <= old.end {
@@ -1319,10 +1247,7 @@ fn join(text: &str, changes: &[Change], selection: Range<usize>) -> Edit {
 
 /// The byte length of the chars that two char sequences share at their start.
 fn common_len(a: impl Iterator<Item = char>, b: impl Iterator<Item = char>) -> usize {
-    a.zip(b)
-        .take_while(|(x, y)| x == y)
-        .map(|(c, _)| c.len_utf8())
-        .sum()
+    a.zip(b).take_while(|(x, y)| x == y).map(|(c, _)| c.len_utf8()).sum()
 }
 
 /// A key with no selection: on the word at `cursor`, or an empty marker pair between words.
@@ -1343,9 +1268,7 @@ fn at_cursor(text: &str, body: &Body, cursor: usize, format: Format) -> Option<E
     let word = if let Some(atom) = inside {
         Some(atom.src.clone())
     } else {
-        let containing = pieces
-            .iter()
-            .position(|p| p.src.start < pos && pos < p.src.end);
+        let containing = pieces.iter().position(|p| p.src.start < pos && pos < p.src.end);
         let left = pieces.iter().rposition(|p| p.src.end <= pos);
         let right = pieces.iter().position(|p| p.src.start >= pos);
         let near = if containing.is_some() {
@@ -1373,11 +1296,7 @@ fn at_cursor(text: &str, body: &Body, cursor: usize, format: Format) -> Option<E
     };
     let range = leaf.to_source(word.start)..leaf.to_source(word.end);
     let changes = change(text, body, &range, format)?;
-    let end = if cursor <= range.start {
-        End::Start
-    } else {
-        End::End
-    };
+    let end = if cursor <= range.start { End::Start } else { End::End };
     let cursor = map(&changes, cursor, end);
     let edit = join(text, &changes, cursor..cursor);
     keeps_blocks(text, body, &edit).then_some(edit)
@@ -1403,7 +1322,6 @@ fn pair(text: &str, body: &Body, cursor: usize, format: Format) -> Option<Edit> 
 fn in_raw_block(blocks: &[crate::Block], cursor: usize) -> bool {
     blocks.iter().any(|block| {
         (block.range.start <= cursor && cursor <= block.range.end)
-            && (matches!(block.kind, BlockKind::Code { .. } | BlockKind::Html)
-                || in_raw_block(&block.children, cursor))
+            && (matches!(block.kind, BlockKind::Code { .. } | BlockKind::Html) || in_raw_block(&block.children, cursor))
     })
 }

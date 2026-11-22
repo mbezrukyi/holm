@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use common::{LINE_HEIGHT, MARGIN, advance, app, column_x, data_folder, open};
 use gpui_kit::{
-    Bounds, ClipboardItem, Entity, EntityInputHandler, Modifiers, MouseButton, MouseDownEvent,
-    MouseUpEvent, Pixels, VisualTestContext, point, px,
+    Bounds, ClipboardItem, Entity, EntityInputHandler, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels,
+    VisualTestContext, point, px,
 };
 use holm_editor::{Changed, Editor, TextWidth, UpFromStart, WritingHelp};
 
@@ -193,10 +193,7 @@ fn the_text_column_fills_a_wide_editor() {
     let (editor, cx) = open(&mut app, &line, width, HEIGHT);
     click(cx, 140.2, LINE_HEIGHT * 0.5);
     cx.simulate_input("X");
-    assert_eq!(
-        text(&editor, cx),
-        format!("{}X{}", "a".repeat(140), "a".repeat(10))
-    );
+    assert_eq!(text(&editor, cx), format!("{}X{}", "a".repeat(140), "a".repeat(10)));
 }
 
 #[test]
@@ -213,10 +210,7 @@ fn a_limited_column_is_centered_and_as_wide_as_its_chars() {
     // The first row holds 30 chars.
     cx.simulate_keystrokes("down");
     cx.simulate_input("X");
-    assert_eq!(
-        text(&editor, cx),
-        format!("{}X{}", "a".repeat(30), "a".repeat(15))
-    );
+    assert_eq!(text(&editor, cx), format!("{}X{}", "a".repeat(30), "a".repeat(15)));
 
     set_width(&editor, cx, TextWidth::Full);
     assert_eq!(text(&editor, cx).find('X'), Some(30));
@@ -236,10 +230,7 @@ fn a_limited_column_shrinks_to_a_narrow_editor() {
     assert_eq!(cursor_x(&editor, cx), Some(MARGIN));
     cx.simulate_keystrokes("down");
     cx.simulate_input("X");
-    assert_eq!(
-        text(&editor, cx),
-        format!("{}X{}", "a".repeat(20), "a".repeat(10))
-    );
+    assert_eq!(text(&editor, cx), format!("{}X{}", "a".repeat(20), "a".repeat(10)));
 }
 
 /// The test image is 64 by 40 pixels, so in a column of 4 chars it gets smaller.
@@ -282,10 +273,7 @@ fn up_and_down_pass_a_wrap_inside_a_word() {
     // Home on the second row stays on that row.
     cx.simulate_keystrokes("backspace down home");
     cx.simulate_input("Z");
-    assert_eq!(
-        text(&editor, cx),
-        format!("{}Z{}\nXend", &word[..20], &word[20..])
-    );
+    assert_eq!(text(&editor, cx), format!("{}Z{}\nXend", &word[..20], &word[20..]));
 }
 
 #[test]
@@ -293,10 +281,7 @@ fn up_and_down_keep_the_column_into_a_line_with_only_an_image() {
     let note = "abcdef\n![x](cat.png)\nabcdef";
     for (keys, expected) in [
         ("right right right down", "abcdef\n![xX](cat.png)\nabcdef"),
-        (
-            "down down right right right up",
-            "abcdef\n![xX](cat.png)\nabcdef",
-        ),
+        ("down down right right right up", "abcdef\n![xX](cat.png)\nabcdef"),
     ] {
         let mut app = app();
         let (editor, cx) = open(&mut app, note, WIDTH, HEIGHT);
@@ -633,21 +618,9 @@ fn a_drag_selects_text() {
     let (editor, cx) = open(&mut app, "one two", WIDTH, HEIGHT);
     let x = advance(cx);
     let y = LINE_HEIGHT * 0.5;
-    cx.simulate_mouse_down(
-        point(MARGIN + x * 1.2, y),
-        MouseButton::Left,
-        Modifiers::none(),
-    );
-    cx.simulate_mouse_move(
-        point(MARGIN + x * 5.2, y),
-        MouseButton::Left,
-        Modifiers::none(),
-    );
-    cx.simulate_mouse_up(
-        point(MARGIN + x * 5.2, y),
-        MouseButton::Left,
-        Modifiers::none(),
-    );
+    cx.simulate_mouse_down(point(MARGIN + x * 1.2, y), MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_move(point(MARGIN + x * 5.2, y), MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_up(point(MARGIN + x * 5.2, y), MouseButton::Left, Modifiers::none());
     cx.simulate_input("X");
     assert_eq!(text(&editor, cx), "oXwo");
 }
@@ -671,26 +644,14 @@ fn a_drag_starts_only_a_few_pixels_from_the_click() {
     let (editor, cx) = open(&mut app, "one two", WIDTH, HEIGHT);
     let x = advance(cx);
     let y = LINE_HEIGHT * 0.5;
-    cx.simulate_mouse_down(
-        point(MARGIN + x * 1.2, y),
-        MouseButton::Left,
-        Modifiers::none(),
-    );
+    cx.simulate_mouse_down(point(MARGIN + x * 1.2, y), MouseButton::Left, Modifiers::none());
     cx.simulate_mouse_move(
         point(MARGIN + x * 1.2 + px(2.), y),
         MouseButton::Left,
         Modifiers::none(),
     );
-    cx.simulate_mouse_move(
-        point(MARGIN + x * 5.2, y),
-        MouseButton::Left,
-        Modifiers::none(),
-    );
-    cx.simulate_mouse_up(
-        point(MARGIN + x * 5.2, y),
-        MouseButton::Left,
-        Modifiers::none(),
-    );
+    cx.simulate_mouse_move(point(MARGIN + x * 5.2, y), MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_up(point(MARGIN + x * 5.2, y), MouseButton::Left, Modifiers::none());
     cx.simulate_input("X");
     assert_eq!(text(&editor, cx), "oXwo");
 }

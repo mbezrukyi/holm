@@ -61,11 +61,7 @@ fn edit() -> impl Strategy<Value = Edit> {
                 tags,
                 pinned
             }),
-        (any::<usize>(), words, tags).prop_map(|(note, words, tags)| Edit::Outside {
-            note,
-            words,
-            tags
-        }),
+        (any::<usize>(), words, tags).prop_map(|(note, words, tags)| Edit::Outside { note, words, tags }),
         any::<usize>().prop_map(|note| Edit::Delete { note }),
         any::<usize>().prop_map(|note| Edit::Copy { note }),
     ]
@@ -93,28 +89,19 @@ fn answers(core: &Core) -> Answers {
         by_title: core.snapshot().notes(NoteSet::All, Order::Title),
         in_folders: ["", "work"]
             .iter()
-            .map(|f| {
-                core.snapshot()
-                    .notes(NoteSet::In(&folder_path(f)), Order::LastChange)
-            })
+            .map(|f| core.snapshot().notes(NoteSet::In(&folder_path(f)), Order::LastChange))
             .collect(),
         tags: core.snapshot().tags(),
         with_tag: ["work", "work/holm", "home", "Work"]
             .iter()
-            .map(|t| {
-                core.snapshot()
-                    .notes(NoteSet::WithTag(&tag_name(t)), Order::LastChange)
-            })
+            .map(|t| core.snapshot().notes(NoteSet::WithTag(&tag_name(t)), Order::LastChange))
             .collect(),
         search: WORDS
             .iter()
             .chain(&["berr", "CAFE"])
             .map(|w| core.search(w, Order::LastChange).unwrap().into_parts().1)
             .collect(),
-        links: paths
-            .iter()
-            .map(|p| core.snapshot().links(p).to_vec())
-            .collect(),
+        links: paths.iter().map(|p| core.snapshot().links(p).to_vec()).collect(),
         backlinks: paths.iter().map(|p| core.snapshot().backlinks(p)).collect(),
         notes,
     }
@@ -132,12 +119,7 @@ fn body(folder: &Folder, words: &[usize], link: usize) -> String {
         if let Some(id) = &target.id {
             write!(body, "[a](holm:{id}) ").unwrap();
         }
-        write!(
-            body,
-            "[b](</{}>)",
-            folder.path("").join(&target.path).display()
-        )
-        .unwrap();
+        write!(body, "[b](</{}>)", folder.path("").join(&target.path).display()).unwrap();
     }
     body.push('\n');
     body
@@ -156,12 +138,7 @@ fn apply(folder: &mut Folder, edit: &Edit, copies: &mut usize) {
     match edit {
         Edit::Create { in_work } => {
             let place = if *in_work { "work" } else { "" };
-            let free = (1..=folder
-                .core
-                .snapshot()
-                .notes(NoteSet::All, Order::Title)
-                .len()
-                + 1)
+            let free = (1..=folder.core.snapshot().notes(NoteSet::All, Order::Title).len() + 1)
                 .map(|n| format!("Note {n}"))
                 .find(|title| !folder.path(place).join(format!("{title}.md")).exists())
                 .unwrap();

@@ -42,9 +42,7 @@ fn examples() -> Vec<Example> {
 }
 
 fn escape(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
+    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
 fn decode(text: &str) -> String {
@@ -67,15 +65,11 @@ fn decode(text: &str) -> String {
                 _ => {
                     let number = name.strip_prefix('#')?;
                     let code = match number.strip_prefix(['x', 'X']) {
-                        Some(hex) if (1..=6).contains(&hex.len()) => {
-                            u32::from_str_radix(hex, 16).ok()?
-                        }
+                        Some(hex) if (1..=6).contains(&hex.len()) => u32::from_str_radix(hex, 16).ok()?,
                         None if (1..=7).contains(&number.len()) => number.parse().ok()?,
                         _ => return None,
                     };
-                    char::from_u32(code)
-                        .filter(|&c| c != '\0')
-                        .unwrap_or('\u{fffd}')
+                    char::from_u32(code).filter(|&c| c != '\0').unwrap_or('\u{fffd}')
                 }
             };
             Some((c, end + 1))
@@ -118,11 +112,7 @@ fn text_html(source: &str) -> String {
         .enumerate()
         .map(|(i, line)| {
             let line = if i > 0 { line.trim_start() } else { line };
-            if i < last {
-                line.trim_end_matches(' ')
-            } else {
-                line
-            }
+            if i < last { line.trim_end_matches(' ') } else { line }
         })
         .collect();
     escape(&decode(&unescape(&lines.join("\n")))).replace('\u{1}', "&amp;")
@@ -203,9 +193,10 @@ fn html(text: &str) -> Option<String> {
             BlockKind::Heading { level } => format!("h{level}"),
             _ => return None,
         };
-        let leaf = body.leaves().iter().find(|leaf| {
-            block.range.start <= leaf.range().start && leaf.range().end <= block.range.end
-        });
+        let leaf = body
+            .leaves()
+            .iter()
+            .find(|leaf| block.range.start <= leaf.range().start && leaf.range().end <= block.range.end);
         let _ = write!(out, "<{tag}>");
         if let Some(leaf) = leaf {
             render(text, &body.inline(text, leaf), &mut out);
@@ -263,11 +254,6 @@ fn inline_examples_of_the_spec() {
             ));
         }
     }
-    assert!(
-        failed.is_empty(),
-        "{} failed:\n\n{}",
-        failed.len(),
-        failed.join("\n")
-    );
+    assert!(failed.is_empty(), "{} failed:\n\n{}", failed.len(), failed.join("\n"));
     assert!(checked > 280, "only {checked} examples checked");
 }

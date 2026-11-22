@@ -10,10 +10,9 @@ use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::{
-    App, Context, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement as _,
-    IntoElement, ParentElement, Pixels, Render, Role, ScrollHandle,
-    StatefulInteractiveElement as _, Styled, TestSupportExt as _, Window, div, point, px,
-    transparent_black,
+    App, Context, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement as _, IntoElement,
+    ParentElement, Pixels, Render, Role, ScrollHandle, StatefulInteractiveElement as _, Styled, TestSupportExt as _,
+    Window, div, point, px, transparent_black,
 };
 
 use holm_editor::shortcuts as editor;
@@ -22,10 +21,7 @@ use crate::shortcuts::{self, Command, Group, Place, Run, Shortcut};
 use crate::{popup, text};
 
 /// The groups of each column.
-const COLUMNS: [&[Group]; 2] = [
-    &[Group::Text],
-    &[Group::Note, Group::Sidebar, Group::Window],
-];
+const COLUMNS: [&[Group]; 2] = [&[Group::Text], &[Group::Note, Group::Sidebar, Group::Window]];
 
 /// The most height of the rows. A longer list scrolls.
 const LIST_HEIGHT: Pixels = px(560.);
@@ -59,9 +55,7 @@ fn title(group: Group) -> &'static str {
 /// text input have none.
 fn heading(place: Place) -> Option<&'static str> {
     match place {
-        Place::Window
-        | Place::Note
-        | Place::Editor(editor::Place::Text | editor::Place::Editor) => None,
+        Place::Window | Place::Note | Place::Editor(editor::Place::Text | editor::Place::Editor) => None,
         Place::Anywhere => Some(text::ANYWHERE),
         Place::Sidebar => Some(text::IN_SIDEBAR),
         Place::Tree => Some(text::IN_TREE),
@@ -254,14 +248,12 @@ impl Render for ShortcutList {
             .test_support()
             .key_context(Place::ShortcutList.key_context())
             .track_focus(&self.focus)
-            .on_action(
-                cx.listener(|list, Run(command): &Run, _, cx| match command {
-                    Command::Close => cx.emit(Close),
-                    Command::Next => list.scroll_by(true, cx),
-                    Command::Previous => list.scroll_by(false, cx),
-                    _ => cx.propagate(),
-                }),
-            )
+            .on_action(cx.listener(|list, Run(command): &Run, _, cx| match command {
+                Command::Close => cx.emit(Close),
+                Command::Next => list.scroll_by(true, cx),
+                Command::Previous => list.scroll_by(false, cx),
+                _ => cx.propagate(),
+            }))
             .child(panel)
     }
 }

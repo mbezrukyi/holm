@@ -36,9 +36,7 @@ use std::time::Duration;
 
 use futures_channel::oneshot;
 use gpui_kit::{App, AppContext as _, Context, EventEmitter, Subscription, Task, Window};
-use holm_core::model::{
-    Change, ChangeList, DeleteCount, LinkTarget, Note, Order, SearchResults, Source,
-};
+use holm_core::model::{Change, ChangeList, DeleteCount, LinkTarget, Note, Order, SearchResults, Source};
 use holm_core::{Core, FolderPath, NotePath, Snapshot, TagName};
 use holm_editor::PastedFile;
 
@@ -67,9 +65,7 @@ impl DoorEvent {
 
     /// Every change with its source, in order.
     pub(crate) fn sourced(&self) -> impl Iterator<Item = (Source, &Change)> {
-        self.changes
-            .iter()
-            .map(|(source, change)| (*source, change))
+        self.changes.iter().map(|(source, change)| (*source, change))
     }
 
     /// Whether the snapshot stayed the same.
@@ -145,13 +141,7 @@ impl CoreDoor {
     /// The door to the notes folder at `root`, which `core` opened. A call waits up to `budget`
     /// for its job. The write line drains when `window` closes, when the app quits, or when the
     /// entity goes.
-    pub(crate) fn new(
-        core: Core,
-        root: PathBuf,
-        budget: Duration,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    pub(crate) fn new(core: Core, root: PathBuf, budget: Duration, window: &Window, cx: &mut Context<Self>) -> Self {
         cx.on_release(|door, _| door.drain()).detach();
         // The platform window can keep views alive after a close, and with them this entity.
         let window = window.window_handle().window_id();
@@ -259,11 +249,7 @@ impl CoreDoor {
     ) {
         self.push_draft();
         let end: End = Box::new(move |door, cx| {
-            let saved = if door.draft.kept_back() {
-                Err(NotSaved)
-            } else {
-                Ok(())
-            };
+            let saved = if door.draft.kept_back() { Err(NotSaved) } else { Ok(()) };
             cx.defer(move |cx| done(saved, cx));
         });
         let number = self.write_line.push(Box::new(|_| None), end);
@@ -277,12 +263,7 @@ impl CoreDoor {
 
     /// Reads the note at `path` to replace its editor text. The text drops now with no write,
     /// and comes back with its hold when the read fails.
-    pub(crate) fn read_and_drop_text(
-        &mut self,
-        path: NotePath,
-        done: Done<Note>,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn read_and_drop_text(&mut self, path: NotePath, done: Done<Note>, cx: &mut Context<Self>) {
         let text = self.draft.drop_for_read(&path);
         self.own_job(
             move |core| core.read(&path),
@@ -302,13 +283,7 @@ impl CoreDoor {
     }
 
     /// Gives the note at `path` a new title, and gives its new path.
-    pub(crate) fn rename_note(
-        &mut self,
-        path: NotePath,
-        title: String,
-        done: Done<NotePath>,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn rename_note(&mut self, path: NotePath, title: String, done: Done<NotePath>, cx: &mut Context<Self>) {
         self.job(
             move |core| core.rename_note(&path, &title).map(|info| info.path),
             done,
@@ -317,13 +292,7 @@ impl CoreDoor {
     }
 
     /// Adds or removes one tag of the note at `path`.
-    pub(crate) fn change_tag(
-        &mut self,
-        path: NotePath,
-        change: TagChange,
-        done: Done<()>,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn change_tag(&mut self, path: NotePath, change: TagChange, done: Done<()>, cx: &mut Context<Self>) {
         self.job(
             move |core| {
                 match change {
@@ -338,18 +307,8 @@ impl CoreDoor {
     }
 
     /// Pins or unpins the note at `path`.
-    pub(crate) fn set_pinned(
-        &mut self,
-        path: NotePath,
-        pinned: bool,
-        done: Done<()>,
-        cx: &mut Context<Self>,
-    ) {
-        self.job(
-            move |core| core.set_pinned(&path, pinned).map(drop),
-            done,
-            cx,
-        );
+    pub(crate) fn set_pinned(&mut self, path: NotePath, pinned: bool, done: Done<()>, cx: &mut Context<Self>) {
+        self.job(move |core| core.set_pinned(&path, pinned).map(drop), done, cx);
     }
 
     /// Creates the note `title` in `folder`, with `tag` when it has one, and gives the note.
@@ -397,11 +356,7 @@ impl CoreDoor {
 
     /// The id of the note at `path`, for a link. A note with no id gets one.
     pub(crate) fn link_id(&mut self, path: NotePath, done: Done<String>, cx: &mut Context<Self>) {
-        self.job(
-            move |core| core.link_id(&path).map(|id| id.to_string()),
-            done,
-            cx,
-        );
+        self.job(move |core| core.link_id(&path).map(|id| id.to_string()), done, cx);
     }
 
     pub(crate) fn move_note(
@@ -452,43 +407,22 @@ impl CoreDoor {
         self.job(move |core| core.delete_note(&path), done, cx);
     }
 
-    pub(crate) fn delete_folder(
-        &mut self,
-        path: FolderPath,
-        done: Done<()>,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn delete_folder(&mut self, path: FolderPath, done: Done<()>, cx: &mut Context<Self>) {
         self.job(move |core| core.delete_folder(&path), done, cx);
     }
 
     /// What a delete of the note at `path` removes, after the writes before it.
-    pub(crate) fn note_delete_count(
-        &mut self,
-        path: NotePath,
-        done: Done<DeleteCount>,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn note_delete_count(&mut self, path: NotePath, done: Done<DeleteCount>, cx: &mut Context<Self>) {
         self.job(move |core| Ok(core.note_delete_count(&path)), done, cx);
     }
 
     /// What a delete of the folder at `path` removes, after the writes before it.
-    pub(crate) fn folder_delete_count(
-        &mut self,
-        path: FolderPath,
-        done: Done<DeleteCount>,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn folder_delete_count(&mut self, path: FolderPath, done: Done<DeleteCount>, cx: &mut Context<Self>) {
         self.job(move |core| Ok(core.folder_delete_count(&path)), done, cx);
     }
 
     /// Renames a tag in all notes, and gives the number of changed notes.
-    pub(crate) fn rename_tag(
-        &mut self,
-        from: TagName,
-        to: TagName,
-        done: Done<usize>,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn rename_tag(&mut self, from: TagName, to: TagName, done: Done<usize>, cx: &mut Context<Self>) {
         self.job(move |core| core.rename_tag(&from, &to), done, cx);
     }
 
@@ -518,12 +452,7 @@ impl CoreDoor {
     }
 
     /// The number of notes that a tag delete changes, after the writes before it.
-    pub(crate) fn tag_delete_count(
-        &mut self,
-        tag: TagName,
-        done: Done<usize>,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn tag_delete_count(&mut self, tag: TagName, done: Done<usize>, cx: &mut Context<Self>) {
         self.job(move |core| Ok(core.tag_delete_count(&tag)), done, cx);
     }
 
@@ -542,9 +471,7 @@ impl CoreDoor {
                     .iter()
                     .map(|file| match file {
                         PastedFile::Path(path) => core.attach_file(&note, path),
-                        PastedFile::Image { extension, bytes } => {
-                            core.paste_image(&note, extension, bytes)
-                        }
+                        PastedFile::Image { extension, bytes } => core.paste_image(&note, extension, bytes),
                     })
                     .collect::<Vec<_>>())
             },
@@ -565,45 +492,29 @@ impl CoreDoor {
         cx: &mut Context<Self>,
     ) -> Task<Vec<Option<PathBuf>>> {
         let job = self.look(
-            move |core| {
-                files
-                    .iter()
-                    .map(|file| core.file_link(&note, file))
-                    .collect()
-            },
+            move |core| files.iter().map(|file| core.file_link(&note, file)).collect(),
             cx,
         );
         cx.spawn(async move |door, cx| {
             let links = job.await;
-            door.update(cx, |_, cx| each_answered(links, cx))
-                .unwrap_or_default()
+            door.update(cx, |_, cx| each_answered(links, cx)).unwrap_or_default()
         })
     }
 
     /// The notes that match `query`, in `order`. It does not wait for the line. A failed
     /// search gives `None`.
-    pub(crate) fn search(
-        &self,
-        query: String,
-        order: Order,
-        cx: &mut Context<Self>,
-    ) -> Task<Option<SearchResults>> {
+    pub(crate) fn search(&self, query: String, order: Order, cx: &mut Context<Self>) -> Task<Option<SearchResults>> {
         let job = self.look(move |core| core.search(&query, order), cx);
         cx.spawn(async move |door, cx| {
             let found = job.await;
-            door.update(cx, |_, cx| answered(found, cx).ok())
-                .ok()
-                .flatten()
+            door.update(cx, |_, cx| answered(found, cx).ok()).ok().flatten()
         })
     }
 
     /// The headings of the note at `path`. It does not wait for the line. After a failure, it
     /// gives none.
     pub(crate) fn headings(&self, path: NotePath, cx: &App) -> Task<Vec<String>> {
-        self.look(
-            move |core| logged(core.headings(&path), "cannot read the headings"),
-            cx,
-        )
+        self.look(move |core| logged(core.headings(&path), "cannot read the headings"), cx)
     }
 
     /// The note links in the note at `path` whose note or heading is gone. It does not wait
@@ -707,11 +618,7 @@ impl CoreDoor {
     }
 
     /// Runs a read that needs no order, off the UI thread.
-    fn look<T: Send + 'static>(
-        &self,
-        job: impl FnOnce(&Core) -> T + Send + 'static,
-        cx: &App,
-    ) -> Task<T> {
+    fn look<T: Send + 'static>(&self, job: impl FnOnce(&Core) -> T + Send + 'static, cx: &App) -> Task<T> {
         let core = self.core.clone();
         cx.background_spawn(async move { job(&core) })
     }
@@ -842,14 +749,8 @@ fn give<T: 'static>(result: holm_core::Result<T>, done: Done<T>, cx: &mut Contex
 }
 
 /// The value of each result, or `None` after its failure went to [`answered`].
-fn each_answered<T>(
-    results: Vec<holm_core::Result<T>>,
-    cx: &mut Context<CoreDoor>,
-) -> Vec<Option<T>> {
-    results
-        .into_iter()
-        .map(|result| answered(result, cx).ok())
-        .collect()
+fn each_answered<T>(results: Vec<holm_core::Result<T>>, cx: &mut Context<CoreDoor>) -> Vec<Option<T>> {
+    results.into_iter().map(|result| answered(result, cx).ok()).collect()
 }
 
 /// Opens the core and gives the note to show first, if any. `create` makes the folder first.
@@ -871,11 +772,7 @@ pub(crate) fn open(
 
 /// The note to open first: the last open note when it still exists, else the first note in
 /// `order`. With no notes, it is `None`.
-fn first_note(
-    core: &Core,
-    last: Option<&NotePath>,
-    order: Order,
-) -> holm_core::Result<Option<Note>> {
+fn first_note(core: &Core, last: Option<&NotePath>, order: Order) -> holm_core::Result<Option<Note>> {
     let snapshot = core.snapshot();
     snapshot
         .note_or_first(last, order)
@@ -939,9 +836,8 @@ mod tests {
 
         assert_eq!(*steps.borrow(), ["after the folder"]);
         assert!(dir.path().join("notes/B").is_dir());
-        let folders: Vec<FolderPath> = core_door.read_with(cx, |core_door, _| {
-            core_door.snapshot().folders().cloned().collect()
-        });
+        let folders: Vec<FolderPath> =
+            core_door.read_with(cx, |core_door, _| core_door.snapshot().folders().cloned().collect());
         assert_eq!(folders, [folder_path("B")]);
     }
 
@@ -1069,10 +965,7 @@ mod tests {
         core_door.update(cx, |core_door, cx| read(core_door, cx));
         cx.run_until_parked();
 
-        assert_eq!(
-            *bodies.borrow(),
-            ["# A\n\nnew\n", "# A\n\nnew\n", "# A\n\nlater\n"]
-        );
+        assert_eq!(*bodies.borrow(), ["# A\n\nnew\n", "# A\n\nnew\n", "# A\n\nlater\n"]);
     }
 
     #[gpui_kit::test]
@@ -1107,10 +1000,7 @@ mod tests {
         let wait = |cx: &mut TestAppContext| {
             let steps = steps.clone();
             core_door.update(cx, |core_door, cx| {
-                core_door.wait_saved(
-                    move |saved, _| steps.borrow_mut().push(format!("wait {saved:?}")),
-                    cx,
-                );
+                core_door.wait_saved(move |saved, _| steps.borrow_mut().push(format!("wait {saved:?}")), cx);
             });
             cx.run_until_parked();
         };

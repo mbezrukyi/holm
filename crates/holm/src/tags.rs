@@ -31,10 +31,9 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Action, AnyElement, App, AppContext as _, Context, CursorStyle, ElementId, Entity,
-    EventEmitter, FocusHandle, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels,
-    Render, Role, StatefulInteractiveElement, Styled, Subscription, TestSupportExt as _, Toggled,
-    Window, div, px,
+    Action, AnyElement, App, AppContext as _, Context, CursorStyle, ElementId, Entity, EventEmitter, FocusHandle,
+    InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Render, Role, StatefulInteractiveElement,
+    Styled, Subscription, TestSupportExt as _, Toggled, Window, div, px,
 };
 use holm_core::model::Tag;
 use holm_core::{NotePath, TagName};
@@ -166,8 +165,7 @@ impl TagRow {
         self.input.update(cx, |input, cx| input.focus(window, cx));
         let tags = self.core_door.read(cx).snapshot().tags();
         self.known.clear();
-        self.known
-            .extend(Tag::walk(&tags).map(|tag| tag.name.clone()));
+        self.known.extend(Tag::walk(&tags).map(|tag| tag.name.clone()));
         cx.notify();
     }
 
@@ -181,8 +179,7 @@ impl TagRow {
     fn clear(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.query.clear();
         self.cursor = None;
-        self.input
-            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.input.update(cx, |input, cx| input.set_value("", window, cx));
     }
 
     fn typed(&self) -> &str {
@@ -192,21 +189,13 @@ impl TagRow {
     /// The lines of the list, from the typed text.
     fn lines(&self) -> Vec<Line> {
         let typed = self.typed();
-        let line = |name: &TagName, on| Line::Tag {
-            name: name.clone(),
-            on,
-        };
+        let line = |name: &TagName, on| Line::Tag { name: name.clone(), on };
         if typed.is_empty() {
             return self.tags.iter().map(|name| line(name, true)).collect();
         }
         let typed_lower = Lowercase::new(typed);
         let matches = |name: &&TagName| Lowercase::new(name.as_str()).holds(&typed_lower);
-        let mut lines: Vec<Line> = self
-            .tags
-            .iter()
-            .filter(matches)
-            .map(|name| line(name, true))
-            .collect();
+        let mut lines: Vec<Line> = self.tags.iter().filter(matches).map(|name| line(name, true)).collect();
         lines.extend(
             self.known
                 .iter()
@@ -297,8 +286,7 @@ impl TagRow {
                 .hover(move |chip| chip.bg(hover))
                 .child(format!("+{}", folded.len()))
                 .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                    row.update(cx, |row, cx| row.open_at(Some(first), window, cx))
-                        .ok();
+                    row.update(cx, |row, cx| row.open_at(Some(first), window, cx)).ok();
                     // The row and the editor would take the focus after this.
                     window.prevent_default();
                 })
@@ -364,45 +352,31 @@ impl TagRow {
                 ),
                 Line::Add(name) => (text::add_tag_line(&name), "+", None),
             };
-            popup::option(
-                ElementId::NamedInteger("tag-option".into(), at as u64),
-                current,
-                cx,
-            )
-            .aria_label(label.clone())
-            .when_some(toggled, StatefulInteractiveElement::aria_toggled)
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(
-                div()
-                    .w(px(12.))
-                    .flex_none()
-                    .text_color(theme.primary)
-                    .child(mark),
-            )
-            .child(div().flex_1().min_w_0().truncate().child(label))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |row, _, window, cx| {
-                    row.cursor = Some(at);
-                    row.choose(window, cx);
-                }),
-            )
-            .test_support()
+            popup::option(ElementId::NamedInteger("tag-option".into(), at as u64), current, cx)
+                .aria_label(label.clone())
+                .when_some(toggled, StatefulInteractiveElement::aria_toggled)
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(div().w(px(12.)).flex_none().text_color(theme.primary).child(mark))
+                .child(div().flex_1().min_w_0().truncate().child(label))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |row, _, window, cx| {
+                        row.cursor = Some(at);
+                        row.choose(window, cx);
+                    }),
+                )
+                .test_support()
         });
         Some(
-            v_flex()
-                .border_t_1()
-                .border_color(theme.border)
-                .children(label)
-                .child(
-                    popup::options()
-                        .id("tag-options")
-                        .role(Role::ListBox)
-                        .children(rows)
-                        .test_support(),
-                ),
+            v_flex().border_t_1().border_color(theme.border).children(label).child(
+                popup::options()
+                    .id("tag-options")
+                    .role(Role::ListBox)
+                    .children(rows)
+                    .test_support(),
+            ),
         )
     }
 
@@ -462,11 +436,7 @@ fn chip(at: usize, tag: &TagName, cx: &App) -> impl InteractiveElement + IntoEle
 }
 
 /// The tag row of a note with no file yet: its tag, and `title` at the right end.
-pub(crate) fn new_note_row(
-    tag: Option<&TagName>,
-    title: AnyElement,
-    cx: &App,
-) -> impl IntoElement + use<> {
+pub(crate) fn new_note_row(tag: Option<&TagName>, title: AnyElement, cx: &App) -> impl IntoElement + use<> {
     let chips = tag.map(|tag| chip(0, tag, cx).into_any_element());
     frame()
         .font_family(cx.theme().font_family.clone())
@@ -511,8 +481,7 @@ impl Render for TagRow {
             })
             // A click between the parts must not open the tag popup.
             .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default());
-        let lead = (pin.is_some() || add.is_some())
-            .then(|| h_flex().gap(px(6.)).children(pin).children(add));
+        let lead = (pin.is_some() || add.is_some()).then(|| h_flex().gap(px(6.)).children(pin).children(add));
         let row = frame()
             .on_mouse_down(
                 MouseButton::Left,

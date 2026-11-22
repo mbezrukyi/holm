@@ -49,10 +49,7 @@ impl Fixture {
 
     fn tell(&self, cx: &mut TestAppContext, note: &str) {
         let feed = self.feed.lock().unwrap();
-        feed.as_ref()
-            .expect("the core is open")
-            .changed([note])
-            .unwrap();
+        feed.as_ref().expect("the core is open").changed([note]).unwrap();
         drop(feed);
         settle(cx);
     }
@@ -129,17 +126,12 @@ fn autosave(cx: &mut TestAppContext) {
 }
 
 fn click(cx: &mut TestAppContext, handle: AnyWindowHandle, id: &'static str) {
-    cx.update_window(handle, |_, window, cx| window.click(id, cx))
-        .unwrap();
+    cx.update_window(handle, |_, window, cx| window.click(id, cx)).unwrap();
     cx.run_until_parked();
 }
 
 /// Draws a frame and reads the screen with `read`.
-fn screen<R>(
-    cx: &mut TestAppContext,
-    handle: AnyWindowHandle,
-    read: impl FnOnce(&mut Window) -> R,
-) -> R {
+fn screen<R>(cx: &mut TestAppContext, handle: AnyWindowHandle, read: impl FnOnce(&mut Window) -> R) -> R {
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
         read(window)
@@ -216,9 +208,7 @@ fn state_reason(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<Stri
 
 fn label(cx: &mut TestAppContext, handle: AnyWindowHandle, id: &'static str) -> Option<String> {
     screen(cx, handle, |window| {
-        window
-            .try_find(id)
-            .and_then(|part| part.label().map(str::to_owned))
+        window.try_find(id).and_then(|part| part.label().map(str::to_owned))
     })
 }
 
@@ -307,10 +297,7 @@ fn typing_saves_the_note_with_its_line_breaks(cx: &mut TestAppContext) {
 
     cx.simulate_input(handle, "zero ");
     settle(cx);
-    assert!(
-        !read(&note).contains("zero"),
-        "the autosave waits for a pause"
-    );
+    assert!(!read(&note).contains("zero"), "the autosave waits for a pause");
     autosave(cx);
 
     assert_eq!(read(&note), "---\nid: 01A\n---\r\nzero one\r\ntwo\r\n");
@@ -397,10 +384,7 @@ fn an_outside_change_with_unsaved_text_asks_to_reload_or_keep_mine(cx: &mut Test
     // The open menu takes every key, and Esc closes only the menu.
     keys(cx, handle, "ctrl-shift-d");
     assert_eq!(state_menu(cx, handle), ["Keep mine*", "Reload"]);
-    assert_eq!(
-        state_reason(cx, handle).as_deref(),
-        Some(text::CHANGED_REASON)
-    );
+    assert_eq!(state_reason(cx, handle).as_deref(), Some(text::CHANGED_REASON));
     let text = editor_text(cx, handle);
     keys(cx, handle, "x backspace");
     assert_eq!(editor_text(cx, handle), text);
@@ -544,10 +528,7 @@ fn a_broken_config_is_a_problem_in_the_message_line(cx: &mut TestAppContext) {
 
     // Ctrl+Shift+E works on the folder screen too.
     keys(cx, handle, "ctrl-shift-e");
-    assert_eq!(
-        problem_list(cx, handle),
-        [format!("{}*", text::CONFIG_WRITE)]
-    );
+    assert_eq!(problem_list(cx, handle), [format!("{}*", text::CONFIG_WRITE)]);
     keys(cx, handle, "tab");
     assert_eq!(
         problem_list(cx, handle),
@@ -578,11 +559,7 @@ fn the_message_line_does_not_move_the_folder_question(cx: &mut TestAppContext) {
     let with = bounds_of(cx, handle, "folder-question").unwrap();
     let line = bounds_of(cx, handle, "message-line").unwrap();
     let screen = bounds_of(cx, handle, "folder-screen").unwrap();
-    assert_eq!(
-        line.bottom(),
-        screen.bottom(),
-        "the line lies over the screen"
-    );
+    assert_eq!(line.bottom(), screen.bottom(), "the line lies over the screen");
 
     keys(cx, handle, "escape");
     assert_eq!(message(cx, handle), None);
@@ -597,10 +574,7 @@ fn an_answer_shows_under_the_note_until_the_next_key(cx: &mut TestAppContext) {
     let handle = open(cx, fixture.startup(Some(log.clone())));
     assert_eq!(message(cx, handle), Some(text::crashed(&log).to_string()));
     let (line, editor) = screen(cx, handle, |window| {
-        (
-            window.find("message-line").bounds(),
-            window.find("editor").bounds(),
-        )
+        (window.find("message-line").bounds(), window.find("editor").bounds())
     });
     assert!(line.top() >= editor.bottom(), "the line is under the note");
 
@@ -640,11 +614,7 @@ fn a_failed_save_shows_not_saved_until_a_save_works(cx: &mut TestAppContext) {
     keys(cx, handle, "ctrl-shift-d");
     assert_eq!(state_reason(cx, handle).as_deref(), Some(text::WRITE));
     assert_eq!(message(cx, handle), None);
-    assert_eq!(
-        editor_text(cx, handle),
-        "aobld\n",
-        "Ctrl+Shift+D types nothing"
-    );
+    assert_eq!(editor_text(cx, handle), "aobld\n", "Ctrl+Shift+D types nothing");
 
     // A disk question wins over "Not saved", and its state closes the menu.
     fixture.write_outside(cx, "Note.md", "theirs\n");
@@ -660,8 +630,7 @@ fn a_failed_save_shows_not_saved_until_a_save_works(cx: &mut TestAppContext) {
 /// Asks to close the window, as the title bar does, and gives whether it is still open.
 fn close(cx: &mut TestAppContext, handle: AnyWindowHandle) -> bool {
     if VisualTestContext::from_window(handle, cx).simulate_close() {
-        cx.update_window(handle, |_, window, _| window.remove_window())
-            .unwrap();
+        cx.update_window(handle, |_, window, _| window.remove_window()).unwrap();
     }
     cx.run_until_parked();
     cx.update_window(handle, |_, _, _| ()).is_ok()
@@ -780,10 +749,7 @@ fn each_sidebar_action_sees_the_typed_text(cx: &mut TestAppContext) {
     keys_now(cx, handle, "f2 ctrl-a");
     cx.simulate_input(handle, "job");
     keys_now(cx, handle, "enter");
-    assert!(
-        read(&note).ends_with(" three\n"),
-        "the count of a tag rename"
-    );
+    assert!(read(&note).ends_with(" three\n"), "the count of a tag rename");
     keys_now(cx, handle, "enter");
     assert_eq!(fields(&note).0, ["job"]);
 
@@ -810,10 +776,7 @@ fn each_sidebar_action_sees_the_typed_text(cx: &mut TestAppContext) {
     keys_now(cx, handle, "ctrl-shift-l escape tab tab");
     assert_eq!(sidebar(cx, handle), "tree #job");
     keys_now(cx, handle, "delete");
-    assert!(
-        read(&note).ends_with(" five\n"),
-        "the count of a tag delete"
-    );
+    assert!(read(&note).ends_with(" five\n"), "the count of a tag delete");
     keys_now(cx, handle, "enter");
     assert_eq!(fields(&note).0, Vec::<String>::new());
 }
@@ -1085,11 +1048,7 @@ fn the_delete_dialog_counts_and_deletes(cx: &mut TestAppContext) {
     assert!(!Config::load(fixture.config()).settings().ask_before_delete);
 
     keys(cx, handle, "delete");
-    assert_eq!(
-        question(cx, handle),
-        None,
-        "no dialog after Do not show again"
-    );
+    assert_eq!(question(cx, handle), None, "no dialog after Do not show again");
     assert!(!notes_dir.join("B.md").exists());
     assert!(empty_pane(cx, handle));
     assert_eq!(files(&notes_dir), ["attachments"]);
@@ -1310,11 +1269,7 @@ fn tab_moves_through_the_tree_and_wraps_and_space_opens_a_folder(cx: &mut TestAp
     keys(cx, handle, "tab");
     assert_eq!(tree(cx, handle), ["All notes*", "area"], "Tab wraps");
     keys(cx, handle, "down right");
-    assert_eq!(
-        tree(cx, handle),
-        ["All notes*", "area"],
-        "an arrow does nothing"
-    );
+    assert_eq!(tree(cx, handle), ["All notes*", "area"], "an arrow does nothing");
 
     keys(cx, handle, "tab space");
     assert_eq!(tree(cx, handle), ["All notes", "area*", "area/work"]);
@@ -1344,17 +1299,9 @@ fn tab_in_the_note_list_opens_each_note_and_wraps(cx: &mut TestAppContext) {
     assert_eq!(notes_list(cx, handle), ["Plan", "Goals*", "Top"]);
     assert_eq!(editor_text(cx, handle), "# Goals\nread more\n");
     keys(cx, handle, "tab tab");
-    assert_eq!(
-        notes_list(cx, handle),
-        ["Plan*", "Goals", "Top"],
-        "Tab wraps"
-    );
+    assert_eq!(notes_list(cx, handle), ["Plan*", "Goals", "Top"], "Tab wraps");
     keys(cx, handle, "shift-tab");
-    assert_eq!(
-        notes_list(cx, handle),
-        ["Plan", "Goals", "Top*"],
-        "Shift+Tab wraps"
-    );
+    assert_eq!(notes_list(cx, handle), ["Plan", "Goals", "Top*"], "Shift+Tab wraps");
     assert_eq!(editor_text(cx, handle), "# Top\n");
     keys(cx, handle, "up down");
     assert_eq!(
@@ -1389,10 +1336,7 @@ fn the_tag_popup_adds_and_removes_tags_and_pins(cx: &mut TestAppContext) {
     assert_eq!(options(cx, handle), ["#work ✓", "#home ✓"]);
     cx.simulate_input(handle, "ho");
     settle(cx);
-    assert_eq!(
-        options(cx, handle),
-        ["#home ✓", "#holiday", "#project/holm", "Add #ho"]
-    );
+    assert_eq!(options(cx, handle), ["#home ✓", "#holiday", "#project/holm", "Add #ho"]);
     keys(cx, handle, "tab tab enter");
     assert_eq!(chips(cx, handle), ["work", "home", "holiday"]);
     cx.simulate_input(handle, "big plans");
@@ -1401,17 +1345,11 @@ fn the_tag_popup_adds_and_removes_tags_and_pins(cx: &mut TestAppContext) {
     assert_eq!(fields(&a).0, ["work", "home", "holiday", "big-plans"]);
 
     keys(cx, handle, "tab tab enter");
-    assert_eq!(
-        options(cx, handle),
-        ["#work ✓", "#holiday ✓*", "#big-plans ✓"]
-    );
+    assert_eq!(options(cx, handle), ["#work ✓", "#holiday ✓*", "#big-plans ✓"]);
     assert_eq!(chips(cx, handle), ["work", "holiday", "big-plans"]);
 
     cx.update_window(handle, |_, window, cx| {
-        window.click(
-            gpui_kit::ElementId::NamedInteger("tag-option".into(), 2),
-            cx,
-        );
+        window.click(gpui_kit::ElementId::NamedInteger("tag-option".into(), 2), cx);
     })
     .unwrap();
     settle(cx);
@@ -1425,20 +1363,12 @@ fn the_tag_popup_adds_and_removes_tags_and_pins(cx: &mut TestAppContext) {
     assert!(!popup_open(cx, handle));
 
     keys(cx, handle, "ctrl-shift-p");
-    assert!(screen(cx, handle, |window| window
-        .try_find("pin-mark")
-        .is_some()));
-    assert_eq!(
-        fields(&a),
-        (vec!["work".to_owned(), "holiday".to_owned()], true)
-    );
+    assert!(screen(cx, handle, |window| window.try_find("pin-mark").is_some()));
+    assert_eq!(fields(&a), (vec!["work".to_owned(), "holiday".to_owned()], true));
 
     keys(cx, handle, "ctrl-z");
     autosave(cx);
-    assert_eq!(
-        fields(&a),
-        (vec!["work".to_owned(), "holiday".to_owned()], true)
-    );
+    assert_eq!(fields(&a), (vec!["work".to_owned(), "holiday".to_owned()], true));
     assert_eq!(
         modified(&a),
         std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(200),
@@ -1592,21 +1522,12 @@ fn clicks_open_and_close_the_tag_popup(cx: &mut TestAppContext) {
     assert_eq!(focus(cx, handle), "tag field");
     assert_eq!(options(cx, handle), ["#work ✓*", "#home ✓"]);
     click_chip(cx, handle, 1);
-    assert!(
-        popup_open(cx, handle),
-        "a click on the row keeps the popup open"
-    );
+    assert!(popup_open(cx, handle), "a click on the row keeps the popup open");
     assert_eq!(options(cx, handle), ["#work ✓", "#home ✓*"]);
     keys(cx, handle, "escape");
-    let right = screen(cx, handle, |window| {
-        window.find("tag-row").bounds().size.width
-    });
+    let right = screen(cx, handle, |window| window.find("tag-row").bounds().size.width);
     cx.update_window(handle, |_, window, cx| {
-        window.click_at(
-            "tag-row",
-            gpui_kit::point(right / 2., gpui_kit::px(16.)),
-            cx,
-        );
+        window.click_at("tag-row", gpui_kit::point(right / 2., gpui_kit::px(16.)), cx);
     })
     .unwrap();
     settle(cx);
@@ -1614,9 +1535,7 @@ fn clicks_open_and_close_the_tag_popup(cx: &mut TestAppContext) {
     assert_eq!(options(cx, handle), ["#work ✓", "#home ✓"]);
 
     // A click outside the popup closes it, as Esc does.
-    let bottom = screen(cx, handle, |window| {
-        window.find("editor").bounds().size.height
-    });
+    let bottom = screen(cx, handle, |window| window.find("editor").bounds().size.height);
     cx.update_window(handle, |_, window, cx| {
         window.click_at(
             "editor",
@@ -1640,8 +1559,7 @@ fn a_note_with_no_tags_shows_the_add_chip(cx: &mut TestAppContext) {
     assert!(row.size.height > gpui_kit::px(0.));
     assert!(bounds_of(cx, handle, "tag-add").is_some());
     assert_eq!(chips(cx, handle), Vec::<String>::new());
-    let popup_under_row =
-        |cx: &mut TestAppContext| bounds_of(cx, handle, "tag-popup").unwrap().top() >= row.bottom();
+    let popup_under_row = |cx: &mut TestAppContext| bounds_of(cx, handle, "tag-popup").unwrap().top() >= row.bottom();
 
     // A click on the chip opens the popup under the row, not over the title.
     click(cx, handle, "tag-add");
@@ -1668,20 +1586,14 @@ fn bounds_of(
     handle: AnyWindowHandle,
     id: &'static str,
 ) -> Option<gpui_kit::Bounds<gpui_kit::Pixels>> {
-    screen(cx, handle, |window| {
-        window.try_find(id).map(|part| part.bounds())
-    })
+    screen(cx, handle, |window| window.try_find(id).map(|part| part.bounds()))
 }
 
 #[gpui_kit::test]
 fn the_tag_row_stays_on_one_line_and_folds_the_rest_into_a_chip(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     let notes = fixture.notes();
-    fs::write(
-        notes.join("A.md"),
-        "---\nid: 01A\ntags:\n  - work\n---\n# A\n",
-    )
-    .unwrap();
+    fs::write(notes.join("A.md"), "---\nid: 01A\ntags:\n  - work\n---\n# A\n").unwrap();
     fs::write(notes.join("B.md"), "# B\n[a](holm:01A)\n").unwrap();
     set_time(&notes.join("A.md"), 200);
     set_time(&notes.join("B.md"), 100);
@@ -1695,11 +1607,7 @@ fn the_tag_row_stays_on_one_line_and_folds_the_rest_into_a_chip(cx: &mut TestApp
         .map(|at| format!("a-long-tag-number-{at:02}-with-words"))
         .collect();
     let lines = tags.join("\n  - ");
-    fixture.write_outside(
-        cx,
-        "A.md",
-        &format!("---\nid: 01A\ntags:\n  - {lines}\n---\n# A\n"),
-    );
+    fixture.write_outside(cx, "A.md", &format!("---\nid: 01A\ntags:\n  - {lines}\n---\n# A\n"));
     let shown = chips(cx, handle);
     assert!(!shown.is_empty() && shown.len() < tags.len(), "{shown:?}");
     assert_eq!(shown, tags[..shown.len()]);
@@ -1716,40 +1624,26 @@ fn the_tag_row_stays_on_one_line_and_folds_the_rest_into_a_chip(cx: &mut TestApp
     assert!(count.right() <= row.right());
 
     // A narrow window folds more tags.
-    cx.simulate_window_resize(
-        handle,
-        gpui_kit::size(gpui_kit::px(560.), gpui_kit::px(600.)),
-    );
+    cx.simulate_window_resize(handle, gpui_kit::size(gpui_kit::px(560.), gpui_kit::px(600.)));
     cx.run_until_parked();
     let narrow = chips(cx, handle);
     assert!(narrow.len() < shown.len(), "{narrow:?}");
-    assert_eq!(
-        bounds_of(cx, handle, "tag-row").unwrap().size.height,
-        one_tag
-    );
+    assert_eq!(bounds_of(cx, handle, "tag-row").unwrap().size.height, one_tag);
 
     // In a window too narrow for any chip, the count still does not cover the "+N" chip.
-    cx.simulate_window_resize(
-        handle,
-        gpui_kit::size(gpui_kit::px(100.), gpui_kit::px(600.)),
-    );
+    cx.simulate_window_resize(handle, gpui_kit::size(gpui_kit::px(100.), gpui_kit::px(600.)));
     cx.run_until_parked();
     assert_eq!(chips(cx, handle), Vec::<String>::new());
     let more = bounds_of(cx, handle, "tag-more").unwrap();
     let count = bounds_of(cx, handle, "backlinks-button").unwrap();
     assert!(more.right() <= count.left(), "{more:?} {count:?}");
-    cx.simulate_window_resize(
-        handle,
-        gpui_kit::size(gpui_kit::px(560.), gpui_kit::px(600.)),
-    );
+    cx.simulate_window_resize(handle, gpui_kit::size(gpui_kit::px(560.), gpui_kit::px(600.)));
     cx.run_until_parked();
 
     // A click on the "+N" chip puts the cursor on the first folded tag.
     click(cx, handle, "tag-more");
     assert_eq!(focus(cx, handle), "tag field");
-    let cursor = options(cx, handle)
-        .iter()
-        .position(|line| line.ends_with('*'));
+    let cursor = options(cx, handle).iter().position(|line| line.ends_with('*'));
     assert_eq!(cursor, Some(narrow.len()));
 }
 
@@ -1790,11 +1684,7 @@ fn tags_rename_and_delete_in_all_notes_after_the_dialog(cx: &mut TestAppContext)
     assert_eq!(fields(&a).0, ["job"]);
     assert_eq!(fields(&b).0, ["job/holm", "home"]);
     assert_eq!(sidebar(cx, handle), "tree #job");
-    assert_eq!(
-        chips(cx, handle),
-        ["job"],
-        "the open note shows the new name"
-    );
+    assert_eq!(chips(cx, handle), ["job"], "the open note shows the new name");
 
     // The tag dialogs have no "Do not show again", so Space does nothing.
     keys(cx, handle, "delete");
@@ -1802,9 +1692,7 @@ fn tags_rename_and_delete_in_all_notes_after_the_dialog(cx: &mut TestAppContext)
         question(cx, handle).as_deref(),
         Some("Remove “#job” from all notes? This changes 2 notes.")
     );
-    assert!(screen(cx, handle, |window| window
-        .try_find("do-not-ask")
-        .is_none()));
+    assert!(screen(cx, handle, |window| window.try_find("do-not-ask").is_none()));
     keys(cx, handle, "space enter");
     assert_eq!(fields(&a).0, Vec::<String>::new());
     assert_eq!(fields(&b).0, ["home"]);
@@ -2040,23 +1928,11 @@ fn a_folder_rename_keeps_the_row_selected_in_every_frame(cx: &mut TestAppContext
     let handle = open(cx, fixture.startup(None));
 
     keys(cx, handle, "ctrl-shift-l escape tab space tab tab space");
-    let before = [
-        "All notes",
-        "area",
-        "area/bebra",
-        "area/work*",
-        "area/work/sub",
-    ];
+    let before = ["All notes", "area", "area/bebra", "area/work*", "area/work/sub"];
     assert_eq!(tree(cx, handle), before);
     assert_eq!(
         rename_steps(cx, handle, "job"),
-        [vec![
-            "All notes",
-            "area",
-            "area/bebra",
-            "area/job*",
-            "area/job/sub"
-        ],]
+        [vec!["All notes", "area", "area/bebra", "area/job*", "area/job/sub"],]
     );
 
     // The open note follows the folder, so the next save goes to the new file.
@@ -2093,13 +1969,7 @@ fn a_folder_rename_to_a_taken_name_keeps_the_row_selected_in_every_frame(cx: &mu
     keys(cx, handle, "ctrl-shift-l escape tab space tab tab space");
     assert_eq!(
         rename_steps(cx, handle, "bebra"),
-        [vec![
-            "All notes",
-            "area",
-            "area/bebra",
-            "area/work*",
-            "area/work/sub"
-        ],]
+        [vec!["All notes", "area", "area/bebra", "area/work*", "area/work/sub"],]
     );
     assert_eq!(tree_field(cx, handle).as_deref(), Some("bebra"));
 }
@@ -2116,13 +1986,7 @@ fn a_new_folder_with_a_taken_name_keeps_the_field_and_esc_leaves_nothing(cx: &mu
     keys(cx, handle, "ctrl-shift-n");
     assert_eq!(
         tree(cx, handle),
-        [
-            "All notes",
-            "area*",
-            text::NEW_FOLDER,
-            "area/bebra",
-            "area/work"
-        ]
+        ["All notes", "area*", text::NEW_FOLDER, "area/bebra", "area/work"]
     );
     cx.simulate_input(handle, "Bebra");
     keys(cx, handle, "enter");
@@ -2134,10 +1998,7 @@ fn a_new_folder_with_a_taken_name_keeps_the_field_and_esc_leaves_nothing(cx: &mu
 
     keys(cx, handle, "escape");
     assert_eq!(tree_field(cx, handle), None);
-    assert_eq!(
-        tree(cx, handle),
-        ["All notes", "area*", "area/bebra", "area/work"]
-    );
+    assert_eq!(tree(cx, handle), ["All notes", "area*", "area/bebra", "area/work"]);
     assert_eq!(folder_names(&notes_dir.join("area")), ["bebra", "work"]);
 
     // An empty name gets an answer too.
@@ -2172,8 +2033,7 @@ fn the_move_picker_finds_a_folder_by_its_path(cx: &mut TestAppContext) {
     fs::create_dir(notes_dir.join("home")).unwrap();
     fs::write(notes_dir.join("Top.md"), "# Top\n").unwrap();
     let handle = open(cx, fixture.startup(None));
-    let options =
-        |cx: &mut TestAppContext| labels(cx, handle, "folder-picker", Role::ListBoxOption);
+    let options = |cx: &mut TestAppContext| labels(cx, handle, "folder-picker", Role::ListBoxOption);
 
     keys(cx, handle, "ctrl-shift-l ctrl-shift-m");
     assert_eq!(question(cx, handle).as_deref(), Some(text::MOVE_TO));
@@ -2225,26 +2085,14 @@ fn a_tag_rename_keeps_the_row_selected_in_every_frame(cx: &mut TestAppContext) {
     keys(cx, handle, "ctrl-shift-l escape tab space tab tab space");
     assert_eq!(
         tree(cx, handle),
-        [
-            "All notes",
-            "#area",
-            "#area/new",
-            "#area/old*",
-            "#area/old/x"
-        ]
+        ["All notes", "#area", "#area/new", "#area/old*", "#area/old/x"]
     );
     type_new_name(cx, handle, "area/fresh");
     keys(cx, handle, "enter");
     press(cx, handle, "enter");
     assert_eq!(
         tree_steps(cx, handle),
-        [vec![
-            "All notes",
-            "#area",
-            "#area/fresh*",
-            "#area/fresh/x",
-            "#area/new"
-        ],]
+        [vec!["All notes", "#area", "#area/fresh*", "#area/fresh/x", "#area/new"],]
     );
 
     // A rename into a tag that exists merges into its row.
@@ -2255,9 +2103,7 @@ fn a_tag_rename_keeps_the_row_selected_in_every_frame(cx: &mut TestAppContext) {
     press(cx, handle, "enter");
     let steps = tree_steps(cx, handle);
     assert!(
-        steps
-            .iter()
-            .all(|step| !step.contains(&"#area*".to_owned())),
+        steps.iter().all(|step| !step.contains(&"#area*".to_owned())),
         "{steps:?}"
     );
     assert_eq!(
@@ -2277,16 +2123,10 @@ fn an_outside_folder_rename_selects_the_parent(cx: &mut TestAppContext) {
     let notes_dir = fixture.notes();
     fs::rename(notes_dir.join("area/work"), notes_dir.join("area/job")).unwrap();
     let feed = fixture.feed.lock().unwrap();
-    feed.as_ref()
-        .unwrap()
-        .changed(["area/work", "area/job"])
-        .unwrap();
+    feed.as_ref().unwrap().changed(["area/work", "area/job"]).unwrap();
     drop(feed);
     settle(cx);
-    assert_eq!(
-        tree(cx, handle),
-        ["All notes", "area*", "area/bebra", "area/job"]
-    );
+    assert_eq!(tree(cx, handle), ["All notes", "area*", "area/bebra", "area/job"]);
 }
 
 #[gpui_kit::test]
@@ -2404,8 +2244,7 @@ fn a_new_tag_renames_in_all_notes_with_no_wait(cx: &mut TestAppContext) {
 /// Whether the last drawn frame shows `id`. It draws no new frame, so it shows a frame that
 /// the window still owes.
 fn drawn(cx: &mut TestAppContext, handle: AnyWindowHandle, id: &'static str) -> bool {
-    cx.update_window(handle, |_, window, _| shows(window, id))
-        .unwrap()
+    cx.update_window(handle, |_, window, _| shows(window, id)).unwrap()
 }
 
 fn shows(window: &Window, id: &'static str) -> bool {
@@ -2413,12 +2252,7 @@ fn shows(window: &Window, id: &'static str) -> bool {
 }
 
 /// Presses `key` and draws one frame. Work that waits for the end of the draw has not run yet.
-fn first_frame_has(
-    cx: &mut TestAppContext,
-    handle: AnyWindowHandle,
-    key: &'static str,
-    id: &'static str,
-) -> bool {
+fn first_frame_has(cx: &mut TestAppContext, handle: AnyWindowHandle, key: &'static str, id: &'static str) -> bool {
     cx.update_window(handle, |_, window, cx| {
         window.dispatch_keystroke(gpui_kit::Keystroke::parse(key).unwrap(), cx);
         window.render_frame(cx);
@@ -2570,10 +2404,7 @@ fn a_new_child_folder_after_the_delete_shows_at_once(cx: &mut TestAppContext) {
 
     fs::create_dir(fixture.notes().join("area/work/later")).unwrap();
     fixture.tell(cx, "area/work/later");
-    assert_eq!(
-        tree(cx, handle),
-        ["All notes", "area", "area/work*", "area/work/later"]
-    );
+    assert_eq!(tree(cx, handle), ["All notes", "area", "area/work*", "area/work/later"]);
     assert_eq!(expanded(cx, handle, "area/work"), Some(true));
 }
 
@@ -2734,10 +2565,7 @@ fn a_search_during_an_outside_rename_keeps_the_note_in_every_frame(cx: &mut Test
     // The core has the rename, and the sidebar has not seen it yet.
     fs::rename(notes_dir.join("Trip.md"), notes_dir.join("Trips.md")).unwrap();
     let feed = fixture.feed.lock().unwrap();
-    feed.as_ref()
-        .unwrap()
-        .changed(["Trip.md", "Trips.md"])
-        .unwrap();
+    feed.as_ref().unwrap().changed(["Trip.md", "Trips.md"]).unwrap();
     drop(feed);
     press(cx, handle, "p");
 
@@ -2859,21 +2687,13 @@ fn quick_open_shows_the_folder_of_each_note(cx: &mut TestAppContext) {
     let handle = open(cx, fixture.startup(None));
 
     keys(cx, handle, "ctrl-shift-o");
-    assert_eq!(
-        labels(cx, handle, "quick-open", Role::ListBoxOption),
-        ["Plan*", "Beta"]
-    );
-    assert_eq!(
-        folders(cx, handle, "quick-open"),
-        [None, Some("work/old".to_owned())]
-    );
+    assert_eq!(labels(cx, handle, "quick-open", Role::ListBoxOption), ["Plan*", "Beta"]);
+    assert_eq!(folders(cx, handle, "quick-open"), [None, Some("work/old".to_owned())]);
 }
 
 /// Clicks near the bottom left of the editor, where no popup panel lies.
 fn click_below(cx: &mut TestAppContext, handle: AnyWindowHandle) {
-    let bottom = screen(cx, handle, |window| {
-        window.find("editor").bounds().size.height
-    });
+    let bottom = screen(cx, handle, |window| window.find("editor").bounds().size.height);
     cx.update_window(handle, |_, window, cx| {
         window.click_at(
             "editor",
@@ -2928,11 +2748,7 @@ fn the_link_picker_links_notes_headings_and_new_notes(cx: &mut TestAppContext) {
     let notes = fixture.notes();
     fs::create_dir(notes.join("work")).unwrap();
     fs::write(notes.join("Alpha.md"), "# Alpha\n").unwrap();
-    fs::write(
-        notes.join("work/Beta.md"),
-        "# Beta\n\n## Bug list\n\n## Ideas\n",
-    )
-    .unwrap();
+    fs::write(notes.join("work/Beta.md"), "# Beta\n\n## Bug list\n\n## Ideas\n").unwrap();
     set_time(&notes.join("Alpha.md"), 300);
     set_time(&notes.join("work/Beta.md"), 200);
     let handle = open(cx, fixture.startup(None));
@@ -2944,10 +2760,7 @@ fn the_link_picker_links_notes_headings_and_new_notes(cx: &mut TestAppContext) {
     keys(cx, handle, "ctrl-k");
     assert_eq!(question(cx, handle).as_deref(), Some(text::LINK_TO_NOTE));
     assert_eq!(options(cx), ["Alpha*", "Beta"]);
-    assert_eq!(
-        folders(cx, handle, "link-picker"),
-        [None, Some("work".to_owned())]
-    );
+    assert_eq!(folders(cx, handle, "link-picker"), [None, Some("work".to_owned())]);
     cx.simulate_input(handle, "bet");
     settle(cx);
     assert_eq!(options(cx), ["Beta*", "Create “bet”"]);
@@ -2955,10 +2768,7 @@ fn the_link_picker_links_notes_headings_and_new_notes(cx: &mut TestAppContext) {
     assert_eq!(question(cx, handle), None);
     assert_eq!(focus(cx, handle), "editor");
     let beta = id_of(&notes.join("work/Beta.md"));
-    assert_eq!(
-        editor_text(cx, handle),
-        format!("# Alpha\n[Beta](holm:{beta})")
-    );
+    assert_eq!(editor_text(cx, handle), format!("# Alpha\n[Beta](holm:{beta})"));
 
     // A heading link. A typed `#` fills in the title and switches to its headings.
     cx.simulate_input(handle, " ");
@@ -2987,10 +2797,7 @@ fn the_link_picker_links_notes_headings_and_new_notes(cx: &mut TestAppContext) {
     assert_eq!(options(cx), ["Create “Gamma”*"]);
     keys(cx, handle, "enter");
     let gamma_path = notes.join("Gamma.md");
-    assert_eq!(
-        holm_markdown::NoteFile::parse(&read(&gamma_path)).body(),
-        ""
-    );
+    assert_eq!(holm_markdown::NoteFile::parse(&read(&gamma_path)).body(), "");
     let gamma = id_of(&gamma_path);
     let text = editor_text(cx, handle);
     assert!(text.starts_with("# Alpha\n"));
@@ -3027,11 +2834,7 @@ fn links_open_notes_at_headings_and_backlinks_lead_back(cx: &mut TestAppContext)
         "---\nid: 01A\n---\n# Alpha\n[ideas](holm:01B#Ideas)\n[gone](holm:01X)\n",
     )
     .unwrap();
-    fs::write(
-        notes.join("Beta.md"),
-        "---\nid: 01B\n---\n# Beta\n\ntext\n\n## Ideas\n",
-    )
-    .unwrap();
+    fs::write(notes.join("Beta.md"), "---\nid: 01B\n---\n# Beta\n\ntext\n\n## Ideas\n").unwrap();
     set_time(&notes.join("Alpha.md"), 300);
     set_time(&notes.join("Beta.md"), 200);
     let handle = open(cx, fixture.startup(None));
@@ -3056,10 +2859,7 @@ fn links_open_notes_at_headings_and_backlinks_lead_back(cx: &mut TestAppContext)
     settle(cx);
     assert_eq!(focus(cx, handle), "editor");
     assert!(editor_text(cx, handle).starts_with("# Alpha\n"));
-    assert_eq!(
-        read(&notes.join("Beta.md")).lines().last(),
-        Some("X## Ideas")
-    );
+    assert_eq!(read(&notes.join("Beta.md")).lines().last(), Some("X## Ideas"));
 
     // A link to a missing note shows an answer.
     keys(cx, handle, "down down ctrl-enter");
@@ -3094,14 +2894,7 @@ fn ctrl_shift_b_opens_the_backlinks_of_the_note(cx: &mut TestAppContext) {
     assert_eq!(editor_text(cx, handle), "# Target\n");
     assert_eq!(chips(cx, handle), Vec::<String>::new());
     assert_eq!(backlink_count(cx, handle).as_deref(), Some("← 2 notes"));
-    assert!(
-        screen(cx, handle, |window| window
-            .find("tag-row")
-            .bounds()
-            .size
-            .height)
-            > gpui_kit::px(0.)
-    );
+    assert!(screen(cx, handle, |window| window.find("tag-row").bounds().size.height) > gpui_kit::px(0.));
 
     // Esc gives the focus back to the text.
     keys(cx, handle, "ctrl-shift-b");
@@ -3155,11 +2948,7 @@ fn the_tag_popup_and_the_backlinks_list_take_turns(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn a_click_in_the_sidebar_keeps_the_focus_after_the_tag_popup_closes(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
-    fs::write(
-        fixture.notes().join("A.md"),
-        "---\ntags:\n  - work\n---\n# A\n",
-    )
-    .unwrap();
+    fs::write(fixture.notes().join("A.md"), "---\ntags:\n  - work\n---\n# A\n").unwrap();
     let handle = open(cx, fixture.startup(None));
 
     click_chip(cx, handle, 0);
@@ -3206,10 +2995,7 @@ fn ctrl_o_embeds_a_file_where_it_is(cx: &mut TestAppContext) {
     let picked = notes.join("docs/plan.pdf");
     cx.simulate_path_prompt_response(move |_| Some(vec![picked]));
     settle(cx);
-    assert_eq!(
-        editor_text(cx, handle),
-        "# A\n![plan.pdf](../docs/plan.pdf)"
-    );
+    assert_eq!(editor_text(cx, handle), "# A\n![plan.pdf](../docs/plan.pdf)");
     assert_eq!(fs::read_dir(notes.join("work")).unwrap().count(), 1);
 }
 
@@ -3329,10 +3115,7 @@ fn an_outside_delete_with_unsaved_text_asks_to_keep_or_close(cx: &mut TestAppCon
 
     keys(cx, handle, "ctrl-shift-d");
     assert_eq!(state_menu(cx, handle), ["Keep mine*", "Close"]);
-    assert_eq!(
-        state_reason(cx, handle).as_deref(),
-        Some(text::DELETED_REASON)
-    );
+    assert_eq!(state_reason(cx, handle).as_deref(), Some(text::DELETED_REASON));
     keys(cx, handle, "escape");
     assert_eq!(state(cx, handle).as_deref(), Some(text::DELETED_ON_DISK));
     keys(cx, handle, "ctrl-shift-d enter");
@@ -3358,9 +3141,7 @@ fn the_link_keys_do_nothing_on_the_empty_pane_with_no_sidebar(cx: &mut TestAppCo
 
     keys(cx, handle, "ctrl-k ctrl-o ctrl-j");
     assert!(!cx.did_prompt_for_paths());
-    let picker = screen(cx, handle, |window| {
-        window.try_find("link-picker").is_some()
-    });
+    let picker = screen(cx, handle, |window| window.try_find("link-picker").is_some());
     assert!(!picker);
     assert!(empty_pane(cx, handle));
 }
@@ -3460,8 +3241,7 @@ fn a_window_close_keeps_the_name_of_the_open_note(cx: &mut TestAppContext) {
     new_note(cx, handle, "Plans");
     cx.simulate_input(handle, "# Spring plans");
 
-    cx.update_window(handle, |_, window, _| window.remove_window())
-        .unwrap();
+    cx.update_window(handle, |_, window, _| window.remove_window()).unwrap();
     cx.run_until_parked();
     assert_eq!(files(&fixture.notes()), ["Plans.md"]);
     assert!(read(&fixture.notes().join("Plans.md")).ends_with("\n# Spring plans\n"));
@@ -3603,11 +3383,7 @@ fn enter_on_an_empty_title_shows_the_answer_with_no_wait(cx: &mut TestAppContext
 
 /// Presses `key`, then runs the tasks one at a time. It gives whether a frame between them
 /// shows the empty pane.
-fn empty_pane_in_a_step(
-    cx: &mut TestAppContext,
-    handle: AnyWindowHandle,
-    key: &'static str,
-) -> bool {
+fn empty_pane_in_a_step(cx: &mut TestAppContext, handle: AnyWindowHandle, key: &'static str) -> bool {
     press(cx, handle, key);
     let mut shown = empty_pane(cx, handle);
     while cx.executor().tick() {
@@ -3670,9 +3446,7 @@ fn a_click_under_the_title_field_of_a_new_note_does_nothing(cx: &mut TestAppCont
     let handle = open(cx, fixture.startup(None));
 
     keys(cx, handle, "ctrl-n");
-    let bottom = screen(cx, handle, |window| {
-        window.find("new-note").bounds().size.height
-    });
+    let bottom = screen(cx, handle, |window| window.find("new-note").bounds().size.height);
     cx.update_window(handle, |_, window, cx| {
         window.click_at(
             "new-note",
@@ -3743,11 +3517,7 @@ fn a_click_on_the_dot_or_the_count_does_not_reach_the_open_title_field(cx: &mut 
         let at = bounds_of(cx, handle, id).unwrap();
         let y = at.center().y - row.top();
         cx.update_window(handle, |_, window, cx| {
-            window.click_at(
-                "tag-row",
-                gpui_kit::point(at.center().x - row.left(), y),
-                cx,
-            );
+            window.click_at("tag-row", gpui_kit::point(at.center().x - row.left(), y), cx);
         })
         .unwrap();
         settle(cx);
@@ -3790,20 +3560,11 @@ fn ctrl_n_after_a_refused_title_starts_clean(cx: &mut TestAppContext) {
 mod speed;
 
 /// Changes the settings, as the settings dialog does.
-fn change_settings(
-    cx: &mut TestAppContext,
-    handle: AnyWindowHandle,
-    change: impl FnOnce(&mut Settings),
-) {
+fn change_settings(cx: &mut TestAppContext, handle: AnyWindowHandle, change: impl FnOnce(&mut Settings)) {
     cx.update_window(handle, |root, _, cx| {
         let root = root.downcast::<gpui_kit::base::Root>().unwrap();
         let view = root.read(cx).view().clone();
-        let config = view
-            .downcast::<HolmWindow>()
-            .unwrap()
-            .read(cx)
-            .config
-            .clone();
+        let config = view.downcast::<HolmWindow>().unwrap().read(cx).config.clone();
         config.update(cx, |config, cx| config.change(change, cx));
     })
     .unwrap();
@@ -3979,17 +3740,9 @@ fn each_setting_changes_by_keys_only(cx: &mut TestAppContext) {
     assert_eq!(setting_rows(cx, handle)[1], "Theme*");
     assert!(dark(cx));
     keys(cx, handle, "space");
-    assert_eq!(
-        settings(&fixture).theme,
-        AppearanceSetting::System,
-        "Space wraps"
-    );
+    assert_eq!(settings(&fixture).theme, AppearanceSetting::System, "Space wraps");
     keys(cx, handle, "shift-space");
-    assert_eq!(
-        settings(&fixture).theme,
-        AppearanceSetting::Dark,
-        "Shift+Space wraps"
-    );
+    assert_eq!(settings(&fixture).theme, AppearanceSetting::Dark, "Shift+Space wraps");
     keys(cx, handle, "shift-space");
     assert_eq!(settings(&fixture).theme, AppearanceSetting::Light);
     assert!(!dark(cx));
@@ -4042,18 +3795,13 @@ fn each_setting_changes_by_keys_only(cx: &mut TestAppContext) {
     keys(cx, handle, "tab");
     assert_eq!(setting_rows(cx, handle)[0], "Notes folder*", "Tab wraps");
     keys(cx, handle, "shift-tab");
-    assert_eq!(
-        setting_rows(cx, handle)[7],
-        "Indent lists with Tab*",
-        "Shift+Tab wraps"
-    );
+    assert_eq!(setting_rows(cx, handle)[7], "Indent lists with Tab*", "Shift+Tab wraps");
     assert_eq!(question(cx, handle).as_deref(), Some(text::SETTINGS));
 }
 
 /// The zoom of the window: the scale of Holm as a factor.
 fn zoom(cx: &mut TestAppContext, handle: AnyWindowHandle) -> f32 {
-    cx.update_window(handle, |_, window, _| window.zoom())
-        .unwrap()
+    cx.update_window(handle, |_, window, _| window.zoom()).unwrap()
 }
 
 #[gpui_kit::test]
@@ -4068,10 +3816,7 @@ fn space_on_the_scale_row_wraps_from_the_largest(cx: &mut TestAppContext) {
 
     keys(cx, handle, "ctrl-shift-s tab tab space");
     assert_eq!(setting_rows(cx, handle)[2], "Scale*");
-    assert_eq!(
-        Config::load(fixture.config()).settings().scale.percent(),
-        80
-    );
+    assert_eq!(Config::load(fixture.config()).settings().scale.percent(), 80);
     assert_eq!(zoom(cx, handle), 0.8);
 }
 
@@ -4081,10 +3826,7 @@ fn text_column(cx: &mut TestAppContext, handle: AnyWindowHandle) -> (f32, f32) {
     screen(cx, handle, |window| {
         let editor = window.find("editor").bounds();
         let row = window.find("tag-row").bounds();
-        (
-            f32::from(row.left() - editor.left()),
-            f32::from(row.size.width),
-        )
+        (f32::from(row.left() - editor.left()), f32::from(row.size.width))
     })
 }
 
@@ -4160,27 +3902,17 @@ fn typing_a_width_on_the_row_changes_the_column_at_once(cx: &mut TestAppContext)
     keys(cx, handle, "backspace backspace 1 2 0");
     assert_eq!(text_width(&fixture).chars(), 120);
 
-    let box_bounds = |cx: &mut TestAppContext| {
-        screen(cx, handle, |window| {
-            window.find("text-width-chars").bounds()
-        })
-    };
+    let box_bounds = |cx: &mut TestAppContext| screen(cx, handle, |window| window.find("text-width-chars").bounds());
     let wide = box_bounds(cx);
     keys(cx, handle, "backspace backspace");
     assert_eq!(box_bounds(cx), wide, "the box keeps its place and size");
     keys(cx, handle, "tab");
-    assert_eq!(
-        setting_rows(cx, handle)[4],
-        "Note order*",
-        "Tab goes to the next row"
-    );
+    assert_eq!(setting_rows(cx, handle)[4], "Note order*", "Tab goes to the next row");
     assert_eq!(chars_field(cx, handle).as_deref(), Some("120"));
 }
 
 #[gpui_kit::test]
-fn a_width_out_of_the_range_shows_the_old_width_again_when_the_cursor_leaves(
-    cx: &mut TestAppContext,
-) {
+fn a_width_out_of_the_range_shows_the_old_width_again_when_the_cursor_leaves(cx: &mut TestAppContext) {
     let (fixture, handle) = open_text_width(cx);
     keys(cx, handle, "space 2 0");
     assert_eq!(chars_field(cx, handle).as_deref(), Some("20"));
@@ -4223,10 +3955,7 @@ fn the_text_width_row_keeps_its_height_with_full_and_limited(cx: &mut TestAppCon
 fn digits_on_a_full_text_width_do_nothing(cx: &mut TestAppContext) {
     let (fixture, handle) = open_text_width(cx);
     keys(cx, handle, "1 2 0");
-    assert_eq!(
-        text_width(&fixture),
-        crate::text_width::TextWidthSetting::default()
-    );
+    assert_eq!(text_width(&fixture), crate::text_width::TextWidthSetting::default());
     assert_eq!(chars_field(cx, handle), None);
 }
 
@@ -4239,10 +3968,7 @@ fn full_and_then_limited_again_shows_the_last_width(cx: &mut TestAppContext) {
 
     keys(cx, handle, "space");
     assert_eq!(chars_field(cx, handle).as_deref(), Some("120"));
-    assert_eq!(
-        text_width(&fixture).text_width(),
-        holm_editor::TextWidth::Limited(120)
-    );
+    assert_eq!(text_width(&fixture).text_width(), holm_editor::TextWidth::Limited(120));
     keys(cx, handle, "escape");
     assert_eq!(question(cx, handle), None);
     assert_eq!(focus(cx, handle), "editor");
@@ -4262,29 +3988,16 @@ fn ctrl_plus_and_ctrl_minus_step_the_scale_and_answer(cx: &mut TestAppContext) {
     assert_eq!(zoom(cx, handle), 1.1);
 
     keys(cx, handle, "ctrl-= ctrl-= ctrl-= ctrl-=");
-    assert_eq!(
-        message(cx, handle).as_deref(),
-        Some("Scale 200 %, the largest")
-    );
+    assert_eq!(message(cx, handle).as_deref(), Some("Scale 200 %, the largest"));
     keys(cx, handle, "ctrl-+");
-    assert_eq!(
-        message(cx, handle).as_deref(),
-        Some("Scale 200 %, the largest")
-    );
+    assert_eq!(message(cx, handle).as_deref(), Some("Scale 200 %, the largest"));
     assert_eq!(percent(), 200);
     assert_eq!(zoom(cx, handle), 2.);
 
     keys(cx, handle, "ctrl--");
     assert_eq!(message(cx, handle).as_deref(), Some("Scale 175 %"));
-    keys(
-        cx,
-        handle,
-        "ctrl-_ ctrl-_ ctrl-_ ctrl-_ ctrl-_ ctrl-_ ctrl-_",
-    );
-    assert_eq!(
-        message(cx, handle).as_deref(),
-        Some("Scale 80 %, the smallest")
-    );
+    keys(cx, handle, "ctrl-_ ctrl-_ ctrl-_ ctrl-_ ctrl-_ ctrl-_ ctrl-_");
+    assert_eq!(message(cx, handle).as_deref(), Some("Scale 80 %, the smallest"));
     assert_eq!(percent(), 80);
     assert_eq!(zoom(cx, handle), 0.8);
     assert_eq!(editor_text(cx, handle), "a\n", "the keys type nothing");
@@ -4321,9 +4034,7 @@ fn a_click_at_a_zoom_of_1_5_hits_the_option_under_it(cx: &mut TestAppContext) {
     ));
     let handle = open(cx, fixture.startup(None));
     let (viewport, screen_size) = cx
-        .update_window(handle, |_, window, _| {
-            (window.viewport_size(), window.bounds().size)
-        })
+        .update_window(handle, |_, window, _| (window.viewport_size(), window.bounds().size))
         .unwrap();
     assert_eq!(viewport.width * 1.5, screen_size.width);
 
@@ -4338,10 +4049,7 @@ fn a_click_at_a_zoom_of_1_5_hits_the_option_under_it(cx: &mut TestAppContext) {
     .unwrap();
     settle(cx);
 
-    assert_eq!(
-        Config::load(fixture.config()).settings().theme,
-        AppearanceSetting::Dark
-    );
+    assert_eq!(Config::load(fixture.config()).settings().theme, AppearanceSetting::Dark);
 }
 
 #[gpui_kit::test]
@@ -4369,10 +4077,7 @@ fn enter_on_the_folder_row_picks_a_new_notes_folder(cx: &mut TestAppContext) {
     keys(cx, handle, "ctrl-shift-s");
 
     keys(cx, handle, "tab enter");
-    assert!(
-        !cx.did_prompt_for_paths(),
-        "Enter on a row with options picks nothing"
-    );
+    assert!(!cx.did_prompt_for_paths(), "Enter on a row with options picks nothing");
     keys(cx, handle, "shift-tab enter");
     assert!(cx.did_prompt_for_paths());
     cx.simulate_path_prompt_response(|_| None);
@@ -4384,10 +4089,7 @@ fn enter_on_the_folder_row_picks_a_new_notes_folder(cx: &mut TestAppContext) {
     settle(cx);
 
     assert_eq!(editor_text(cx, handle), "a\n");
-    assert_eq!(
-        Config::load(fixture.config()).settings().notes_folder,
-        Some(other)
-    );
+    assert_eq!(Config::load(fixture.config()).settings().notes_folder, Some(other));
 }
 
 #[gpui_kit::test]
@@ -4417,10 +4119,7 @@ fn a_click_on_the_folder_button_picks_a_new_notes_folder(cx: &mut TestAppContext
     cx.simulate_path_prompt_response(|_| Some(vec![other.clone()]));
     settle(cx);
 
-    assert_eq!(
-        Config::load(fixture.config()).settings().notes_folder,
-        Some(other)
-    );
+    assert_eq!(Config::load(fixture.config()).settings().notes_folder, Some(other));
 }
 
 #[gpui_kit::test]
@@ -4448,9 +4147,7 @@ fn first_shortcut_top(cx: &mut TestAppContext, handle: AnyWindowHandle) -> gpui_
 }
 
 #[gpui_kit::test]
-fn ctrl_question_mark_opens_the_shortcut_list_and_esc_gives_the_focus_back(
-    cx: &mut TestAppContext,
-) {
+fn ctrl_question_mark_opens_the_shortcut_list_and_esc_gives_the_focus_back(cx: &mut TestAppContext) {
     use crate::shortcuts;
     let fixture = Fixture::new().with_folder();
     fs::write(fixture.notes().join("Note.md"), "a\n").unwrap();
@@ -4497,9 +4194,7 @@ fn ctrl_question_mark_opens_the_shortcut_list_and_esc_gives_the_focus_back(
 }
 
 #[gpui_kit::test]
-fn the_shortcut_list_names_each_place_once_and_no_label_runs_into_its_keys(
-    cx: &mut TestAppContext,
-) {
+fn the_shortcut_list_names_each_place_once_and_no_label_runs_into_its_keys(cx: &mut TestAppContext) {
     let fixture = Fixture::new().with_folder();
     let handle = open(cx, fixture.startup(None));
     keys(cx, handle, "ctrl-?");
@@ -4531,10 +4226,7 @@ fn the_shortcut_list_names_each_place_once_and_no_label_runs_into_its_keys(
         (0..count)
             .filter_map(|at| {
                 let item = window.try_find(("shortcut", at))?;
-                let (edge, name) = (
-                    item.bounds().right(),
-                    item.label().unwrap_or_default().to_owned(),
-                );
+                let (edge, name) = (item.bounds().right(), item.label().unwrap_or_default().to_owned());
                 let row = window.within(("shortcut", at));
                 let label = row.try_find("label")?.bounds();
                 let keys = row.try_find("keys")?.bounds();
@@ -4542,10 +4234,7 @@ fn the_shortcut_list_names_each_place_once_and_no_label_runs_into_its_keys(
             })
             .collect()
     });
-    assert!(
-        crowded.is_empty(),
-        "labels run into their keys: {crowded:?}"
-    );
+    assert!(crowded.is_empty(), "labels run into their keys: {crowded:?}");
 }
 
 #[gpui_kit::test]
@@ -4575,11 +4264,7 @@ fn tab_and_shift_tab_scroll_the_shortcut_list(cx: &mut TestAppContext) {
     let top = first_shortcut_top(cx, handle);
 
     keys(cx, handle, "shift-tab");
-    assert_eq!(
-        first_shortcut_top(cx, handle),
-        top,
-        "Shift+Tab stops at the top"
-    );
+    assert_eq!(first_shortcut_top(cx, handle), top, "Shift+Tab stops at the top");
     keys(cx, handle, "down");
     assert_eq!(first_shortcut_top(cx, handle), top, "an arrow does nothing");
     keys(cx, handle, "tab");
@@ -4610,10 +4295,7 @@ fn app_menu(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<String> {
 /// Clicks the item at `at` in the app menu.
 fn click_menu_item(cx: &mut TestAppContext, handle: AnyWindowHandle, at: u64) {
     cx.update_window(handle, |_, window, cx| {
-        window.click(
-            gpui_kit::ElementId::NamedInteger("menu-item".into(), at),
-            cx,
-        );
+        window.click(gpui_kit::ElementId::NamedInteger("menu-item".into(), at), cx);
     })
     .unwrap();
     settle(cx);
@@ -4630,19 +4312,13 @@ fn f10_and_the_menu_button_open_the_app_menu_under_the_button(cx: &mut TestAppCo
     let handle = open(cx, fixture.startup(None));
 
     keys(cx, handle, "f10");
-    assert_eq!(
-        app_menu(cx, handle),
-        ["Settings*", "Shortcuts", "Pin note", "Quit"]
-    );
+    assert_eq!(app_menu(cx, handle), ["Settings*", "Shortcuts", "Pin note", "Quit"]);
     let menu = bounds_of(cx, handle, "app-menu").unwrap();
     let button = bounds_of(cx, handle, "app-menu-button").unwrap();
     assert_eq!(menu.left(), button.left());
     assert!(menu.top() >= button.bottom());
     keys(cx, handle, "tab tab tab");
-    assert_eq!(
-        app_menu(cx, handle),
-        ["Settings", "Shortcuts", "Pin note", "Quit*"]
-    );
+    assert_eq!(app_menu(cx, handle), ["Settings", "Shortcuts", "Pin note", "Quit*"]);
     keys(cx, handle, "escape");
     assert_eq!(app_menu(cx, handle), Vec::<String>::new());
     assert_eq!(focus(cx, handle), "editor");
@@ -4737,21 +4413,11 @@ fn pin_note_is_off_with_no_note_open(cx: &mut TestAppContext) {
     assert!(empty_pane(cx, handle));
 
     keys(cx, handle, "f10 tab tab");
-    assert_eq!(
-        app_menu(cx, handle),
-        ["Settings", "Shortcuts", "Pin note", "Quit*"]
-    );
+    assert_eq!(app_menu(cx, handle), ["Settings", "Shortcuts", "Pin note", "Quit*"]);
     keys(cx, handle, "shift-tab");
-    assert_eq!(
-        app_menu(cx, handle),
-        ["Settings", "Shortcuts*", "Pin note", "Quit"]
-    );
+    assert_eq!(app_menu(cx, handle), ["Settings", "Shortcuts*", "Pin note", "Quit"]);
     click_menu_item(cx, handle, 2);
-    assert_eq!(
-        app_menu(cx, handle).len(),
-        4,
-        "a click on Pin note does nothing"
-    );
+    assert_eq!(app_menu(cx, handle).len(), 4, "a click on Pin note does nothing");
     keys(cx, handle, "escape");
     assert_eq!(focus(cx, handle), "sidebar");
 }
@@ -4768,10 +4434,7 @@ fn f10_with_the_sidebar_hidden_opens_the_menu_at_the_corner(cx: &mut TestAppCont
     assert_eq!(app_menu(cx, handle).len(), 4);
     assert_eq!(sidebar(cx, handle), "hidden");
     let menu = bounds_of(cx, handle, "app-menu").unwrap();
-    assert_eq!(
-        (menu.left(), menu.top()),
-        (gpui_kit::px(4.), gpui_kit::px(4.))
-    );
+    assert_eq!((menu.left(), menu.top()), (gpui_kit::px(4.), gpui_kit::px(4.)));
 
     keys(cx, handle, "enter");
     assert_eq!(question(cx, handle).as_deref(), Some(text::SETTINGS));
@@ -4803,10 +4466,7 @@ fn ctrl_shift_q_with_a_dialog_open_closes_the_window_by_the_close_rule(cx: &mut 
     assert!(question(cx, handle).is_some());
     keys(cx, handle, "ctrl-shift-q");
     assert!(!window_open(cx, handle));
-    assert!(
-        read(&note).ends_with("\naold\n"),
-        "the close saves the text"
-    );
+    assert!(read(&note).ends_with("\naold\n"), "the close saves the text");
 }
 
 #[gpui_kit::test]
@@ -4820,10 +4480,7 @@ fn ctrl_shift_e_with_the_settings_open_opens_the_problem_list(cx: &mut TestAppCo
     keys(cx, handle, "ctrl-shift-s");
     assert_eq!(question(cx, handle).as_deref(), Some(text::SETTINGS));
     keys(cx, handle, "ctrl-shift-e");
-    assert_eq!(
-        problem_list(cx, handle),
-        [format!("{}*", text::CONFIG_WRITE)]
-    );
+    assert_eq!(problem_list(cx, handle), [format!("{}*", text::CONFIG_WRITE)]);
 }
 
 #[gpui_kit::test]

@@ -23,10 +23,7 @@ impl Item {
     pub(crate) fn parent(&self) -> Option<Self> {
         match self {
             Self::All => None,
-            Self::Folder(path) => path
-                .folder()
-                .filter(|parent| !parent.is_root())
-                .map(Self::Folder),
+            Self::Folder(path) => path.folder().filter(|parent| !parent.is_root()).map(Self::Folder),
             Self::Tag(name) => name.parent().map(Self::Tag),
         }
     }
@@ -78,11 +75,7 @@ pub(crate) enum SidebarView {
 impl From<&SavedSidebarView> for SidebarView {
     fn from(saved: &SavedSidebarView) -> Self {
         let item = Item::from(&saved.item);
-        if saved.list {
-            Self::List(item)
-        } else {
-            Self::Tree(item)
-        }
+        if saved.list { Self::List(item) } else { Self::Tree(item) }
     }
 }
 
@@ -307,11 +300,8 @@ impl Lists {
                 continue;
             }
             let item = Item::Folder(path.clone());
-            let has_children = new_folder == Some(path)
-                || self
-                    .folders
-                    .get(i + 1)
-                    .is_some_and(|next| next.path.is_below(path));
+            let has_children =
+                new_folder == Some(path) || self.folders.get(i + 1).is_some_and(|next| next.path.is_below(path));
             rows.push(TreeRow {
                 name: item.name(),
                 depth: path.depth() - 1,
@@ -402,10 +392,7 @@ mod tests {
 
     #[test]
     fn open_items_show_their_children() {
-        let open = HashSet::from([
-            Item::Folder(folder_path("work")),
-            Item::Tag(tag_name("work")),
-        ]);
+        let open = HashSet::from([Item::Folder(folder_path("work")), Item::Tag(tag_name("work"))]);
         let rows = lists().rows(&open, None);
         assert_eq!(
             names(&rows),
@@ -454,10 +441,7 @@ mod tests {
     #[test]
     fn a_new_folder_is_the_first_child_line_of_its_parent() {
         let root = lists().tree(&HashSet::new(), Some(&FolderPath::root()));
-        assert_eq!(
-            &root.entries[1..3],
-            [Entry::Label(Label::Folders), Entry::NewFolder(0)]
-        );
+        assert_eq!(&root.entries[1..3], [Entry::Label(Label::Folders), Entry::NewFolder(0)]);
         assert_eq!(root.entries[3], Entry::Row(1));
 
         let open = HashSet::from([Item::Folder(folder_path("home"))]);
@@ -471,29 +455,17 @@ mod tests {
         let tree = Lists::default().tree(&HashSet::new(), Some(&FolderPath::root()));
         assert_eq!(
             tree.entries,
-            [
-                Entry::Row(0),
-                Entry::Label(Label::Folders),
-                Entry::NewFolder(0)
-            ]
+            [Entry::Row(0), Entry::Label(Label::Folders), Entry::NewFolder(0)]
         );
     }
 
     #[test]
     fn lists_hold_their_notes() {
         let lists = lists();
-        let paths = |item: Item| -> Vec<String> {
-            lists
-                .list(&item)
-                .notes()
-                .map(|note| note.path.to_string())
-                .collect()
-        };
+        let paths =
+            |item: Item| -> Vec<String> { lists.list(&item).notes().map(|note| note.path.to_string()).collect() };
         assert_eq!(paths(Item::All).len(), 4);
-        assert_eq!(
-            paths(Item::Folder(folder_path("work"))),
-            ["work/b.md", "work/c.md"]
-        );
+        assert_eq!(paths(Item::Folder(folder_path("work"))), ["work/b.md", "work/c.md"]);
         assert_eq!(paths(Item::Tag(tag_name("work"))), ["a.md", "work/b.md"]);
         assert_eq!(paths(Item::Tag(tag_name("work/holm"))), ["work/b.md"]);
     }
@@ -509,10 +481,7 @@ mod tests {
             Item::Tag(tag_name("work/holm")).parent(),
             Some(Item::Tag(tag_name("work")))
         );
-        assert_eq!(
-            Item::Tag(tag_name("work/holm")).folder(),
-            FolderPath::root()
-        );
+        assert_eq!(Item::Tag(tag_name("work/holm")).folder(), FolderPath::root());
         assert!(lists().has(&Item::Tag(tag_name("work/holm"))));
         assert!(!lists().has(&Item::Folder(folder_path("gone"))));
     }
@@ -554,10 +523,7 @@ mod tests {
             Item::Folder(folder_path("work"))
         );
         assert_eq!(nearest(Item::Folder(folder_path("gone"))), Item::All);
-        assert_eq!(
-            nearest(Item::Tag(tag_name("work/gone"))),
-            Item::Tag(tag_name("work"))
-        );
+        assert_eq!(nearest(Item::Tag(tag_name("work/gone"))), Item::Tag(tag_name("work")));
         assert_eq!(nearest(Item::Tag(tag_name("gone/holm"))), Item::All);
     }
 }

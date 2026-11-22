@@ -15,9 +15,8 @@ use std::rc::Rc;
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AppContext as _, Context, CursorStyle, Entity, FocusHandle, Focusable as _,
-    InteractiveElement as _, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement,
-    Pixels, Render, Styled, Subscription, Window, div, px,
+    AppContext as _, Context, CursorStyle, Entity, FocusHandle, Focusable as _, InteractiveElement as _, IntoElement,
+    MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render, Styled, Subscription, Window, div, px,
 };
 use holm_core::model::Note;
 use holm_core::{FolderPath, NotePath, TagName};
@@ -78,16 +77,7 @@ impl NotesView {
         cx: &mut Context<Self>,
     ) -> Self {
         let settings = config.read(cx).settings().clone();
-        let pane = cx.new(|cx| {
-            NotePane::new(
-                core_door.clone(),
-                &config,
-                message_line.clone(),
-                note,
-                window,
-                cx,
-            )
-        });
+        let pane = cx.new(|cx| NotePane::new(core_door.clone(), &config, message_line.clone(), note, window, cx));
         let sidebar = cx.new(|cx| {
             Sidebar::new(
                 core_door.clone(),
@@ -111,12 +101,10 @@ impl NotesView {
             }),
             cx.observe(&core_door, |this, core_door, cx| {
                 let writing = core_door.read(cx).writing();
-                this.message_line
-                    .update(cx, |line, cx| line.set_writing(writing, cx));
+                this.message_line.update(cx, |line, cx| line.set_writing(writing, cx));
             }),
             cx.subscribe(&core_door, |this, _, JobFailed(answer), cx| {
-                this.message_line
-                    .update(cx, |line, cx| line.show(*answer, cx));
+                this.message_line.update(cx, |line, cx| line.show(*answer, cx));
             }),
             cx.subscribe_in(&sidebar, window, Self::sidebar_event),
             cx.subscribe_in(&pane, window, Self::pane_event),
@@ -149,13 +137,7 @@ impl NotesView {
         this
     }
 
-    fn pane_event(
-        &mut self,
-        _: &Entity<NotePane>,
-        event: &PaneEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn pane_event(&mut self, _: &Entity<NotePane>, event: &PaneEvent, window: &mut Window, cx: &mut Context<Self>) {
         match event {
             PaneEvent::Opening(_) => {}
             PaneEvent::Opened(_) => self.save_place(cx),
@@ -176,12 +158,7 @@ impl NotesView {
     }
 
     /// `F2` on a tag line: shows the sidebar and starts the name field of the tag.
-    fn rename_tag_from_line(
-        &mut self,
-        RenameTag(tag): &RenameTag,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn rename_tag_from_line(&mut self, RenameTag(tag): &RenameTag, window: &mut Window, cx: &mut Context<Self>) {
         let tag = tag.clone();
         self.hidden = false;
         self.save_place(cx);
@@ -270,8 +247,7 @@ impl NotesView {
         match event {
             SidebarEvent::Open(path) => {
                 let path = path.clone();
-                self.pane
-                    .update(cx, |pane, cx| pane.open(path, Leave::Keep, cx));
+                self.pane.update(cx, |pane, cx| pane.open(path, Leave::Keep, cx));
             }
             SidebarEvent::FocusEditor => self.focus_home(window, cx),
             SidebarEvent::RenameNote => {
@@ -399,16 +375,14 @@ impl NotesView {
         self.before_popup = window.focused(cx);
         let config = self.config.clone();
         let settings = cx.new(|cx| SettingsDialog::new(config, window, cx));
-        self.subscriptions.push(cx.subscribe_in(
-            &settings,
-            window,
-            |this, _, _: &settings::Close, window, cx| {
+        self.subscriptions.push(
+            cx.subscribe_in(&settings, window, |this, _, _: &settings::Close, window, cx| {
                 this.settings = None;
                 let before = this.before_popup.take();
                 this.focus_before(before, window, cx);
                 cx.notify();
-            },
-        ));
+            }),
+        );
         self.settings = Some(settings);
         cx.notify();
     }
@@ -417,16 +391,14 @@ impl NotesView {
     fn open_shortcut_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.before_popup = window.focused(cx);
         let list = cx.new(|cx| ShortcutList::new(window, cx));
-        self.subscriptions.push(cx.subscribe_in(
-            &list,
-            window,
-            |this, _, _: &shortcut_list::Close, window, cx| {
+        self.subscriptions.push(
+            cx.subscribe_in(&list, window, |this, _, _: &shortcut_list::Close, window, cx| {
                 this.shortcut_list = None;
                 let before = this.before_popup.take();
                 this.focus_before(before, window, cx);
                 cx.notify();
-            },
-        ));
+            }),
+        );
         self.shortcut_list = Some(list);
         cx.notify();
     }
@@ -434,14 +406,9 @@ impl NotesView {
     /// F10 or the button of the sidebar head: opens or closes the app menu. With the sidebar
     /// hidden, it opens at the window corner, and the sidebar stays hidden.
     fn toggle_app_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let spot = if self.hidden {
-            Spot::Corner
-        } else {
-            Spot::Button
-        };
+        let spot = if self.hidden { Spot::Corner } else { Spot::Button };
         let note = self.pane.read(cx).path().is_some();
-        self.app_menu
-            .update(cx, |menu, cx| menu.toggle(spot, note, window, cx));
+        self.app_menu.update(cx, |menu, cx| menu.toggle(spot, note, window, cx));
     }
 
     /// Ctrl+K: opens the link picker.
@@ -495,8 +462,7 @@ impl NotesView {
         match event {
             QuickOpenEvent::Open(path) => {
                 let path = path.clone();
-                self.pane
-                    .update(cx, |pane, cx| pane.open(path, Leave::Keep, cx));
+                self.pane.update(cx, |pane, cx| pane.open(path, Leave::Keep, cx));
                 self.focus_editor(window, cx);
             }
             QuickOpenEvent::Close => self.focus_before(before, window, cx),
@@ -505,12 +471,7 @@ impl NotesView {
     }
 
     /// Gives the focus back to `before`, or to the editor.
-    fn focus_before(
-        &self,
-        before: Option<FocusHandle>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn focus_before(&self, before: Option<FocusHandle>, window: &mut Window, cx: &mut Context<Self>) {
         match before {
             Some(before) => window.focus(&before, cx),
             None => self.focus_home(window, cx),
@@ -573,15 +534,13 @@ impl NotesView {
     /// Ctrl+N: a new note in the folder of the sidebar view, with its tag.
     fn new_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (folder, tag) = self.sidebar.read(cx).new_note_place();
-        self.pane
-            .update(cx, |pane, cx| pane.new_note(folder, tag, window, cx));
+        self.pane.update(cx, |pane, cx| pane.new_note(folder, tag, window, cx));
     }
 
     /// Ctrl+Shift+N: an empty name field for a new folder in the folder of the sidebar view.
     fn new_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.hidden = false;
-        self.sidebar
-            .update(cx, |sidebar, cx| sidebar.new_folder(window, cx));
+        self.sidebar.update(cx, |sidebar, cx| sidebar.new_folder(window, cx));
         cx.notify();
     }
 
@@ -601,10 +560,7 @@ impl NotesView {
     /// editor and shows "Not saved".
     pub(crate) fn leave(&self, done: Then<bool>, cx: &mut Context<Self>) {
         self.core_door.update(cx, |core_door, cx| {
-            core_door.wait_saved(
-                move |saved: Result<(), NotSaved>, cx| done(saved.is_ok(), cx),
-                cx,
-            );
+            core_door.wait_saved(move |saved: Result<(), NotSaved>, cx| done(saved.is_ok(), cx), cx);
         });
     }
 
@@ -621,8 +577,7 @@ impl NotesView {
             done(this, value, window, cx);
             cx.notify();
         }));
-        self.core_door
-            .update(cx, |core_door, cx| start(core_door, done, cx));
+        self.core_door.update(cx, |core_door, cx| start(core_door, done, cx));
     }
 
     fn focus_editor(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -663,8 +618,7 @@ impl NotesView {
     /// Ctrl+Shift+F: show the sidebar and give its search field the focus.
     fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.hidden = false;
-        self.sidebar
-            .update(cx, |sidebar, cx| sidebar.focus_search(window, cx));
+        self.sidebar.update(cx, |sidebar, cx| sidebar.focus_search(window, cx));
         self.save_place(cx);
         cx.notify();
     }
@@ -695,19 +649,15 @@ impl NotesView {
             Command::QuickOpen => self.open_quick_open(window, cx),
             Command::Pin => self.pane.update(cx, NotePane::toggle_pin),
             Command::Tags => self.pane.update(cx, |pane, cx| pane.focus_tags(window, cx)),
-            Command::Backlinks => self
-                .pane
-                .update(cx, |pane, cx| pane.show_backlinks(window, cx)),
+            Command::Backlinks => self.pane.update(cx, |pane, cx| pane.show_backlinks(window, cx)),
             Command::NewNote => self.new_note(window, cx),
             Command::NewFolder => self.new_folder(window, cx),
             Command::LinkNote => self.open_link_picker(window, cx),
             Command::LinkFiles => {
-                self.pane
-                    .update(cx, |pane, cx| pane.link_paths(Pick::Files, cx));
+                self.pane.update(cx, |pane, cx| pane.link_paths(Pick::Files, cx));
             }
             Command::LinkFolders => {
-                self.pane
-                    .update(cx, |pane, cx| pane.link_paths(Pick::Folders, cx));
+                self.pane.update(cx, |pane, cx| pane.link_paths(Pick::Folders, cx));
             }
             Command::Settings => self.open_settings(window, cx),
             Command::ShortcutList => self.open_shortcut_list(window, cx),
@@ -804,9 +754,7 @@ impl Render for NotesView {
             .id("notes")
             .size_full()
             .relative()
-            .when(!self.covered(), |view| {
-                view.key_context(Place::Window.key_context())
-            })
+            .when(!self.covered(), |view| view.key_context(Place::Window.key_context()))
             .on_action(cx.listener(Self::run_key))
             .on_action(cx.listener(Self::rename_tag_from_line))
             .on_mouse_move(cx.listener(Self::mouse_move))

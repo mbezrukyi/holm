@@ -9,8 +9,8 @@
 use std::path::PathBuf;
 
 use gpui_kit::{
-    App, AppContext, Bounds, Context, Entity, Focusable, IntoElement, ParentElement, Render,
-    Styled, TitlebarOptions, Window, WindowBounds, WindowOptions, div, px, size,
+    App, AppContext, Bounds, Context, Entity, Focusable, IntoElement, ParentElement, Render, Styled, TitlebarOptions,
+    Window, WindowBounds, WindowOptions, div, px, size,
 };
 use holm_editor::{Appearance, Editor};
 
@@ -45,10 +45,7 @@ fn main() {
             "--tail" => tail = true,
             "--font" => font = args.next().unwrap_or(font),
             "--size" => {
-                text_size = args
-                    .next()
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(text_size);
+                text_size = args.next().and_then(|v| v.parse().ok()).unwrap_or(text_size);
             }
             "--line" => line = args.next().and_then(|v| v.parse().ok()).unwrap_or(line),
             _ => {}
@@ -72,21 +69,10 @@ fn main() {
             let editor = cx.new(|cx| {
                 let mut editor = Editor::new(cx);
                 let note = include_str!("look.md");
-                let from = if tail {
-                    note.find("## Code").unwrap_or(0)
-                } else {
-                    0
-                };
+                let from = if tail { note.find("## Code").unwrap_or(0) } else { 0 };
                 editor.set_text(&note[from..], cx);
-                editor.set_folder(
-                    Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data")),
-                    cx,
-                );
-                let appearance = if dark {
-                    Appearance::Dark
-                } else {
-                    Appearance::Light
-                };
+                editor.set_folder(Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data")), cx);
+                let appearance = if dark { Appearance::Dark } else { Appearance::Light };
                 editor.set_appearance(appearance, cx);
                 editor
             });

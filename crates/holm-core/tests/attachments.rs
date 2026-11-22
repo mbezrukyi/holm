@@ -17,16 +17,10 @@ fn attach_file_copies_the_file_and_returns_the_path_from_the_note() {
     let file = outside.path().join("photo.jpg");
     fs::write(&file, b"jpg").unwrap();
 
-    let path = folder
-        .core
-        .attach_file(&note_path("work/b.md"), &file)
-        .unwrap();
+    let path = folder.core.attach_file(&note_path("work/b.md"), &file).unwrap();
 
     assert_eq!(path, Path::new("../attachments/photo-f8146b6c.jpg"));
-    assert_eq!(
-        fs::read(folder.path("attachments/photo-f8146b6c.jpg")).unwrap(),
-        b"jpg"
-    );
+    assert_eq!(fs::read(folder.path("attachments/photo-f8146b6c.jpg")).unwrap(), b"jpg");
     assert_eq!(fs::read(&file).unwrap(), b"jpg");
     assert_eq!(folder.text("work/b.md"), "# B\n");
 }
@@ -66,10 +60,7 @@ fn attach_file_names_a_hidden_file_and_a_file_with_no_extension() {
     fs::write(&plain, "").unwrap();
 
     assert_eq!(
-        folder
-            .core
-            .attach_file(&note_path("a.md"), &hidden)
-            .unwrap(),
+        folder.core.attach_file(&note_path("a.md"), &hidden).unwrap(),
         Path::new("attachments/-config-e3b0c442")
     );
     assert_eq!(
@@ -113,10 +104,7 @@ fn attach_file_fails_when_attachments_is_a_file() {
 fn paste_image_names_the_file_by_its_content() {
     let folder = Folder::new(&[("work/a.md", "# A\n")]);
 
-    let path = folder
-        .core
-        .paste_image(&note_path("work/a.md"), "png", b"png")
-        .unwrap();
+    let path = folder.core.paste_image(&note_path("work/a.md"), "png", b"png").unwrap();
 
     assert_eq!(path, Path::new("../attachments/Pasted image-8f8cbb7d.png"));
     assert_eq!(
@@ -129,10 +117,7 @@ fn paste_image_names_the_file_by_its_content() {
 fn attachments_do_not_show_as_folders_or_notes() {
     let folder = Folder::new(&[("a.md", "# A\n")]);
 
-    folder
-        .core
-        .paste_image(&note_path("a.md"), "png", b"png")
-        .unwrap();
+    folder.core.paste_image(&note_path("a.md"), "png", b"png").unwrap();
 
     assert_eq!(
         folder
@@ -147,10 +132,7 @@ fn attachments_do_not_show_as_folders_or_notes() {
         folder
             .core
             .snapshot()
-            .notes(
-                holm_core::model::NoteSet::All,
-                holm_core::model::Order::Title
-            )
+            .notes(holm_core::model::NoteSet::All, holm_core::model::Order::Title)
             .len(),
         1
     );

@@ -94,10 +94,7 @@ fn email_autolink(b: &[u8], start: usize) -> Option<usize> {
     i += 1;
     loop {
         let label = i;
-        while b
-            .get(i)
-            .is_some_and(|c| c.is_ascii_alphanumeric() || *c == b'-')
-        {
+        while b.get(i).is_some_and(|c| c.is_ascii_alphanumeric() || *c == b'-') {
             i += 1;
         }
         let len = i - label;
@@ -117,11 +114,7 @@ fn email_autolink(b: &[u8], start: usize) -> Option<usize> {
 pub(super) fn raw_html(text: &str, start: usize) -> Option<usize> {
     let b = text.as_bytes();
     let rest = &text[start..];
-    let after = |pattern: &str, from: usize| {
-        text[from..]
-            .find(pattern)
-            .map(|at| from + at + pattern.len())
-    };
+    let after = |pattern: &str, from: usize| text[from..].find(pattern).map(|at| from + at + pattern.len());
     match *b.get(start + 1)? {
         b'!' => {
             if rest.starts_with("<!-->") {
@@ -153,10 +146,7 @@ fn tag_name(b: &[u8], start: usize) -> Option<usize> {
         return None;
     }
     let mut i = start + 1;
-    while b
-        .get(i)
-        .is_some_and(|c| c.is_ascii_alphanumeric() || *c == b'-')
-    {
+    while b.get(i).is_some_and(|c| c.is_ascii_alphanumeric() || *c == b'-') {
         i += 1;
     }
     Some(i)

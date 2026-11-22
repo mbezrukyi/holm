@@ -19,9 +19,7 @@ impl Defs {
     }
 
     fn get(&self, label: &str) -> Option<&str> {
-        self.0
-            .get(&scan::normalize_label(label))
-            .map(String::as_str)
+        self.0.get(&scan::normalize_label(label)).map(String::as_str)
     }
 }
 
@@ -233,11 +231,7 @@ impl Parser<'_> {
                     }
                 }
                 b'\n' => {
-                    let spaces = b[text_start..p]
-                        .iter()
-                        .rev()
-                        .take_while(|&&c| c == b' ')
-                        .count();
+                    let spaces = b[text_start..p].iter().rev().take_while(|&&c| c == b' ').count();
                     if spaces >= 2 {
                         self.flush(text_start..p - spaces);
                         self.push_node(Kind::HardBreak, p - spaces..p + 1, p..p);
@@ -286,10 +280,7 @@ impl Parser<'_> {
         let left = !space(after) && (!punct(after) || space(before) || punct(before));
         let right = !space(before) && (!punct(before) || space(after) || punct(after));
         let (open, close) = if ch == b'_' {
-            (
-                left && (!right || punct(before)),
-                right && (!left || punct(after)),
-            )
+            (left && (!right || punct(before)), right && (!left || punct(after)))
         } else {
             (left, right)
         };
@@ -370,8 +361,7 @@ impl Parser<'_> {
             self.brackets.pop();
             return None;
         };
-        let (image, start, active, delims) =
-            (bracket.image, bracket.start, bracket.active, bracket.delims);
+        let (image, start, active, delims) = (bracket.image, bracket.start, bracket.active, bracket.delims);
         if !active {
             self.brackets.pop();
             return None;
@@ -553,11 +543,7 @@ impl Parser<'_> {
     fn insert_after(&mut self, at: usize, item: Item) {
         let next = self.slots[at].next;
         let new = self.slots.len();
-        self.slots.push(Slot {
-            item,
-            prev: at,
-            next,
-        });
+        self.slots.push(Slot { item, prev: at, next });
         self.slots[at].next = new;
         if next == NONE {
             self.tail = new;
@@ -633,11 +619,7 @@ fn run_len(b: &[u8], start: usize) -> usize {
 fn code_content(b: &[u8], inner: Range<usize>) -> Range<usize> {
     let space = |c: u8| matches!(c, b' ' | b'\n');
     let code = &b[inner.clone()];
-    if code.len() >= 2
-        && space(code[0])
-        && space(code[code.len() - 1])
-        && !code.iter().all(|&c| space(c))
-    {
+    if code.len() >= 2 && space(code[0]) && space(code[code.len() - 1]) && !code.iter().all(|&c| space(c)) {
         inner.start + 1..inner.end - 1
     } else {
         inner
@@ -656,8 +638,8 @@ fn text_node(range: Range<usize>) -> Node {
 /// Joins text nodes that touch, then pairs Holm's HTML tags into style nodes.
 fn finish(text: &str, mut nodes: Vec<Node>) -> Vec<Node> {
     nodes.dedup_by(|next, last| {
-        let touch = matches!((&last.kind, &next.kind), (Kind::Text, Kind::Text))
-            && last.source.end == next.source.start;
+        let touch =
+            matches!((&last.kind, &next.kind), (Kind::Text, Kind::Text)) && last.source.end == next.source.start;
         if touch {
             last.source.end = next.source.end;
             last.content.end = next.source.end;

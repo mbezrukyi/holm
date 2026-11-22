@@ -88,10 +88,7 @@ impl NoteFile {
     ///
     /// It reads a block list, a flow list like `[a, b]`, and a single tag.
     pub fn tags(&self) -> Vec<String> {
-        self.frontmatter
-            .as_ref()
-            .map(Frontmatter::tags)
-            .unwrap_or_default()
+        self.frontmatter.as_ref().map(Frontmatter::tags).unwrap_or_default()
     }
 
     /// Whether the `pinned` field is `true`.
@@ -129,8 +126,7 @@ impl NoteFile {
     /// It normalizes each tag like [`normalize_tag`](crate::normalize_tag) and drops repeats.
     pub fn set_tags<S: AsRef<str>>(&mut self, tags: &[S]) {
         let tags = clean_tags(tags);
-        let raw =
-            (!tags.is_empty()).then(|| Frontmatter::write_tags(&tags, self.line_ending.as_str()));
+        let raw = (!tags.is_empty()).then(|| Frontmatter::write_tags(&tags, self.line_ending.as_str()));
         self.set(Key::Tags, raw);
     }
 

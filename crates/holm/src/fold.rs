@@ -7,9 +7,9 @@
 use std::ops::Range;
 
 use gpui_kit::{
-    AlignItems, AnyElement, App, AvailableSpace, Bounds, Display, Element, ElementId,
-    FlexDirection, GlobalElementId, InspectorElementId, IntoElement, LayoutId, Overflow,
-    ParentElement as _, Pixels, Style, Styled as _, Window, div, point, px, relative, size,
+    AlignItems, AnyElement, App, AvailableSpace, Bounds, Display, Element, ElementId, FlexDirection, GlobalElementId,
+    InspectorElementId, IntoElement, LayoutId, Overflow, ParentElement as _, Pixels, Style, Styled as _, Window, div,
+    point, px, relative, size,
 };
 
 /// One part of the row, with its layout in a row with no fold.

@@ -173,13 +173,7 @@ use Group as G;
 use Place as P;
 
 const ROWS: &[Row] = &[
-    row(
-        P::Window,
-        Keys::ctrl("n"),
-        C::NewNote,
-        G::Note,
-        text::KEY_NEW_NOTE,
-    ),
+    row(P::Window, Keys::ctrl("n"), C::NewNote, G::Note, text::KEY_NEW_NOTE),
     row(
         P::Window,
         Keys::ctrl_shift("n"),
@@ -208,20 +202,8 @@ const ROWS: &[Row] = &[
         G::Sidebar,
         text::KEY_SEARCH,
     ),
-    row(
-        P::Window,
-        Keys::ctrl_shift("p"),
-        C::Pin,
-        G::Note,
-        text::KEY_PIN,
-    ),
-    row(
-        P::Window,
-        Keys::ctrl_shift("t"),
-        C::Tags,
-        G::Note,
-        text::KEY_TAGS,
-    ),
+    row(P::Window, Keys::ctrl_shift("p"), C::Pin, G::Note, text::KEY_PIN),
+    row(P::Window, Keys::ctrl_shift("t"), C::Tags, G::Note, text::KEY_TAGS),
     row(
         P::Window,
         Keys::ctrl_shift("b"),
@@ -243,20 +225,8 @@ const ROWS: &[Row] = &[
         G::Window,
         text::KEY_SHORTCUT_LIST,
     ),
-    row(
-        P::Window,
-        Keys::plain("f10"),
-        C::AppMenu,
-        G::Window,
-        text::KEY_APP_MENU,
-    ),
-    row(
-        P::Window,
-        Keys::ctrl("+"),
-        C::ScaleUp,
-        G::Window,
-        text::KEY_SCALE_UP,
-    ),
+    row(P::Window, Keys::plain("f10"), C::AppMenu, G::Window, text::KEY_APP_MENU),
+    row(P::Window, Keys::ctrl("+"), C::ScaleUp, G::Window, text::KEY_SCALE_UP),
     row(
         P::Window,
         Keys::ctrl("-"),
@@ -278,34 +248,10 @@ const ROWS: &[Row] = &[
         G::Window,
         text::KEY_PROBLEMS,
     ),
-    row(
-        P::Anywhere,
-        Keys::ctrl_shift("q"),
-        C::Quit,
-        G::Window,
-        text::KEY_QUIT,
-    ),
-    row(
-        P::Note,
-        Keys::plain("f2"),
-        C::EditTitle,
-        G::Note,
-        text::KEY_EDIT_TITLE,
-    ),
-    row(
-        P::Note,
-        Keys::ctrl("k"),
-        C::LinkNote,
-        G::Note,
-        text::KEY_LINK_NOTE,
-    ),
-    row(
-        P::Note,
-        Keys::ctrl("o"),
-        C::LinkFiles,
-        G::Note,
-        text::KEY_LINK_FILES,
-    ),
+    row(P::Anywhere, Keys::ctrl_shift("q"), C::Quit, G::Window, text::KEY_QUIT),
+    row(P::Note, Keys::plain("f2"), C::EditTitle, G::Note, text::KEY_EDIT_TITLE),
+    row(P::Note, Keys::ctrl("k"), C::LinkNote, G::Note, text::KEY_LINK_NOTE),
+    row(P::Note, Keys::ctrl("o"), C::LinkFiles, G::Note, text::KEY_LINK_FILES),
     row(
         P::Note,
         Keys::ctrl("j"),
@@ -313,20 +259,8 @@ const ROWS: &[Row] = &[
         G::Note,
         text::KEY_LINK_FOLDERS,
     ),
-    row(
-        P::Sidebar,
-        Keys::ctrl_shift("m"),
-        C::Move,
-        G::Sidebar,
-        text::KEY_MOVE,
-    ),
-    row(
-        P::Tree,
-        Keys::plain("tab"),
-        C::Next,
-        G::Sidebar,
-        text::KEY_NEXT_ITEM,
-    ),
+    row(P::Sidebar, Keys::ctrl_shift("m"), C::Move, G::Sidebar, text::KEY_MOVE),
+    row(P::Tree, Keys::plain("tab"), C::Next, G::Sidebar, text::KEY_NEXT_ITEM),
     row(
         P::Tree,
         Keys::plain("tab").shift(Shift::Down),
@@ -355,13 +289,7 @@ const ROWS: &[Row] = &[
         G::Sidebar,
         text::KEY_FOCUS_EDITOR,
     ),
-    row(
-        P::Tree,
-        Keys::plain("f2"),
-        C::Rename,
-        G::Sidebar,
-        text::KEY_RENAME_ITEM,
-    ),
+    row(P::Tree, Keys::plain("f2"), C::Rename, G::Sidebar, text::KEY_RENAME_ITEM),
     row(
         P::Tree,
         Keys::plain("delete"),
@@ -390,13 +318,7 @@ const ROWS: &[Row] = &[
         G::Sidebar,
         text::KEY_FOCUS_EDITOR,
     ),
-    row(
-        P::NoteList,
-        Keys::plain("escape"),
-        C::Back,
-        G::Sidebar,
-        text::KEY_BACK,
-    ),
+    row(P::NoteList, Keys::plain("escape"), C::Back, G::Sidebar, text::KEY_BACK),
     row(
         P::NoteList,
         Keys::plain("f2"),
@@ -411,13 +333,7 @@ const ROWS: &[Row] = &[
         G::Sidebar,
         text::KEY_DELETE_NOTE,
     ),
-    row(
-        P::TagPopup,
-        Keys::plain("f2"),
-        C::Rename,
-        G::Note,
-        text::KEY_RENAME_TAG,
-    ),
+    row(P::TagPopup, Keys::plain("f2"), C::Rename, G::Note, text::KEY_RENAME_TAG),
     row(
         P::TagPopup,
         Keys::plain("enter"),
@@ -425,13 +341,7 @@ const ROWS: &[Row] = &[
         G::Note,
         text::KEY_SWITCH_TAG,
     ),
-    row(
-        P::TagPopup,
-        Keys::plain("tab"),
-        C::Next,
-        G::Note,
-        text::KEY_NEXT_TAG,
-    ),
+    row(P::TagPopup, Keys::plain("tab"), C::Next, G::Note, text::KEY_NEXT_TAG),
     row(
         P::TagPopup,
         Keys::plain("tab").shift(Shift::Down),
@@ -439,13 +349,7 @@ const ROWS: &[Row] = &[
         G::Note,
         text::KEY_PREVIOUS_TAG,
     ),
-    row(
-        P::TagPopup,
-        Keys::plain("escape"),
-        C::Close,
-        G::Note,
-        text::KEY_CLOSE,
-    ),
+    row(P::TagPopup, Keys::plain("escape"), C::Close, G::Note, text::KEY_CLOSE),
     row(
         P::SearchField,
         Keys::plain("enter"),
@@ -460,20 +364,8 @@ const ROWS: &[Row] = &[
         G::Sidebar,
         text::KEY_CLEAR_SEARCH,
     ),
-    row(
-        P::Dialog,
-        Keys::plain("enter"),
-        C::Yes,
-        G::Window,
-        text::KEY_YES,
-    ),
-    row(
-        P::Dialog,
-        Keys::plain("escape"),
-        C::No,
-        G::Window,
-        text::KEY_NO,
-    ),
+    row(P::Dialog, Keys::plain("enter"), C::Yes, G::Window, text::KEY_YES),
+    row(P::Dialog, Keys::plain("escape"), C::No, G::Window, text::KEY_NO),
     row(
         P::Dialog,
         Keys::plain("space"),
@@ -481,13 +373,7 @@ const ROWS: &[Row] = &[
         G::Window,
         text::KEY_SWITCH_ASK,
     ),
-    row(
-        P::ListPopup,
-        Keys::plain("tab"),
-        C::Next,
-        G::Window,
-        text::KEY_NEXT_ROW,
-    ),
+    row(P::ListPopup, Keys::plain("tab"), C::Next, G::Window, text::KEY_NEXT_ROW),
     row(
         P::ListPopup,
         Keys::plain("tab").shift(Shift::Down),
@@ -495,13 +381,7 @@ const ROWS: &[Row] = &[
         G::Window,
         text::KEY_PREVIOUS_ROW,
     ),
-    row(
-        P::ListPopup,
-        Keys::plain("enter"),
-        C::Pick,
-        G::Window,
-        text::KEY_PICK,
-    ),
+    row(P::ListPopup, Keys::plain("enter"), C::Pick, G::Window, text::KEY_PICK),
     row(
         P::ListPopup,
         Keys::plain("escape"),
@@ -509,13 +389,7 @@ const ROWS: &[Row] = &[
         G::Window,
         text::KEY_CLOSE,
     ),
-    row(
-        P::Picker,
-        Keys::plain("tab"),
-        C::Next,
-        G::Window,
-        text::KEY_NEXT_ROW,
-    ),
+    row(P::Picker, Keys::plain("tab"), C::Next, G::Window, text::KEY_NEXT_ROW),
     row(
         P::Picker,
         Keys::plain("tab").shift(Shift::Down),
@@ -523,20 +397,8 @@ const ROWS: &[Row] = &[
         G::Window,
         text::KEY_PREVIOUS_ROW,
     ),
-    row(
-        P::Picker,
-        Keys::plain("enter"),
-        C::Pick,
-        G::Window,
-        text::KEY_PICK,
-    ),
-    row(
-        P::Picker,
-        Keys::plain("escape"),
-        C::Close,
-        G::Window,
-        text::KEY_CLOSE,
-    ),
+    row(P::Picker, Keys::plain("enter"), C::Pick, G::Window, text::KEY_PICK),
+    row(P::Picker, Keys::plain("escape"), C::Close, G::Window, text::KEY_CLOSE),
     row(
         P::TextField,
         Keys::plain("enter").shift(Shift::Either),
@@ -586,13 +448,7 @@ const ROWS: &[Row] = &[
         G::Window,
         text::KEY_CHANGE_FOLDER,
     ),
-    row(
-        P::Settings,
-        Keys::plain("escape"),
-        C::Close,
-        G::Window,
-        text::KEY_CLOSE,
-    ),
+    row(P::Settings, Keys::plain("escape"), C::Close, G::Window, text::KEY_CLOSE),
     row(
         P::ShortcutList,
         Keys::plain("tab"),
@@ -658,8 +514,7 @@ pub(crate) fn bind(cx: &mut App) {
         .iter()
         .flat_map(|row| {
             let command = row.command;
-            row.keys
-                .bindings(row.place.key_context(), |_| Run(command), cx)
+            row.keys.bindings(row.place.key_context(), |_| Run(command), cx)
         })
         .collect();
     for (place, keys, command) in second_keys() {
@@ -706,12 +561,7 @@ fn kept_by_text_fields() -> Vec<Keys> {
         .chain(text_keys().map(|shortcut| shortcut.keys))
         .collect();
     ROWS.iter()
-        .filter(|row| {
-            !matches!(
-                row.place,
-                Place::TextField | Place::Anywhere | Place::Window
-            ) && !row.keys.ctrl
-        })
+        .filter(|row| !matches!(row.place, Place::TextField | Place::Anywhere | Place::Window) && !row.keys.ctrl)
         .map(|row| row.keys)
         .filter(|keys| !named.iter().any(|name| name.overlaps(keys)))
         .collect()
@@ -783,11 +633,7 @@ mod tests {
             for row in ROWS {
                 let context = row.place.key_context();
                 let bindings = row.keys.bindings(context, |_| Run(row.command), cx);
-                let count = if row.keys.shift == Shift::Either {
-                    2
-                } else {
-                    1
-                };
+                let count = if row.keys.shift == Shift::Either { 2 } else { 1 };
                 assert_eq!(bindings.len(), count, "{:?} {:?}", row.place, row.keys);
             }
         });
@@ -835,10 +681,7 @@ mod tests {
         let typed = typed_keys();
         assert!(typed.iter().all(|keys| !keys.ctrl), "{typed:?}");
         assert!(typed.iter().any(|keys| keys.key == "space"), "{typed:?}");
-        assert!(
-            typed.iter().any(|keys| keys.key == "1"),
-            "a color of the color window"
-        );
+        assert!(typed.iter().any(|keys| keys.key == "1"), "a color of the color window");
         assert!(!typed.iter().any(|keys| keys.key == "enter"));
 
         let kept = kept_by_text_fields();

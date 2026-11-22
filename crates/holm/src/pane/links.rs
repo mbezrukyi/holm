@@ -25,10 +25,7 @@ use crate::text;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum LinksEvent {
     /// Open another note, at `heading` when it has one.
-    Open {
-        path: NotePath,
-        heading: Option<String>,
-    },
+    Open { path: NotePath, heading: Option<String> },
     /// An answer for the message line.
     Error(&'static str),
 }
@@ -134,11 +131,7 @@ impl Links {
     /// Gives `done` what the link picker starts with, after the write line writes the unsaved
     /// text. In a note link, the field starts with its target, and the pick changes that link.
     /// With no open note, it does nothing.
-    pub(super) fn start(
-        &mut self,
-        done: impl FnOnce(LinkStart, &mut App) + 'static,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn start(&mut self, done: impl FnOnce(LinkStart, &mut App) + 'static, cx: &mut Context<Self>) {
         let Some(open_note) = self.note.clone() else {
             return;
         };
@@ -148,18 +141,13 @@ impl Links {
         let links = cx.weak_entity();
         let done = Done::value(move |(), cx| {
             let start = links.read_with(cx, |links, cx| {
-                LinkStart::new(
-                    links.core_door.read(cx).snapshot(),
-                    open_note,
-                    target.as_ref(),
-                )
+                LinkStart::new(links.core_door.read(cx).snapshot(), open_note, target.as_ref())
             });
             if let Ok(start) = start {
                 done(start, cx);
             }
         });
-        self.core_door
-            .update(cx, |core_door, cx| core_door.wait(done, cx));
+        self.core_door.update(cx, |core_door, cx| core_door.wait(done, cx));
     }
 
     /// Makes the link of `choice`, and puts it at the cursor. A new note goes in the folder of
@@ -174,16 +162,10 @@ impl Links {
         let links = cx.weak_entity();
         let into = note.clone();
         let put = move |target: Target, text: String, cx: &mut App| {
-            links
-                .update(cx, |links, cx| links.put(&into, &target, &text, cx))
-                .ok();
+            links.update(cx, |links, cx| links.put(&into, &target, &text, cx)).ok();
         };
         match choice {
-            LinkChoice::Note {
-                path,
-                title,
-                heading,
-            } => self.core_door.update(cx, |core_door, cx| {
+            LinkChoice::Note { path, title, heading } => self.core_door.update(cx, |core_door, cx| {
                 core_door.link_id(
                     path,
                     Done::value(move |id, cx| {
@@ -229,8 +211,7 @@ impl Links {
     fn read(&mut self, cx: &mut Context<Self>) {
         let Some(path) = self.note.clone() else {
             self.reading = None;
-            self.backlinks
-                .update(cx, |list, cx| list.show(Vec::new(), cx));
+            self.backlinks.update(cx, |list, cx| list.show(Vec::new(), cx));
             return;
         };
         let core_door = self.core_door.read(cx);
@@ -243,13 +224,9 @@ impl Links {
                     if links.note.as_ref() != Some(&path) {
                         return;
                     }
-                    links
-                        .backlinks
-                        .update(cx, |list, cx| list.show(backlinks, cx));
+                    links.backlinks.update(cx, |list, cx| list.show(backlinks, cx));
                     let broken: HashSet<Target> = broken.into_iter().filter_map(target).collect();
-                    links
-                        .editor
-                        .update(cx, |editor, cx| editor.set_link_states(broken, cx));
+                    links.editor.update(cx, |editor, cx| editor.set_link_states(broken, cx));
                 })
                 .ok();
         }));
@@ -276,8 +253,7 @@ impl Links {
         if self.note.as_ref() != Some(&path) {
             cx.emit(LinksEvent::Open { path, heading });
         } else if let Some(heading) = heading {
-            self.editor
-                .update(cx, |editor, cx| editor.show_heading(&heading, cx));
+            self.editor.update(cx, |editor, cx| editor.show_heading(&heading, cx));
         }
     }
 
@@ -313,12 +289,7 @@ impl Links {
 
     /// Embeds a link to each file at the cursor, as `![name](..)`. It shows an image or a file
     /// chip. A file with no link gets none.
-    fn insert_file_links(
-        &mut self,
-        names: Vec<String>,
-        files: Vec<Option<PathBuf>>,
-        cx: &mut Context<Self>,
-    ) {
+    fn insert_file_links(&mut self, names: Vec<String>, files: Vec<Option<PathBuf>>, cx: &mut Context<Self>) {
         for (name, path) in names.into_iter().zip(files) {
             let Some(path) = path else {
                 continue;

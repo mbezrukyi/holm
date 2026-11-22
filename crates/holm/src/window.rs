@@ -14,10 +14,10 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Bounds, Context, Entity, FocusHandle,
-    InteractiveElement as _, IntoElement, ParentElement, PathPromptOptions, Render, Role,
-    SharedString, StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _,
-    TitlebarOptions, Window, WindowBounds, WindowDecorations, WindowOptions, div, px, size,
+    AnyElement, App, AppContext as _, Bounds, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
+    ParentElement, PathPromptOptions, Render, Role, SharedString, StatefulInteractiveElement as _, Styled,
+    Subscription, TestSupportExt as _, TitlebarOptions, Window, WindowBounds, WindowDecorations, WindowOptions, div,
+    px, size,
 };
 use holm_core::Core;
 
@@ -139,8 +139,7 @@ impl HolmWindow {
         });
         let this = cx.weak_entity();
         window.on_window_should_close(cx, move |window, cx| {
-            this.update(cx, |this, cx| this.may_close(window, cx))
-                .unwrap_or(true)
+            this.update(cx, |this, cx| this.may_close(window, cx)).unwrap_or(true)
         });
         let mut this = Self {
             open_core,
@@ -168,11 +167,7 @@ impl HolmWindow {
     fn config_changed(&mut self, _: Entity<Config>, window: &mut Window, cx: &mut Context<Self>) {
         self.show_problems(cx);
         let settings = self.config.read(cx).settings();
-        let (mode, scale, folder) = (
-            settings.theme,
-            settings.scale,
-            settings.notes_folder.clone(),
-        );
+        let (mode, scale, folder) = (settings.theme, settings.scale, settings.notes_folder.clone());
         theme::update_mode(mode, window, cx);
         window.set_zoom(scale.factor(), cx);
         if let Some(folder) = folder
@@ -220,8 +215,7 @@ impl HolmWindow {
             .flatten()
             .map(SharedString::from)
             .collect();
-        self.message_line
-            .update(cx, |line, cx| line.set_problems(problems, cx));
+        self.message_line.update(cx, |line, cx| line.set_problems(problems, cx));
     }
 
     /// A close of the window: gives whether it may close now. The open notes folder may keep it
@@ -255,13 +249,7 @@ impl HolmWindow {
     }
 
     /// Opens the notes folder and its first note. `create` makes the folder first.
-    fn open_folder(
-        &mut self,
-        folder: PathBuf,
-        create: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn open_folder(&mut self, folder: PathBuf, create: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.folder = Some(folder.clone());
         self.stage = Stage::Opening;
         cx.notify();
@@ -271,13 +259,10 @@ impl HolmWindow {
         let (last, order) = (settings.last_note.clone(), settings.note_order);
         let message_line = self.message_line.clone();
         let budget = self.write_budget;
-        let job =
-            cx.background_spawn({
-                let folder = folder.clone();
-                async move {
-                    core_door::open(&*open, &folder, &index_dir, create, last.as_ref(), order)
-                }
-            });
+        let job = cx.background_spawn({
+            let folder = folder.clone();
+            async move { core_door::open(&*open, &folder, &index_dir, create, last.as_ref(), order) }
+        });
         cx.spawn_in(window, async move |this, cx| {
             let result = job.await;
             this.update_in(cx, |this, window, cx| {
@@ -289,18 +274,13 @@ impl HolmWindow {
                     Ok((core, note)) => {
                         let folder = folder.clone();
                         let config = this.config.clone();
-                        let core_door =
-                            cx.new(|cx| CoreDoor::new(core, folder, budget, window, cx));
-                        Stage::Open(cx.new(|cx| {
-                            NotesView::new(core_door, note, config, message_line, window, cx)
-                        }))
+                        let core_door = cx.new(|cx| CoreDoor::new(core, folder, budget, window, cx));
+                        Stage::Open(cx.new(|cx| NotesView::new(core_door, note, config, message_line, window, cx)))
                     }
                     Err(error) => {
                         tracing::warn!(error = %crate::chain(&error), "cannot open the notes folder");
                         Stage::Failed(match error {
-                            AppError::Core(holm_core::Error::NotesFolder { .. }) => {
-                                text::folder_missing(&folder)
-                            }
+                            AppError::Core(holm_core::Error::NotesFolder { .. }) => text::folder_missing(&folder),
                             error => error.message().into(),
                         })
                     }
@@ -313,13 +293,7 @@ impl HolmWindow {
     }
 
     /// Keeps `folder` in the settings and opens it.
-    fn choose(
-        &mut self,
-        folder: PathBuf,
-        create: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn choose(&mut self, folder: PathBuf, create: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.config.update(cx, |config, cx| {
             config.change(
                 |settings| {
@@ -349,54 +323,42 @@ impl HolmWindow {
         let pick = Button::new("pick-folder")
             .label(text::PICK_FOLDER)
             .on_click(cx.listener(|_, _, window, cx| Self::pick(window, cx)));
-        let (message, content) = match &self.stage {
-            Stage::Ask => (
-                SharedString::from(text::ASK_FOLDER),
-                v_flex()
-                    .gap_2()
-                    .child(div().text_lg().child(text::ASK_FOLDER))
-                    .child(
-                        div()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(text::ABOUT_FOLDER),
-                    )
-                    .child(
-                        h_flex()
-                            .pt_4()
-                            .gap_2()
-                            .child(
-                                Button::new("use-default")
-                                    .primary()
-                                    .label(text::USE_DEFAULT)
-                                    .on_click(cx.listener(|this, _, window, cx| {
+        let (message, content) =
+            match &self.stage {
+                Stage::Ask => (
+                    SharedString::from(text::ASK_FOLDER),
+                    v_flex()
+                        .gap_2()
+                        .child(div().text_lg().child(text::ASK_FOLDER))
+                        .child(div().text_color(cx.theme().muted_foreground).child(text::ABOUT_FOLDER))
+                        .child(
+                            h_flex()
+                                .pt_4()
+                                .gap_2()
+                                .child(Button::new("use-default").primary().label(text::USE_DEFAULT).on_click(
+                                    cx.listener(|this, _, window, cx| {
                                         let folder = this.default_folder.clone();
                                         this.choose(folder, true, window, cx);
-                                    })),
-                            )
-                            .child(pick),
-                    ),
-            ),
-            Stage::Failed(message) => (
-                message.plain_text(),
-                v_flex()
-                    .gap_2()
-                    .child(message.wrapped())
-                    .child(h_flex().pt_4().child(pick.primary())),
-            ),
-            Stage::Opening => (
-                SharedString::from(text::OPENING),
-                v_flex()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(text::OPENING),
-            ),
-            Stage::Open(notes) => {
-                return div()
-                    .flex_1()
-                    .min_h_0()
-                    .child(notes.clone())
-                    .into_any_element();
-            }
-        };
+                                    }),
+                                ))
+                                .child(pick),
+                        ),
+                ),
+                Stage::Failed(message) => (
+                    message.plain_text(),
+                    v_flex()
+                        .gap_2()
+                        .child(message.wrapped())
+                        .child(h_flex().pt_4().child(pick.primary())),
+                ),
+                Stage::Opening => (
+                    SharedString::from(text::OPENING),
+                    v_flex().text_color(cx.theme().muted_foreground).child(text::OPENING),
+                ),
+                Stage::Open(notes) => {
+                    return div().flex_1().min_h_0().child(notes.clone()).into_any_element();
+                }
+            };
         div()
             .id("folder-screen")
             .role(Role::Group)
@@ -457,13 +419,7 @@ impl Render for HolmWindow {
                     root.child(self.message_line.clone())
                 } else {
                     // The question stays in the middle of the window, under the message line.
-                    root.child(
-                        div()
-                            .absolute()
-                            .bottom_0()
-                            .w_full()
-                            .child(self.message_line.clone()),
-                    )
+                    root.child(div().absolute().bottom_0().w_full().child(self.message_line.clone()))
                 }
             })
     }

@@ -93,10 +93,8 @@ fn pulldown_cmark_only(bencher: divan::Bencher<'_, '_>) {
     use pulldown_cmark::{Options, Parser};
 
     let text = one_mb_note();
-    let options = Options::ENABLE_TABLES
-        | Options::ENABLE_TASKLISTS
-        | Options::ENABLE_STRIKETHROUGH
-        | Options::ENABLE_GFM;
+    let options =
+        Options::ENABLE_TABLES | Options::ENABLE_TASKLISTS | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_GFM;
     bencher.bench(|| {
         Parser::new_ext(divan::black_box(&text), options)
             .into_offset_iter()

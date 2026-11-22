@@ -7,8 +7,8 @@ use std::rc::Rc;
 
 use common::{LINE_HEIGHT, app, column_x, open};
 use gpui_kit::{
-    AppContext as _, Entity, FocusHandle, Focusable as _, Modifiers, Pixels, Point, ScrollDelta,
-    ScrollEvent, VisualTestContext, point, px,
+    AppContext as _, Entity, FocusHandle, Focusable as _, Modifiers, Pixels, Point, ScrollDelta, ScrollEvent,
+    VisualTestContext, point, px,
 };
 use holm_editor::Editor;
 
@@ -63,9 +63,7 @@ fn open_with_start<'a>(
             keys: Rc::default(),
             focus: cx.focus_handle(),
         };
-        let start = cx.new(|_| Start {
-            probe: probe.clone(),
-        });
+        let start = cx.new(|_| Start { probe: probe.clone() });
         editor.update(cx, |editor, cx| editor.set_start(Some(start.into()), cx));
         probe
     });
@@ -99,10 +97,7 @@ fn scroll(cx: &mut VisualTestContext, by: Pixels) {
 
 /// Lines `l00` to `l29`.
 fn long_text() -> String {
-    (0..30)
-        .map(|line| format!("l{line:02}"))
-        .collect::<Vec<_>>()
-        .join("\n")
+    (0..30).map(|line| format!("l{line:02}")).collect::<Vec<_>>().join("\n")
 }
 
 #[test]
@@ -173,11 +168,7 @@ fn up_and_page_up_bring_the_start_view_back() {
         cx.run_until_parked();
     }
     cx.simulate_input("B");
-    assert!(
-        text(&editor, cx).starts_with("Bl00\n"),
-        "{}",
-        &text(&editor, cx)[..20]
-    );
+    assert!(text(&editor, cx).starts_with("Bl00\n"), "{}", &text(&editor, cx)[..20]);
     cx.simulate_click(at(cx, 0., START / 2.), Modifiers::none());
     assert_eq!(*probe.clicks.borrow(), 1);
     let editor_focus = cx.read(|cx| editor.focus_handle(cx));
@@ -223,10 +214,7 @@ fn the_start_view_keeps_its_keys_out_of_sight() {
 
     cx.simulate_keystrokes("x delete");
     assert_eq!(*probe.keys.borrow(), 2);
-    assert!(
-        text(&editor, cx).starts_with("l00\n"),
-        "keys do not reach the text"
-    );
+    assert!(text(&editor, cx).starts_with("l00\n"), "keys do not reach the text");
 }
 
 #[test]

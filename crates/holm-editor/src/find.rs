@@ -2,9 +2,7 @@
 
 use std::ops::Range;
 
-use gpui_kit::{
-    InteractiveElement, IntoElement, MouseButton, ParentElement, Styled, div, px, rems,
-};
+use gpui_kit::{InteractiveElement, IntoElement, MouseButton, ParentElement, Styled, div, px, rems};
 
 use crate::element::Theme;
 use crate::model::Model;
@@ -87,9 +85,7 @@ impl Find {
         let caret = div().w(px(2.)).h(rems(1.)).bg(theme.cursor);
         let field = div().flex().items_center().min_w(px(120.));
         let field = if self.query.is_empty() {
-            field
-                .child(caret)
-                .child(div().text_color(theme.muted).child("Find"))
+            field.child(caret).child(div().text_color(theme.muted).child("Find"))
         } else {
             field.child(self.query.clone()).child(caret)
         };

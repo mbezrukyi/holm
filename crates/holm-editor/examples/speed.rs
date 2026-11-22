@@ -18,8 +18,8 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui_kit::{
-    App, AppContext, Bounds, Context, Entity, Focusable, IntoElement, Keystroke, ParentElement,
-    Render, Styled, Window, WindowBounds, WindowOptions, div, px, rgb, size,
+    App, AppContext, Bounds, Context, Entity, Focusable, IntoElement, Keystroke, ParentElement, Render, Styled, Window,
+    WindowBounds, WindowOptions, div, px, rgb, size,
 };
 use holm_editor::Editor;
 

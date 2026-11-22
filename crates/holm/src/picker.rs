@@ -3,9 +3,8 @@
 //! `Tab` and `Shift+Tab` pick a folder, `Enter` moves there, `Esc` cancels.
 
 use gpui_kit::{
-    AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _, IntoElement,
-    ParentElement, Render, Role, StatefulInteractiveElement as _, Subscription,
-    TestSupportExt as _, Window, px,
+    AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _, IntoElement, ParentElement, Render, Role,
+    StatefulInteractiveElement as _, Subscription, TestSupportExt as _, Window, px,
 };
 
 use holm_core::FolderPath;
@@ -37,22 +36,14 @@ impl FolderPicker {
     /// A picker for `target`, over `folders`. It leaves out the folder of the target.
     /// For a folder move, it also leaves out that folder and its children. The field gets the
     /// focus.
-    pub(crate) fn new(
-        target: Target,
-        folders: &[FolderPath],
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    pub(crate) fn new(target: Target, folders: &[FolderPath], window: &mut Window, cx: &mut Context<Self>) -> Self {
         let (home, inside) = match &target {
             Target::Note(path) => (Some(path.folder().clone()), None),
             Target::Folder(path) => (path.folder(), Some(path)),
         };
         let folders = std::iter::once(FolderPath::root())
             .chain(folders.iter().cloned())
-            .filter(|folder| {
-                home.as_ref() != Some(folder)
-                    && inside.is_none_or(|inside| inside.can_move_into(folder))
-            })
+            .filter(|folder| home.as_ref() != Some(folder) && inside.is_none_or(|inside| inside.can_move_into(folder)))
             .collect();
         let name = match &target {
             Target::Note(path) => path.title().into_owned(),

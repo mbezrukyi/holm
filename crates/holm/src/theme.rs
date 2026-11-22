@@ -29,10 +29,7 @@ pub(crate) const EMPTY_LINE: Pixels = px(15.);
 
 /// Adds the UI font and the Holm themes. Call it once, after `gpui_kit::init`.
 pub(crate) fn init(cx: &mut App) {
-    let fonts = UI_FONT_FILES
-        .iter()
-        .map(|file| Cow::Borrowed(*file))
-        .collect();
+    let fonts = UI_FONT_FILES.iter().map(|file| Cow::Borrowed(*file)).collect();
     if let Err(error) = cx.text_system().add_fonts(fonts) {
         tracing::error!(%error, "cannot load the UI font");
     }
@@ -98,10 +95,7 @@ mod tests {
     #[test]
     fn the_ui_font_has_a_face_for_each_weight() {
         let text_system = gpui_kit::platform::current_platform(true).text_system();
-        let fonts = UI_FONT_FILES
-            .iter()
-            .map(|file| Cow::Borrowed(*file))
-            .collect();
+        let fonts = UI_FONT_FILES.iter().map(|file| Cow::Borrowed(*file)).collect();
         text_system.add_fonts(fonts).unwrap();
         let face = |weight| {
             let mut ui = font("Inter");

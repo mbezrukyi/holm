@@ -50,12 +50,7 @@ fn notes_come_last_change_first_with_pinned_notes_on_top() {
     folder.reopen();
 
     assert_eq!(
-        paths(
-            folder
-                .core
-                .snapshot()
-                .notes(NoteSet::All, Order::LastChange)
-        ),
+        paths(folder.core.snapshot().notes(NoteSet::All, Order::LastChange)),
         ["pinned.md", "new.md", "work/mid.md", "old.md"]
     );
     assert_eq!(
@@ -120,10 +115,7 @@ fn notes_keep_their_fields_in_the_index() {
     let text = "---\nid: 01A\ntags: [work/holm, home]\npinned: true\n---\n\n- Buy *milk*\n";
     let folder = Folder::new(&[("a.md", text)]);
 
-    let listed = folder
-        .core
-        .snapshot()
-        .notes(NoteSet::All, Order::LastChange);
+    let listed = folder.core.snapshot().notes(NoteSet::All, Order::LastChange);
 
     assert_eq!(listed, [folder.core.read(&note_path("a.md")).unwrap().info]);
     assert_eq!(listed[0].tags, ["work/holm", "home"]);
@@ -208,16 +200,8 @@ fn search_finds_words_in_titles_text_and_tags() {
     assert_eq!(search("cafe"), ["b.md"], "accents make no difference");
     assert_eq!(search("bread"), ["c.md"]);
     assert_eq!(search("garden text"), ["a.md"]);
-    assert_eq!(
-        search("bake bread"),
-        ["c.md"],
-        "words match the title and a tag"
-    );
-    assert_eq!(
-        search("garden nine"),
-        Vec::<String>::new(),
-        "every word must match"
-    );
+    assert_eq!(search("bake bread"), ["c.md"], "words match the title and a tag");
+    assert_eq!(search("garden nine"), Vec::<String>::new(), "every word must match");
     assert_eq!(search(""), Vec::<String>::new());
     assert_eq!(search("  \"* ( "), Vec::<String>::new());
     assert_eq!(search("\"garden"), ["a.md"], "quotes are plain text");
@@ -227,10 +211,7 @@ fn search_finds_words_in_titles_text_and_tags() {
 fn search_follows_a_tag_change_and_keeps_the_text() {
     let folder = Folder::new(&[("a.md", "---\ntags: [work]\n---\n# Garden\n")]);
 
-    folder
-        .core
-        .rename_tag(&tag_name("work"), &tag_name("home"))
-        .unwrap();
+    folder.core.rename_tag(&tag_name("work"), &tag_name("home")).unwrap();
 
     assert_eq!(found(&folder, "work"), Vec::<String>::new());
     assert_eq!(found(&folder, "home garden"), ["a.md"]);
@@ -246,11 +227,7 @@ fn links_give_every_link_of_a_note_in_order() {
     let link = |target, embedded| Link { target, embedded };
     let file = |path: &str| LinkTarget::File(PathBuf::from(path));
 
-    let links = folder
-        .core
-        .snapshot()
-        .links(&note_path("work/a.md"))
-        .to_vec();
+    let links = folder.core.snapshot().links(&note_path("work/a.md")).to_vec();
 
     let notes: Vec<(&str, Option<&str>)> = links[..2]
         .iter()
@@ -271,11 +248,7 @@ fn links_give_every_link_of_a_note_in_order() {
         ]
     );
     assert_eq!(
-        folder
-            .core
-            .snapshot()
-            .links(&note_path("missing.md"))
-            .to_vec(),
+        folder.core.snapshot().links(&note_path("missing.md")).to_vec(),
         Vec::<Link>::new()
     );
 }
@@ -303,15 +276,9 @@ fn backlinks_come_from_id_links_and_file_links() {
 #[test]
 fn save_and_create_update_the_index() {
     let folder = Folder::new(&[("a.md", "# A\n")]);
-    folder
-        .core
-        .add_tag(&note_path("a.md"), &tag_name("food"))
-        .unwrap();
+    folder.core.add_tag(&note_path("a.md"), &tag_name("food")).unwrap();
 
-    let saved = folder
-        .core
-        .save(&note_path("a.md"), "# A\nPotatoes\n", None)
-        .unwrap();
+    let saved = folder.core.save(&note_path("a.md"), "# A\nPotatoes\n", None).unwrap();
     let created = folder.core.create(&folder_path(""), "New").unwrap();
 
     assert_eq!(found(&folder, "potato"), ["a.md"]);
@@ -322,11 +289,7 @@ fn save_and_create_update_the_index() {
 
 #[test]
 fn open_picks_up_changes_made_while_holm_was_closed() {
-    let mut folder = Folder::new(&[
-        ("edited.md", "# Before\n"),
-        ("deleted.md", ""),
-        ("kept.md", "# Kept\n"),
-    ]);
+    let mut folder = Folder::new(&[("edited.md", "# Before\n"), ("deleted.md", ""), ("kept.md", "# Kept\n")]);
     folder.write("edited.md", "# After\nNew words\n");
     fs::remove_file(folder.path("deleted.md")).unwrap();
     folder.write("work/added.md", "---\ntags: [new]\n---\n");
@@ -337,15 +300,7 @@ fn open_picks_up_changes_made_while_holm_was_closed() {
     all.sort();
     assert_eq!(all, ["edited.md", "kept.md", "work/added.md"]);
     assert_eq!(found(&folder, "words"), ["edited.md"]);
-    assert_eq!(
-        folder
-            .core
-            .read(&note_path("edited.md"))
-            .unwrap()
-            .info
-            .preview,
-        "After"
-    );
+    assert_eq!(folder.core.read(&note_path("edited.md")).unwrap().info.preview, "After");
     assert_eq!(folder.core.snapshot().tags(), [tag("new", 1, vec![])]);
 }
 
@@ -377,27 +332,14 @@ fn a_copied_note_gets_a_new_id_and_the_known_note_keeps_its_id() {
     assert_eq!(b.info.id.unwrap().as_str(), "01SAME");
     let new = a.info.id.unwrap();
     assert_ne!(new.as_str(), "01SAME");
-    assert_eq!(
-        folder.text("a.md"),
-        note(new.as_str(), "author: me\n", "# Copy\n")
-    );
+    assert_eq!(folder.text("a.md"), note(new.as_str(), "author: me\n", "# Copy\n"));
     assert_eq!(a.info.modified, time, "the copy keeps its time");
-    assert_eq!(
-        folder
-            .core
-            .snapshot()
-            .notes(NoteSet::All, Order::Title)
-            .len(),
-        2
-    );
+    assert_eq!(folder.core.snapshot().notes(NoteSet::All, Order::Title).len(), 2);
 }
 
 #[test]
 fn the_first_of_two_new_notes_with_the_same_id_keeps_it() {
-    let folder = Folder::new(&[
-        ("a.md", &note("01SAME", "", "")),
-        ("b.md", &note("01SAME", "", "")),
-    ]);
+    let folder = Folder::new(&[("a.md", &note("01SAME", "", "")), ("b.md", &note("01SAME", "", ""))]);
 
     let a = folder.core.read(&note_path("a.md")).unwrap();
     let b = folder.core.read(&note_path("b.md")).unwrap();
@@ -429,10 +371,7 @@ fn saving_a_note_with_the_id_of_a_deleted_note_keeps_the_id() {
     let folder = Folder::new(&[("a.md", &note("01GONE", "", ""))]);
     fs::remove_file(folder.path("a.md")).unwrap();
     folder.write("b.md", &note("01GONE", "", ""));
-    let saved = folder
-        .core
-        .save(&note_path("b.md"), "Text\n", None)
-        .unwrap();
+    let saved = folder.core.save(&note_path("b.md"), "Text\n", None).unwrap();
 
     assert_eq!(saved.info.id.unwrap().as_str(), "01GONE");
     assert_eq!(
@@ -449,10 +388,7 @@ fn a_broken_index_is_rebuilt() {
 
     let core = Core::open(folder.dir.path(), cache.path()).unwrap();
 
-    assert_eq!(
-        paths(core.snapshot().notes(NoteSet::All, Order::Title)),
-        ["a.md"]
-    );
+    assert_eq!(paths(core.snapshot().notes(NoteSet::All, Order::Title)), ["a.md"]);
 }
 
 #[test]
@@ -468,10 +404,7 @@ fn an_index_with_another_shape_is_rebuilt() {
 
     let core = Core::open(folder.dir.path(), cache.path()).unwrap();
 
-    assert_eq!(
-        paths(core.snapshot().notes(NoteSet::All, Order::Title)),
-        ["a.md"]
-    );
+    assert_eq!(paths(core.snapshot().notes(NoteSet::All, Order::Title)), ["a.md"]);
 }
 
 #[test]
@@ -481,9 +414,7 @@ fn an_index_row_with_a_bad_path_never_reaches_the_snapshot() {
     drop(Core::open(folder.dir.path(), cache.path()).unwrap());
     rusqlite::Connection::open(cache.path().join("index.sqlite"))
         .unwrap()
-        .execute_batch(
-            "UPDATE notes SET path = CAST('../b.md' AS BLOB) WHERE path = CAST('b.md' AS BLOB);",
-        )
+        .execute_batch("UPDATE notes SET path = CAST('../b.md' AS BLOB) WHERE path = CAST('b.md' AS BLOB);")
         .unwrap();
 
     let core = Core::open(folder.dir.path(), cache.path()).unwrap();
@@ -505,12 +436,7 @@ fn the_index_lives_in_memory_when_its_folder_cannot_be_written() {
 
     fs::set_permissions(cache.path(), fs::Permissions::from_mode(0o755)).unwrap();
     saved.unwrap();
-    let preview = core
-        .snapshot()
-        .note(&note_path("a.md"))
-        .unwrap()
-        .preview
-        .clone();
+    let preview = core.snapshot().note(&note_path("a.md")).unwrap().preview.clone();
     assert_eq!(preview, "new");
     assert!(!cache.path().join("index.sqlite").exists());
 }
@@ -522,22 +448,13 @@ fn a_save_stays_when_the_index_fails_and_the_next_start_reads_the_file_again() {
     let core = Core::open(folder.dir.path(), cache.path()).unwrap();
     rusqlite::Connection::open(cache.path().join("index.sqlite"))
         .unwrap()
-        .execute_batch(
-            "CREATE TRIGGER no_update BEFORE UPDATE ON notes BEGIN SELECT RAISE(ABORT, 'no'); END;",
-        )
+        .execute_batch("CREATE TRIGGER no_update BEFORE UPDATE ON notes BEGIN SELECT RAISE(ABORT, 'no'); END;")
         .unwrap();
     fs::set_permissions(cache.path(), fs::Permissions::from_mode(0o555)).unwrap();
 
     let saved = core.save(&note_path("a.md"), "new\n", None);
-    let preview = |core: &Core| {
-        core.snapshot()
-            .note(&note_path("a.md"))
-            .unwrap()
-            .preview
-            .clone()
-    };
-    let found =
-        |core: &Core| common::paths(core.search("new", Order::Title).unwrap().paths().to_vec());
+    let preview = |core: &Core| core.snapshot().note(&note_path("a.md")).unwrap().preview.clone();
+    let found = |core: &Core| common::paths(core.search("new", Order::Title).unwrap().paths().to_vec());
     let during = (preview(&core), found(&core));
     drop(core);
     fs::set_permissions(cache.path(), fs::Permissions::from_mode(0o755)).unwrap();
@@ -562,10 +479,7 @@ fn notes_in_attachments_and_odd_names_round_trip() {
         .collect();
     all.sort();
 
-    assert_eq!(
-        all,
-        [note_path("attachments/a b.md"), note_path("ünï cödé.md")]
-    );
+    assert_eq!(all, [note_path("attachments/a b.md"), note_path("ünï cödé.md")]);
 }
 
 #[test]
@@ -578,10 +492,7 @@ fn search_gives_pinned_notes_first_with_the_snapshot_of_each_note() {
     ]);
     let results = folder.core.search("plan", Order::Title).unwrap();
 
-    assert_eq!(
-        common::paths(results.paths().to_vec()),
-        ["work/c.md", "A.md", "b.md"]
-    );
+    assert_eq!(common::paths(results.paths().to_vec()), ["work/c.md", "A.md", "b.md"]);
     for path in results.paths() {
         assert!(results.snapshot().note(path).is_some());
     }

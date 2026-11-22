@@ -56,12 +56,7 @@ impl Touched {
     /// explains gives no other change. A gone note and a new note with the same id are one
     /// [`Change::Moved`]. A note with a new content hash is [`Change::Changed`], also when
     /// what the snapshot shows of it stays.
-    pub(crate) fn list(
-        mut self,
-        source: Source,
-        before: &Facts,
-        after: Facts,
-    ) -> (Facts, Option<ChangeList>) {
+    pub(crate) fn list(mut self, source: Source, before: &Facts, after: Facts) -> (Facts, Option<ChangeList>) {
         let mut read = std::mem::take(&mut self.read);
         read.retain(|path| before.hash(path) != after.hash(path));
         let changes = self.changes(before, &after);
@@ -98,10 +93,7 @@ impl Touched {
                 (Some((old, _)), None) => gone.push(old),
                 (None, Some((note, _))) => new.push(note),
                 (Some((old, old_links)), Some((note, links))) => {
-                    if old != note
-                        || old_links != links
-                        || before_facts.hash(path) != after_facts.hash(path)
-                    {
+                    if old != note || old_links != links || before_facts.hash(path) != after_facts.hash(path) {
                         tags = tags || !same_tags(old, note);
                         notes.push(Change::Changed(path.clone()));
                     }
@@ -109,14 +101,9 @@ impl Touched {
                 (None, None) => {}
             }
         }
-        let mut new: HashMap<&NotePath, &NoteInfo> =
-            new.into_iter().map(|note| (&note.path, note)).collect();
+        let mut new: HashMap<&NotePath, &NoteInfo> = new.into_iter().map(|note| (&note.path, note)).collect();
         gone.retain(|old| {
-            let Some(to) = self
-                .moves
-                .iter()
-                .find_map(|change| change.note_after(&old.path))
-            else {
+            let Some(to) = self.moves.iter().find_map(|change| change.note_after(&old.path)) else {
                 return true;
             };
             let Some(note) = new.remove(&to) else {
@@ -154,10 +141,7 @@ impl Touched {
             notes.push(Change::Removed(old.path.clone()));
         }
         notes.sort_by(|a, b| note_path(a).cmp(&note_path(b)));
-        let folders = self
-            .folders
-            .iter()
-            .any(|folder| !same_folders(before, after, folder));
+        let folders = self.folders.iter().any(|folder| !same_folders(before, after, folder));
         let mut changes = self.moves;
         changes.extend(notes);
         if folders {
@@ -172,26 +156,20 @@ impl Touched {
 
 /// Whether both notes have the same tags, in any order. A note has few tags.
 fn same_tags(a: &NoteInfo, b: &NoteInfo) -> bool {
-    a.tags == b.tags
-        || (a.tags.iter().all(|tag| b.tags.contains(tag))
-            && b.tags.iter().all(|tag| a.tags.contains(tag)))
+    a.tags == b.tags || (a.tags.iter().all(|tag| b.tags.contains(tag)) && b.tags.iter().all(|tag| a.tags.contains(tag)))
 }
 
 /// Whether both snapshots have the same folders at `folder` or below it.
 fn same_folders(before: &Snapshot, after: &Snapshot, folder: &FolderPath) -> bool {
     let held = |other: &&FolderPath| *other == folder || other.is_below(folder);
-    before
-        .folders()
-        .filter(held)
-        .eq(after.folders().filter(held))
+    before.folders().filter(held).eq(after.folders().filter(held))
 }
 
 fn note_path(change: &Change) -> Option<&NotePath> {
     match change {
-        Change::Added(path)
-        | Change::Changed(path)
-        | Change::Moved { to: path, .. }
-        | Change::Removed(path) => Some(path),
+        Change::Added(path) | Change::Changed(path) | Change::Moved { to: path, .. } | Change::Removed(path) => {
+            Some(path)
+        }
         _ => None,
     }
 }
@@ -252,13 +230,7 @@ mod tests {
     }
 
     /// The changes from `before` to `after` at `notes` and `folders`, with `moves`.
-    fn changes(
-        before: &Facts,
-        after: Facts,
-        notes: &[&str],
-        folders: &[&str],
-        moves: Vec<Change>,
-    ) -> Vec<Change> {
+    fn changes(before: &Facts, after: Facts, notes: &[&str], folders: &[&str], moves: Vec<Change>) -> Vec<Change> {
         let touched = Touched {
             notes: notes.iter().map(|at| path(at)).collect(),
             read: Vec::new(),
@@ -306,10 +278,7 @@ mod tests {
     #[test]
     fn notes_come_in_path_order_and_tags_once() {
         let before = facts(&[info("b.md", None, &["x"]), info("c.md", None, &[])], &[]);
-        let after = facts(
-            &[info("a.md", None, &["y"]), info("c.md", None, &["x"])],
-            &[],
-        );
+        let after = facts(&[info("a.md", None, &["y"]), info("c.md", None, &["x"])], &[]);
 
         assert_eq!(
             changes(&before, after, &["a.md", "b.md", "c.md"], &[], Vec::new()),
@@ -324,14 +293,8 @@ mod tests {
 
     #[test]
     fn a_gone_note_and_a_new_note_with_one_id_are_a_move() {
-        let before = facts(
-            &[info("a.md", Some("A"), &[]), info("b.md", None, &[])],
-            &[],
-        );
-        let after = facts(
-            &[info("x/a.md", Some("A"), &[]), info("x/b.md", None, &[])],
-            &[],
-        );
+        let before = facts(&[info("a.md", Some("A"), &[]), info("b.md", None, &[])], &[]);
+        let after = facts(&[info("x/a.md", Some("A"), &[]), info("x/b.md", None, &[])], &[]);
         let notes = ["a.md", "b.md", "x/a.md", "x/b.md"];
 
         assert_eq!(
@@ -349,14 +312,8 @@ mod tests {
 
     #[test]
     fn a_move_of_the_write_explains_its_notes() {
-        let before = facts(
-            &[info("a.md", None, &[]), info("work/b.md", None, &["x"])],
-            &["work"],
-        );
-        let after = facts(
-            &[info("c.md", None, &[]), info("job/b.md", None, &["x"])],
-            &["job"],
-        );
+        let before = facts(&[info("a.md", None, &[]), info("work/b.md", None, &["x"])], &["work"]);
+        let after = facts(&[info("c.md", None, &[]), info("job/b.md", None, &["x"])], &["job"]);
         let moves = vec![
             Change::Moved {
                 from: path("a.md"),
@@ -395,10 +352,7 @@ mod tests {
             changes(&before, with_hash("two"), &["a.md"], &[], Vec::new()),
             [Change::Changed(path("a.md"))]
         );
-        assert_eq!(
-            changes(&before, with_hash("one"), &["a.md"], &[], Vec::new()),
-            []
-        );
+        assert_eq!(changes(&before, with_hash("one"), &["a.md"], &[], Vec::new()), []);
     }
 
     #[test]

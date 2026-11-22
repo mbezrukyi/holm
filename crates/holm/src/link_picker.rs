@@ -8,9 +8,8 @@
 use std::collections::{HashMap, HashSet};
 
 use gpui_kit::{
-    AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _, IntoElement,
-    ParentElement, Render, Role, StatefulInteractiveElement as _, Subscription,
-    TestSupportExt as _, Window, px,
+    AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _, IntoElement, ParentElement, Render, Role,
+    StatefulInteractiveElement as _, Subscription, TestSupportExt as _, Window, px,
 };
 use holm_core::model::{NoteInfo, NoteSet};
 use holm_core::{NotePath, Snapshot};
@@ -102,15 +101,11 @@ impl LinkPicker {
             list.set_query(start.query, window, cx);
             list
         });
-        let subscription = cx.subscribe_in(
-            &list,
-            window,
-            |this, _, event: &PickEvent, window, cx| match event {
-                PickEvent::Query => this.typed(window, cx),
-                PickEvent::Pick(at) => this.pick(*at, cx),
-                PickEvent::Close => cx.emit(LinkPickerEvent::Close),
-            },
-        );
+        let subscription = cx.subscribe_in(&list, window, |this, _, event: &PickEvent, window, cx| match event {
+            PickEvent::Query => this.typed(window, cx),
+            PickEvent::Pick(at) => this.pick(*at, cx),
+            PickEvent::Close => cx.emit(LinkPickerEvent::Close),
+        });
         let mut this = Self {
             core_door,
             notes: PickNotes::new(start.notes),
@@ -202,8 +197,7 @@ impl LinkPicker {
             let cursor = self.list.read(cx).cursor();
             if let Some(LinkRow::Note(at)) = cursor.and_then(|at| self.rows.get(at)) {
                 let query = Query::text(Some(&self.notes[*at].title), Some(""));
-                self.list
-                    .update(cx, |list, cx| list.set_query(query, window, cx));
+                self.list.update(cx, |list, cx| list.set_query(query, window, cx));
             }
         }
         self.query_changed(cx);

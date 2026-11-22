@@ -59,8 +59,6 @@ impl NoteList {
     }
 
     pub(crate) fn notes(&self) -> impl Iterator<Item = &NoteInfo> {
-        self.paths
-            .iter()
-            .filter_map(|path| self.snapshot.note(path))
+        self.paths.iter().filter_map(|path| self.snapshot.note(path))
     }
 }

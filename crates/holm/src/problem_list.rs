@@ -8,10 +8,9 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui_kit::{
-    Anchor, Bounds, Context, ElementId, FocusHandle, InteractiveElement as _, IntoElement,
-    MouseButton, ParentElement, Pixels, Render, Role, SharedString,
-    StatefulInteractiveElement as _, TestSupportExt as _, Window, anchored, deferred, div, point,
-    px,
+    Anchor, Bounds, Context, ElementId, FocusHandle, InteractiveElement as _, IntoElement, MouseButton, ParentElement,
+    Pixels, Render, Role, SharedString, StatefulInteractiveElement as _, TestSupportExt as _, Window, anchored,
+    deferred, div, point, px,
 };
 
 use crate::list_cursor;
@@ -65,8 +64,7 @@ impl ProblemList {
             self.close(window, cx);
         } else if !self.problems.is_empty() {
             let back = window.focused(cx).unwrap_or_else(|| self.idle.clone());
-            let dropdown =
-                Dropdown::new(back, Self::close, window, cx).with_opener(self.mark.clone());
+            let dropdown = Dropdown::new(back, Self::close, window, cx).with_opener(self.mark.clone());
             window.focus(dropdown.focus_handle(), cx);
             self.dropdown = Some(dropdown);
             self.open = true;

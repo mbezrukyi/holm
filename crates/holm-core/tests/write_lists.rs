@@ -16,11 +16,7 @@ use holm_core::model::Change;
 fn files(root: &Path, dir: &Path, found: &mut BTreeMap<String, Option<String>>) {
     for entry in fs::read_dir(dir).unwrap() {
         let path = entry.unwrap().path();
-        let name = path
-            .strip_prefix(root)
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
+        let name = path.strip_prefix(root).unwrap().to_string_lossy().into_owned();
         if path.is_dir() {
             found.insert(name, None);
             files(root, &path, found);
@@ -53,10 +49,7 @@ const FILES: &[(&str, &str)] = &[
         "---\nid: P\ntags: [work, work/holm]\n---\n# Plans\n![](attachments/a.png)\n",
     ),
     ("Ideas.md", "# Ideas\n"),
-    (
-        "work/Notes.md",
-        "---\nid: N\ntags: [work]\n---\n[a](../Ideas.md)\n",
-    ),
+    ("work/Notes.md", "---\nid: N\ntags: [work]\n---\n[a](../Ideas.md)\n"),
     ("work/holm/Todo.md", "# Todo\n"),
     ("home/Shop.md", "# Shop\n"),
     ("attachments/a.png", "png"),
@@ -100,10 +93,7 @@ fn check_after(name: &str, prepare: impl FnOnce(&Folder), write: impl FnOnce(&Co
     };
     if folders(&before) != folders(&after) {
         seen = true;
-        assert!(
-            changes.contains(&Change::Folders),
-            "{name}: no Folders in {changes:?}"
-        );
+        assert!(changes.contains(&Change::Folders), "{name}: no Folders in {changes:?}");
     }
     assert!(seen, "{name}: the write changed nothing on disk");
 }
@@ -111,13 +101,9 @@ fn check_after(name: &str, prepare: impl FnOnce(&Folder), write: impl FnOnce(&Co
 #[test]
 fn each_write_names_every_note_and_folder_it_changed() {
     check("save", |core| {
-        core.save(&note_path("Ideas.md"), "# More ideas\n", None)
-            .unwrap();
+        core.save(&note_path("Ideas.md"), "# More ideas\n", None).unwrap();
     });
-    let deleted = Folder::with_feed(FILES)
-        .core
-        .read(&note_path("Ideas.md"))
-        .unwrap();
+    let deleted = Folder::with_feed(FILES).core.read(&note_path("Ideas.md")).unwrap();
     check_after(
         "restore",
         |folder| {
@@ -132,8 +118,7 @@ fn each_write_names_every_note_and_folder_it_changed() {
         core.create(&folder_path("work"), "New").unwrap();
     });
     check("rename_note", |core| {
-        core.rename_note(&note_path("work/Notes.md"), "Log")
-            .unwrap();
+        core.rename_note(&note_path("work/Notes.md"), "Log").unwrap();
     });
     check("move_note", |core| {
         core.move_note(&note_path("work/Notes.md"), &folder_path("home"))
@@ -159,19 +144,16 @@ fn each_write_names_every_note_and_folder_it_changed() {
         core.link_id(&note_path("Ideas.md")).unwrap();
     });
     check("add_tag", |core| {
-        core.add_tag(&note_path("Ideas.md"), &tag_name("home"))
-            .unwrap();
+        core.add_tag(&note_path("Ideas.md"), &tag_name("home")).unwrap();
     });
     check("remove_tag", |core| {
-        core.remove_tag(&note_path("Plans.md"), &tag_name("work"))
-            .unwrap();
+        core.remove_tag(&note_path("Plans.md"), &tag_name("work")).unwrap();
     });
     check("set_pinned", |core| {
         core.set_pinned(&note_path("Ideas.md"), true).unwrap();
     });
     check("rename_tag", |core| {
-        core.rename_tag(&tag_name("work"), &tag_name("job"))
-            .unwrap();
+        core.rename_tag(&tag_name("work"), &tag_name("job")).unwrap();
     });
     check("delete_tag", |core| {
         core.delete_tag(&tag_name("work")).unwrap();

@@ -22,8 +22,5 @@ fn a_key_press_in_a_1_mb_note_takes_under_50_ms() {
     let time = start.elapsed();
 
     assert_eq!(cx.read(|cx| editor.read(cx).text().len()), note.len() + 1);
-    assert!(
-        time < Duration::from_millis(50),
-        "a key press took {time:?}"
-    );
+    assert!(time < Duration::from_millis(50), "a key press took {time:?}");
 }

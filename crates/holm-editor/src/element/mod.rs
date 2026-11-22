@@ -8,10 +8,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui_kit::{
-    AnyElement, App, AvailableSpace, BorderStyle, Bounds, ContentMask, Corners, ElementId,
-    ElementInputHandler, Entity, FontStyle, FontWeight, GlobalElementId, Hsla, ImgResourceLoader,
-    InspectorElementId, IntoElement, LayoutId, ParentElement as _, PathBuilder, Pixels, Point,
-    Resource, Style, Styled as _, TextAlign, Window, div, fill, outline, point, px, relative, size,
+    AnyElement, App, AvailableSpace, BorderStyle, Bounds, ContentMask, Corners, ElementId, ElementInputHandler, Entity,
+    FontStyle, FontWeight, GlobalElementId, Hsla, ImgResourceLoader, InspectorElementId, IntoElement, LayoutId,
+    ParentElement as _, PathBuilder, Pixels, Point, Resource, Style, Styled as _, TextAlign, Window, div, fill,
+    outline, point, px, relative, size,
 };
 
 pub(crate) use layout::{Layout, Reveal, Scroll};
@@ -139,9 +139,7 @@ fn char_width(window: &Window) -> Pixels {
     let font_size = style.font_size.to_pixels(window.rem_size());
     let text_system = window.text_system();
     let font_id = text_system.resolve_font(&style.font());
-    text_system
-        .ch_advance(font_id, font_size)
-        .unwrap_or(font_size * 0.5)
+    text_system.ch_advance(font_id, font_size).unwrap_or(font_size * 0.5)
 }
 
 /// The width of `chars` chars, as a whole pixel. It is a little wider than the chars, so a sum
@@ -208,10 +206,7 @@ impl gpui_kit::Element for EditorElement {
     ) -> Self::PrepaintState {
         let style = window.text_style();
         let column = column(bounds, self.editor.read(cx).text_width, window);
-        let width = size(
-            AvailableSpace::Definite(column.size.width),
-            AvailableSpace::MinContent,
-        );
+        let width = size(AvailableSpace::Definite(column.size.width), AvailableSpace::MinContent);
         let editor = self.editor.read(cx);
         let focus = editor.focus.clone();
         let mut start_view = editor.start.clone().map(IntoElement::into_any_element);
@@ -292,11 +287,7 @@ impl gpui_kit::Element for EditorElement {
             .as_ref()
             .map(|find| layout.match_bounds(&find.matches))
             .unwrap_or_default();
-        window.handle_input(
-            &focus,
-            ElementInputHandler::new(bounds, self.editor.clone()),
-            cx,
-        );
+        window.handle_input(&focus, ElementInputHandler::new(bounds, self.editor.clone()), cx);
         window.paint_quad(fill(bounds, theme.background));
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             for line in &layout.lines {
@@ -369,16 +360,10 @@ fn paint_blocks(line: &LaidLine, column: Bounds<Pixels>, theme: &Theme, window: 
             let table = Bounds::new(origin + point(line.left, px(0.)), size(right, line.height));
             if *head {
                 window.paint_quad(fill(table, theme.panel));
-                window.paint_quad(fill(
-                    Bounds::new(table.origin, size(right, px(1.))),
-                    theme.line,
-                ));
+                window.paint_quad(fill(Bounds::new(table.origin, size(right, px(1.))), theme.line));
             }
             window.paint_quad(fill(
-                Bounds::new(
-                    table.origin + point(px(0.), line.height - px(1.)),
-                    size(right, px(1.)),
-                ),
+                Bounds::new(table.origin + point(px(0.), line.height - px(1.)), size(right, px(1.))),
                 theme.line,
             ));
             for x in std::iter::once(px(0.)).chain(cells.iter().map(|cell| cell.x + cell.width)) {
@@ -394,36 +379,16 @@ fn paint_blocks(line: &LaidLine, column: Bounds<Pixels>, theme: &Theme, window: 
 }
 
 /// Paints the text, the list marker and the images of a line.
-fn paint_line(
-    line: &LaidLine,
-    column: Bounds<Pixels>,
-    theme: &Theme,
-    window: &mut Window,
-    cx: &mut App,
-) {
+fn paint_line(line: &LaidLine, column: Bounds<Pixels>, theme: &Theme, window: &mut Window, cx: &mut App) {
     let origin = column.origin + point(px(0.), line.top);
     let text_origin = origin + point(line.left, line.pad);
     match &line.content {
         Content::Text(text) => {
             let runs = &line.display.shown.runs;
-            paint_text(
-                (text, runs, line.place),
-                text_origin,
-                line,
-                theme,
-                window,
-                cx,
-            );
+            paint_text((text, runs, line.place), text_origin, line, theme, window, cx);
         }
         Content::Label(text) => {
-            paint_text(
-                (text, &[], line.place),
-                text_origin,
-                line,
-                theme,
-                window,
-                cx,
-            );
+            paint_text((text, &[], line.place), text_origin, line, theme, window, cx);
         }
         Content::Cells(cells) => {
             let top = (line.height - line.text_height.max(line.line_height)) / 2.;
@@ -443,14 +408,7 @@ fn paint_line(
             }
             Mark::Number(_) => {
                 if let Some(number) = &mark.number {
-                    let _ = number.paint(
-                        bounds.origin,
-                        line.line_height,
-                        TextAlign::Left,
-                        None,
-                        window,
-                        cx,
-                    );
+                    let _ = number.paint(bounds.origin, line.line_height, TextAlign::Left, None, window, cx);
                 }
             }
             Mark::Task { checked, .. } => paint_task(bounds, *checked, theme, window),
@@ -522,22 +480,14 @@ fn paint_chip(
             .border_color(theme.line),
     );
     if let Some((icon, at)) = chip.icon {
-        paint_icon(
-            icon,
-            Bounds::new(origin + at.origin, at.size),
-            theme.link,
-            window,
-        );
+        paint_icon(icon, Bounds::new(origin + at.origin, at.size), theme.link, window);
     }
     let (name, at) = chip.name;
     let _ = name.paint(origin + at, line_height, TextAlign::Left, None, window, cx);
     if let Some((detail, at, underline)) = chip.detail {
         let height = detail.ascent + detail.descent;
         let _ = detail.paint(origin + at, height, TextAlign::Left, None, window, cx);
-        window.paint_quad(fill(
-            Bounds::new(origin + underline.origin, underline.size),
-            theme.line,
-        ));
+        window.paint_quad(fill(Bounds::new(origin + underline.origin, underline.size), theme.line));
     }
 }
 
@@ -545,14 +495,7 @@ fn paint_chip(
 fn icon_lines(icon: Icon) -> &'static [&'static [(f32, f32)]] {
     match icon {
         Icon::File => &[
-            &[
-                (6., 3.),
-                (14., 3.),
-                (18., 7.),
-                (18., 21.),
-                (6., 21.),
-                (6., 3.),
-            ],
+            &[(6., 3.), (14., 3.), (18., 7.), (18., 21.), (6., 21.), (6., 3.)],
             &[(14., 3.), (14., 7.), (18., 7.)],
         ],
         Icon::Folder => &[&[
@@ -666,10 +609,7 @@ fn paint_underlines(
         for (y, parts) in rows {
             for (left, right) in parts {
                 if right > left {
-                    let bounds = Bounds::new(
-                        origin + point(left, y + baseline + offset),
-                        size(right - left, px(1.)),
-                    );
+                    let bounds = Bounds::new(origin + point(left, y + baseline + offset), size(right - left, px(1.)));
                     window.paint_quad(fill(bounds, color));
                 }
             }

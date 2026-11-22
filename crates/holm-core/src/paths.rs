@@ -137,9 +137,7 @@ impl NotePath {
     /// The path after the folder `from` moved to `to`, or `None` when the note is not below
     /// `from`.
     pub fn moved(&self, from: &FolderPath, to: &FolderPath) -> Option<Self> {
-        self.folder
-            .moved(from, to)
-            .map(|folder| self.in_folder(&folder))
+        self.folder.moved(from, to).map(|folder| self.in_folder(&folder))
     }
 
     /// The folders that hold the note, the nearest first. The root is last.
@@ -649,10 +647,7 @@ mod tests {
         assert_eq!(plans.name(), "Plans.md");
         assert_eq!(*note("A.md").folder(), FolderPath::root());
         let parents: Vec<_> = plans.parents().collect();
-        assert_eq!(
-            parents,
-            [folder("work/2026"), folder("work"), FolderPath::root()]
-        );
+        assert_eq!(parents, [folder("work/2026"), folder("work"), FolderPath::root()]);
     }
 
     #[test]
@@ -699,16 +694,10 @@ mod tests {
     #[test]
     fn moved_follows_a_folder_move() {
         let (from, to) = (folder("work"), folder("old/job"));
-        assert_eq!(
-            note("work/x/a.md").moved(&from, &to),
-            Some(note("old/job/x/a.md"))
-        );
+        assert_eq!(note("work/x/a.md").moved(&from, &to), Some(note("old/job/x/a.md")));
         assert_eq!(note("workshop/a.md").moved(&from, &to), None);
         assert_eq!(from.moved(&from, &to), Some(to.clone()));
-        assert_eq!(
-            folder("work/x").moved(&from, &to),
-            Some(folder("old/job/x"))
-        );
+        assert_eq!(folder("work/x").moved(&from, &to), Some(folder("old/job/x")));
         assert_eq!(
             note("a/b.md").moved(&folder("a"), &FolderPath::root()),
             Some(note("b.md"))
@@ -733,15 +722,9 @@ mod tests {
         let work = folder("work");
         let title = Name::title(" Plans ").unwrap();
         assert_eq!(work.note(&title), note("work/Plans.md"));
-        assert_eq!(
-            work.child(&Name::typed(" 2026 ").unwrap()),
-            folder("work/2026")
-        );
+        assert_eq!(work.child(&Name::typed(" 2026 ").unwrap()), folder("work/2026"));
         let attachments = Name::typed("attachments").unwrap();
-        assert_eq!(
-            FolderPath::root().child(&attachments),
-            folder("attachments")
-        );
+        assert_eq!(FolderPath::root().child(&attachments), folder("attachments"));
     }
 
     #[test]
@@ -749,14 +732,8 @@ mod tests {
         let disk = |name: &str| Name::from_disk(OsStr::new(name));
         let work = folder("work");
         assert_eq!(work.child(&disk(" x ").unwrap()), folder("work/ x "));
-        assert_eq!(
-            work.child(&disk("attachments").unwrap()),
-            folder("work/attachments")
-        );
-        assert_eq!(
-            work.note_file(&disk("a.md").unwrap()),
-            Some(note("work/a.md"))
-        );
+        assert_eq!(work.child(&disk("attachments").unwrap()), folder("work/attachments"));
+        assert_eq!(work.note_file(&disk("a.md").unwrap()), Some(note("work/a.md")));
         assert_eq!(work.note_file(&disk("a.txt").unwrap()), None);
         assert_eq!(disk(".a.md"), None);
         assert_eq!(disk(".git"), None);
@@ -775,8 +752,7 @@ mod tests {
     #[test]
     fn a_raw_path_splits_only_when_it_is_plain() {
         let split = |path: &str| {
-            FolderPath::split_raw(Path::new(path))
-                .map(|(folder, name)| (folder, name.as_os_str().to_owned()))
+            FolderPath::split_raw(Path::new(path)).map(|(folder, name)| (folder, name.as_os_str().to_owned()))
         };
         assert_eq!(split("work/a.png"), Some((folder("work"), "a.png".into())));
         assert_eq!(split("a.md"), Some((FolderPath::root(), "a.md".into())));

@@ -48,10 +48,7 @@ fn open_fails_on_a_file() {
     let file = dir.path().join("file");
     fs::write(&file, "").unwrap();
 
-    assert!(matches!(
-        Core::open(&file, dir.path()),
-        Err(Error::NotesFolder { .. })
-    ));
+    assert!(matches!(Core::open(&file, dir.path()), Err(Error::NotesFolder { .. })));
 }
 
 #[test]
@@ -67,10 +64,7 @@ fn notes_lists_only_md_files_and_skips_hidden_ones() {
         ("work/.trash/e.md", ""),
     ]);
 
-    let notes = folder
-        .core
-        .snapshot()
-        .notes(NoteSet::All, Order::LastChange);
+    let notes = folder.core.snapshot().notes(NoteSet::All, Order::LastChange);
 
     assert_eq!(
         paths(notes.into_iter().map(|n| n.path)),
@@ -83,10 +77,7 @@ fn notes_skips_a_note_that_is_not_text() {
     let folder = Folder::new(&[("a.md", "")]);
     fs::write(folder.dir.path().join("b.md"), [0xff, 0xfe]).unwrap();
 
-    let notes = folder
-        .core
-        .snapshot()
-        .notes(NoteSet::All, Order::LastChange);
+    let notes = folder.core.snapshot().notes(NoteSet::All, Order::LastChange);
 
     assert_eq!(paths(notes.into_iter().map(|n| n.path)), ["a.md"]);
 }
@@ -104,10 +95,7 @@ fn folders_lists_nested_folders_without_attachments() {
     let snapshot = folder.core.snapshot();
     let folders = snapshot.folders().collect::<Vec<_>>();
 
-    assert_eq!(
-        paths(folders),
-        ["home", "work", "work/attachments", "work/holm"]
-    );
+    assert_eq!(paths(folders), ["home", "work", "work/attachments", "work/holm"]);
 }
 
 #[test]
@@ -172,24 +160,13 @@ fn read_fails_on_a_missing_note_and_on_bytes_that_are_not_text() {
 fn save_adds_an_id_on_the_first_write_and_keeps_it() {
     let folder = Folder::new(&[("a.md", "# A\n")]);
 
-    let saved = folder
-        .core
-        .save(&note_path("a.md"), "# A\n\nMore.\n", None)
-        .unwrap();
+    let saved = folder.core.save(&note_path("a.md"), "# A\n\nMore.\n", None).unwrap();
 
     let id = saved.info.id.clone().unwrap();
     assert_eq!(id.as_str().len(), 26, "a ULID");
+    assert_eq!(folder.text("a.md"), format!("---\nid: {id}\n---\n# A\n\nMore.\n"));
     assert_eq!(
-        folder.text("a.md"),
-        format!("---\nid: {id}\n---\n# A\n\nMore.\n")
-    );
-    assert_eq!(
-        folder
-            .core
-            .save(&note_path("a.md"), "# A\n", None)
-            .unwrap()
-            .info
-            .id,
+        folder.core.save(&note_path("a.md"), "# A\n", None).unwrap().info.id,
         Some(id)
     );
 }
@@ -206,10 +183,7 @@ fn save_writes_the_body_and_keeps_the_frontmatter_of_the_file() {
         "---\nauthor: me\nid: X1\ntags: [work, home]\npinned: true\n# a comment\n---\nBody\n",
     );
 
-    let saved = folder
-        .core
-        .save(&note_path("a.md"), "New body\n", None)
-        .unwrap();
+    let saved = folder.core.save(&note_path("a.md"), "New body\n", None).unwrap();
 
     assert_eq!(
         folder.text("a.md"),
@@ -224,10 +198,7 @@ fn save_keeps_the_old_time_when_it_only_adds_the_id() {
     let folder = Folder::new(&[("a.md", "Body\n")]);
     let time = folder.set_time("a.md", 1_000_000);
 
-    let saved = folder
-        .core
-        .save(&note_path("a.md"), "Body\n", None)
-        .unwrap();
+    let saved = folder.core.save(&note_path("a.md"), "Body\n", None).unwrap();
 
     assert!(saved.info.id.is_some());
     assert_eq!(saved.info.modified, time);
@@ -238,10 +209,7 @@ fn save_gives_a_new_time_when_the_body_changes() {
     let folder = Folder::new(&[("a.md", "---\nid: X1\n---\nBody\n")]);
     let time = folder.set_time("a.md", 1_000_000);
 
-    let saved = folder
-        .core
-        .save(&note_path("a.md"), "New body\n", None)
-        .unwrap();
+    let saved = folder.core.save(&note_path("a.md"), "New body\n", None).unwrap();
 
     assert!(saved.info.modified > time);
 }
@@ -252,31 +220,19 @@ fn save_with_no_change_does_not_write() {
     let folder = Folder::new(&[("a.md", text)]);
     let time = folder.set_time("a.md", 1_000_000);
 
-    folder
-        .core
-        .save(&note_path("a.md"), "Body\n", None)
-        .unwrap();
+    folder.core.save(&note_path("a.md"), "Body\n", None).unwrap();
 
     assert_eq!(folder.text("a.md"), text, "the flow list stays");
-    assert_eq!(
-        folder.core.read(&note_path("a.md")).unwrap().info.modified,
-        time
-    );
+    assert_eq!(folder.core.read(&note_path("a.md")).unwrap().info.modified, time);
 }
 
 #[test]
 fn save_adds_a_final_line_break_with_the_line_ending_of_the_file() {
     let folder = Folder::new(&[("a.md", "---\r\nid: X1\r\n---\r\nBody\r\n")]);
 
-    folder
-        .core
-        .save(&note_path("a.md"), "Body\r\nMore", None)
-        .unwrap();
+    folder.core.save(&note_path("a.md"), "Body\r\nMore", None).unwrap();
 
-    assert_eq!(
-        folder.text("a.md"),
-        "---\r\nid: X1\r\n---\r\nBody\r\nMore\r\n"
-    );
+    assert_eq!(folder.text("a.md"), "---\r\nid: X1\r\n---\r\nBody\r\nMore\r\n");
 }
 
 #[test]
@@ -308,10 +264,7 @@ fn save_fails_on_a_missing_note() {
 
 #[test]
 fn restore_writes_a_deleted_note_again_with_its_id_tags_and_pin() {
-    let folder = Folder::new(&[(
-        "a.md",
-        "---\nid: X1\ntags: [work]\npinned: true\n---\n# A\n",
-    )]);
+    let folder = Folder::new(&[("a.md", "---\nid: X1\ntags: [work]\npinned: true\n---\n# A\n")]);
     let mut note = folder.core.read(&note_path("a.md")).unwrap();
     fs::remove_file(folder.path("a.md")).unwrap();
     note.body = "# A\n\nMine.\n".to_owned();
@@ -334,10 +287,7 @@ fn restore_saves_the_body_over_a_file_that_is_back() {
 
     folder.core.restore(&note).unwrap();
 
-    assert_eq!(
-        folder.text("a.md"),
-        "---\nid: X1\ntags: [theirs]\n---\n# Mine\n"
-    );
+    assert_eq!(folder.text("a.md"), "---\nid: X1\ntags: [theirs]\n---\n# Mine\n");
 }
 
 #[test]
@@ -373,12 +323,7 @@ fn create_refuses_a_taken_or_bad_title_and_writes_nothing() {
     assert_eq!(problem(".hidden"), Some(NameProblem::Dot));
     assert_eq!(problem(&"x".repeat(253)), Some(NameProblem::TooLong));
     assert_eq!(folder.files(), ["Plans.md"]);
-    assert!(
-        folder
-            .core
-            .create(&folder_path(""), &"x".repeat(252))
-            .is_ok()
-    );
+    assert!(folder.core.create(&folder_path(""), &"x".repeat(252)).is_ok());
 }
 
 #[test]
@@ -410,12 +355,7 @@ fn the_handle_works_from_many_threads() {
     let handles: Vec<_> = (0..8)
         .map(|n| {
             let core = folder.core.clone();
-            std::thread::spawn(move || {
-                core.create(&folder_path(""), &n.to_string())
-                    .unwrap()
-                    .info
-                    .path
-            })
+            std::thread::spawn(move || core.create(&folder_path(""), &n.to_string()).unwrap().info.path)
         })
         .collect();
     let mut created: Vec<NotePath> = handles.into_iter().map(|h| h.join().unwrap()).collect();
@@ -423,12 +363,5 @@ fn the_handle_works_from_many_threads() {
     created.dedup();
 
     assert_eq!(created.len(), 8);
-    assert_eq!(
-        folder
-            .core
-            .snapshot()
-            .notes(NoteSet::All, Order::LastChange)
-            .len(),
-        8
-    );
+    assert_eq!(folder.core.snapshot().notes(NoteSet::All, Order::LastChange).len(), 8);
 }

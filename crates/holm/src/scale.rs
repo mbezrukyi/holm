@@ -50,11 +50,7 @@ impl Scale {
     /// The next step up or down, or `None` at that end.
     pub(crate) fn step(self, bigger: bool) -> Option<Self> {
         let at = STEPS.iter().position(|(step, _)| *step == self)?;
-        let next = if bigger {
-            at.checked_add(1)?
-        } else {
-            at.checked_sub(1)?
-        };
+        let next = if bigger { at.checked_add(1)? } else { at.checked_sub(1)? };
         STEPS.get(next).map(|(step, _)| *step)
     }
 

@@ -104,9 +104,7 @@ impl Index {
     /// Opens the index in `dir`. When SQLite fails on it, the index starts empty.
     pub(crate) fn open(dir: &Path) -> Result<Self> {
         let path = dir.join(FILE);
-        let opened = fs::create_dir_all(dir)
-            .map_err(Fail::Io)
-            .and_then(|()| connect(&path));
+        let opened = fs::create_dir_all(dir).map_err(Fail::Io).and_then(|()| connect(&path));
         let conn = match opened {
             Ok(conn) => conn,
             Err(fail) => {
@@ -148,8 +146,7 @@ impl Index {
                 JOIN notes ON notes.key = links.note ORDER BY links.note, pos",
             )?;
             let mut links: HashMap<NotePath, Vec<Link>> = HashMap::new();
-            let rows =
-                statement.query_map([], |row| Ok((note_path(&mut reader, row, 4)?, link(row)?)))?;
+            let rows = statement.query_map([], |row| Ok((note_path(&mut reader, row, 4)?, link(row)?)))?;
             for row in rows {
                 let (note, link) = row?;
                 links.entry(note).or_default().push(link);
@@ -247,9 +244,7 @@ fn connect(path: &Path) -> Result<Connection, Fail> {
     if shape == SHAPE {
         return Ok(conn);
     }
-    let empty: bool = conn.query_row("SELECT count(*) = 0 FROM sqlite_schema", [], |row| {
-        row.get(0)
-    })?;
+    let empty: bool = conn.query_row("SELECT count(*) = 0 FROM sqlite_schema", [], |row| row.get(0))?;
     if !empty {
         tracing::info!(shape, path = %path.display(), "the index has another shape, so Holm rebuilds it");
         drop(conn);
@@ -359,8 +354,7 @@ fn write(conn: &Connection, row: &NoteRows<'_>) -> Result<(), Fail> {
         )?;
     conn.prepare_cached("DELETE FROM tags WHERE note = ?1")?
         .execute([key])?;
-    let mut add_tag =
-        conn.prepare_cached("INSERT INTO tags (note, pos, tag) VALUES (?1, ?2, ?3)")?;
+    let mut add_tag = conn.prepare_cached("INSERT INTO tags (note, pos, tag) VALUES (?1, ?2, ?3)")?;
     for (pos, tag) in (0_i64..).zip(&info.tags) {
         add_tag.execute(params![key, pos, tag.as_str()])?;
     }
@@ -381,11 +375,7 @@ fn write_links(conn: &Connection, key: i64, links: &[Link]) -> Result<(), Fail> 
     )?;
     for (pos, link) in (0_i64..).zip(links) {
         let (kind, target, heading) = match &link.target {
-            LinkTarget::Note { id, heading } => (
-                "note",
-                Value::Text(id.as_str().to_owned()),
-                heading.as_deref(),
-            ),
+            LinkTarget::Note { id, heading } => ("note", Value::Text(id.as_str().to_owned()), heading.as_deref()),
             LinkTarget::Heading(heading) => ("heading", Value::Text(heading.clone()), None),
             LinkTarget::File(file) => ("file", bytes(file), None),
             LinkTarget::Web(address) => ("web", Value::Text(address.clone()), None),
@@ -475,14 +465,8 @@ fn path(bytes: Vec<u8>) -> PathBuf {
 
 /// The note path in column `index`. A path that is not a note path fails like a broken row, so
 /// the index gets rebuilt.
-fn note_path(
-    reader: &mut NoteReader,
-    row: &rusqlite::Row<'_>,
-    index: usize,
-) -> rusqlite::Result<NotePath> {
+fn note_path(reader: &mut NoteReader, row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<NotePath> {
     let fail = |error| rusqlite::Error::FromSqlConversionFailure(index, Type::Blob, error);
     let bytes = row.get_ref(index)?.as_blob().map_err(|e| fail(e.into()))?;
-    reader
-        .note(bytes)
-        .ok_or_else(|| fail("not a note path".into()))
+    reader.note(bytes).ok_or_else(|| fail("not a note path".into()))
 }

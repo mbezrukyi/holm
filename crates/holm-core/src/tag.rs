@@ -27,9 +27,9 @@ impl TagName {
     ///
     /// [`Error::BadTag`] when nothing is left.
     pub fn typed(text: &str) -> Result<Self> {
-        normalize_tag(text).map(Self).ok_or_else(|| Error::BadTag {
-            tag: text.to_owned(),
-        })
+        normalize_tag(text)
+            .map(Self)
+            .ok_or_else(|| Error::BadTag { tag: text.to_owned() })
     }
 
     /// A name that is already written as Holm writes tags, like a tag of a parsed note.
@@ -152,10 +152,7 @@ mod tests {
 
     #[test]
     fn typed_cleans_the_text() {
-        assert_eq!(
-            TagName::typed(" my work / holm/ ").unwrap(),
-            tag("my-work/holm")
-        );
+        assert_eq!(TagName::typed(" my work / holm/ ").unwrap(), tag("my-work/holm"));
         assert!(matches!(TagName::typed(" / "), Err(Error::BadTag { tag }) if tag == " / "));
     }
 
@@ -182,10 +179,7 @@ mod tests {
     fn moved_takes_the_children_along() {
         let (from, to) = (tag("work"), tag("life/home"));
         assert_eq!(tag("work").moved(&from, &to), Some(tag("life/home")));
-        assert_eq!(
-            tag("work/holm").moved(&from, &to),
-            Some(tag("life/home/holm"))
-        );
+        assert_eq!(tag("work/holm").moved(&from, &to), Some(tag("life/home/holm")));
         assert_eq!(tag("workshop").moved(&from, &to), None);
     }
 

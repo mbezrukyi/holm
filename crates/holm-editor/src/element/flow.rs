@@ -12,8 +12,8 @@ use icu_segmenter::LineSegmenter;
 use icu_segmenter::options::LineBreakOptions;
 
 use gpui_kit::{
-    App, Bounds, Font, IndentAdjustment, LineFragment, LineWrapper, Pixels, Point, ShapedLine,
-    SharedString, Size, TextAlign, TextRun, Window, point, px, size,
+    App, Bounds, Font, IndentAdjustment, LineFragment, LineWrapper, Pixels, Point, ShapedLine, SharedString, Size,
+    TextAlign, TextRun, Window, point, px, size,
 };
 
 /// The space between the edge of a chip and its content, as a part of the text size.
@@ -104,8 +104,7 @@ fn shorten(name: &str, fits: impl Fn(&str) -> bool) -> String {
         .min(chars.len());
     let end: String = chars[chars.len() - tail..].iter().collect();
     let head = chars.len() - tail;
-    let cut =
-        |keep: usize| -> String { chars[..keep].iter().collect::<String>() + "\u{2026}" + &end };
+    let cut = |keep: usize| -> String { chars[..keep].iter().collect::<String>() + "\u{2026}" + &end };
     // The most chars from the start that still fit.
     let (mut low, mut high) = (0, head);
     while low < high {
@@ -258,9 +257,7 @@ impl FlowLine {
             if end <= start {
                 continue;
             }
-            let piece = flow
-                .measure(&segs, start..end)
-                .max(summed[end] - summed[start]);
+            let piece = flow.measure(&segs, start..end).max(summed[end] - summed[start]);
             narrowest = narrowest.max(piece);
             start = end;
         }
@@ -332,9 +329,7 @@ impl FlowLine {
 
     /// Wraps the line into rows of `wrap_width`.
     fn wrap_into_rows(&mut self, segs: &[Seg], font: &Font, wrap_width: Pixels, window: &Window) {
-        let mut wrapper = window
-            .text_system()
-            .line_wrapper(font.clone(), self.font_size);
+        let mut wrapper = window.text_system().line_wrapper(font.clone(), self.font_size);
         let cuts = self.wrap(segs, &mut wrapper, wrap_width);
         let mut cutter = Cutter::new(segs.len());
         self.rows = cuts
@@ -463,9 +458,7 @@ impl FlowLine {
 
     /// The width of the row of the wrapper text in `range`, as [`Self::row`] lays it out.
     fn measure(&self, segs: &[Seg], range: Range<usize>) -> Pixels {
-        let part = |line: &ShapedLine, low: usize, high: usize| {
-            line.x_for_index(high) - line.x_for_index(low)
-        };
+        let part = |line: &ShapedLine, low: usize, high: usize| line.x_for_index(high) - line.x_for_index(low);
         let mut width = px(0.);
         let (mut first, mut any, mut name) = (false, false, px(0.));
         let mut start = 0;
@@ -501,9 +494,7 @@ impl FlowLine {
             if at < end {
                 return match seg {
                     Seg::Text { display, .. } => display.start + at - start,
-                    Seg::Lead(chip) | Seg::Name(chip) | Seg::Tail(chip) => {
-                        self.chips[*chip].range.start
-                    }
+                    Seg::Lead(chip) | Seg::Name(chip) | Seg::Tail(chip) => self.chips[*chip].range.start,
                 };
             }
             start = end;
@@ -552,11 +543,7 @@ impl FlowLine {
                             Seg::Lead(_) => piece.first = true,
                             Seg::Tail(_) => piece.last = true,
                             _ => {
-                                piece.name = cutter.cut(
-                                    ix,
-                                    &self.chips[*chip].name,
-                                    low - start..high - start,
-                                );
+                                piece.name = cutter.cut(ix, &self.chips[*chip].name, low - start..high - start);
                             }
                         }
                     }
@@ -576,9 +563,7 @@ impl FlowLine {
 
     /// Ends `piece` with its width, and adds it to `pieces`. It returns the width.
     fn close(&self, pieces: &mut Vec<Piece>, mut piece: ChipPiece) -> Pixels {
-        piece.width = self.lead_width(piece.first)
-            + piece.name.width()
-            + self.tail_width(piece.chip, piece.last);
+        piece.width = self.lead_width(piece.first) + piece.name.width() + self.tail_width(piece.chip, piece.last);
         let width = piece.width;
         pieces.push(Piece::Chip(piece));
         width
@@ -604,10 +589,7 @@ impl FlowLine {
 
     /// The width of the widest row.
     pub(crate) fn width(&self) -> Pixels {
-        self.rows
-            .iter()
-            .map(|row| row.width)
-            .fold(px(0.), Pixels::max)
+        self.rows.iter().map(|row| row.width).fold(px(0.), Pixels::max)
     }
 
     pub(crate) fn size(&self, line_height: Pixels) -> Size<Pixels> {
@@ -618,16 +600,8 @@ impl FlowLine {
 
     /// Where the screen offset `index` shows, from the top left of the line. An offset between
     /// two rows shows at the end of the first row, as in [`gpui_kit::WrappedLine`].
-    pub(crate) fn position_for_index(
-        &self,
-        index: usize,
-        line_height: Pixels,
-    ) -> Option<Point<Pixels>> {
-        let (ix, row) = self
-            .rows
-            .iter()
-            .enumerate()
-            .find(|(_, row)| index <= row.range.end)?;
+    pub(crate) fn position_for_index(&self, index: usize, line_height: Pixels) -> Option<Point<Pixels>> {
+        let (ix, row) = self.rows.iter().enumerate().find(|(_, row)| index <= row.range.end)?;
         if index < row.range.start {
             return None;
         }
@@ -655,11 +629,7 @@ impl FlowLine {
                 }
             }
         }
-        if index <= row.range.start {
-            px(0.)
-        } else {
-            row.width
-        }
+        if index <= row.range.start { px(0.) } else { row.width }
     }
 
     /// The screen offset closest to `position`. A point on a chip gives the start of the chip.
@@ -669,11 +639,7 @@ impl FlowLine {
         position: Point<Pixels>,
         line_height: Pixels,
     ) -> Result<usize, usize> {
-        #[allow(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "a row number"
-        )]
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "a row number")]
         let ix = (position.y / line_height).floor().max(0.) as usize;
         let Some(row) = self.rows.get(ix) else {
             return Err(self.text.len());
@@ -696,13 +662,7 @@ impl FlowLine {
     }
 
     /// Paints the text pieces. A failed paint only loses glyphs in this frame.
-    pub(crate) fn paint(
-        &self,
-        origin: Point<Pixels>,
-        line_height: Pixels,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
+    pub(crate) fn paint(&self, origin: Point<Pixels>, line_height: Pixels, window: &mut Window, cx: &mut App) {
         for (y, row) in self.rows_with_y(line_height) {
             for piece in &row.pieces {
                 if let Piece::Text { x, line, .. } = piece {
@@ -802,9 +762,7 @@ impl Cutter {
 
     /// The part of `line`, the piece `ix`, in `range`, from x zero.
     fn cut(&mut self, ix: usize, line: &ShapedLine, range: Range<usize>) -> ShapedLine {
-        let kept = self.rests[ix]
-            .take()
-            .filter(|(start, _)| *start == range.start);
+        let kept = self.rests[ix].take().filter(|(start, _)| *start == range.start);
         let (start, from) = match &kept {
             Some((start, rest)) => (*start, rest),
             None => (0, line),
@@ -852,12 +810,8 @@ fn fragments_from<'a>(fragments: &[LineFragment<'a>], skip: usize) -> Vec<LineFr
         };
         if offset + len > skip {
             rest.push(match fragment {
-                LineFragment::Text { text } => {
-                    LineFragment::text(&text[skip.saturating_sub(offset)..])
-                }
-                LineFragment::Element { width, len_utf8 } => {
-                    LineFragment::element(*width, *len_utf8)
-                }
+                LineFragment::Text { text } => LineFragment::text(&text[skip.saturating_sub(offset)..]),
+                LineFragment::Element { width, len_utf8 } => LineFragment::element(*width, *len_utf8),
             });
         }
         offset += len;
@@ -888,8 +842,7 @@ mod tests {
                 Cow::Borrowed(include_bytes!("../../../holm/fonts/Inter-Regular.ttf")),
             ])
             .expect("the repo font loads");
-        let mut app =
-            TestAppContext::build_with_text_system(TestDispatcher::new(0), None, text_system);
+        let mut app = TestAppContext::build_with_text_system(TestDispatcher::new(0), None, text_system);
         app.add_empty_window().update(|window, _| test(window));
     }
 
@@ -968,10 +921,7 @@ mod tests {
             for range in [4..8, 0..4, 14..line.len(), 8..19] {
                 same(&cutter.cut(0, &line, range.clone()), range);
             }
-            assert!(close(
-                cutter.cut(0, &line, 0..line.len()).width(),
-                line.width()
-            ));
+            assert!(close(cutter.cut(0, &line, 0..line.len()).width(), line.width()));
         });
     }
 
@@ -986,20 +936,13 @@ mod tests {
     #[test]
     fn a_chip_box_has_the_width_of_its_parts() {
         in_window(|window| {
-            let (line, chip) = flow(
-                ("See ", "report.pdf", Some("48 KB"), " now"),
-                px(600.),
-                window,
-            );
+            let (line, chip) = flow(("See ", "report.pdf", Some("48 KB"), " now"), px(600.), window);
             let parts = SIZE * (CHIP_PAD + CHIP_ICON + CHIP_ICON_GAP)
                 + shape("report.pdf", SIZE, window).width()
                 + SIZE * CHIP_DETAIL_GAP
                 + shape("48 KB", SIZE * DETAIL_SCALE, window).width()
                 + SIZE * CHIP_PAD;
-            assert!(close(
-                x(&line, chip.start),
-                shape("See ", SIZE, window).width()
-            ));
+            assert!(close(x(&line, chip.start), shape("See ", SIZE, window).width()));
             assert!(close(x(&line, chip.end) - x(&line, chip.start), parts));
             let [paint] = line.chip_paints(LINE).try_into().ok().expect("one piece");
             assert!(close(paint.bounds.size.width, parts));
@@ -1019,17 +962,10 @@ mod tests {
             assert_eq!(paint.bounds.origin.x, px(0.));
             assert!(paint.bounds.origin.y > LINE);
             assert!(close(paint.bounds.size.width, chip_width));
-            assert_eq!(
-                line.position_for_index(chip.end, LINE).map(|at| at.y),
-                Some(LINE)
-            );
+            assert_eq!(line.position_for_index(chip.end, LINE).map(|at| at.y), Some(LINE));
 
             // A chip that only just fits a row moves whole to the next row.
-            let (line, _) = flow(
-                ("aaaa ", "report.pdf", None, " b"),
-                chip_width + px(1.),
-                window,
-            );
+            let (line, _) = flow(("aaaa ", "report.pdf", None, " b"), chip_width + px(1.), window);
             let [paint] = line.chip_paints(LINE).try_into().ok().expect("one piece");
             assert!(paint.icon.is_some() && paint.bounds.origin.y > LINE);
         });
@@ -1040,11 +976,7 @@ mod tests {
         in_window(|window| {
             let detail = Some("2 KB");
             let (whole, _) = flow(("", "my report.pdf", detail, ""), px(600.), window);
-            let (line, _) = flow(
-                ("", "my report.pdf", detail, ""),
-                whole.width() - px(1.),
-                window,
-            );
+            let (line, _) = flow(("", "my report.pdf", detail, ""), whole.width() - px(1.), window);
             let [first, last] = line.chip_paints(LINE).try_into().ok().expect("two pieces");
             let pad = SIZE * CHIP_PAD;
             assert!(first.icon.is_some() && first.detail.is_none());
@@ -1053,9 +985,7 @@ mod tests {
             assert_eq!(last.name.0.text.as_ref(), "report.pdf");
             assert!(close(
                 first.bounds.size.width,
-                SIZE * (CHIP_PAD + CHIP_ICON + CHIP_ICON_GAP)
-                    + shape("my ", SIZE, window).width()
-                    + pad
+                SIZE * (CHIP_PAD + CHIP_ICON + CHIP_ICON_GAP) + shape("my ", SIZE, window).width() + pad
             ));
             assert!(close(last.name.1.x, pad));
             assert_eq!(line.size(LINE).height, LINE * 2.);
@@ -1098,11 +1028,7 @@ mod tests {
                 ("Axis", vec![run(4)], &fira),
                 ("Property one long word", vec![run(22)], &fira),
                 // Code in a wider font than the base font of the wrapper.
-                (
-                    "see justify-content now",
-                    vec![text(4), code(15), text(4)],
-                    &inter,
-                ),
+                ("see justify-content now", vec![text(4), code(15), text(4)], &inter),
                 ("flex-direction", vec![code(14)], &inter),
                 // Text in a narrower font than the base font of the wrapper.
                 ("Distributes leftover space", vec![text(26)], &fira),
@@ -1110,15 +1036,7 @@ mod tests {
             for (line_text, runs, base) in &cases {
                 let (min, max) = widths(line_text, runs, base);
                 assert!(min <= max, "{line_text}");
-                let line = FlowLine::new(
-                    (*line_text).into(),
-                    runs,
-                    Vec::new(),
-                    base,
-                    SIZE,
-                    min,
-                    window,
-                );
+                let line = FlowLine::new((*line_text).into(), runs, Vec::new(), base, SIZE, min, window);
                 for row in &line.rows {
                     let end = row.range.end;
                     assert!(
@@ -1143,14 +1061,7 @@ mod tests {
                 SIZE,
                 window,
             );
-            let (min, max) = FlowLine::widths(
-                text.into(),
-                &[run(text.len())],
-                vec![chip],
-                &fira,
-                SIZE,
-                window,
-            );
+            let (min, max) = FlowLine::widths(text.into(), &[run(text.len())], vec![chip], &fira, SIZE, window);
             assert!(close(max, whole.width()));
             assert!(min < max);
             let (line, _) = flow(("", "my report.pdf", detail, ""), min, window);
@@ -1192,8 +1103,7 @@ mod tests {
             let after_hyphen = word + "aspect-".len();
             for half in 300_u16..1400 {
                 let wrap = px(f32::from(half) / 2.);
-                let line =
-                    FlowLine::new(text.into(), &runs, Vec::new(), &inter, SIZE, wrap, window);
+                let line = FlowLine::new(text.into(), &runs, Vec::new(), &inter, SIZE, wrap, window);
                 for row in &line.rows {
                     let end = row.range.end;
                     assert!(

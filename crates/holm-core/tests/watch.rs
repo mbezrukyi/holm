@@ -57,10 +57,7 @@ impl Fed {
 
     /// Every change that is waiting now, from all change lists.
     fn take(&self) -> Vec<Change> {
-        self.lists()
-            .into_iter()
-            .flat_map(|list| list.changes)
-            .collect()
+        self.lists().into_iter().flat_map(|list| list.changes).collect()
     }
 
     /// Every change list that is waiting now.
@@ -102,14 +99,7 @@ fn an_outside_edit_updates_the_index_and_sends_a_change() {
 
     assert_eq!(fed.take(), [Change::Changed(note_path("a.md"))]);
     assert_eq!(previews(&fed.core), ["New words"]);
-    assert_eq!(
-        fed.core
-            .search("words", Order::Title)
-            .unwrap()
-            .paths()
-            .len(),
-        1
-    );
+    assert_eq!(fed.core.search("words", Order::Title).unwrap().paths().len(), 1);
 }
 
 #[test]
@@ -133,10 +123,7 @@ fn a_move_in_two_batches_with_the_old_path_first_is_a_remove_and_an_add() {
 
     assert_eq!(
         fed.take(),
-        [
-            Change::Removed(note_path("a.md")),
-            Change::Added(note_path("z.md"))
-        ]
+        [Change::Removed(note_path("a.md")), Change::Added(note_path("z.md"))]
     );
 }
 
@@ -197,20 +184,11 @@ fn a_move_with_the_new_path_first_is_one_change() {
 fn holm_s_own_saves_and_new_notes_come_from_holm() {
     let fed = Fed::new(&[("a.md", "# A\n")]);
 
-    let saved = fed
-        .core
-        .save(&note_path("a.md"), "# A\n\nMore.\n", None)
-        .unwrap();
-    let tagged = fed
-        .core
-        .add_tag(&note_path("a.md"), &tag_name("work"))
-        .unwrap();
+    let saved = fed.core.save(&note_path("a.md"), "# A\n\nMore.\n", None).unwrap();
+    let tagged = fed.core.add_tag(&note_path("a.md"), &tag_name("work")).unwrap();
     let new = fed.core.create(&folder_path(""), "New").unwrap();
     fed.feed
-        .changed([
-            PathBuf::from("a.md"),
-            common::path_buf(new.info.path.clone()),
-        ])
+        .changed([PathBuf::from("a.md"), common::path_buf(new.info.path.clone())])
         .unwrap();
 
     let lists: Vec<(Source, Vec<Change>)> = fed
@@ -222,10 +200,7 @@ fn holm_s_own_saves_and_new_notes_come_from_holm() {
         lists,
         [
             (Source::Holm, vec![Change::Changed(saved.info.path)]),
-            (
-                Source::Holm,
-                vec![Change::Changed(tagged.path), Change::Tags]
-            ),
+            (Source::Holm, vec![Change::Changed(tagged.path), Change::Tags]),
             (Source::Holm, vec![Change::Added(new.info.path)]),
         ]
     );
@@ -236,10 +211,7 @@ fn a_pin_comes_as_a_change_and_an_attachment_not_at_all() {
     let fed = Fed::new(&[("a.md", "# A\n")]);
 
     let pinned = fed.core.set_pinned(&note_path("a.md"), true).unwrap();
-    let image = fed
-        .core
-        .paste_image(&note_path("a.md"), "png", b"png")
-        .unwrap();
+    let image = fed.core.paste_image(&note_path("a.md"), "png", b"png").unwrap();
     fed.feed
         .changed([PathBuf::from("a.md"), PathBuf::from("attachments"), image])
         .unwrap();
@@ -249,26 +221,15 @@ fn a_pin_comes_as_a_change_and_an_attachment_not_at_all() {
 
 #[test]
 fn each_own_move_comes_as_one_list_with_its_revision() {
-    let fed = Fed::new(&[
-        ("a.md", "---\ntags: [work/holm]\n---\n# A\n"),
-        ("area/b.md", "# B\n"),
-    ]);
+    let fed = Fed::new(&[("a.md", "---\ntags: [work/holm]\n---\n# A\n"), ("area/b.md", "# B\n")]);
 
     let note = fed.core.rename_note(&note_path("a.md"), "C").unwrap();
     let note_revision = fed.core.snapshot().revision();
-    fed.core
-        .rename_folder(&folder_path("area"), "zone")
-        .unwrap();
+    fed.core.rename_folder(&folder_path("area"), "zone").unwrap();
     let folder_revision = fed.core.snapshot().revision();
-    fed.core
-        .rename_tag(&tag_name("work"), &tag_name("Job"))
-        .unwrap();
-    fed.core
-        .rename_tag(&tag_name("gone"), &tag_name("x"))
-        .unwrap();
-    fed.core
-        .rename_folder(&folder_path("zone"), "zone")
-        .unwrap();
+    fed.core.rename_tag(&tag_name("work"), &tag_name("Job")).unwrap();
+    fed.core.rename_tag(&tag_name("gone"), &tag_name("x")).unwrap();
+    fed.core.rename_folder(&folder_path("zone"), "zone").unwrap();
 
     let lists: Vec<(u64, Vec<Change>)> = fed
         .lists()
@@ -384,10 +345,7 @@ fn a_move_rule_follows_paths_below_a_folder_and_child_tags() {
         from: note_path("a.md"),
         to: note_path("b.md"),
     };
-    assert_eq!(
-        moved.note_after(&note_path("a.md")),
-        Some(note_path("b.md"))
-    );
+    assert_eq!(moved.note_after(&note_path("a.md")), Some(note_path("b.md")));
     assert_eq!(moved.note_after(&note_path("c.md")), None);
     assert_eq!(moved.folder_after(&folder_path("a")), None);
 
@@ -395,14 +353,8 @@ fn a_move_rule_follows_paths_below_a_folder_and_child_tags() {
         from: tag_name("work"),
         to: tag_name("life/home"),
     };
-    assert_eq!(
-        tag.tag_after(&tag_name("work")),
-        Some(tag_name("life/home"))
-    );
-    assert_eq!(
-        tag.tag_after(&tag_name("work/holm")),
-        Some(tag_name("life/home/holm"))
-    );
+    assert_eq!(tag.tag_after(&tag_name("work")), Some(tag_name("life/home")));
+    assert_eq!(tag.tag_after(&tag_name("work/holm")), Some(tag_name("life/home/holm")));
     assert_eq!(tag.tag_after(&tag_name("workshop")), None);
     assert_eq!(after(&tag, "work"), None);
 }
@@ -424,22 +376,14 @@ fn a_new_folder_adds_its_notes_and_changes_the_folder_list() {
         ]
     );
     assert_eq!(
-        fed.core
-            .snapshot()
-            .folders()
-            .map(common::path_buf)
-            .collect::<Vec<_>>(),
+        fed.core.snapshot().folders().map(common::path_buf).collect::<Vec<_>>(),
         [PathBuf::from("work"), PathBuf::from("work/deep")]
     );
 }
 
 #[test]
 fn a_deleted_folder_removes_its_notes() {
-    let fed = Fed::new(&[
-        ("work/a.md", "# A\n"),
-        ("work/deep/b.md", "# B\n"),
-        ("c.md", "# C\n"),
-    ]);
+    let fed = Fed::new(&[("work/a.md", "# A\n"), ("work/deep/b.md", "# B\n"), ("c.md", "# C\n")]);
 
     fs::remove_dir_all(fed.path("work")).unwrap();
     // Each path inside it may come too. The folder covers them.
@@ -462,10 +406,7 @@ fn a_deleted_folder_removes_its_notes() {
 #[test]
 fn a_renamed_folder_keeps_search_links_and_file_links_of_its_notes() {
     let fed = Fed::new(&[
-        (
-            "work/a.md",
-            &note("A", "tags: [food]\n", "# A\nPotatoes [c](holm:C)\n"),
-        ),
+        ("work/a.md", &note("A", "tags: [food]\n", "# A\nPotatoes [c](holm:C)\n")),
         ("work/pic.md", &note("P", "", "# Pic\n![p](pic.png)\n")),
         ("work/plain.md", "# Plain\nCarrots\n"),
         ("b.md", &note("B", "", "[a](holm:A)\n")),
@@ -521,10 +462,7 @@ fn a_tag_change_sends_a_tags_change() {
 
     fed.write("a.md", &note("A", "tags: [work]\n", "# A\n"));
     fed.feed.changed(["a.md"]).unwrap();
-    assert_eq!(
-        fed.take(),
-        [Change::Changed(note_path("a.md")), Change::Tags]
-    );
+    assert_eq!(fed.take(), [Change::Changed(note_path("a.md")), Change::Tags]);
 
     fed.write("a.md", &note("A", "tags: [work]\n", "# A\n\nText.\n"));
     fed.feed.changed(["a.md"]).unwrap();
@@ -532,10 +470,7 @@ fn a_tag_change_sends_a_tags_change() {
 
     fs::remove_file(fed.path("a.md")).unwrap();
     fed.feed.changed(["a.md"]).unwrap();
-    assert_eq!(
-        fed.take(),
-        [Change::Removed(note_path("a.md")), Change::Tags]
-    );
+    assert_eq!(fed.take(), [Change::Removed(note_path("a.md")), Change::Tags]);
     assert_eq!(fed.core.snapshot().tags(), []);
 }
 
@@ -558,10 +493,7 @@ fn a_second_write_in_the_same_tick_is_a_change() {
     fed.write("a.md", &note("A", "tags: [work]\n", "# A\n"));
     let first = modified(&fed.path("a.md"));
     fed.feed.changed(["a.md"]).unwrap();
-    assert_eq!(
-        fed.take(),
-        [Change::Changed(note_path("a.md")), Change::Tags]
-    );
+    assert_eq!(fed.take(), [Change::Changed(note_path("a.md")), Change::Tags]);
     fed.write("a.md", &note("A", "tags: [work]\n", "# A\n\nText.\n"));
     set_modified(&fed.path("a.md"), first);
     fed.feed.changed(["a.md"]).unwrap();
@@ -587,10 +519,7 @@ fn a_write_of_the_same_size_in_the_same_tick_is_a_change() {
     fed.feed.changed(["a.md"]).unwrap();
 
     assert_eq!(fed.take(), [Change::Changed(note_path("a.md"))]);
-    assert_eq!(
-        fed.core.read(&note_path("a.md")).unwrap().body,
-        "# A\n\nTwo.\n"
-    );
+    assert_eq!(fed.core.read(&note_path("a.md")).unwrap().body, "# A\n\nTwo.\n");
     let saved = fed.core.save(&note_path("a.md"), "mine\n", Some(seen));
     assert!(matches!(saved, Err(Error::Changed { .. })), "{saved:?}");
 }
@@ -607,9 +536,7 @@ fn a_new_mode_alone_is_no_change() {
 
     assert_eq!(fed.take(), []);
     assert_eq!(fed.core.snapshot().revision(), seen);
-    fed.core
-        .save(&note_path("a.md"), "mine\n", Some(seen))
-        .unwrap();
+    fed.core.save(&note_path("a.md"), "mine\n", Some(seen)).unwrap();
 }
 
 #[test]
@@ -617,9 +544,7 @@ fn the_event_of_a_write_of_holm_is_no_outside_change() {
     let fed = Fed::new(&[("a.md", &note("A", "", "# A\n"))]);
     let seen = fed.core.snapshot().revision();
 
-    fed.core
-        .save(&note_path("a.md"), "# A\n\nOne.\n", Some(seen))
-        .unwrap();
+    fed.core.save(&note_path("a.md"), "# A\n\nOne.\n", Some(seen)).unwrap();
     fed.feed.changed(["a.md"]).unwrap();
     let outside: Vec<ChangeList> = fed
         .lists()
@@ -627,15 +552,9 @@ fn the_event_of_a_write_of_holm_is_no_outside_change() {
         .filter(|list| list.source == Source::Outside)
         .collect();
     assert!(outside.is_empty(), "{outside:?}");
-    fed.core
-        .save(&note_path("a.md"), "# A\n\nTwo.\n", Some(seen))
-        .unwrap();
+    fed.core.save(&note_path("a.md"), "# A\n\nTwo.\n", Some(seen)).unwrap();
 
-    assert!(
-        fs::read_to_string(fed.path("a.md"))
-            .unwrap()
-            .ends_with("# A\n\nTwo.\n")
-    );
+    assert!(fs::read_to_string(fed.path("a.md")).unwrap().ends_with("# A\n\nTwo.\n"));
 }
 
 #[test]
@@ -733,10 +652,7 @@ fn the_feed_refuses_paths_outside_the_notes_folder() {
     let fed = Fed::new(&[]);
 
     for path in ["/etc/passwd", "../a.md", "work/../a.md"] {
-        assert!(matches!(
-            fed.feed.changed(["a.md", path]),
-            Err(Error::BadPath { .. })
-        ));
+        assert!(matches!(fed.feed.changed(["a.md", path]), Err(Error::BadPath { .. })));
     }
 }
 
@@ -749,9 +665,7 @@ fn a_stream_ends_when_the_core_is_gone() {
 
     let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
     assert_eq!(
-        Pin::new(&mut changes)
-            .poll_next(&mut cx)
-            .map(|list| list.is_none()),
+        Pin::new(&mut changes).poll_next(&mut cx).map(|list| list.is_none()),
         Poll::Ready(true)
     );
 }
@@ -805,9 +719,7 @@ mod real_events {
     fn a_save_comes_from_holm_and_the_next_outside_change_from_outside() {
         let (dir, _cache, core, mut changes) = open(&[("a.md", "# A\n")]);
 
-        let saved = core
-            .save(&note_path("a.md"), "# A\n\nMore.\n", None)
-            .unwrap();
+        let saved = core.save(&note_path("a.md"), "# A\n\nMore.\n", None).unwrap();
         fs::write(dir.path().join("b.md"), "# B\n").unwrap();
 
         let list = next_list(&mut changes);
@@ -859,11 +771,7 @@ fn the_revision_grows_with_own_writes_and_outside_changes() {
 
     fed.core.read(&note_path("a.md")).unwrap();
     fed.core.snapshot().notes(NoteSet::All, Order::Title);
-    assert_eq!(
-        fed.core.snapshot().revision(),
-        start,
-        "reads change nothing"
-    );
+    assert_eq!(fed.core.snapshot().revision(), start, "reads change nothing");
 
     fed.core.create(&folder_path(""), "New").unwrap();
     let created = fed.core.snapshot().revision();
@@ -947,14 +855,8 @@ fn a_save_from_before_an_outside_change_writes_nothing() {
     assert!(matches!(saved, Err(Error::Changed { .. })), "{saved:?}");
     assert_eq!(fs::read_to_string(fed.path("a.md")).unwrap(), "theirs\n");
     let now = fed.core.snapshot().revision();
-    fed.core
-        .save(&note_path("a.md"), "mine\n", Some(now))
-        .unwrap();
-    assert!(
-        fs::read_to_string(fed.path("a.md"))
-            .unwrap()
-            .ends_with("\nmine\n")
-    );
+    fed.core.save(&note_path("a.md"), "mine\n", Some(now)).unwrap();
+    assert!(fs::read_to_string(fed.path("a.md")).unwrap().ends_with("\nmine\n"));
 }
 
 #[test]
@@ -968,11 +870,7 @@ fn a_save_refuses_a_change_on_disk_that_the_core_does_not_know_yet() {
     assert!(matches!(saved, Err(Error::Changed { .. })), "{saved:?}");
     assert_eq!(fs::read_to_string(fed.path("a.md")).unwrap(), "theirs\n");
     fed.core.save(&note_path("a.md"), "mine\n", None).unwrap();
-    assert!(
-        fs::read_to_string(fed.path("a.md"))
-            .unwrap()
-            .ends_with("\nmine\n")
-    );
+    assert!(fs::read_to_string(fed.path("a.md")).unwrap().ends_with("\nmine\n"));
 }
 
 #[test]
@@ -981,19 +879,11 @@ fn writes_of_holm_after_the_seen_revision_are_no_outside_change() {
     let seen = fed.core.snapshot().revision();
 
     fed.core.set_pinned(&note_path("a.md"), true).unwrap();
-    fed.core
-        .save(&note_path("a.md"), "mine\n", Some(seen))
-        .unwrap();
+    fed.core.save(&note_path("a.md"), "mine\n", Some(seen)).unwrap();
     fed.feed.changed(["a.md"]).unwrap();
-    fed.core
-        .save(&note_path("a.md"), "more\n", Some(seen))
-        .unwrap();
+    fed.core.save(&note_path("a.md"), "more\n", Some(seen)).unwrap();
 
-    assert!(
-        fs::read_to_string(fed.path("a.md"))
-            .unwrap()
-            .ends_with("\nmore\n")
-    );
+    assert!(fs::read_to_string(fed.path("a.md")).unwrap().ends_with("\nmore\n"));
 }
 
 #[test]
@@ -1008,11 +898,7 @@ fn an_outside_change_stays_unseen_after_a_pin_and_a_rename() {
     let saved = fed.core.save(&note_path("b.md"), "mine\n", Some(seen));
 
     assert!(matches!(saved, Err(Error::Changed { .. })), "{saved:?}");
-    assert!(
-        fs::read_to_string(fed.path("b.md"))
-            .unwrap()
-            .ends_with("\ntheirs\n")
-    );
+    assert!(fs::read_to_string(fed.path("b.md")).unwrap().ends_with("\ntheirs\n"));
 }
 
 #[test]
@@ -1022,14 +908,9 @@ fn an_outside_change_stays_unseen_after_a_folder_rename() {
     fed.write("work/a.md", "theirs\n");
     fed.feed.changed(["work/a.md"]).unwrap();
 
-    fed.core
-        .rename_folder(&folder_path("work"), "home")
-        .unwrap();
+    fed.core.rename_folder(&folder_path("work"), "home").unwrap();
     let saved = fed.core.save(&note_path("home/a.md"), "mine\n", Some(seen));
 
     assert!(matches!(saved, Err(Error::Changed { .. })), "{saved:?}");
-    assert_eq!(
-        fs::read_to_string(fed.path("home/a.md")).unwrap(),
-        "theirs\n"
-    );
+    assert_eq!(fs::read_to_string(fed.path("home/a.md")).unwrap(), "theirs\n");
 }

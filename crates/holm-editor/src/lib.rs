@@ -14,8 +14,8 @@ mod palette;
 pub mod shortcuts;
 
 pub use editor::{
-    Appearance, Changed, CursorLink, CustomColors, Editor, OpenFile, OpenLink, PasteFiles,
-    PastedFile, TextWidth, UpFromStart, WritingHelp,
+    Appearance, Changed, CursorLink, CustomColors, Editor, OpenFile, OpenLink, PasteFiles, PastedFile, TextWidth,
+    UpFromStart, WritingHelp,
 };
 pub use element::{TextColumn, text_column};
 

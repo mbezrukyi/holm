@@ -99,11 +99,7 @@ impl Model {
                 0,
             ),
             LinkForm::Block => (
-                if before.is_none_or(|c| c == '\n') {
-                    ""
-                } else {
-                    "\n"
-                },
+                if before.is_none_or(|c| c == '\n') { "" } else { "\n" },
                 if after == Some('\n') { "" } else { "\n" },
                 1,
             ),
@@ -120,10 +116,7 @@ impl Model {
     /// Writes `target` in place of the target of the link at the cursor. The link text stays.
     /// It does nothing for a reference link, whose target is in its definition.
     pub(crate) fn set_link_target(&mut self, target: &Target) -> bool {
-        let Some(range) = self
-            .link_at(self.cursor())
-            .and_then(|link| link.target_range.clone())
-        else {
+        let Some(range) = self.link_at(self.cursor()).and_then(|link| link.target_range.clone()) else {
             return false;
         };
         let edits = vec![(range, target.to_destination())];
@@ -192,17 +185,11 @@ mod tests {
         let text = "a [![img](i.png) b](holm:X) [c](d.md)";
         let model = Model::new(text);
         assert_eq!(model.link_at(0), None);
-        assert_eq!(
-            model.link_at(5).map(|l| &l.target),
-            Some(&Target::File("i.png".into()))
-        );
+        assert_eq!(model.link_at(5).map(|l| &l.target), Some(&Target::File("i.png".into())));
         assert_eq!(model.link_at(18).map(|l| &l.target), Some(&note("X", None)));
         // The end of a link counts when no other link starts there.
         assert_eq!(model.link_at(27).map(|l| &l.target), Some(&note("X", None)));
-        assert_eq!(
-            model.link_at(28).map(|l| &l.target),
-            Some(&Target::File("d.md".into()))
-        );
+        assert_eq!(model.link_at(28).map(|l| &l.target), Some(&Target::File("d.md".into())));
     }
 
     #[test]

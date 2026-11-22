@@ -44,13 +44,7 @@ const MAX_WORDS: usize = 64;
 /// Makes the note with `key` findable by its title, its body and its tags.
 ///
 /// The note's rows in the `tags` table must be written already.
-pub(super) fn put(
-    conn: &Connection,
-    key: i64,
-    title: &str,
-    body: &str,
-    tags: &[TagName],
-) -> rusqlite::Result<()> {
+pub(super) fn put(conn: &Connection, key: i64, title: &str, body: &str, tags: &[TagName]) -> rusqlite::Result<()> {
     let hash = hash((title, body));
     let old: Option<i64> = conn
         .prepare_cached("SELECT hash FROM text_hashes WHERE note = ?1")?
@@ -114,9 +108,8 @@ pub(super) fn find(conn: &Connection, text: &str) -> rusqlite::Result<Vec<NotePa
             .collect();
         if rest.is_empty() {
             let keys: Vec<String> = keys.iter().map(i64::to_string).collect();
-            let mut statement = conn.prepare_cached(
-                "SELECT key, path FROM notes WHERE key IN (SELECT value FROM json_each(?1))",
-            )?;
+            let mut statement =
+                conn.prepare_cached("SELECT key, path FROM notes WHERE key IN (SELECT value FROM json_each(?1))")?;
             let mut reader = NoteReader::default();
             let rows = statement.query_map([format!("[{}]", keys.join(","))], |row| {
                 Ok((row.get(0)?, note_path(&mut reader, row, 1)?))
@@ -139,9 +132,7 @@ fn text_matches(conn: &Connection, query: &str) -> rusqlite::Result<Vec<(i64, No
         WHERE key IN (SELECT rowid FROM text_words WHERE text_words MATCH ?1)",
     )?;
     let mut reader = NoteReader::default();
-    let rows = statement.query_map([query], |row| {
-        Ok((row.get(0)?, note_path(&mut reader, row, 1)?))
-    })?;
+    let rows = statement.query_map([query], |row| Ok((row.get(0)?, note_path(&mut reader, row, 1)?)))?;
     rows.collect()
 }
 

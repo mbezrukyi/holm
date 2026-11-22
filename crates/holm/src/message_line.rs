@@ -17,9 +17,9 @@ use std::rc::Rc;
 
 use gpui_kit::component::{ActiveTheme as _, h_flex};
 use gpui_kit::{
-    AppContext as _, Bounds, Context, CursorStyle, Entity, EventEmitter, InteractiveElement as _,
-    IntoElement, MouseButton, ParentElement, Pixels, Render, Role, SharedString,
-    StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _, Window, div,
+    AppContext as _, Bounds, Context, CursorStyle, Entity, EventEmitter, InteractiveElement as _, IntoElement,
+    MouseButton, ParentElement, Pixels, Render, Role, SharedString, StatefulInteractiveElement as _, Styled,
+    Subscription, TestSupportExt as _, Window, div,
 };
 
 use crate::path_text::PathText;
@@ -72,8 +72,7 @@ impl MessageLine {
 
     /// Shows the mark with the count of `problems`, or no mark when there are none.
     pub(crate) fn set_problems(&mut self, problems: Vec<SharedString>, cx: &mut Context<Self>) {
-        self.problems
-            .update(cx, |list, cx| list.set_problems(problems, cx));
+        self.problems.update(cx, |list, cx| list.set_problems(problems, cx));
         cx.notify();
     }
 
@@ -91,15 +90,13 @@ impl MessageLine {
     /// Shows `state` on the right, or no state with `None`. Another state closes the state
     /// menu.
     pub(crate) fn set_state(&mut self, state: Option<State>, cx: &mut Context<Self>) {
-        self.state_menu
-            .update(cx, |menu, cx| menu.set_state(state, cx));
+        self.state_menu.update(cx, |menu, cx| menu.set_state(state, cx));
         cx.notify();
     }
 
     /// Opens the state menu, or closes it when it is open. With no state, it does nothing.
     pub(crate) fn toggle_state_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.state_menu
-            .update(cx, |menu, cx| menu.toggle(window, cx));
+        self.state_menu.update(cx, |menu, cx| menu.toggle(window, cx));
     }
 
     /// Shows "Writing…" while `writing` is true.
@@ -194,11 +191,7 @@ impl EventEmitter<StatePick> for MessageLine {}
 impl Render for MessageLine {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let problems = self.problems.read(cx).problems().len();
-        let state = self
-            .state_menu
-            .read(cx)
-            .state()
-            .map(|state| state.label.clone());
+        let state = self.state_menu.read(cx).state().map(|state| state.label.clone());
         if self.message.is_none() && state.is_none() && !self.writing && problems == 0 {
             return div().into_any_element();
         }

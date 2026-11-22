@@ -8,9 +8,8 @@ use std::borrow::Cow;
 use std::path::PathBuf;
 
 use gpui_kit::{
-    AppContext, Bounds, Context, Entity, EntityInputHandler as _, Focusable, IntoElement,
-    ParentElement, Pixels, Render, Styled, TestAppContext, TestDispatcher, VisualTestContext,
-    Window, div, font, px, size,
+    AppContext, Bounds, Context, Entity, EntityInputHandler as _, Focusable, IntoElement, ParentElement, Pixels,
+    Render, Styled, TestAppContext, TestDispatcher, VisualTestContext, Window, div, font, px, size,
 };
 use holm_editor::Editor;
 
@@ -40,9 +39,7 @@ impl Render for Host {
 pub fn app() -> TestAppContext {
     let text_system = gpui_kit::platform::current_platform(true).text_system();
     text_system
-        .add_fonts(vec![Cow::Borrowed(include_bytes!(
-            "../fonts/FiraMono-Medium.ttf"
-        ))])
+        .add_fonts(vec![Cow::Borrowed(include_bytes!("../fonts/FiraMono-Medium.ttf"))])
         .expect("the repo font loads");
     let cx = TestAppContext::build_with_text_system(TestDispatcher::new(0), None, text_system);
     cx.update(holm_editor::init);
@@ -112,8 +109,7 @@ pub fn one_mb_note() -> String {
 
 /// 200 long lines that wrap, each with 12 file chips.
 pub fn chip_lines_note() -> String {
-    let part =
-        "some words before a file ![report](attachments/report.pdf) and more words after it, ";
+    let part = "some words before a file ![report](attachments/report.pdf) and more words after it, ";
     let line = part.repeat(12);
     vec![line.trim_end(); 200].join("\n\n")
 }

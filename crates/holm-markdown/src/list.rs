@@ -49,18 +49,12 @@ pub fn relist(text: &str, body: &Body, selection: Range<usize>, key: Move) -> Op
 struct Plan {
     edit: Edit,
     /// The new tree. `None` when the edit writes no tree.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the tests compare it with the parse")
-    )]
+    #[cfg_attr(not(test), expect(dead_code, reason = "the tests compare it with the parse"))]
     tree: Option<Planned>,
 }
 
 /// A tree that a key writes.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the tests compare it with the parse")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "the tests compare it with the parse"))]
 struct Planned {
     parts: Vec<Part>,
     /// The lines of the tree in the old text.
@@ -242,10 +236,7 @@ fn next(text: &str, body: &Body, selection: Range<usize>) -> Option<Plan> {
 /// Where the last item of the list `block` ends. The range of a list can end in the indent of
 /// the next line.
 fn list_end(block: &Block) -> usize {
-    block
-        .children
-        .last()
-        .map_or(block.range.end, |item| item.range.end)
+    block.children.last().map_or(block.range.end, |item| item.range.end)
 }
 
 fn is_item(block: &Block) -> bool {
@@ -257,9 +248,7 @@ fn line_start(text: &str, offset: usize) -> usize {
 }
 
 fn line_end(text: &str, offset: usize) -> usize {
-    text[offset..]
-        .find('\n')
-        .map_or(text.len(), |at| offset + at)
+    text[offset..].find('\n').map_or(text.len(), |at| offset + at)
 }
 
 /// The blocks from the top level down to the first block in document order that `pick` takes.
@@ -280,10 +269,7 @@ fn path_to<'b>(blocks: &'b [Block], pick: &dyn Fn(&Block) -> bool) -> Option<Vec
 fn chain_at(blocks: &[Block], offset: usize) -> Vec<&Block> {
     let mut chain = Vec::new();
     let mut level = blocks;
-    while let Some(block) = level
-        .iter()
-        .find(|b| b.range.start <= offset && offset <= b.range.end)
-    {
+    while let Some(block) = level.iter().find(|b| b.range.start <= offset && offset <= b.range.end) {
         chain.push(block);
         level = &block.children;
     }
@@ -292,13 +278,8 @@ fn chain_at(blocks: &[Block], offset: usize) -> Vec<&Block> {
 
 /// The width of leading space and tabs, with tab stops of 4.
 fn columns(lead: &str) -> usize {
-    lead.bytes().fold(0, |col, b| {
-        if b == b'\t' {
-            col + 4 - col % 4
-        } else {
-            col + 1
-        }
-    })
+    lead.bytes()
+        .fold(0, |col, b| if b == b'\t' { col + 4 - col % 4 } else { col + 1 })
 }
 
 /// The marker at the start of `line`: its kind, its number and its length.
@@ -429,19 +410,10 @@ struct Source<'a> {
 impl<'a> Source<'a> {
     /// The source of the list tree around the last block of `path`, an item, with the item. The
     /// tree holds the outermost list of the item, and the lists right before and after it.
-    fn around<'b>(
-        text: &'a str,
-        top: &'b [Block],
-        path: &[&'b Block],
-    ) -> Option<(Self, Vec<&'b Block>, &'b Block)> {
+    fn around<'b>(text: &'a str, top: &'b [Block], path: &[&'b Block]) -> Option<(Self, Vec<&'b Block>, &'b Block)> {
         let item = *path.last()?;
         let mut root = path.len() - 1;
-        while root > 0
-            && matches!(
-                path[root - 1].kind,
-                BlockKind::List { .. } | BlockKind::Item { .. }
-            )
-        {
+        while root > 0 && matches!(path[root - 1].kind, BlockKind::List { .. } | BlockKind::Item { .. }) {
             root -= 1;
         }
         let list = path[root];
@@ -459,10 +431,7 @@ impl<'a> Source<'a> {
         let lists = match siblings.iter().position(|b| std::ptr::eq(b, list)) {
             Some(at) => {
                 let is_list = |b: &Block| matches!(b.kind, BlockKind::List { .. });
-                let from = siblings[..at]
-                    .iter()
-                    .rposition(|b| !is_list(b))
-                    .map_or(0, |k| k + 1);
+                let from = siblings[..at].iter().rposition(|b| !is_list(b)).map_or(0, |k| k + 1);
                 let to = siblings[at..]
                     .iter()
                     .position(|b| !is_list(b))
@@ -568,10 +537,7 @@ impl<'a> Source<'a> {
                 return None;
             }
             let rest = &self.text[at..line.end];
-            let ws = rest
-                .bytes()
-                .take_while(|b| *b == b' ' || *b == b'\t')
-                .count();
+            let ws = rest.bytes().take_while(|b| *b == b' ' || *b == b'\t').count();
             if ws < rest.len() {
                 return Some(columns(&rest[..ws]));
             }
@@ -586,10 +552,7 @@ impl<'a> Source<'a> {
             return None;
         }
         let items: Vec<&Block> = block.children.iter().filter(|b| is_item(b)).collect();
-        let firsts: Vec<usize> = items
-            .iter()
-            .map(|item| self.line_of(item.range.start))
-            .collect();
+        let firsts: Vec<usize> = items.iter().map(|item| self.line_of(item.range.start)).collect();
         let mut built = Vec::with_capacity(items.len());
         for (k, item) in items.iter().enumerate() {
             let end = firsts.get(k + 1).map_or(last, |next| next - 1);
@@ -602,13 +565,7 @@ impl<'a> Source<'a> {
         })
     }
 
-    fn item(
-        &self,
-        block: &Block,
-        lines: std::ops::RangeInclusive<usize>,
-        first: bool,
-        col: usize,
-    ) -> Option<Item> {
+    fn item(&self, block: &Block, lines: std::ops::RangeInclusive<usize>, first: bool, col: usize) -> Option<Item> {
         let (head, last) = (*lines.start(), *lines.end());
         let line = self.lines[head].clone();
         let prefix_end = self.prefix_end(head);
@@ -667,10 +624,7 @@ impl<'a> Source<'a> {
         let range = self.lines[line].clone();
         let prefix_end = self.prefix_end(line);
         let rest = &self.text[prefix_end..range.end];
-        let ws = rest
-            .bytes()
-            .take_while(|b| *b == b' ' || *b == b'\t')
-            .count();
+        let ws = rest.bytes().take_while(|b| *b == b' ' || *b == b'\t').count();
         let lead = columns(&rest[..ws]);
         let blank = ws == rest.len();
         let risky = !rest[ws..].starts_with(|c: char| c.is_alphabetic());
@@ -679,9 +633,8 @@ impl<'a> Source<'a> {
         } else {
             (None, prefix_end..range.end)
         };
-        let starts_item = marker(&rest[ws..]).is_some_and(|(_, _, width)| {
-            rest[ws + width..].is_empty() || rest[ws + width..].starts_with([' ', '\t'])
-        });
+        let starts_item = marker(&rest[ws..])
+            .is_some_and(|(_, _, width)| rest[ws + width..].is_empty() || rest[ws + width..].starts_with([' ', '\t']));
         let after_text = line > 0 && {
             let above = self.prefix_end(line - 1);
             !self.text[above..self.lines[line - 1].end].trim().is_empty()
@@ -703,11 +656,7 @@ impl<'a> Source<'a> {
     fn finish(self, writer: Writer<'_>, tree: Vec<Part>, selection: Range<usize>) -> Plan {
         let old = &self.text[self.region.clone()];
         let new = writer.out;
-        let mut prefix = old
-            .bytes()
-            .zip(new.bytes())
-            .take_while(|(a, b)| a == b)
-            .count();
+        let mut prefix = old.bytes().zip(new.bytes()).take_while(|(a, b)| a == b).count();
         while !old.is_char_boundary(prefix) {
             prefix -= 1;
         }
@@ -719,8 +668,7 @@ impl<'a> Source<'a> {
             .take(max)
             .take_while(|(a, b)| a == b)
             .count();
-        while !old.is_char_boundary(old.len() - suffix) || !new.is_char_boundary(new.len() - suffix)
-        {
+        while !old.is_char_boundary(old.len() - suffix) || !new.is_char_boundary(new.len() - suffix) {
             suffix -= 1;
         }
         let start = self.region.start;
@@ -775,10 +723,7 @@ fn find(parts: &[Part], id: usize) -> Option<Vec<(usize, usize)>> {
 }
 
 /// The parts that hold the last list of `path`.
-fn parts_mut<'p>(
-    mut parts: &'p mut Vec<Part>,
-    path: &[(usize, usize)],
-) -> Option<&'p mut Vec<Part>> {
+fn parts_mut<'p>(mut parts: &'p mut Vec<Part>, path: &[(usize, usize)]) -> Option<&'p mut Vec<Part>> {
     for &(p, i) in path {
         let Part::List(list) = parts.get_mut(p)? else {
             return None;
@@ -1041,11 +986,7 @@ impl<'a> Writer<'a> {
             keeps: Vec::new(),
             broken: false,
             last: None,
-            above: if after_text {
-                Above::Lazy
-            } else {
-                Above::Nothing
-            },
+            above: if after_text { Above::Lazy } else { Above::Nothing },
             depth: 0,
             top: 0,
         };
@@ -1113,11 +1054,7 @@ impl<'a> Writer<'a> {
         if item.empty && self.above == Above::Lazy {
             self.broken = true;
         }
-        self.above = if item.empty {
-            Above::Nothing
-        } else {
-            Above::Text
-        };
+        self.above = if item.empty { Above::Nothing } else { Above::Text };
         let new_line = self.begin(&item.prefix);
         let indent = col + rel;
         self.spaces(indent);
@@ -1182,9 +1119,7 @@ impl<'a> Writer<'a> {
     /// The offset in the written text of `offset` in the old text, from the start of the region.
     fn map(&self, offset: usize) -> usize {
         let keeps: Vec<&Placed> = self.keeps.iter().filter(|k| k.old_keep.is_some()).collect();
-        let at = keeps
-            .partition_point(|k| k.old_line <= offset)
-            .saturating_sub(1);
+        let at = keeps.partition_point(|k| k.old_line <= offset).saturating_sub(1);
         let Some(keep) = keeps.get(at) else {
             return 0;
         };
@@ -1238,11 +1173,7 @@ mod tests {
                                 Src::Old(range) => &text[range.clone()],
                                 Src::New(new) => new.as_str(),
                             };
-                            (
-                                list.mark.text(number),
-                                kept.trim().to_owned(),
-                                shape(text, &item.parts),
-                            )
+                            (list.mark.text(number), kept.trim().to_owned(), shape(text, &item.parts))
                         })
                         .collect(),
                 ),
@@ -1263,18 +1194,11 @@ mod tests {
             b.range.start <= lines.end && lines.start <= end
         };
         for _ in 0..quotes {
-            blocks = &blocks
-                .iter()
-                .find(|b| overlaps(b))
-                .ok_or("no quote")?
-                .children;
+            blocks = &blocks.iter().find(|b| overlaps(b)).ok_or("no quote")?.children;
         }
         let source = Source::lines(text, lines.clone(), quotes);
         let blocks: Vec<&Block> = blocks.iter().filter(|b| overlaps(b)).collect();
-        if let Some(block) = blocks
-            .iter()
-            .find(|b| !matches!(b.kind, BlockKind::List { .. }))
-        {
+        if let Some(block) = blocks.iter().find(|b| !matches!(b.kind, BlockKind::List { .. })) {
             return Err(format!("not a list: {:?}", block.kind));
         }
         source.tree(&blocks).ok_or_else(|| "no tree".to_owned())
@@ -1293,11 +1217,7 @@ mod tests {
             let empty = matches!(&head.kept, Src::Old(r) if text[r.clone()].trim().is_empty())
                 || matches!(&head.kept, Src::New(new) if new.trim().is_empty());
             let empty_head = empty && !(top && k == 0);
-            empty_head
-                || list
-                    .items
-                    .iter()
-                    .any(|item| has_empty_head(text, &item.parts, false))
+            empty_head || list.items.iter().any(|item| has_empty_head(text, &item.parts, false))
         })
     }
 
@@ -1319,11 +1239,7 @@ mod tests {
 
     /// A text of list lines: level, marker, text, a second line (none, indented, lazy), a blank
     /// line after, and the spaces before the marker.
-    fn list_text(
-        lines: &[(usize, usize, usize, usize, bool, usize)],
-        start: u64,
-        quote: bool,
-    ) -> String {
+    fn list_text(lines: &[(usize, usize, usize, usize, bool, usize)], start: u64, quote: bool) -> String {
         let mut out = Vec::new();
         let mut cols: Vec<usize> = Vec::new();
         let mut counts: Vec<u64> = Vec::new();

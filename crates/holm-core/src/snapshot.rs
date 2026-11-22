@@ -24,8 +24,7 @@ pub struct Snapshot {
 }
 
 /// The paths come from file names on disk, so the hasher has a random seed.
-type Map<K, V> =
-    imbl::GenericHashMap<K, V, foldhash::fast::RandomState, imbl::shared_ptr::DefaultSharedPtr>;
+type Map<K, V> = imbl::GenericHashMap<K, V, foldhash::fast::RandomState, imbl::shared_ptr::DefaultSharedPtr>;
 
 /// What a delete of a node removes, from [`Snapshot::removal`].
 #[derive(Debug)]
@@ -76,10 +75,7 @@ impl Snapshot {
     }
 
     /// The notes of `set`, in no fixed order.
-    pub fn matching<'s, 'a>(
-        &'s self,
-        set: NoteSet<'a>,
-    ) -> impl Iterator<Item = &'s NoteInfo> + use<'s, 'a> {
+    pub fn matching<'s, 'a>(&'s self, set: NoteSet<'a>) -> impl Iterator<Item = &'s NoteInfo> + use<'s, 'a> {
         self.notes
             .values()
             .filter(move |entry| set.holds(&entry.info))
@@ -139,9 +135,7 @@ impl Snapshot {
     ///
     /// A note that the snapshot does not know has no links.
     pub fn links(&self, path: &NotePath) -> &[Link] {
-        self.notes
-            .get(path)
-            .map_or(&[], |entry| entry.links.as_slice())
+        self.notes.get(path).map_or(&[], |entry| entry.links.as_slice())
     }
 
     /// The other notes that link to the note at `path`, by its id or by its file path. The
@@ -199,9 +193,7 @@ impl Snapshot {
 
     /// The note at `path` and its links, or `None` when no note is there.
     pub(crate) fn note_and_links(&self, path: &NotePath) -> Option<(&NoteInfo, &[Link])> {
-        self.notes
-            .get(path)
-            .map(|entry| (&entry.info, entry.links.as_slice()))
+        self.notes.get(path).map(|entry| (&entry.info, entry.links.as_slice()))
     }
 
     /// The note at `path`, or `None` when no note is there.
@@ -217,15 +209,8 @@ impl Snapshot {
 
     /// The paths of `paths` that the snapshot has a note at, in `order`. Pinned notes are on
     /// top. The others are left out.
-    pub(crate) fn sorted(
-        &self,
-        paths: impl IntoIterator<Item = NotePath>,
-        order: Order,
-    ) -> Vec<NotePath> {
-        let mut notes: Vec<&NoteInfo> = paths
-            .into_iter()
-            .filter_map(|path| self.note(&path))
-            .collect();
+    pub(crate) fn sorted(&self, paths: impl IntoIterator<Item = NotePath>, order: Order) -> Vec<NotePath> {
+        let mut notes: Vec<&NoteInfo> = paths.into_iter().filter_map(|path| self.note(&path)).collect();
         sort(&mut notes, order);
         notes.into_iter().map(|note| note.path.clone()).collect()
     }
@@ -261,27 +246,18 @@ impl Snapshot {
 
     /// Takes out the notes at `removed`, then puts in `put`. So a note can move to a path and
     /// keep its id.
-    pub(crate) fn swap(
-        &mut self,
-        removed: Vec<NotePath>,
-        put: impl IntoIterator<Item = (NoteInfo, Vec<Link>)>,
-    ) {
+    pub(crate) fn swap(&mut self, removed: Vec<NotePath>, put: impl IntoIterator<Item = (NoteInfo, Vec<Link>)>) {
         for path in removed {
             self.remove(&path);
         }
         for (info, links) in put {
             let entry = NoteData { info, links };
-            if self
-                .notes
-                .get(&entry.info.path)
-                .is_some_and(|old| **old == entry)
-            {
+            if self.notes.get(&entry.info.path).is_some_and(|old| **old == entry) {
                 continue;
             }
             self.remove(&entry.info.path);
             if let Some(id) = &entry.info.id {
-                self.ids
-                    .insert(id.as_str().to_owned(), entry.info.path.clone());
+                self.ids.insert(id.as_str().to_owned(), entry.info.path.clone());
             }
             self.notes.insert(entry.info.path.clone(), Arc::new(entry));
         }
@@ -342,9 +318,7 @@ fn last_change(a: &NoteInfo, b: &NoteInfo) -> Ordering {
 
 /// The newest change first. The path breaks a tie.
 fn newest(a: &NoteInfo, b: &NoteInfo) -> Ordering {
-    b.modified
-        .cmp(&a.modified)
-        .then_with(|| a.path.cmp(&b.path))
+    b.modified.cmp(&a.modified).then_with(|| a.path.cmp(&b.path))
 }
 
 fn title_key(note: &NoteInfo) -> (bool, String) {

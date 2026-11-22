@@ -10,10 +10,9 @@ use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, AppContext as _, Bounds, ClickEvent, Context, CursorStyle, Div, ElementId, Entity,
-    EventEmitter, FocusHandle, InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent,
-    ParentElement as _, Pixels, Render, Role, ScrollStrategy, SharedString, Stateful,
-    StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _,
+    App, AppContext as _, Bounds, ClickEvent, Context, CursorStyle, Div, ElementId, Entity, EventEmitter, FocusHandle,
+    InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent, ParentElement as _, Pixels, Render, Role,
+    ScrollStrategy, SharedString, Stateful, StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _,
     UniformListScrollHandle, Window, div, phi, px, transparent_black, uniform_list,
 };
 use holm_core::NotePath;
@@ -101,13 +100,8 @@ impl PickRow {
             .text_sm()
             .rounded(theme.radius)
             .cursor_default()
-            .when(current, |row| {
-                row.bg(theme.accent).text_color(theme.accent_foreground)
-            })
-            .children(
-                self.icon
-                    .map(|icon| Icon::view(icon, theme.muted_foreground)),
-            )
+            .when(current, |row| row.bg(theme.accent).text_color(theme.accent_foreground))
+            .children(self.icon.map(|icon| Icon::view(icon, theme.muted_foreground)))
             .child(div().min_w(px(48.)).truncate().child(self.label.clone()))
             .children(self.detail.clone().map(|detail| {
                 div()
@@ -189,8 +183,7 @@ impl PickList {
 
     /// Puts `query` in the field. It sends no [`PickEvent::Query`].
     pub(crate) fn set_query(&self, query: String, window: &mut Window, cx: &mut Context<Self>) {
-        self.field
-            .update(cx, |field, cx| field.set_value(query, window, cx));
+        self.field.update(cx, |field, cx| field.set_value(query, window, cx));
     }
 
     /// Shows `rows`, with the cursor on the first one.
@@ -292,28 +285,19 @@ impl Render for PickList {
             .key_context(Place::Picker.key_context())
             .on_action(cx.listener(Self::run))
             .child(
-                div()
-                    .flex_none()
-                    .px_3()
-                    .border_b_1()
-                    .border_color(theme.border)
-                    .child(
-                        Input::new(&self.field)
-                            .prefix(Icon::view(Icon::Search, theme.muted_foreground))
-                            .appearance(false)
-                            .p_0(),
-                    ),
+                div().flex_none().px_3().border_b_1().border_color(theme.border).child(
+                    Input::new(&self.field)
+                        .prefix(Icon::view(Icon::Search, theme.muted_foreground))
+                        .appearance(false)
+                        .p_0(),
+                ),
             )
             .map(|this| {
                 if self.rows.is_empty() {
                     this.child(
-                        div().p_1().child(
-                            div()
-                                .px_3()
-                                .py_2()
-                                .text_color(theme.muted_foreground)
-                                .child(self.empty),
-                        ),
+                        div()
+                            .p_1()
+                            .child(div().px_3().py_2().text_color(theme.muted_foreground).child(self.empty)),
                     )
                 } else {
                     this.child(self.list(cx))
@@ -384,10 +368,7 @@ impl<T: 'static> Dropdown<T> {
                 // GPUI calls this during a draw. A notify there asks for no new frame.
                 cx.defer_in(window, close);
                 // The focus still names the blurred part when the frame no longer has it.
-                if window
-                    .focused(cx)
-                    .is_some_and(|focused| event.blurred == focused)
-                {
+                if window.focused(cx).is_some_and(|focused| event.blurred == focused) {
                     window.focus(&text, cx);
                 }
             }
@@ -458,13 +439,11 @@ impl<T: 'static> Dropdown<T> {
                     cx.stop_propagation();
                 }),
             )
-            .on_mouse_down_out(
-                cx.listener(move |owner, event: &MouseDownEvent, window, cx| {
-                    // The opener handles its own clicks.
-                    if !opener.get().contains(&event.position) {
-                        close(owner, window, cx);
-                    }
-                }),
-            )
+            .on_mouse_down_out(cx.listener(move |owner, event: &MouseDownEvent, window, cx| {
+                // The opener handles its own clicks.
+                if !opener.get().contains(&event.position) {
+                    close(owner, window, cx);
+                }
+            }))
     }
 }

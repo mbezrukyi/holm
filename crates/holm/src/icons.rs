@@ -35,16 +35,10 @@ impl Icon {
         match self {
             Self::All => ("icons/all.svg", include_bytes!("../icons/all.svg")),
             Self::Folder => ("icons/folder.svg", include_bytes!("../icons/folder.svg")),
-            Self::FolderOpen => (
-                "icons/folder-open.svg",
-                include_bytes!("../icons/folder-open.svg"),
-            ),
+            Self::FolderOpen => ("icons/folder-open.svg", include_bytes!("../icons/folder-open.svg")),
             Self::Tag => ("icons/tag.svg", include_bytes!("../icons/tag.svg")),
             Self::Tags => ("icons/tags.svg", include_bytes!("../icons/tags.svg")),
-            Self::TagsOpen => (
-                "icons/tags-open.svg",
-                include_bytes!("../icons/tags-open.svg"),
-            ),
+            Self::TagsOpen => ("icons/tags-open.svg", include_bytes!("../icons/tags-open.svg")),
             Self::Search => ("icons/search.svg", include_bytes!("../icons/search.svg")),
             Self::Menu => ("icons/menu.svg", include_bytes!("../icons/menu.svg")),
         }
@@ -89,10 +83,7 @@ mod tests {
     fn every_icon_loads_by_its_path() {
         for icon in Icon::EVERY {
             let file = Icons.load(icon.file().0).ok().flatten();
-            assert!(
-                file.is_some_and(|bytes| bytes.starts_with(b"<svg")),
-                "{icon:?}"
-            );
+            assert!(file.is_some_and(|bytes| bytes.starts_with(b"<svg")), "{icon:?}");
         }
         assert_eq!(Icons.list("icons/").unwrap().len(), Icon::EVERY.len());
     }

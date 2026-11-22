@@ -19,10 +19,7 @@ fn selected(editor: &Entity<Editor>, cx: &VisualTestContext) -> String {
 
 /// A note of 100 lines, `item 000` to `item 099`.
 fn items() -> String {
-    (0..100)
-        .map(|n| format!("item {n:03}"))
-        .collect::<Vec<_>>()
-        .join("\n")
+    (0..100).map(|n| format!("item {n:03}")).collect::<Vec<_>>().join("\n")
 }
 
 /// The view of the scroll tests: ten lines high.

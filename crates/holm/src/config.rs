@@ -135,9 +135,7 @@ impl Config {
     pub(crate) fn load(path: PathBuf) -> Self {
         let (document, health) = match fs::read_to_string(&path) {
             Ok(text) => parse(&path, &text),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                (DocumentMut::new(), Health::Writable)
-            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => (DocumentMut::new(), Health::Writable),
             Err(error) => {
                 tracing::warn!(path = %path.display(), %error, "cannot read the config file");
                 (DocumentMut::new(), Health::Broken)
@@ -229,10 +227,7 @@ fn parse(path: &Path, text: &str) -> (DocumentMut, Health) {
         );
         return (document, Health::Newer);
     }
-    for step in MIGRATIONS
-        .iter()
-        .skip(usize::try_from(version).unwrap_or(0))
-    {
+    for step in MIGRATIONS.iter().skip(usize::try_from(version).unwrap_or(0)) {
         step(&mut document);
     }
     set(&mut document, "version", Value::from(VERSION));
@@ -349,11 +344,7 @@ fn read_text_width(table: &dyn toml_edit::TableLike, width: &mut TextWidthSettin
             }
             "chars" => {
                 let mut read = *width;
-                if get(key, item, |item| {
-                    read.set_chars(item.as_integer()?).then_some(())
-                })
-                .is_some()
-                {
+                if get(key, item, |item| read.set_chars(item.as_integer()?).then_some(())).is_some() {
                     *width = read;
                 }
             }
@@ -366,9 +357,7 @@ fn read_sidebar(table: &dyn toml_edit::TableLike, sidebar: &mut SidebarSettings)
     for (key, value) in table.iter() {
         match key {
             "width" => {
-                if let Some(width) =
-                    get(key, value, |value| u16::try_from(value.as_integer()?).ok())
-                {
+                if let Some(width) = get(key, value, |value| u16::try_from(value.as_integer()?).ok()) {
                     sidebar.width = width;
                 }
             }
@@ -400,9 +389,7 @@ fn read_sidebar(table: &dyn toml_edit::TableLike, sidebar: &mut SidebarSettings)
 fn item_from(text: &str) -> Option<SidebarItem> {
     match text.split_once(':') {
         None if text == "all" => Some(SidebarItem::All),
-        Some(("folder", path)) if !path.is_empty() => {
-            FolderPath::new(path).map(SidebarItem::Folder)
-        }
+        Some(("folder", path)) if !path.is_empty() => FolderPath::new(path).map(SidebarItem::Folder),
         Some(("tag", name)) => TagName::new(name).map(SidebarItem::Tag),
         _ => None,
     }
@@ -450,26 +437,14 @@ fn write(document: &mut DocumentMut, settings: &Settings) {
         AppearanceSetting::Dark => "dark",
     };
     set(document, "theme", Value::from(theme));
-    set(
-        document,
-        "scale",
-        Value::from(i64::from(settings.scale.percent())),
-    );
+    set(document, "scale", Value::from(i64::from(settings.scale.percent())));
     let order = match settings.note_order {
         Order::LastChange => "last_change",
         Order::Title => "title",
     };
     set(document, "note_order", Value::from(order));
-    set(
-        document,
-        "ask_before_delete",
-        Value::from(settings.ask_before_delete),
-    );
-    let colors: Array = settings
-        .custom_colors
-        .iter()
-        .map(ToString::to_string)
-        .collect();
+    set(document, "ask_before_delete", Value::from(settings.ask_before_delete));
+    let colors: Array = settings.custom_colors.iter().map(ToString::to_string).collect();
     set(document, "custom_colors", Value::from(colors));
     match settings
         .last_note
@@ -485,10 +460,7 @@ fn write(document: &mut DocumentMut, settings: &Settings) {
     if !document.get("writing_help").is_some_and(Item::is_table) {
         document.insert("writing_help", Item::Table(Table::new()));
     }
-    if let Some(table) = document
-        .get_mut("writing_help")
-        .and_then(Item::as_table_mut)
-    {
+    if let Some(table) = document.get_mut("writing_help").and_then(Item::as_table_mut) {
         let help = settings.writing_help;
         set(table, "format_keys", Value::from(help.format_keys));
         set(table, "continue_lists", Value::from(help.continue_lists));
@@ -602,9 +574,8 @@ mod tests {
 
     #[test]
     fn unknown_keys_stay_in_the_file() {
-        let (_dir, mut config) = load(
-            "version = 1\nfuture = \"yes\"\n\n[writing_help]\nsmart_quotes = true\n\n[plugins]\nx = 1\n",
-        );
+        let (_dir, mut config) =
+            load("version = 1\nfuture = \"yes\"\n\n[writing_help]\nsmart_quotes = true\n\n[plugins]\nx = 1\n");
 
         let mut settings = config.settings().clone();
         settings.theme = AppearanceSetting::Light;
@@ -624,8 +595,7 @@ mod tests {
 
     #[test]
     fn the_sidebar_list_and_its_item_come_back() {
-        let (_dir, config) =
-            load("version = 1\n[sidebar]\nview = \"list\"\nitem = \"folder:work\"\n");
+        let (_dir, config) = load("version = 1\n[sidebar]\nview = \"list\"\nitem = \"folder:work\"\n");
         assert_eq!(
             config.settings().sidebar.view,
             SavedSidebarView {
@@ -676,18 +646,14 @@ mod tests {
 
     #[test]
     fn the_text_width_keeps_its_mode_and_width_apart() {
-        let (_dir, mut config) =
-            load("version = 1\n[text_width]\nmode = \"limited\"\nchars = 120\n");
+        let (_dir, mut config) = load("version = 1\n[text_width]\nmode = \"limited\"\nchars = 120\n");
         assert_eq!(config.settings().text_width, limited_width(120));
 
         let mut settings = config.settings().clone();
         settings.text_width.limited = false;
         config.save(settings);
         let text = file(&config);
-        assert!(
-            text.contains("[text_width]\nmode = \"full\"\nchars = 120\n"),
-            "{text}"
-        );
+        assert!(text.contains("[text_width]\nmode = \"full\"\nchars = 120\n"), "{text}");
         let width = Config::load(config.path.clone()).settings().text_width;
         assert!(!width.limited);
         assert_eq!(width.chars(), 120);
@@ -702,9 +668,7 @@ mod tests {
             "chars = \"wide\"",
             "chars = 99.5",
         ] {
-            let (_dir, config) = load(&format!(
-                "version = 1\n[text_width]\nmode = \"limited\"\n{bad}\n"
-            ));
+            let (_dir, config) = load(&format!("version = 1\n[text_width]\nmode = \"limited\"\n{bad}\n"));
             assert_eq!(config.settings().text_width, limited_width(80), "{bad}");
         }
         let (_dir, config) = load("version = 1\n[text_width]\nmode = \"wide\"\n");

@@ -1,8 +1,8 @@
 //! The color window: it sets the text color or the highlight color of the selection.
 
 use gpui_kit::{
-    AnyElement, Hsla, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point,
-    Styled, anchored, deferred, div, px, rems,
+    AnyElement, Hsla, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point, Styled, anchored,
+    deferred, div, px, rems,
 };
 use holm_markdown::Color;
 
@@ -93,8 +93,9 @@ impl ColorWindow {
         }
         if let Some(hex) = &self.hex {
             return match command {
-                Command::TakeHex => Color::from_hex(&format!("#{hex}"))
-                    .map_or(KeyResult::Stay, |color| KeyResult::Apply(Some(color))),
+                Command::TakeHex => {
+                    Color::from_hex(&format!("#{hex}")).map_or(KeyResult::Stay, |color| KeyResult::Apply(Some(color)))
+                }
                 _ => KeyResult::Stay,
             };
         }
@@ -134,8 +135,7 @@ impl ColorWindow {
             .iter()
             .enumerate()
             .map(|(ix, color)| swatch(theme, paint, Some(*color), ix + 1));
-        let custom =
-            (0..CUSTOM_COUNT).map(|ix| swatch(theme, paint, custom.get(ix).copied(), ix + 7));
+        let custom = (0..CUSTOM_COUNT).map(|ix| swatch(theme, paint, custom.get(ix).copied(), ix + 7));
         let remove = key_box(theme).text_color(theme.muted).child("0");
         let window = div()
             .flex()
@@ -153,26 +153,16 @@ impl ColorWindow {
             .children(custom)
             .child(remove)
             .child(self.hex_field(theme));
-        deferred(
-            anchored()
-                .position(at)
-                .snap_to_window_with_margin(px(8.))
-                .child(window),
-        )
-        .into_any_element()
+        deferred(anchored().position(at).snap_to_window_with_margin(px(8.)).child(window)).into_any_element()
     }
 
     /// The `+` key, or the hex field with a sample of its color when the value is whole.
     fn hex_field(&self, theme: &Theme) -> AnyElement {
         let Some(hex) = &self.hex else {
-            return key_box(theme)
-                .text_color(theme.muted)
-                .child("+")
-                .into_any_element();
+            return key_box(theme).text_color(theme.muted).child("+").into_any_element();
         };
         let caret = div().w(px(2.)).h(rems(1.)).bg(theme.cursor);
-        let sample = Color::from_hex(&format!("#{hex}"))
-            .map(|color| key_box(theme).bg(theme.note_color(color)));
+        let sample = Color::from_hex(&format!("#{hex}")).map(|color| key_box(theme).bg(theme.note_color(color)));
         div()
             .flex()
             .items_center()

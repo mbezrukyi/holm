@@ -110,18 +110,12 @@ fn block_text() -> impl Strategy<Value = String> {
         "  ",
     ]);
     let gap = prop::sample::select(vec!["\n", "\n\n", "\n \n"]);
-    prop::collection::vec((line, gap), 0..40).prop_map(|lines| {
-        lines
-            .into_iter()
-            .flat_map(|(line, gap)| [line, gap])
-            .collect()
-    })
+    prop::collection::vec((line, gap), 0..40)
+        .prop_map(|lines| lines.into_iter().flat_map(|(line, gap)| [line, gap]).collect())
 }
 
 /// A text and one edit in it: a range on char boundaries and the new text for it.
-fn text_and_edit(
-    text: impl Strategy<Value = String>,
-) -> impl Strategy<Value = (String, Range<usize>, String)> {
+fn text_and_edit(text: impl Strategy<Value = String>) -> impl Strategy<Value = (String, Range<usize>, String)> {
     (
         text,
         any::<prop::sample::Index>(),
@@ -129,9 +123,7 @@ fn text_and_edit(
         prop::collection::vec(piece(), 0..3).prop_map(|pieces| pieces.concat()),
     )
         .prop_map(|(text, a, b, new)| {
-            let bounds: Vec<usize> = (0..=text.len())
-                .filter(|&i| text.is_char_boundary(i))
-                .collect();
+            let bounds: Vec<usize> = (0..=text.len()).filter(|&i| text.is_char_boundary(i)).collect();
             let (a, b) = (*a.get(&bounds), *b.get(&bounds));
             (text, a.min(b)..a.max(b), new)
         })

@@ -17,10 +17,9 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme as _, Selectable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
-    InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement, Pixels, Render, Role,
-    SharedString, StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _,
-    Window, div, px, rems, transparent_black,
+    App, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement as _, IntoElement,
+    KeyDownEvent, ParentElement, Pixels, Render, Role, SharedString, StatefulInteractiveElement as _, Styled,
+    Subscription, TestSupportExt as _, Window, div, px, rems, transparent_black,
 };
 use holm_core::model::Order;
 use holm_editor::WritingHelp;
@@ -220,8 +219,7 @@ impl SettingsDialog {
     }
 
     fn change(&self, change: impl FnOnce(&mut Settings), cx: &mut App) {
-        self.config
-            .update(cx, |config, cx| config.change(change, cx));
+        self.config.update(cx, |config, cx| config.change(change, cx));
     }
 
     /// Opens the folder picker. The picked folder goes to the settings, also after the dialog
@@ -319,13 +317,7 @@ impl SettingsDialog {
         }
     }
 
-    fn control(
-        &self,
-        row: Row,
-        settings: &Settings,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    fn control(&self, row: Row, settings: &Settings, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         match row {
             Row::Folder => {
                 let folder = settings
@@ -367,12 +359,7 @@ impl SettingsDialog {
                 let editing = self.row() == Row::TextWidth;
                 let box_width = chars_box_width(window);
                 let theme = cx.theme();
-                let (muted, border, caret, radius) = (
-                    theme.muted_foreground,
-                    theme.border,
-                    theme.caret,
-                    theme.radius,
-                );
+                let (muted, border, caret, radius) = (theme.muted_foreground, theme.border, theme.caret, theme.radius);
                 // A plain frame and no focus ring: the dialog keeps the focus. Its width fits 3
                 // digits, so the options before it stay in place while the user types.
                 let width = h_flex()
@@ -391,9 +378,7 @@ impl SettingsDialog {
                     .rounded(radius)
                     .text_sm()
                     .child(text_field::label(self.chars.text.clone()))
-                    .when(editing, |field| {
-                        field.child(div().w(px(1.)).h(px(14.)).bg(caret))
-                    });
+                    .when(editing, |field| field.child(div().w(px(1.)).h(px(14.)).bg(caret)));
                 h_flex()
                     .flex_none()
                     .h(CONTROL_HEIGHT)
@@ -454,10 +439,7 @@ fn format_keys() -> Vec<String> {
         .filter_map(keys)
         .map(keys_text)
         .collect();
-    if let (Some(first), Some(last)) = (
-        keys(editor::Command::Heading(1)),
-        keys(editor::Command::Heading(6)),
-    ) {
+    if let (Some(first), Some(last)) = (keys(editor::Command::Heading(1)), keys(editor::Command::Heading(6))) {
         let last = keys_text(Keys::plain(last.key));
         chips.push(format!("{}–{last}", keys_text(first)));
     }
@@ -494,12 +476,7 @@ fn format_key_chips(cx: &App) -> impl IntoElement + use<> {
         .mt(px(3.))
         .gap(px(3.))
         .children(chips)
-        .child(
-            div()
-                .text_xs()
-                .text_color(theme.muted_foreground)
-                .child("…"),
-        )
+        .child(div().text_xs().text_color(theme.muted_foreground).child("…"))
 }
 
 /// The buttons of a row with options, in one frame. A click picks the option.
@@ -514,30 +491,15 @@ fn options<T: Copy + PartialEq + 'static>(
     set: fn(&mut Settings, T),
 ) -> impl IntoElement {
     let theme = cx.theme();
-    let (fill, on_fill, line, radius) = (
-        theme.primary,
-        theme.primary_foreground,
-        theme.border,
-        theme.radius,
-    );
+    let (fill, on_fill, line, radius) = (theme.primary, theme.primary_foreground, theme.border, theme.radius);
     let inner = radius - px(1.);
     let last = options.len() - 1;
     let chosen = options.iter().position(|(option, _)| *option == current);
-    let mut frame = h_flex()
-        .flex_none()
-        .border_1()
-        .border_color(line)
-        .rounded(radius);
+    let mut frame = h_flex().flex_none().border_1().border_color(line).rounded(radius);
     for (at, (option, label)) in options.iter().enumerate() {
         if at > 0 {
             let touches = chosen.is_some_and(|chosen| chosen == at || chosen + 1 == at);
-            frame =
-                frame.child(
-                    div()
-                        .w(px(1.))
-                        .h(BUTTON_HEIGHT)
-                        .bg(if touches { fill } else { line }),
-                );
+            frame = frame.child(div().w(px(1.)).h(BUTTON_HEIGHT).bg(if touches { fill } else { line }));
         }
         let selected = chosen == Some(at);
         let option = *option;

@@ -179,11 +179,7 @@ impl Draft {
 
     /// Drops the text of the note at `path` with no write.
     pub(super) fn drop_text(&mut self, path: &NotePath) {
-        if self
-            .open
-            .as_ref()
-            .is_some_and(|open| open.note.path() == path)
-        {
+        if self.open.as_ref().is_some_and(|open| open.note.path() == path) {
             self.open = None;
         }
         self.left.retain(|text| text.note.path() != path);
@@ -193,11 +189,7 @@ impl Draft {
     /// Takes out the text of the note at `path` for a read of its file, and gives the id of the
     /// text. Until [`Self::read_ended`], the text gives no write and is not unsaved.
     pub(super) fn drop_for_read(&mut self, path: &NotePath) -> Option<u64> {
-        let text = if self
-            .open
-            .as_ref()
-            .is_some_and(|open| open.note.path() == path)
-        {
+        let text = if self.open.as_ref().is_some_and(|open| open.note.path() == path) {
             self.open.take()
         } else {
             let at = self.left.iter().position(|text| text.note.path() == path)?;
@@ -287,12 +279,7 @@ impl Draft {
     /// Takes the end of the write of `version` of the text `id`, with the reason of its
     /// `failure`. The text goes only when this write saved it and no newer body came. A saved
     /// left text tells the user only when no other text waits.
-    pub(super) fn written(
-        &mut self,
-        id: u64,
-        version: u64,
-        failure: Option<&'static str>,
-    ) -> Written {
+    pub(super) fn written(&mut self, id: u64, version: u64, failure: Option<&'static str>) -> Written {
         let first = !self.failed();
         let is_open = self.open.as_ref().is_some_and(|open| open.id == id);
         let text = if is_open {
@@ -328,11 +315,7 @@ impl Draft {
     /// an outside change. The text stays, and the draft holds it until [`Self::release`].
     pub(super) fn refused(&mut self, id: u64, version: u64) -> Written {
         let is_open = self.open.as_ref().is_some_and(|open| open.id == id);
-        let text = self
-            .left
-            .iter_mut()
-            .chain(&mut self.open)
-            .find(|text| text.id == id);
+        let text = self.left.iter_mut().chain(&mut self.open).find(|text| text.id == id);
         let Some(text) = text else {
             return Written::Stale;
         };
@@ -340,11 +323,7 @@ impl Draft {
             text.writing = None;
         }
         text.held = true;
-        if is_open {
-            Written::Changed
-        } else {
-            Written::Stale
-        }
+        if is_open { Written::Changed } else { Written::Stale }
     }
 
     /// Follows `change` from `source`. `before` is the snapshot before it.
@@ -568,20 +547,9 @@ mod tests {
             from: note_path(from),
             to: note_path(to),
         };
-        draft.follow(
-            Source::Holm,
-            &moved("A.md", "work/A.md"),
-            &Snapshot::default(),
-        );
-        draft.follow(
-            Source::Holm,
-            &moved("B.md", "work/B.md"),
-            &Snapshot::default(),
-        );
-        assert_eq!(
-            draft.take(),
-            [save("work/A.md", "one"), save("work/B.md", "two")]
-        );
+        draft.follow(Source::Holm, &moved("A.md", "work/A.md"), &Snapshot::default());
+        draft.follow(Source::Holm, &moved("B.md", "work/B.md"), &Snapshot::default());
+        assert_eq!(draft.take(), [save("work/A.md", "one"), save("work/B.md", "two")]);
     }
 
     #[test]

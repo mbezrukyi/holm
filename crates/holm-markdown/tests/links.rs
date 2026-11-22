@@ -20,10 +20,7 @@ fn destinations() {
         (Target::File("a.png".into()), "a.png"),
         (Target::File("my file.pdf".into()), "<my file.pdf>"),
         (Target::File("a(1).png".into()), "<a(1).png>"),
-        (
-            Target::File("/home/me/a b.txt".into()),
-            "</home/me/a b.txt>",
-        ),
+        (Target::File("/home/me/a b.txt".into()), "</home/me/a b.txt>"),
         (Target::Heading("Bug list".into()), "<#Bug list>"),
         (
             Target::Note {
@@ -32,10 +29,7 @@ fn destinations() {
             },
             "holm:01JC3X",
         ),
-        (
-            Target::Web("https://a.org/?q=1&b=2".into()),
-            r"https://a.org/?q=1\&b=2",
-        ),
+        (Target::Web("https://a.org/?q=1&b=2".into()), r"https://a.org/?q=1\&b=2"),
     ];
     let dotted = [
         (Target::File("#top.md".into()), "./#top.md"),
@@ -58,8 +52,7 @@ fn piece() -> impl Strategy<Value = String> {
 
 fn any_target() -> impl Strategy<Value = Target> {
     prop_oneof![
-        ("[A-Z0-9]{1,8}", prop::option::of(piece()))
-            .prop_map(|(id, heading)| Target::Note { id, heading }),
+        ("[A-Z0-9]{1,8}", prop::option::of(piece())).prop_map(|(id, heading)| Target::Note { id, heading }),
         piece().prop_map(Target::Heading),
         piece().prop_map(Target::File),
         piece().prop_map(|rest| Target::Web(format!("https://{rest}"))),

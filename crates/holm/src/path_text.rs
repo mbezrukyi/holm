@@ -8,9 +8,9 @@ use std::fmt;
 
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::{
-    App, AvailableSpace, Bounds, Element, ElementId, Font, GlobalElementId, Hsla,
-    InspectorElementId, IntoElement, LayoutId, Pixels, ShapedLine, SharedString, Size, Style,
-    TextAlign, TextRun, Window, fill, point, px, relative, size,
+    App, AvailableSpace, Bounds, Element, ElementId, Font, GlobalElementId, Hsla, InspectorElementId, IntoElement,
+    LayoutId, Pixels, ShapedLine, SharedString, Size, Style, TextAlign, TextRun, Window, fill, point, px, relative,
+    size,
 };
 
 const CHIP_PAD_X: Pixels = px(5.);
@@ -127,12 +127,7 @@ fn piece_width(text: &str, chip: bool, measure: Measure<'_>) -> Pixels {
 }
 
 /// Lays out `parts` in rows. With no `width`, the text stays in one row.
-fn lay_out(
-    parts: &[Part],
-    mode: Mode,
-    width: Option<Pixels>,
-    measure: Measure<'_>,
-) -> Vec<WrapRow> {
+fn lay_out(parts: &[Part], mode: Mode, width: Option<Pixels>, measure: Measure<'_>) -> Vec<WrapRow> {
     let segs: Vec<Piece> = parts
         .iter()
         .map(|part| match part {
@@ -161,10 +156,7 @@ fn push(row: &mut WrapRow, piece: Piece, measure: Measure<'_>) {
         }
         last => {
             row.pieces.extend(last);
-            Piece {
-                x: row.width,
-                ..piece
-            }
+            Piece { x: row.width, ..piece }
         }
     };
     row.width = piece.x + piece_width(&piece.text, piece.chip, measure);
@@ -250,9 +242,7 @@ fn one_line(segs: Vec<Piece>, width: Pixels, measure: Measure<'_>) -> WrapRow {
             continue;
         }
         let room = width - row.width;
-        let text = cut(&seg.text, |text| {
-            piece_width(text, seg.chip, measure) <= room
-        });
+        let text = cut(&seg.text, |text| piece_width(text, seg.chip, measure) <= room);
         push(&mut row, Piece { text, ..seg }, measure);
         break;
     }
@@ -321,13 +311,7 @@ impl PathTextStyle {
             .shape_line(text.to_owned().into(), font_size, &[run], None)
     }
 
-    fn lay_out(
-        &self,
-        text: &PathText,
-        mode: Mode,
-        width: Option<Pixels>,
-        window: &Window,
-    ) -> Vec<WrapRow> {
+    fn lay_out(&self, text: &PathText, mode: Mode, width: Option<Pixels>, window: &Window) -> Vec<WrapRow> {
         let measure = |text: &str, chip: bool| self.shape(text, chip, window).width();
         lay_out(&text.parts, mode, width, &measure)
     }
@@ -411,13 +395,7 @@ impl Element for PathTextElement {
                 ShapedRow(
                     row.pieces
                         .into_iter()
-                        .map(|piece| {
-                            (
-                                piece.x,
-                                path_style.shape(&piece.text, piece.chip, window),
-                                piece.chip,
-                            )
-                        })
+                        .map(|piece| (piece.x, path_style.shape(&piece.text, piece.chip, window), piece.chip))
                         .collect(),
                 )
             })

@@ -14,9 +14,9 @@ use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::h_flex;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AppContext as _, Context, Entity, EventEmitter, FocusHandle, InteractiveElement as _,
-    IntoElement, MouseButton, ParentElement, Pixels, Render, Role, StatefulInteractiveElement as _,
-    Styled, Subscription, TestSupportExt as _, Window, div, px,
+    AppContext as _, Context, Entity, EventEmitter, FocusHandle, InteractiveElement as _, IntoElement, MouseButton,
+    ParentElement, Pixels, Render, Role, StatefulInteractiveElement as _, Styled, Subscription, TestSupportExt as _,
+    Window, div, px,
 };
 
 use holm_core::NotePath;
@@ -135,11 +135,7 @@ impl<T: Clone + 'static> Render for TitleField<T> {
                 .whitespace_nowrap()
                 .text_ellipsis_start()
                 .text_color(theme.muted_foreground)
-                .child(format!(
-                    "{}{}",
-                    folders.join(text::PATH_GAP),
-                    text::PATH_GAP
-                ))
+                .child(format!("{}{}", folders.join(text::PATH_GAP), text::PATH_GAP))
         });
         let end = match &self.field {
             Some((field, _)) => div()

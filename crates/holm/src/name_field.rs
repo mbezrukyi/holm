@@ -18,8 +18,8 @@
 use std::rc::Rc;
 
 use gpui_kit::{
-    App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable as _, IntoElement,
-    Render, SharedString, Subscription, Window,
+    App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable as _, IntoElement, Render,
+    SharedString, Subscription, Window,
 };
 
 use crate::core_door::Then;
@@ -92,10 +92,8 @@ impl<T: Clone + 'static> NameField<T> {
         cx: &mut Context<Self>,
     ) -> Self {
         let text = start.as_deref().unwrap_or_default();
-        let field = cx.new(|cx| {
-            TextField::new(wording.id, wording.label, text, window, cx)
-                .placeholder(wording.placeholder)
-        });
+        let field =
+            cx.new(|cx| TextField::new(wording.id, wording.label, text, window, cx).placeholder(wording.placeholder));
         let subscription = cx.subscribe_in(&field, window, |this, _, event, window, cx| {
             this.field_event(*event, window, cx);
         });
@@ -146,8 +144,7 @@ impl<T: Clone + 'static> NameField<T> {
         self.set_writing(true, cx);
         let ended = window_step(window, cx, Self::ended);
         // A job may end at once, and the field can't take its end in its own update.
-        let done: Then<Result<T, AppError>> =
-            Box::new(move |result, cx| cx.defer(move |cx| ended(result, cx)));
+        let done: Then<Result<T, AppError>> = Box::new(move |result, cx| cx.defer(move |cx| ended(result, cx)));
         let write = self.write.clone();
         window.defer(cx, move |window, cx| write(name, done, window, cx));
     }
@@ -216,9 +213,7 @@ mod tests {
         })
     }
 
-    fn field(
-        cx: &mut TestAppContext,
-    ) -> (Entity<NameField<String>>, Events, &mut VisualTestContext) {
+    fn field(cx: &mut TestAppContext) -> (Entity<NameField<String>>, Events, &mut VisualTestContext) {
         cx.update(|cx| {
             gpui_kit::init(cx);
             crate::shortcuts::bind(cx);

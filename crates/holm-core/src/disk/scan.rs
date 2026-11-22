@@ -37,11 +37,7 @@ pub(super) fn files(store: &Store, facts: &Facts, nodes: &Nodes) -> Result<Settl
 }
 
 /// Settles notes that Holm just wrote, with their stamps and content hashes, against `facts`.
-pub(super) fn wrote(
-    store: &Store,
-    facts: &Facts,
-    notes: Vec<(Note, Stamp, ContentHash)>,
-) -> Settled {
+pub(super) fn wrote(store: &Store, facts: &Facts, notes: Vec<(Note, Stamp, ContentHash)>) -> Settled {
     let plan = reconcile::written(facts, notes.iter().map(|(note, ..)| note.info.path.clone()));
     let reads = notes
         .into_iter()

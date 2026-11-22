@@ -5,10 +5,10 @@ use std::rc::Rc;
 use std::collections::HashSet;
 
 use gpui_kit::{
-    AnyView, App, Bounds, ClipboardEntry, ClipboardItem, Context, CursorStyle, EntityInputHandler,
-    EventEmitter, ExternalPaths, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
-    Point, Render, ScrollEvent, Styled, TestSupportExt as _, UTF16Selection, Window, div, px,
+    AnyView, App, Bounds, ClipboardEntry, ClipboardItem, Context, CursorStyle, EntityInputHandler, EventEmitter,
+    ExternalPaths, FocusHandle, Focusable, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render, ScrollEvent, Styled, TestSupportExt as _,
+    UTF16Selection, Window, div, px,
 };
 use holm_markdown::{Color, Target};
 
@@ -339,12 +339,10 @@ impl Editor {
 
     /// The link that holds the cursor, or ends at it.
     pub fn link_at_cursor(&self) -> Option<CursorLink> {
-        self.model
-            .link_at(self.model.cursor())
-            .map(|link| CursorLink {
-                target: link.target.clone(),
-                embedded: link.embedded,
-            })
+        self.model.link_at(self.model.cursor()).map(|link| CursorLink {
+            target: link.target.clone(),
+            embedded: link.embedded,
+        })
     }
 
     /// Puts a link to `target` in place of the selection, as one undo step, and the cursor
@@ -353,18 +351,10 @@ impl Editor {
     /// of its own, and the image shows under it. A link to another file or a folder stays at
     /// the cursor, as a file chip, with a space on each side where the text needs one.
     /// It sends [`Changed`].
-    pub fn insert_link(
-        &mut self,
-        text: &str,
-        target: &Target,
-        embedded: bool,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn insert_link(&mut self, text: &str, target: &Target, embedded: bool, cx: &mut Context<Self>) {
         let form = match target {
             _ if !embedded => LinkForm::Text,
-            Target::File(path) if matches!(self.files.kind(path), FileKind::Image(_)) => {
-                LinkForm::Block
-            }
+            Target::File(path) if matches!(self.files.kind(path), FileKind::Image(_)) => LinkForm::Block,
             _ => LinkForm::Inline,
         };
         let changed = self.model.insert_link(text, target, form);
@@ -465,9 +455,7 @@ impl Editor {
 
     /// The last layout, when it still shows the current text.
     fn current_layout(&self) -> Option<&Layout> {
-        self.layout
-            .as_deref()
-            .filter(|layout| layout.version == self.version)
+        self.layout.as_deref().filter(|layout| layout.version == self.version)
     }
 
     fn edited(&mut self, cx: &mut Context<Self>) {
@@ -586,11 +574,7 @@ impl Editor {
             }
             Command::Indent | Command::Outdent => {
                 let outdent = command == Command::Outdent;
-                let indented = self
-                    .help
-                    .indent_lists
-                    .then(|| self.model.indent(outdent))
-                    .flatten();
+                let indented = self.help.indent_lists.then(|| self.model.indent(outdent)).flatten();
                 let changed = match indented {
                     Some(changed) => changed,
                     None if outdent => false,
@@ -801,10 +785,7 @@ impl Editor {
             .current_layout()
             .and_then(|layout| layout.vertical(cursor, caret.row_start(), goal_x, down))
         {
-            let goal_row = to.hidden.then_some(GoalRow {
-                first: down,
-                extend,
-            });
+            let goal_row = to.hidden.then_some(GoalRow { first: down, extend });
             let caret = Caret::at(to.offset)
                 .with_row_start(to.row_start)
                 .with_goal_x(f32::from(to.x))
@@ -829,8 +810,7 @@ impl Editor {
             line
         };
         let range = self.model.line_range(target);
-        self.model
-            .set_cursor((range.start + column).min(range.end), extend);
+        self.model.set_cursor((range.start + column).min(range.end), extend);
     }
 
     fn offset_at(&self, position: Point<Pixels>) -> Option<usize> {
@@ -848,9 +828,7 @@ impl Editor {
         window.focus(&self.focus, cx);
         self.find = None;
         self.color = None;
-        let task = self
-            .current_layout()
-            .and_then(|layout| layout.task_at(event.position));
+        let task = self.current_layout().and_then(|layout| layout.task_at(event.position));
         if let Some(range) = task {
             // The cursor stays, so the view does not move.
             if self.model.toggle_task(&range) {
@@ -945,12 +923,7 @@ impl Editor {
         if let Some(offset) = self.offset_at(window.mouse_position()) {
             self.model.set_cursor(offset, false);
         }
-        let files = paths
-            .paths()
-            .iter()
-            .cloned()
-            .map(PastedFile::Path)
-            .collect();
+        let files = paths.paths().iter().cloned().map(PastedFile::Path).collect();
         cx.emit(PasteFiles { files });
         cx.notify();
     }
@@ -1011,9 +984,7 @@ impl Render for Editor {
             .on_scroll(cx.listener(Self::scroll))
             .on_drop(cx.listener(Self::drop_files))
             .relative()
-            .child(EditorElement {
-                editor: cx.entity(),
-            })
+            .child(EditorElement { editor: cx.entity() })
             .children(self.find.as_ref().map(|find| find.bar(&self.theme)))
             .children(color)
     }
@@ -1045,11 +1016,7 @@ impl EntityInputHandler for Editor {
         })
     }
 
-    fn marked_text_range(
-        &self,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
-    ) -> Option<Range<usize>> {
+    fn marked_text_range(&self, _window: &mut Window, _cx: &mut Context<Self>) -> Option<Range<usize>> {
         None
     }
 
@@ -1074,9 +1041,7 @@ impl EntityInputHandler for Editor {
             return;
         }
         let range = range.map_or_else(|| self.model.selection(), |r| self.range_from_utf16(&r));
-        let changed = self
-            .model
-            .type_in(range, text, cx.background_executor().now());
+        let changed = self.model.type_in(range, text, cx.background_executor().now());
         self.finish(changed, cx);
     }
 
@@ -1111,22 +1076,13 @@ impl EntityInputHandler for Editor {
         Some(self.model.offset_to_utf16(self.offset_at(point)?))
     }
 
-    fn set_selected_text_range(
-        &mut self,
-        range_utf16: Range<usize>,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn set_selected_text_range(&mut self, range_utf16: Range<usize>, _window: &mut Window, cx: &mut Context<Self>) {
         let range = self.range_from_utf16(&range_utf16);
         self.model.select(range);
         cx.notify();
     }
 
-    fn text_length_utf16(
-        &mut self,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
-    ) -> Option<usize> {
+    fn text_length_utf16(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> Option<usize> {
         Some(self.model.offset_to_utf16(self.model.text().len()))
     }
 }

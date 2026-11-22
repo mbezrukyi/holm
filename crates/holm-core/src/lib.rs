@@ -111,10 +111,7 @@ impl Core {
     /// # Errors
     ///
     /// As in [`Core::open`].
-    pub fn open_with_feed(
-        notes_folder: impl AsRef<Path>,
-        index_dir: impl AsRef<Path>,
-    ) -> Result<(Self, Feed)> {
+    pub fn open_with_feed(notes_folder: impl AsRef<Path>, index_dir: impl AsRef<Path>) -> Result<(Self, Feed)> {
         let (core, ()) = Self::build(notes_folder.as_ref(), index_dir.as_ref(), |_| (None, ()))?;
         let feed = Feed {
             handler: core.handler(),
@@ -174,9 +171,8 @@ impl Core {
     ///
     /// As in [`Core::read`], when a linked note can't be read.
     pub fn broken_links(&self, path: &NotePath) -> Result<Vec<LinkTarget>> {
-        self.inner.with(|locked| {
-            links::broken(locked.facts.snapshot(), path, |note| locked.disk.read(note))
-        })
+        self.inner
+            .with(|locked| links::broken(locked.facts.snapshot(), path, |note| locked.disk.read(note)))
     }
 
     /// The path for a link from the note at `note` to `file`, with no copy. A file inside the
@@ -187,8 +183,7 @@ impl Core {
     ///
     /// [`Error::BadPath`] when `file` is not absolute.
     pub fn file_link(&self, note: &NotePath, file: impl AsRef<Path>) -> Result<PathBuf> {
-        self.inner
-            .with(|locked| locked.disk.file_link(note, file.as_ref()))
+        self.inner.with(|locked| locked.disk.file_link(note, file.as_ref()))
     }
 
     /// Reads one note.
@@ -280,8 +275,7 @@ impl Core {
     ///   capital letters. Nothing moves.
     /// - Else as in [`Core::rename_note`].
     pub fn move_note(&self, path: &NotePath, folder: &FolderPath) -> Result<NoteInfo> {
-        self.inner
-            .write(|write| write.move_note(path, path.in_folder(folder)))
+        self.inner.write(|write| write.move_note(path, path.in_folder(folder)))
     }
 
     /// Creates the folder `name` in `parent`, and returns its path.
@@ -444,8 +438,7 @@ impl Core {
     ///
     /// The first error of a note, as in [`Core::add_tag`].
     pub fn rename_tag(&self, from: &TagName, to: &TagName) -> Result<usize> {
-        self.inner
-            .write(|write| write.edit_tag(&TagEdit::Rename { from, to }))
+        self.inner.write(|write| write.edit_tag(&TagEdit::Rename { from, to }))
     }
 
     /// How many notes [`Core::delete_tag`] changes.
@@ -461,8 +454,7 @@ impl Core {
     ///
     /// The first error of a note, as in [`Core::add_tag`].
     pub fn delete_tag(&self, tag: &TagName) -> Result<usize> {
-        self.inner
-            .write(|write| write.edit_tag(&TagEdit::Delete(tag)))
+        self.inner.write(|write| write.edit_tag(&TagEdit::Delete(tag)))
     }
 
     /// Copies the file into `attachments/` at the root of the notes folder,
@@ -478,8 +470,7 @@ impl Core {
     /// - [`Error::Read`] when `file` can't be read or is not a file.
     /// - [`Error::Write`] when the copy can't be written.
     pub fn attach_file(&self, note: &NotePath, file: impl AsRef<Path>) -> Result<PathBuf> {
-        self.inner
-            .write(|write| write.attach_file(note, file.as_ref()))
+        self.inner.write(|write| write.attach_file(note, file.as_ref()))
     }
 
     /// Saves a pasted image into `attachments/`, and returns its path from the folder
@@ -491,13 +482,11 @@ impl Core {
     ///
     /// [`Error::Write`] when the image can't be written.
     pub fn paste_image(&self, note: &NotePath, extension: &str, bytes: &[u8]) -> Result<PathBuf> {
-        self.inner
-            .write(|write| write.paste_image(note, extension, bytes))
+        self.inner.write(|write| write.paste_image(note, extension, bytes))
     }
 
     fn tag_edit_count(&self, edit: &TagEdit<'_>) -> usize {
-        self.inner
-            .with(|locked| edit.count(locked.facts.snapshot()))
+        self.inner.with(|locked| edit.count(locked.facts.snapshot()))
     }
 
     /// Opens the disk. `before_read` runs on the notes folder before the first read of a file,
@@ -513,9 +502,7 @@ impl Core {
             listeners: Listeners::default(),
             _watcher: watcher,
         };
-        let core = Self {
-            inner: Arc::new(inner),
-        };
+        let core = Self { inner: Arc::new(inner) };
         Ok((core, value))
     }
 

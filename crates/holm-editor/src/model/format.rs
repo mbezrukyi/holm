@@ -111,8 +111,8 @@ impl Model {
     /// Returns whether the text changed.
     pub(crate) fn toggle_tasks(&mut self) -> bool {
         let selection = self.selection();
-        let lines = self.line_range(self.line_of(selection.start)).start
-            ..self.line_range(self.line_of(selection.end)).end;
+        let lines =
+            self.line_range(self.line_of(selection.start)).start..self.line_range(self.line_of(selection.end)).end;
         let mut boxes = Vec::new();
         collect_tasks(self.body.blocks(), &lines, &mut boxes);
         self.toggle_task_boxes(&boxes)
@@ -121,9 +121,7 @@ impl Model {
     fn toggle_task_boxes(&mut self, boxes: &[Range<usize>]) -> bool {
         let edits: Vec<Edit> = boxes
             .iter()
-            .filter(|range| {
-                range.len() == 3 && self.text.get(range.start..range.start + 1) == Some("[")
-            })
+            .filter(|range| range.len() == 3 && self.text.get(range.start..range.start + 1) == Some("["))
             .map(|range| {
                 let mark = &self.text[range.start + 1..range.start + 2];
                 let new = if mark == " " { "x" } else { " " };
@@ -170,10 +168,7 @@ mod tests {
 
     #[test]
     fn a_format_key_wraps_the_selection_as_one_undo_step() {
-        assert_eq!(
-            toggled("a word", 2..6, Format::Bold),
-            ("a **word**".into(), 4..8)
-        );
+        assert_eq!(toggled("a word", 2..6, Format::Bold), ("a **word**".into(), 4..8));
         let mut model = Model::new("a word");
         model.set_cursor(6, false);
         model.set_cursor(2, true);
@@ -268,10 +263,7 @@ mod tests {
     #[test]
     fn tab_makes_an_item_a_child_of_the_item_above() {
         assert_eq!(indented("- a\n- b", 6..6, false), Some("- a\n  - b".into()));
-        assert_eq!(
-            indented("10. a\n11. b", 8..8, false),
-            Some("10. a\n    1. b".into())
-        );
+        assert_eq!(indented("10. a\n11. b", 8..8, false), Some("10. a\n    1. b".into()));
         assert_eq!(
             indented("- a\n  - b\n- c", 12..12, false),
             Some("- a\n  - b\n  - c".into())
@@ -305,10 +297,7 @@ mod tests {
 
     #[test]
     fn enter_counts_the_list_again() {
-        assert_eq!(
-            enter("1. a\n2. b\n3. c", 9),
-            ("1. a\n2. b\n3. \n4. c".into(), 13)
-        );
+        assert_eq!(enter("1. a\n2. b\n3. c", 9), ("1. a\n2. b\n3. \n4. c".into(), 13));
     }
 
     #[test]

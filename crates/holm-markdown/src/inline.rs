@@ -218,9 +218,7 @@ impl Leaf {
         if self.lines.is_empty() {
             return source.clamp(self.range.start, self.range.end) - self.range.start;
         }
-        let i = self
-            .lines
-            .partition_point(|line| line.source.start <= source);
+        let i = self.lines.partition_point(|line| line.source.start <= source);
         let Some(i) = i.checked_sub(1) else {
             return 0;
         };
@@ -297,11 +295,7 @@ fn decode_entities(text: &str) -> String {
                         Some(hex) => u32::from_str_radix(hex, 16).ok()?,
                         None => number.parse().ok()?,
                     };
-                    Some(
-                        char::from_u32(code)
-                            .filter(|&c| c != '\0')
-                            .unwrap_or('\u{fffd}'),
-                    )
+                    Some(char::from_u32(code).filter(|&c| c != '\0').unwrap_or('\u{fffd}'))
                 }
             }?;
             Some((c, end + 1))

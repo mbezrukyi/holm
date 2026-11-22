@@ -83,16 +83,8 @@ pub(crate) fn gaps(font: &FontKey, letter: char, band: Band) -> Vec<Gap> {
 fn find(font: &FontKey, letter: char, band: Band) -> Option<Vec<Gap>> {
     let query = Query {
         families: &[Family::Name(&font.family)],
-        weight: if font.bold {
-            Weight::BOLD
-        } else {
-            Weight::NORMAL
-        },
-        style: if font.italic {
-            Style::Italic
-        } else {
-            Style::Normal
-        },
+        weight: if font.bold { Weight::BOLD } else { Weight::NORMAL },
+        style: if font.italic { Style::Italic } else { Style::Normal },
         ..Query::default()
     };
     let id = FONTS.query(&query)?;
@@ -194,12 +186,7 @@ impl OutlineBuilder for Ink {
         for step in 1..=STEPS {
             let t = f32::from(step) / f32::from(STEPS);
             let rest = 1. - t;
-            let weights = [
-                rest * rest * rest,
-                3. * rest * rest * t,
-                3. * rest * t * t,
-                t * t * t,
-            ];
+            let weights = [rest * rest * rest, 3. * rest * rest * t, 3. * rest * t * t, t * t * t];
             let point = |p: [f32; 4]| weights.iter().zip(p).map(|(w, p)| w * p).sum();
             self.piece((point([from.0, x1, x2, x]), point([from.1, y1, y2, y])));
         }

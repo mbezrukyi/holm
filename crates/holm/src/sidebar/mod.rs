@@ -22,11 +22,10 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, CursorStyle, Div, ElementId,
-    Entity, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement as _, IntoElement,
-    KeyContext, MouseButton, ParentElement, Pixels, Render, Role, ScrollStrategy, SharedString,
-    StatefulInteractiveElement as _, Styled, Subscription, Task, TestSupportExt as _,
-    UniformListScrollHandle, Window, div, px, uniform_list,
+    AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, CursorStyle, Div, ElementId, Entity, EventEmitter,
+    FocusHandle, Focusable, FontWeight, InteractiveElement as _, IntoElement, KeyContext, MouseButton, ParentElement,
+    Pixels, Render, Role, ScrollStrategy, SharedString, StatefulInteractiveElement as _, Styled, Subscription, Task,
+    TestSupportExt as _, UniformListScrollHandle, Window, div, px, uniform_list,
 };
 use holm_core::model::{Change, NoteInfo, Order};
 use holm_core::{FolderPath, NotePath, TagName};
@@ -79,8 +78,7 @@ pub(crate) enum SidebarEvent {
 
 /// Renames the tag `from` to a typed name, and ends with the result. It shows the answer of
 /// a fail.
-pub(crate) type TagRename =
-    Rc<dyn Fn(TagName, String, Then<Result<(), AppError>>, &mut Window, &mut App)>;
+pub(crate) type TagRename = Rc<dyn Fn(TagName, String, Then<Result<(), AppError>>, &mut Window, &mut App)>;
 
 /// A name field in the tree: for a folder or a tag after `F2`, or for a new folder.
 struct Naming {
@@ -288,9 +286,9 @@ impl Sidebar {
             return;
         }
         let (query, order) = (self.query.clone(), self.order(cx));
-        let search = self.core_door.update(cx, |core_door, cx| {
-            core_door.search(query.clone(), order, cx)
-        });
+        let search = self
+            .core_door
+            .update(cx, |core_door, cx| core_door.search(query.clone(), order, cx));
         self.finding = Some(cx.spawn(async move |sidebar, cx| {
             let found = search.await.map(NoteList::new);
             sidebar
@@ -321,8 +319,7 @@ impl Sidebar {
     /// Empties the search field, so the last sidebar view shows again. The list gets the focus.
     fn clear_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.query.clear();
-        self.search
-            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.search.update(cx, |input, cx| input.set_value("", window, cx));
         self.find(cx);
         window.focus(&self.focus, cx);
         self.scroll_to_selection(cx);
@@ -464,21 +461,16 @@ impl Sidebar {
     /// Starts the name field of a tag in the tree, with its full name, so a rename can also move
     /// the tag under another parent. `rename` writes the typed name. It does nothing while the
     /// job of a name field runs.
-    pub(crate) fn rename_tag(
-        &mut self,
-        tag: TagName,
-        rename: TagRename,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn rename_tag(&mut self, tag: TagName, rename: TagRename, window: &mut Window, cx: &mut Context<Self>) {
         let sidebar = cx.weak_entity();
         // The name field follows moves, so the job takes the tag it names at `Enter`.
-        let write: NameWrite<()> = Rc::new(move |name, done, window, cx| {
-            match sidebar.read_with(cx, |sidebar, _| sidebar.named()) {
-                Ok(Some(Named::Tag(from))) => rename(from, name, done, window, cx),
-                _ => done(Ok(()), cx),
-            }
-        });
+        let write: NameWrite<()> =
+            Rc::new(
+                move |name, done, window, cx| match sidebar.read_with(cx, |sidebar, _| sidebar.named()) {
+                    Ok(Some(Named::Tag(from))) => rename(from, name, done, window, cx),
+                    _ => done(Ok(()), cx),
+                },
+            );
         let text = tag.to_string();
         let item = Item::Tag(tag.clone());
         self.open_name_field(Named::Tag(tag), Some(&text), item, write, window, cx);
@@ -578,9 +570,7 @@ impl Sidebar {
         let sidebar = cx.weak_entity();
         let renamed = Done::result(move |renamed: Result<FolderPath, AppError>, cx: &mut App| {
             if renamed.is_ok() {
-                sidebar
-                    .update(cx, |_, cx| cx.emit(SidebarEvent::ViewChanged))
-                    .ok();
+                sidebar.update(cx, |_, cx| cx.emit(SidebarEvent::ViewChanged)).ok();
             }
             done(renamed.map(drop), cx);
         });
@@ -664,12 +654,7 @@ impl Sidebar {
     }
 
     /// A shortcut of the tree.
-    fn tree_command(
-        &mut self,
-        command: Command,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    fn tree_command(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let SidebarView::Tree(item) = &self.view else {
             return false;
         };
@@ -686,8 +671,7 @@ impl Sidebar {
             }
             Command::Switch => {
                 let row = self.tree.row_of(&item).map(|at| &self.tree.rows[at]);
-                let (open, has_children) =
-                    row.map_or((false, false), |row| (row.open, row.has_children));
+                let (open, has_children) = row.map_or((false, false), |row| (row.open, row.has_children));
                 if open {
                     self.open.remove(&item);
                 } else if has_children {
@@ -714,17 +698,11 @@ impl Sidebar {
     }
 
     /// A shortcut of the note list.
-    fn list_command(
-        &mut self,
-        command: Command,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    fn list_command(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) -> bool {
         match command {
             Command::Next | Command::Previous => {
                 let forward = command == Command::Next;
-                let next =
-                    list_cursor::step(self.selected_note(cx), self.list.len(), forward, |_| true);
+                let next = list_cursor::step(self.selected_note(cx), self.list.len(), forward, |_| true);
                 if let Some(path) = next.and_then(|next| self.list.path(next)) {
                     let path = path.to_owned();
                     cx.emit(SidebarEvent::Open(path));
@@ -789,9 +767,7 @@ impl Sidebar {
                             if self.search.focus_handle(cx).is_focused(window) {
                                 field.bg(theme.background).border_color(theme.border)
                             } else {
-                                field
-                                    .bg(theme.accent)
-                                    .border_color(gpui_kit::transparent_black())
+                                field.bg(theme.accent).border_color(gpui_kit::transparent_black())
                             }
                         }),
                 ),
@@ -821,9 +797,7 @@ impl Sidebar {
     }
 
     fn tree_rows(&mut self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let entries: Vec<Entry> = range
-            .filter_map(|at| self.tree.entries.get(at).copied())
-            .collect();
+        let entries: Vec<Entry> = range.filter_map(|at| self.tree.entries.get(at).copied()).collect();
         entries
             .into_iter()
             .map(|entry| match entry {
@@ -869,12 +843,7 @@ impl Sidebar {
         let editing = field.is_some();
         let label = match field {
             Some(naming) => field_label(&naming.field),
-            None => div()
-                .flex_1()
-                .min_w_0()
-                .truncate()
-                .child(name)
-                .into_any_element(),
+            None => div().flex_1().min_w_0().truncate().child(name).into_any_element(),
         };
         let item = row.item.clone();
         let has_children = row.has_children;
@@ -898,9 +867,7 @@ impl Sidebar {
             .role(Role::TreeItem)
             .aria_label(aria)
             .aria_selected(selected)
-            .when(row.has_children, |row_element| {
-                row_element.aria_expanded(row.open)
-            })
+            .when(row.has_children, |row_element| row_element.aria_expanded(row.open))
             .test_support()
             .when(selected, |row| row.bg(theme.selection))
             .child(toggle)
@@ -980,19 +947,11 @@ impl Sidebar {
                 let path = note.path.clone();
                 let title = h_flex()
                     .gap_1p5()
-                    .children(note.pinned.then(|| {
-                        div()
-                            .text_size(px(10.))
-                            .text_color(theme.primary)
-                            .child(text::PIN_MARK)
-                    }))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .child(note.title.clone()),
-                    );
+                    .children(
+                        note.pinned
+                            .then(|| div().text_size(px(10.)).text_color(theme.primary).child(text::PIN_MARK)),
+                    )
+                    .child(div().flex_1().min_w_0().truncate().child(note.title.clone()));
                 let meta = if note.preview.is_empty() {
                     when(note.modified)
                 } else {
@@ -1066,26 +1025,14 @@ fn row_frame(depth: usize, editing: bool, cx: &App) -> Div {
         .pl(px(12. + 16. * depth))
         .gap_2()
         .when(editing, |row| {
-            row.relative().child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .top_0()
-                    .bottom_0()
-                    .w(px(2.))
-                    .bg(theme.ring),
-            )
+            row.relative()
+                .child(div().absolute().left_0().top_0().bottom_0().w(px(2.)).bg(theme.ring))
         })
 }
 
 /// The name field in the place of the name of a tree row.
 fn field_label(field: &Entity<NameField<()>>) -> AnyElement {
-    div()
-        .flex_1()
-        .min_w_0()
-        .flex()
-        .child(field.clone())
-        .into_any_element()
+    div().flex_1().min_w_0().flex().child(field.clone()).into_any_element()
 }
 
 impl EventEmitter<SidebarEvent> for Sidebar {}

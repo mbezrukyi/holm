@@ -118,11 +118,7 @@ impl Write<'_> {
     }
 
     /// Changes the frontmatter of the note with `edit`, and keeps its modification time.
-    fn edit_fields(
-        &mut self,
-        path: &NotePath,
-        edit: impl FnOnce(&mut holm_markdown::NoteFile),
-    ) -> Result<Note> {
+    fn edit_fields(&mut self, path: &NotePath, edit: impl FnOnce(&mut holm_markdown::NoteFile)) -> Result<Note> {
         let (note, stamp, hash) = self.disk.store.edit_fields(path, edit)?;
         self.update(note, stamp, hash)
     }
@@ -138,10 +134,7 @@ impl Write<'_> {
         self.refresh(vec![Node::Note(from.clone()), Node::Note(to.clone())])?;
         self.next.mark_outside([&to], outside);
         let info = self.disk.store.read(&to)?.0.info;
-        self.touched.moved(Change::Moved {
-            from: from.clone(),
-            to,
-        });
+        self.touched.moved(Change::Moved { from: from.clone(), to });
         Ok(info)
     }
 
@@ -158,11 +151,7 @@ impl Write<'_> {
     }
 
     /// Moves the folder into `parent` with its name, and returns its new path.
-    pub(crate) fn move_folder(
-        &mut self,
-        folder: &FolderPath,
-        parent: &FolderPath,
-    ) -> Result<FolderPath> {
+    pub(crate) fn move_folder(&mut self, folder: &FolderPath, parent: &FolderPath) -> Result<FolderPath> {
         let Some((_, name)) = folder.split() else {
             return Err(Error::BadPath {
                 path: folder.as_ref().to_owned(),
@@ -172,12 +161,7 @@ impl Write<'_> {
     }
 
     /// Moves the folder into `parent` as `name`, and returns its new path.
-    fn move_folder_to(
-        &mut self,
-        folder: &FolderPath,
-        parent: &FolderPath,
-        name: &Name,
-    ) -> Result<FolderPath> {
+    fn move_folder_to(&mut self, folder: &FolderPath, parent: &FolderPath, name: &Name) -> Result<FolderPath> {
         let new = self.disk.store.move_folder(folder, parent, name)?;
         if new != *folder {
             self.touched.moved(Change::FolderMoved {
@@ -199,17 +183,12 @@ impl Write<'_> {
 
     /// Deletes the folder, with every note and file in it, and their attachment files.
     pub(crate) fn delete_folder(&mut self, folder: &FolderPath) -> Result<()> {
-        self.delete(&Node::Folder(folder.clone()), |store| {
-            store.delete_folder(folder)
-        })
+        self.delete(&Node::Folder(folder.clone()), |store| store.delete_folder(folder))
     }
 
     /// Runs `edit` on the tags of each note with its tag, and returns how many notes changed.
     pub(crate) fn edit_tag(&mut self, edit: &TagEdit<'_>) -> Result<usize> {
-        let paths = self
-            .next
-            .snapshot()
-            .paths(NoteSet::WithTag(edit.tag()), Order::Title);
+        let paths = self.next.snapshot().paths(NoteSet::WithTag(edit.tag()), Order::Title);
         let store = &self.disk.store;
         let rewritten = store.rewrite(&paths, |_, old| {
             let mut text = holm_markdown::NoteFile::parse(old);
@@ -253,12 +232,7 @@ impl Write<'_> {
     }
 
     /// Saves a pasted image into `attachments/`, and returns its path from the folder of `note`.
-    pub(crate) fn paste_image(
-        &mut self,
-        note: &NotePath,
-        extension: &str,
-        bytes: &[u8],
-    ) -> Result<PathBuf> {
+    pub(crate) fn paste_image(&mut self, note: &NotePath, extension: &str, bytes: &[u8]) -> Result<PathBuf> {
         self.disk.store.paste_image(note, extension, bytes)
     }
 

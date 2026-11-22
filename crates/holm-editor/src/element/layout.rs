@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use gpui_kit::{
-    Bounds, Font, FontStyle, FontWeight, Pixels, Point, ShapedLine, StrikethroughStyle, TextRun,
-    TextStyle, Window, point, px, size,
+    Bounds, Font, FontStyle, FontWeight, Pixels, Point, ShapedLine, StrikethroughStyle, TextRun, TextStyle, Window,
+    point, px, size,
 };
 use holm_markdown::{Alignment, CalloutKind};
 
@@ -215,15 +215,13 @@ impl Shaper<'_> {
             block_left + base * 0.75
         } else if let Some(prefix) = display.prefix.as_ref().filter(|_| display.raw) {
             // The marker hangs to the left, so the text stays where the preview shows it.
-            (block_left - self.width_of(&model.text()[prefix.clone()], font_size, window))
-                .max(quote_left)
+            (block_left - self.width_of(&model.text()[prefix.clone()], font_size, window)).max(quote_left)
         } else {
             block_left
         };
         let width = (self.width - left).max(px(1.));
 
-        let (content, text_height) =
-            self.content(model, &display, font_size, line_height, width, window);
+        let (content, text_height) = self.content(model, &display, font_size, line_height, width, window);
         let mark = display
             .mark
             .clone()
@@ -368,13 +366,7 @@ impl Shaper<'_> {
     }
 
     /// The text runs of a code line, colored by the tokens of its block.
-    fn code_runs(
-        &mut self,
-        model: &Model,
-        display: &DisplayLine,
-        language: &str,
-        code: &Range<usize>,
-    ) -> Vec<TextRun> {
+    fn code_runs(&mut self, model: &Model, display: &DisplayLine, language: &str, code: &Range<usize>) -> Vec<TextRun> {
         let source = display.source();
         let text = &display.shown.text;
         let mut font = self.style.font();
@@ -389,23 +381,15 @@ impl Shaper<'_> {
         };
         let plain = self.theme.text;
         if text.len() != source.len() || source.start < code.start || source.end > code.end {
-            return vec![run(
-                text.len(),
-                if display.raw { self.theme.muted } else { plain },
-            )];
+            return vec![run(text.len(), if display.raw { self.theme.muted } else { plain })];
         }
-        let tokens: Tokens = self
-            .highlighter
-            .tokens(language, &model.text()[code.clone()]);
+        let tokens: Tokens = self.highlighter.tokens(language, &model.text()[code.clone()]);
         let start = source.start - code.start;
         let end = source.end - code.start;
         let first = tokens.partition_point(|(range, _)| range.end <= start);
         let mut runs = Vec::new();
         let mut at = start;
-        for (range, token) in tokens[first..]
-            .iter()
-            .take_while(|(range, _)| range.start < end)
-        {
+        for (range, token) in tokens[first..].iter().take_while(|(range, _)| range.start < end) {
             let from = range.start.max(start);
             let to = range.end.min(end);
             if at < from {
@@ -562,10 +546,7 @@ impl Shaper<'_> {
                 let side = base * 0.35;
                 (
                     Bounds::new(
-                        point(
-                            left - area / 2. - side / 2.,
-                            pad + (line_height - side) / 2.,
-                        ),
+                        point(left - area / 2. - side / 2., pad + (line_height - side) / 2.),
                         size(side, side),
                     ),
                     None,
@@ -593,25 +574,15 @@ impl Shaper<'_> {
                     underline: None,
                     strikethrough: None,
                 };
-                let shaped =
-                    window
-                        .text_system()
-                        .shape_line(text.clone().into(), base, &[run], None);
+                let shaped = window.text_system().shape_line(text.clone().into(), base, &[run], None);
                 let width = shaped.width();
                 (
-                    Bounds::new(
-                        point(left - width - base * 0.4, pad),
-                        size(width, line_height),
-                    ),
+                    Bounds::new(point(left - width - base * 0.4, pad), size(width, line_height)),
                     Some(shaped),
                 )
             }
         };
-        LaidMark {
-            mark,
-            bounds,
-            number,
-        }
+        LaidMark { mark, bounds, number }
     }
 
     /// How a link to `target` shows.
@@ -623,13 +594,7 @@ impl Shaper<'_> {
     }
 
     /// The boxes of `chips` in a text with `runs`. A chip name has the look of its screen text.
-    fn chip_boxes(
-        &mut self,
-        chips: &[Chip],
-        runs: &[TextRun],
-        font_size: Pixels,
-        window: &Window,
-    ) -> Vec<ChipBox> {
+    fn chip_boxes(&mut self, chips: &[Chip], runs: &[TextRun], font_size: Pixels, window: &Window) -> Vec<ChipBox> {
         let detail_run = TextRun {
             len: 0,
             font: self.style.font(),
@@ -651,10 +616,9 @@ impl Shaper<'_> {
                     .unwrap_or(&detail_run);
                 let kind = self.files.kind(&chip.target);
                 let name = match chip.name.as_str() {
-                    "" => Path::new(&chip.target).file_name().map_or_else(
-                        || chip.target.as_str().into(),
-                        |name| name.to_string_lossy(),
-                    ),
+                    "" => Path::new(&chip.target)
+                        .file_name()
+                        .map_or_else(|| chip.target.as_str().into(), |name| name.to_string_lossy()),
                     name => name.into(),
                 };
                 let detail = match kind {
@@ -666,14 +630,7 @@ impl Shaper<'_> {
                 } else {
                     Icon::File
                 };
-                ChipBox::new(
-                    chip.range.clone(),
-                    icon,
-                    (&name, run),
-                    detail,
-                    font_size,
-                    window,
-                )
+                ChipBox::new(chip.range.clone(), icon, (&name, run), detail, font_size, window)
             })
             .collect()
     }
@@ -745,9 +702,7 @@ pub(crate) fn lay_out(
     };
     let target = match reveal {
         Reveal::Edge => to_edge(model, scroll, &lines, shaper, view, start, window),
-        Reveal::Middle | Reveal::Top => {
-            to_place(model, reveal, &lines, shaper, view, start, window)
-        }
+        Reveal::Middle | Reveal::Top => to_place(model, reveal, &lines, shaper, view, start, window),
     };
     let Some(target) = target else {
         return lines;
@@ -867,9 +822,7 @@ fn fill_view(
         if top >= view {
             break;
         }
-        let mut line = above
-            .pop()
-            .unwrap_or_else(|| shaper.line(model, ix, window));
+        let mut line = above.pop().unwrap_or_else(|| shaper.line(model, ix, window));
         let bottom = top + line.height;
         if bottom <= px(0.) && ix < last {
             *scroll = Scroll {
@@ -958,10 +911,7 @@ impl Layout {
             }
             Content::Cells(cells) => {
                 let x = local.x - line.left;
-                let cell = cells
-                    .iter()
-                    .find(|cell| x < cell.x + cell.width)
-                    .or(cells.last())?;
+                let cell = cells.iter().find(|cell| x < cell.x + cell.width).or(cells.last())?;
                 let inner = point(x - cell.x - cell.inset, y);
                 let index = cell
                     .text
@@ -1008,15 +958,9 @@ impl Layout {
         let x = goal_x.unwrap_or(line.left + at.x);
         let origin = self.bounds.origin;
         let (line, target) = if down && at.y + line.line_height < line.text_height {
-            (
-                line,
-                point(x, line.text_top() + at.y + line.line_height * 1.5),
-            )
+            (line, point(x, line.text_top() + at.y + line.line_height * 1.5))
         } else if !down && at.y >= line.line_height {
-            (
-                line,
-                point(x, line.text_top() + at.y - line.line_height * 0.5),
-            )
+            (line, point(x, line.text_top() + at.y - line.line_height * 0.5))
         } else {
             let other = if down {
                 self.lines[ix + 1..].iter().find(|l| l.height > px(0.))?
@@ -1065,21 +1009,13 @@ impl Layout {
         };
         let target = point(x, line.text_top() + row_y + line.line_height * 0.5);
         let offset = self.offset_at(self.bounds.origin + target)?;
-        Some((
-            offset,
-            line.shows_above(offset, row_y + line.line_height * 0.5),
-        ))
+        Some((offset, line.shows_above(offset, row_y + line.line_height * 0.5)))
     }
 
     /// The source offset at the start or the end of the screen row with the cursor.
     /// It returns `None` when that row is not in this layout.
     /// It also returns whether the offset is the start of its row, as in [`LaidLine::caret`].
-    pub(crate) fn row_edge(
-        &self,
-        cursor: usize,
-        row_start: bool,
-        end: bool,
-    ) -> Option<(usize, bool)> {
+    pub(crate) fn row_edge(&self, cursor: usize, row_start: bool, end: bool) -> Option<(usize, bool)> {
         let line = self
             .lines
             .iter()
@@ -1143,8 +1079,7 @@ impl Layout {
             return Vec::new();
         };
         let (start, end) = (first.display.source().start, last.display.source().end);
-        matches[matches.partition_point(|m| m.end < start)
-            ..matches.partition_point(|m| m.start <= end)]
+        matches[matches.partition_point(|m| m.end < start)..matches.partition_point(|m| m.start <= end)]
             .iter()
             .flat_map(|m| self.text_bounds(m, false))
             .collect()
@@ -1153,11 +1088,7 @@ impl Layout {
     /// The rects of the text in `range`. With `raw_only`, only lines that show their syntax.
     fn text_bounds(&self, selection: &Range<usize>, raw_only: bool) -> Vec<Bounds<Pixels>> {
         let mut rects = Vec::new();
-        for line in self
-            .lines
-            .iter()
-            .filter(|line| line.display.raw || !raw_only)
-        {
+        for line in self.lines.iter().filter(|line| line.display.raw || !raw_only) {
             let Some(text) = line.text() else { continue };
             let source = line.display.source();
             if selection.end < source.start || selection.start > source.end {
@@ -1204,24 +1135,16 @@ impl Layout {
 ///   to the columns in proportion to the difference of their two widths.
 /// - Else the narrowest widths shrink by the same factor, to no less than `floor`.
 fn split(columns: &[(Pixels, Pixels)], room: Pixels, floor: Pixels) -> Vec<Pixels> {
-    let sum = |width: fn(&(Pixels, Pixels)) -> Pixels| {
-        columns.iter().map(width).fold(px(0.), |sum, w| sum + w)
-    };
+    let sum = |width: fn(&(Pixels, Pixels)) -> Pixels| columns.iter().map(width).fold(px(0.), |sum, w| sum + w);
     let (narrowest, widest) = (sum(|column| column.0), sum(|column| column.1));
     if widest <= room {
         columns.iter().map(|column| column.1).collect()
     } else if narrowest <= room {
         let share = (room - narrowest) / (widest - narrowest);
-        columns
-            .iter()
-            .map(|(min, max)| *min + (*max - *min) * share)
-            .collect()
+        columns.iter().map(|(min, max)| *min + (*max - *min) * share).collect()
     } else {
         let fit = room / narrowest;
-        columns
-            .iter()
-            .map(|(min, _)| (*min * fit).max(floor))
-            .collect()
+        columns.iter().map(|(min, _)| (*min * fit).max(floor)).collect()
     }
 }
 
@@ -1258,10 +1181,7 @@ mod tests {
         for (width, expected) in widths.iter().zip(expected) {
             assert!((*width - expected).abs() < px(0.001), "{widths:?}");
         }
-        assert_eq!(
-            split(&columns, px(60.), px(8.)),
-            [px(20.), px(30.), px(10.)]
-        );
+        assert_eq!(split(&columns, px(60.), px(8.)), [px(20.), px(30.), px(10.)]);
     }
 
     #[test]

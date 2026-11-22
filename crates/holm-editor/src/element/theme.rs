@@ -189,11 +189,7 @@ impl Theme {
 
     /// A color from the note. Palette colors get their dark tone in dark mode.
     pub(crate) fn note_color(&self, color: Color) -> Hsla {
-        let color = if self.dark {
-            palette::dark_tone(color)
-        } else {
-            color
-        };
+        let color = if self.dark { palette::dark_tone(color) } else { color };
         rgb(u32::from(color.r) << 16 | u32::from(color.g) << 8 | u32::from(color.b)).into()
     }
 }

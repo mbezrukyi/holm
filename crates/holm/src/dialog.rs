@@ -10,8 +10,8 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex};
 use gpui_kit::{
-    App, Context, FocusHandle, Focusable, InteractiveElement as _, IntoElement, ParentElement,
-    Render, Role, StatefulInteractiveElement as _, Styled, TestSupportExt as _, Window, div, px,
+    App, Context, FocusHandle, Focusable, InteractiveElement as _, IntoElement, ParentElement, Render, Role,
+    StatefulInteractiveElement as _, Styled, TestSupportExt as _, Window, div, px,
 };
 
 use holm_core::TagName;
@@ -27,11 +27,7 @@ pub(crate) enum Ask {
     /// Delete a note or a folder. `name` is the title of the note, or the name of the folder.
     Delete { name: String, count: DeleteCount },
     /// Rename a tag in all notes.
-    RenameTag {
-        from: TagName,
-        to: TagName,
-        notes: usize,
-    },
+    RenameTag { from: TagName, to: TagName, notes: usize },
     /// Remove a tag from all notes.
     DeleteTag { tag: TagName, notes: usize },
 }
@@ -52,16 +48,10 @@ pub(crate) struct Dialog {
 }
 
 impl Dialog {
-    pub(crate) fn new(
-        ask: Ask,
-        then: Then<Decision>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    pub(crate) fn new(ask: Ask, then: Then<Decision>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
-        cx.on_release(|dialog: &mut Self, cx| dialog.decide(false, cx))
-            .detach();
+        cx.on_release(|dialog: &mut Self, cx| dialog.decide(false, cx)).detach();
         Self {
             ask,
             do_not_ask: false,
@@ -73,9 +63,7 @@ impl Dialog {
     /// For example: "Delete “Plans”? This deletes 1 note and 2 files forever."
     fn question(&self) -> String {
         match &self.ask {
-            Ask::Delete { name, count, .. } => {
-                text::delete_question(name, count.notes, count.attachments)
-            }
+            Ask::Delete { name, count, .. } => text::delete_question(name, count.notes, count.attachments),
             Ask::RenameTag { from, to, notes } => text::rename_tag_question(from, to, *notes),
             Ask::DeleteTag { tag, notes } => text::delete_tag_question(tag, *notes),
         }
@@ -132,17 +120,13 @@ impl Render for Dialog {
             Ask::Delete { .. } | Ask::DeleteTag { .. } => text::DELETE,
         };
         let switch = self.ask.can_skip().then(|| {
-            h_flex()
-                .gap_2()
-                .text_sm()
-                .text_color(theme.muted_foreground)
-                .child(
-                    Switch::new("do-not-ask")
-                        .checked(self.do_not_ask)
-                        .label(text::DO_NOT_ASK)
-                        .small()
-                        .on_click(cx.listener(|dialog, _: &bool, _, cx| dialog.toggle(cx))),
-                )
+            h_flex().gap_2().text_sm().text_color(theme.muted_foreground).child(
+                Switch::new("do-not-ask")
+                    .checked(self.do_not_ask)
+                    .label(text::DO_NOT_ASK)
+                    .small()
+                    .on_click(cx.listener(|dialog, _: &bool, _, cx| dialog.toggle(cx))),
+            )
         });
         let dialog = popup::panel(px(420.), cx)
             .p_4()

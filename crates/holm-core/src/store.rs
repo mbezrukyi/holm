@@ -107,9 +107,7 @@ impl Store {
     /// It follows the symlinks in `file` when it can.
     pub(crate) fn file_link(&self, note: &NotePath, file: &Path) -> Result<PathBuf> {
         if !file.is_absolute() {
-            return Err(Error::BadPath {
-                path: file.to_owned(),
-            });
+            return Err(Error::BadPath { path: file.to_owned() });
         }
         let file = fs::canonicalize(file).unwrap_or_else(|_| file.to_owned());
         Ok(crate::links::link(&self.root, note, &file))
@@ -150,13 +148,8 @@ impl Store {
     ///
     /// Like the folder walk, it does not follow symlinks.
     pub(crate) fn at(&self, folder: &FolderPath, name: &Name) -> AtPath {
-        let real_dir = |dir: FolderPath| {
-            fs::symlink_metadata(self.root.join(dir)).is_ok_and(|meta| meta.is_dir())
-        };
-        if !std::iter::once(folder.clone())
-            .chain(folder.parents())
-            .all(real_dir)
-        {
+        let real_dir = |dir: FolderPath| fs::symlink_metadata(self.root.join(dir)).is_ok_and(|meta| meta.is_dir());
+        if !std::iter::once(folder.clone()).chain(folder.parents()).all(real_dir) {
             return AtPath::Missing;
         }
         let path = self.root.join(folder).join(name.as_os_str());
@@ -254,13 +247,8 @@ impl Store {
                 let fail = |source| write_error(&path, source);
                 let permissions = fs::metadata(&path).map_err(fail)?.permissions();
                 let modified = Some(time(stamp.modified));
-                let file = unsynced_temp_file(
-                    folder_abs(&path),
-                    new.as_bytes(),
-                    Some(permissions),
-                    modified,
-                )
-                .map_err(fail)?;
+                let file =
+                    unsynced_temp_file(folder_abs(&path), new.as_bytes(), Some(permissions), modified).map_err(fail)?;
                 // A closed file, so a big index write does not run out of file handles.
                 Ok(Some(file.into_temp_path()))
             });
@@ -329,12 +317,7 @@ impl Store {
         if text.id().is_none() {
             text.set_id(Some(NoteId::generate().as_str()));
         }
-        write(
-            &path,
-            &old,
-            &text.to_string(),
-            (!body_changed).then_some(stamp),
-        )?;
+        write(&path, &old, &text.to_string(), (!body_changed).then_some(stamp))?;
         self.read(rel)
     }
 
@@ -349,8 +332,8 @@ impl Store {
         text.set_id(Some(id.as_str()));
         text.set_tags(&note.info.tags);
         text.set_pinned(note.info.pinned);
-        let file = temp_file(&dir, text.to_string().as_bytes(), None, None)
-            .map_err(|source| write_error(&path, source))?;
+        let file =
+            temp_file(&dir, text.to_string().as_bytes(), None, None).map_err(|source| write_error(&path, source))?;
         match file.persist_noclobber(&path) {
             Ok(_) => sync_dir(&dir).map_err(|source| write_error(&path, source))?,
             Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => {}
@@ -369,8 +352,8 @@ impl Store {
         let path = self.root.join(rel);
         let mut text = NoteFile::parse("");
         text.set_id(Some(NoteId::generate().as_str()));
-        let file = temp_file(&dir, text.to_string().as_bytes(), None, None)
-            .map_err(|source| write_error(&dir, source))?;
+        let file =
+            temp_file(&dir, text.to_string().as_bytes(), None, None).map_err(|source| write_error(&dir, source))?;
         match file.persist_noclobber(&path) {
             Ok(_) => sync_dir(&dir).map_err(|source| write_error(&path, source))?,
             Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => {
@@ -404,13 +387,8 @@ impl Store {
             })?
             .permissions();
         let dir = self.root.join(folder);
-        let temp = temp_file(
-            &dir,
-            text.as_bytes(),
-            Some(permissions),
-            Some(time(stamp.modified)),
-        )
-        .map_err(|source| write_error(&dir, source))?;
+        let temp = temp_file(&dir, text.as_bytes(), Some(permissions), Some(time(stamp.modified)))
+            .map_err(|source| write_error(&dir, source))?;
         let path = self.root.join(&to);
         match temp.persist_noclobber(&path) {
             Ok(_) => {
@@ -419,9 +397,7 @@ impl Store {
                 sync_dir(folder_abs(&source)).map_err(|e| write_error(&source, e))?;
                 Ok(to)
             }
-            Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => {
-                Err(Error::NameTaken { path })
-            }
+            Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => Err(Error::NameTaken { path }),
             Err(e) => Err(write_error(&path, e.error)),
         }
     }
@@ -449,12 +425,7 @@ impl Store {
     /// Names work as in [`Store::create_folder`]. The folder may take its own name with other
     /// capital letters. It fixes the relative file links in the notes inside. A note that can't
     /// be fixed keeps its links, with a log line.
-    pub(crate) fn move_folder(
-        &self,
-        from: &FolderPath,
-        parent: &FolderPath,
-        name: &Name,
-    ) -> Result<FolderPath> {
+    pub(crate) fn move_folder(&self, from: &FolderPath, parent: &FolderPath, name: &Name) -> Result<FolderPath> {
         self.check_user_folder(from)?;
         if !from.can_move_into(parent) {
             return Err(bad_path(parent.as_ref()));
@@ -463,10 +434,7 @@ impl Store {
         if rel == *from {
             return Ok(rel);
         }
-        let own = from
-            .folder()
-            .filter(|folder| folder == parent)
-            .and(from.name());
+        let own = from.folder().filter(|folder| folder == parent).and(from.name());
         self.check_free(parent, rel.name().unwrap_or_default(), own)?;
         let source = self.root.join(from);
         let path = self.root.join(&rel);
@@ -503,9 +471,7 @@ impl Store {
         for entry in entries.flatten() {
             let found = entry.file_name();
             if found.to_string_lossy().to_lowercase() == wanted && own != Some(found.as_os_str()) {
-                return Err(Error::NameTaken {
-                    path: dir.join(name),
-                });
+                return Err(Error::NameTaken { path: dir.join(name) });
             }
         }
         Ok(())
@@ -706,12 +672,7 @@ fn write(path: &Path, old: &str, new: &str, keep: Option<Stamp>) -> Result<()> {
 }
 
 /// Replaces the file at `path` with `text` in one rename, so a crash never leaves half a note.
-fn replace(
-    path: &Path,
-    text: &str,
-    permissions: Permissions,
-    modified: Option<SystemTime>,
-) -> io::Result<()> {
+fn replace(path: &Path, text: &str, permissions: Permissions, modified: Option<SystemTime>) -> io::Result<()> {
     let dir = path.parent().unwrap_or(Path::new("."));
     temp_file(dir, text.as_bytes(), Some(permissions), modified)?
         .persist(path)
@@ -764,9 +725,7 @@ fn is_temp(name: &OsStr) -> bool {
 }
 
 fn bad_path(rel: &Path) -> Error {
-    Error::BadPath {
-        path: rel.to_owned(),
-    }
+    Error::BadPath { path: rel.to_owned() }
 }
 
 fn write_error(path: &Path, source: io::Error) -> Error {

@@ -182,10 +182,7 @@ mod tests {
     #[test]
     fn titles_match_in_order_and_fuzzy() {
         let list = notes(&["Plans", "Holm ideas", "Shopping list", "Pasta"]);
-        assert_eq!(
-            titles("", &list),
-            ["Plans", "Holm ideas", "Shopping list", "Pasta"]
-        );
+        assert_eq!(titles("", &list), ["Plans", "Holm ideas", "Shopping list", "Pasta"]);
         assert_eq!(titles("pla", &list), ["Plans", "+pla"]);
         assert_eq!(titles("hi", &list), ["Holm ideas", "Shopping list", "+hi"]);
         assert_eq!(titles("PLANS", &list), ["Plans"]);
@@ -243,14 +240,8 @@ mod tests {
             Query::Titles(text) => (None, text.to_owned()),
             Query::Headings { note, filter } => (Some(note), filter.to_owned()),
         };
-        assert_eq!(
-            parse(Some("Ideas"), Some("Bug")),
-            (Some(Some(1)), "Bug".to_owned())
-        );
-        assert_eq!(
-            parse(Some("Ideas"), Some("")),
-            (Some(Some(1)), String::new())
-        );
+        assert_eq!(parse(Some("Ideas"), Some("Bug")), (Some(Some(1)), "Bug".to_owned()));
+        assert_eq!(parse(Some("Ideas"), Some("")), (Some(Some(1)), String::new()));
         assert_eq!(parse(None, Some("Top")), (Some(None), "Top".to_owned()));
         assert_eq!(parse(Some("Plans"), None), (None, "Plans".to_owned()));
         assert_eq!(parse(None, None), (None, String::new()));
@@ -258,15 +249,9 @@ mod tests {
 
     #[test]
     fn headings_filter_with_fuzzy_matching() {
-        let headings = [
-            "Bug list".to_owned(),
-            "Ideas".to_owned(),
-            "Big bets".to_owned(),
-        ];
+        let headings = ["Bug list".to_owned(), "Ideas".to_owned(), "Big bets".to_owned()];
         let query = |filter| Query::Headings { note: None, filter };
-        let shown = |filter| -> Vec<LinkRow> {
-            rows(query(filter), &PickNotes::new(Vec::new()), &headings)
-        };
+        let shown = |filter| -> Vec<LinkRow> { rows(query(filter), &PickNotes::new(Vec::new()), &headings) };
         assert_eq!(shown("").len(), 3);
         assert_eq!(
             shown("bi"),

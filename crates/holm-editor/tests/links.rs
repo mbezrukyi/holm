@@ -8,8 +8,8 @@ use std::rc::Rc;
 
 use common::{LINE_HEIGHT, app, column_x, cursor_y, data_folder, open};
 use gpui_kit::{
-    ClipboardEntry, ClipboardItem, Entity, ExternalPaths, FileDropEvent, Image, ImageFormat,
-    Modifiers, Pixels, VisualTestContext, point, px,
+    ClipboardEntry, ClipboardItem, Entity, ExternalPaths, FileDropEvent, Image, ImageFormat, Modifiers, Pixels,
+    VisualTestContext, point, px,
 };
 use holm_editor::{CursorLink, Editor, OpenFile, OpenLink, PasteFiles, PastedFile};
 use holm_markdown::Target;
@@ -22,10 +22,7 @@ fn text(editor: &Entity<Editor>, cx: &VisualTestContext) -> String {
 }
 
 /// Collects the events of type `E` that the editor sends.
-fn events<E: Clone + 'static>(
-    editor: &Entity<Editor>,
-    cx: &mut VisualTestContext,
-) -> Rc<RefCell<Vec<E>>>
+fn events<E: Clone + 'static>(editor: &Entity<Editor>, cx: &mut VisualTestContext) -> Rc<RefCell<Vec<E>>>
 where
     Editor: gpui_kit::EventEmitter<E>,
 {
@@ -102,12 +99,7 @@ fn ctrl_click_opens_the_link_under_the_mouse() {
 #[test]
 fn ctrl_enter_opens_the_link_at_the_cursor() {
     let mut app = app();
-    let (editor, cx) = open(
-        &mut app,
-        "[a](<my file.pdf>)\n\n# Plans\n\n[b](#Plans)",
-        WIDTH,
-        HEIGHT,
-    );
+    let (editor, cx) = open(&mut app, "[a](<my file.pdf>)\n\n# Plans\n\n[b](#Plans)", WIDTH, HEIGHT);
     cx.update(|_, cx| {
         editor.update(cx, |editor, cx| {
             editor.set_folder(Some(PathBuf::from("/notes")), cx);
@@ -124,10 +116,7 @@ fn ctrl_enter_opens_the_link_at_the_cursor() {
     // A heading in this note: the cursor moves to it.
     cx.simulate_keystrokes("ctrl-end left ctrl-enter");
     cx.simulate_input("X");
-    assert_eq!(
-        text(&editor, cx),
-        "[a](<my file.pdf>)\n\nX# Plans\n\n[b](#Plans)"
-    );
+    assert_eq!(text(&editor, cx), "[a](<my file.pdf>)\n\nX# Plans\n\n[b](#Plans)");
     // No link at the cursor: Ctrl+Enter does nothing.
     cx.simulate_keystrokes("ctrl-enter");
     assert_eq!(files.borrow().len(), 1);
@@ -138,27 +127,20 @@ fn insert_link_takes_the_selection_and_set_link_target_keeps_the_text() {
     let mut app = app();
     let (editor, cx) = open(&mut app, "see plans", WIDTH, HEIGHT);
     cx.simulate_keystrokes("ctrl-end shift-ctrl-left");
-    assert_eq!(
-        cx.read(|cx| editor.read(cx).selected_text().to_owned()),
-        "plans"
-    );
+    assert_eq!(cx.read(|cx| editor.read(cx).selected_text().to_owned()), "plans");
     cx.update(|_, cx| {
         editor.update(cx, |editor, cx| {
             editor.insert_link("Plans", &note("X"), false, cx);
         });
     });
     assert_eq!(text(&editor, cx), "see [plans](holm:X)");
-    assert_eq!(
-        link_at_cursor(&editor, cx).map(|l| l.target),
-        Some(note("X"))
-    );
+    assert_eq!(link_at_cursor(&editor, cx).map(|l| l.target), Some(note("X")));
 
     let heading = Target::Note {
         id: "Y".into(),
         heading: Some("Bug list".into()),
     };
-    let changed =
-        cx.update(|_, cx| editor.update(cx, |editor, cx| editor.set_link_target(&heading, cx)));
+    let changed = cx.update(|_, cx| editor.update(cx, |editor, cx| editor.set_link_target(&heading, cx)));
     assert!(changed);
     assert_eq!(text(&editor, cx), "see [plans](<holm:Y#Bug list>)");
     cx.simulate_keystrokes("ctrl-z");
@@ -226,14 +208,12 @@ fn a_drop_moves_the_cursor_and_sends_paste_files() {
 fn show_heading_puts_the_cursor_at_the_heading() {
     let mut app = app();
     let (editor, cx) = open(&mut app, "# Top\n\ntext\n\n## Bug list\n", WIDTH, HEIGHT);
-    let found =
-        cx.update(|_, cx| editor.update(cx, |editor, cx| editor.show_heading("Bug list", cx)));
+    let found = cx.update(|_, cx| editor.update(cx, |editor, cx| editor.show_heading("Bug list", cx)));
     assert!(found);
     cx.simulate_input("X");
     assert_eq!(text(&editor, cx), "# Top\n\ntext\n\nX## Bug list\n");
 
-    let found =
-        cx.update(|_, cx| editor.update(cx, |editor, cx| editor.show_heading("bug list", cx)));
+    let found = cx.update(|_, cx| editor.update(cx, |editor, cx| editor.show_heading("bug list", cx)));
     assert!(!found);
 }
 

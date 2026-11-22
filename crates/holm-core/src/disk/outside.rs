@@ -9,11 +9,7 @@ use crate::store::{AtPath, Store};
 
 /// The nodes for outside changes at the raw paths `paths`: what is there now, and what was
 /// there in `before`.
-pub(super) fn nodes(
-    store: &Store,
-    before: &Snapshot,
-    paths: impl IntoIterator<Item = PathBuf>,
-) -> Nodes {
+pub(super) fn nodes(store: &Store, before: &Snapshot, paths: impl IntoIterator<Item = PathBuf>) -> Nodes {
     Nodes::new(paths.into_iter().flat_map(|path| at(store, before, &path)))
 }
 
@@ -35,9 +31,7 @@ fn at(store: &Store, before: &Snapshot, path: &Path) -> Vec<Node> {
         AtPath::Folder(folder) => Some(Node::Folder(folder)),
         AtPath::Other | AtPath::Missing => None,
     };
-    let note = folder
-        .note_file(&name)
-        .filter(|note| before.note(note).is_some());
+    let note = folder.note_file(&name).filter(|note| before.note(note).is_some());
     let child = folder.child(&name);
     match (&now, note) {
         (_, Some(note)) => nodes.push(Node::Note(note)),

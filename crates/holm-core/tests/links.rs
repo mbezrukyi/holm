@@ -21,18 +21,10 @@ fn note(id: &str, body: &str) -> String {
 fn links_everywhere(folder: &mut Folder, path: &str) -> Vec<Link> {
     let links = folder.core.snapshot().links(&note_path(path)).to_vec();
     folder.reopen();
-    assert_eq!(
-        folder.core.snapshot().links(&note_path(path)),
-        links,
-        "index rows"
-    );
+    assert_eq!(folder.core.snapshot().links(&note_path(path)), links, "index rows");
     fs::remove_file(folder.index_file()).unwrap();
     folder.reopen();
-    assert_eq!(
-        folder.core.snapshot().links(&note_path(path)),
-        links,
-        "new index"
-    );
+    assert_eq!(folder.core.snapshot().links(&note_path(path)), links, "new index");
     links
 }
 
@@ -46,16 +38,9 @@ fn file(path: &str) -> Link {
 #[test]
 fn a_tag_change_keeps_the_links() {
     let mut folder = Folder::new(&[("work/a.md", &note("01A", "[f](x.pdf) [n](holm:01B)\n"))]);
-    let before = folder
-        .core
-        .snapshot()
-        .links(&note_path("work/a.md"))
-        .to_vec();
+    let before = folder.core.snapshot().links(&note_path("work/a.md")).to_vec();
 
-    folder
-        .core
-        .add_tag(&note_path("work/a.md"), &tag_name("new"))
-        .unwrap();
+    folder.core.add_tag(&note_path("work/a.md"), &tag_name("new")).unwrap();
 
     assert_eq!(links_everywhere(&mut folder, "work/a.md"), before);
     assert_eq!(before[0], file("work/x.pdf"));
@@ -69,19 +54,13 @@ fn a_save_follows_the_links_of_the_text() {
         .core
         .save(&note_path("work/a.md"), "More words. [f](x.pdf)\n", None)
         .unwrap();
-    assert_eq!(
-        links_everywhere(&mut folder, "work/a.md"),
-        [file("work/x.pdf")]
-    );
+    assert_eq!(links_everywhere(&mut folder, "work/a.md"), [file("work/x.pdf")]);
 
     folder
         .core
         .save(&note_path("work/a.md"), "More words. [f](y.pdf)\n", None)
         .unwrap();
-    assert_eq!(
-        links_everywhere(&mut folder, "work/a.md"),
-        [file("work/y.pdf")]
-    );
+    assert_eq!(links_everywhere(&mut folder, "work/a.md"), [file("work/y.pdf")]);
 }
 
 #[test]
@@ -97,10 +76,7 @@ fn a_folder_move_points_relative_file_links_to_the_new_place() {
         .move_folder(&folder_path("work"), &folder_path("archive"))
         .unwrap();
 
-    assert_eq!(
-        folder.text("archive/work/a.md"),
-        note("01A", "[b](sub/b.md)\n")
-    );
+    assert_eq!(folder.text("archive/work/a.md"), note("01A", "[b](sub/b.md)\n"));
     assert_eq!(
         links_everywhere(&mut folder, "archive/work/a.md"),
         [file("archive/work/sub/b.md")]
@@ -139,10 +115,7 @@ fn broken_links_name_missing_notes_and_headings_once() {
 [a](holm:01T) [b](<holm:01T#Bug list>) [c](<holm:01T#bug list>) [d](<holm:01T#Plans>)
 [e](holm:01X) [f](holm:01X) [g](<#Nowhere>) [h](gone.pdf)
 ";
-    let folder = Folder::new(&[
-        ("a.md", body),
-        ("t.md", &note("01T", "# Plans\n\n## Bug list\n")),
-    ]);
+    let folder = Folder::new(&[("a.md", body), ("t.md", &note("01T", "# Plans\n\n## Bug list\n"))]);
     let broken = folder.core.broken_links(&note_path("a.md")).unwrap();
 
     let shown: Vec<(String, Option<String>)> = broken
@@ -190,10 +163,7 @@ fn file_link_to_a_missing_file_outside_is_clean_and_absolute() {
 
     let link = folder
         .core
-        .file_link(
-            &note_path("work/a.md"),
-            root.join("x/../../away/missing.pdf"),
-        )
+        .file_link(&note_path("work/a.md"), root.join("x/../../away/missing.pdf"))
         .unwrap();
 
     assert_eq!(link, root.parent().unwrap().join("away/missing.pdf"));
@@ -203,10 +173,7 @@ fn file_link_to_a_missing_file_outside_is_clean_and_absolute() {
 fn paste_image_keeps_the_format() {
     let folder = Folder::new(&[("a.md", "")]);
 
-    let path = folder
-        .core
-        .paste_image(&note_path("a.md"), "jpg", b"jpg")
-        .unwrap();
+    let path = folder.core.paste_image(&note_path("a.md"), "jpg", b"jpg").unwrap();
 
     assert!(path.starts_with("attachments"));
     assert_eq!(path.extension().unwrap(), "jpg");

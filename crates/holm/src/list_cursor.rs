@@ -3,12 +3,7 @@
 /// The item after `at`, or before it when not `forward`, among the `len` items. It wraps at
 /// the ends, and skips each item where `works` is false. With no cursor, forward goes to the
 /// first item that works, back to the last. It is `None` only when no item works.
-pub(crate) fn step(
-    at: Option<usize>,
-    len: usize,
-    forward: bool,
-    works: impl Fn(usize) -> bool,
-) -> Option<usize> {
+pub(crate) fn step(at: Option<usize>, len: usize, forward: bool, works: impl Fn(usize) -> bool) -> Option<usize> {
     let start = match at.filter(|at| *at < len) {
         Some(at) => at,
         // One step from the item before the first, or after the last.

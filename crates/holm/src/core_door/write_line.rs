@@ -134,11 +134,7 @@ impl<E> WriteLine<E> {
                 ended.push(job);
             }
         }
-        let wake = self
-            .running
-            .as_mut()
-            .and_then(|job| job.task.take())
-            .map(Wake);
+        let wake = self.running.as_mut().and_then(|job| job.task.take()).map(Wake);
         Run { ended, wake }
     }
 
@@ -206,10 +202,9 @@ impl<E> WriteLine<E> {
         let job = self.running.as_mut()?;
         let done = match job.done.try_recv() {
             Ok(None) => match wait {
-                Some(left) if !left.is_zero() => cx
-                    .foreground_executor()
-                    .block_with_timeout(left, &mut job.done)
-                    .ok()?,
+                Some(left) if !left.is_zero() => {
+                    cx.foreground_executor().block_with_timeout(left, &mut job.done).ok()?
+                }
                 _ => return None,
             },
             Ok(Some(())) => Ok(()),
@@ -271,10 +266,7 @@ mod tests {
     }
 
     fn ends(run: &Run<u32>) -> Vec<(u32, usize)> {
-        run.ended
-            .iter()
-            .map(|job| (job.end, job.lists.len()))
-            .collect()
+        run.ended.iter().map(|job| (job.end, job.lists.len())).collect()
     }
 
     #[gpui_kit::test]
@@ -292,9 +284,7 @@ mod tests {
     }
 
     #[gpui_kit::test]
-    fn a_job_past_its_budget_is_late_and_its_wake_lets_the_next_run_end_it(
-        cx: &mut TestAppContext,
-    ) {
+    fn a_job_past_its_budget_is_late_and_its_wake_lets_the_next_run_end_it(cx: &mut TestAppContext) {
         let (_dir, mut line) = line();
         let number = line.push(folder("B"), 1);
         let run = cx.update(|cx| line.run(Some(number), Duration::ZERO, cx));

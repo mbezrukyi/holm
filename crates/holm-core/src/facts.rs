@@ -59,12 +59,9 @@ impl Facts {
                 Node::Folder(folder) if folder.is_root() => {
                     stamps.extend(self.files.iter().map(stamp));
                 }
-                Node::Folder(folder) => stamps.extend(
-                    self.files
-                        .iter()
-                        .filter(|(path, _)| path.is_below(folder))
-                        .map(stamp),
-                ),
+                Node::Folder(folder) => {
+                    stamps.extend(self.files.iter().filter(|(path, _)| path.is_below(folder)).map(stamp))
+                }
             }
         }
         stamps
@@ -94,11 +91,7 @@ impl Facts {
 
     /// Records that an outside change of `revision` gave each file at `paths` new content. A
     /// newer revision that a file has stays.
-    pub(crate) fn mark_outside<'p>(
-        &mut self,
-        paths: impl IntoIterator<Item = &'p NotePath>,
-        revision: u64,
-    ) {
+    pub(crate) fn mark_outside<'p>(&mut self, paths: impl IntoIterator<Item = &'p NotePath>, revision: u64) {
         for path in paths {
             if let Some(file) = self.files.get_mut(path) {
                 file.outside = file.outside.max(revision);
@@ -114,25 +107,13 @@ impl Facts {
         let mut notes = Vec::with_capacity(settled.put.len());
         let mut carried = Vec::with_capacity(settled.moved.len());
         for read in settled.put {
-            put.push((
-                read.note.info.clone(),
-                read.links,
-                read.stamp,
-                read.hash,
-                read.source,
-            ));
+            put.push((read.note.info.clone(), read.links, read.stamp, read.hash, read.source));
             notes.push(read.note);
         }
         for moved in settled.moved {
             carried.push((moved.info.path.clone(), self.outside(&moved.from)));
             removed.push(moved.from);
-            put.push((
-                moved.info,
-                moved.links,
-                moved.stamp,
-                moved.hash,
-                moved.source,
-            ));
+            put.push((moved.info, moved.links, moved.stamp, moved.hash, moved.source));
         }
         self.remove_and_put(removed, put);
         for (path, outside) in carried {
@@ -156,10 +137,8 @@ impl Facts {
             };
             self.files.insert(info.path.clone(), file);
         }
-        self.snapshot.swap(
-            removed,
-            put.into_iter().map(|(info, links, _, _, _)| (info, links)),
-        );
+        self.snapshot
+            .swap(removed, put.into_iter().map(|(info, links, _, _, _)| (info, links)));
     }
 
     /// Puts `found` in place of the folders at `folder` or below it. `found` must be sorted.
