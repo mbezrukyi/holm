@@ -3404,7 +3404,7 @@ dependencies = [
 
 [[package]]
 name = "holm"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "futures-channel",
  "futures-core",
@@ -3424,7 +3424,7 @@ dependencies = [
 
 [[package]]
 name = "holm-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "divan",
  "foldhash",
@@ -3447,7 +3447,7 @@ dependencies = [
 
 [[package]]
 name = "holm-core-test"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "holm-core",
  "tempfile",
@@ -3455,7 +3455,7 @@ dependencies = [
 
 [[package]]
 name = "holm-editor"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bitflags 2.13.2",
  "divan",
@@ -3476,7 +3476,7 @@ dependencies = [
 
 [[package]]
 name = "holm-editor-test"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "gpui-kit",
  "holm-editor",
@@ -3484,7 +3484,7 @@ dependencies = [
 
 [[package]]
 name = "holm-markdown"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "divan",
  "insta",

@@ -1,3 +1,11 @@
+## 0.1.1
+
+### Changed
+
+- The AppImage no longer bundles `libXau`, `libXdmcp`, `libbsd`, `libmd` and
+  `libxcb-xkb`, which 0.1.0 shipped without their licence notices; it uses the
+  copies your system already has.
+
 ## 0.1.0
 
 The first release of Holm, a keyboard-first app for Markdown notes on Linux (x86_64).
