@@ -15,16 +15,12 @@ use holm_core::{ChangeLists, Core};
 /// The work of one job. It runs off the UI thread, and gives the error of a failed job for the log at quit.
 pub(super) type Work = Box<dyn FnOnce(&Core) -> Option<String> + Send>;
 
-/// A job whose work ran, with the change lists of the core since the job before it.
-pub(super) struct Ended<E> {
-    pub(super) end: E,
-    pub(super) lists: Vec<ChangeList>,
-}
-
 /// What one [`WriteLine::run`] gives.
 pub(super) struct Run<E> {
-    /// The jobs whose work ran, in their order.
-    pub(super) ended: Vec<Ended<E>>,
+    /// The ends of the jobs whose work ran, in their order.
+    pub(super) ended: Vec<E>,
+    /// The change lists of the core up to the last job that ended.
+    pub(super) lists: Vec<ChangeList>,
     /// It is there when the run started a job that still runs. It comes when the work of that job ends, and then the
     /// next run gives the job.
     pub(super) wake: Option<Wake>,
@@ -119,6 +115,7 @@ impl<E> WriteLine<E> {
     pub(super) fn run(&mut self, until: Option<JobNumber>, budget: Duration, cx: &App) -> Run<E> {
         let deadline = Instant::now() + budget;
         let mut ended = Vec::new();
+        let mut lists = Vec::new();
         loop {
             if self.running.is_none() && !self.start(cx) {
                 break;
@@ -135,12 +132,13 @@ impl<E> WriteLine<E> {
                 }
                 break;
             };
-            if let Some(job) = self.end(ran) {
-                ended.push(job);
+            if let Some(end) = self.end(ran) {
+                ended.push(end);
+                lists.extend(std::iter::from_fn(|| self.changes.try_next()));
             }
         }
         let wake = self.running.as_mut().and_then(|job| job.task.take()).map(Wake);
-        Run { ended, wake }
+        Run { ended, lists, wake }
     }
 
     /// The change lists that wait, while no job runs. During a job it gives `None`, and the lists wait for the end of
@@ -218,18 +216,14 @@ impl<E> WriteLine<E> {
         Some(done)
     }
 
-    /// Ends the running job. When its work ran, it gives the job with the lists that wait. A late job is no longer late
-    /// once it ends.
-    fn end(&mut self, ran: Result<(), oneshot::Canceled>) -> Option<Ended<E>> {
+    /// Ends the running job. When its work ran, it gives the end of the job. A late job is no longer late once it ends.
+    fn end(&mut self, ran: Result<(), oneshot::Canceled>) -> Option<E> {
         let job = self.running.take()?;
         self.last_ended = Some(job.number);
         if self.late.is_some_and(|late| late <= job.number) {
             self.late = None;
         }
-        ran.ok().map(|()| Ended {
-            end: job.end,
-            lists: std::iter::from_fn(|| self.changes.try_next()).collect(),
-        })
+        ran.ok().map(|()| job.end)
     }
 }
 
@@ -267,12 +261,13 @@ mod tests {
         })
     }
 
-    fn ends(run: &Run<u32>) -> Vec<(u32, usize)> {
-        run.ended.iter().map(|job| (job.end, job.lists.len())).collect()
+    /// The ends in their order, and the count of the lists.
+    fn ends(run: &Run<u32>) -> (Vec<u32>, usize) {
+        (run.ended.clone(), run.lists.len())
     }
 
     #[gpui_kit::test]
-    fn the_jobs_in_the_budget_end_in_order_with_their_lists(cx: &mut TestAppContext) {
+    fn the_jobs_in_the_budget_end_in_order_with_the_lists_of_all(cx: &mut TestAppContext) {
         let (_dir, mut line) = line();
         line.push(folder("B"), 1);
         line.push(Box::new(|_| None), 2);
@@ -280,7 +275,7 @@ mod tests {
 
         let run = cx.update(|cx| line.run(Some(last), Duration::from_secs(10), cx));
 
-        assert_eq!(ends(&run), [(1, 1), (2, 0), (3, 1)]);
+        assert_eq!(ends(&run), (vec![1, 2, 3], 2));
         assert!(run.wake.is_none());
         assert!(!line.is_late());
     }
@@ -290,7 +285,7 @@ mod tests {
         let (_dir, mut line) = line();
         let number = line.push(folder("B"), 1);
         let run = cx.update(|cx| line.run(Some(number), Duration::ZERO, cx));
-        assert!(run.ended.is_empty());
+        assert_eq!(ends(&run), (vec![], 0));
         assert!(line.is_late());
         let mut waker = task::Context::from_waker(Waker::noop());
         assert!(line.outside(&mut waker).is_none());
@@ -309,7 +304,7 @@ mod tests {
         assert!(seen.get());
 
         let run = cx.update(|cx| line.run(None, Duration::ZERO, cx));
-        assert_eq!(ends(&run), [(1, 1)]);
+        assert_eq!(ends(&run), (vec![1], 1));
         assert!(run.wake.is_none());
         assert!(!line.is_late());
         assert_eq!(line.outside(&mut waker).map(|lists| lists.len()), Some(0));
@@ -327,7 +322,7 @@ mod tests {
         cx.run_until_parked();
         let run = cx.update(|cx| line.run(Some(later), Duration::from_secs(10), cx));
 
-        assert!(run.ended.is_empty());
+        assert_eq!(ends(&run), (vec![], 0));
         assert!(run.wake.is_none());
         let notes = dir.path().join("notes");
         for name in ["B", "C", "D"] {

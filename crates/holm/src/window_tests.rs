@@ -716,7 +716,7 @@ fn each_sidebar_action_sees_the_typed_text(cx: &mut TestAppContext) {
     keys_now(cx, handle, "escape");
     type_unsaved(cx, handle, " three");
     keys_now(cx, handle, "ctrl-shift-l tab");
-    assert_eq!(tree(cx, handle), ["All notes", "area", "new", "#old*"]);
+    assert_eq!(tree(cx, handle), ["All notes", "area", "area/new", "#old*"]);
     keys_now(cx, handle, "f2 ctrl-a");
     cx.simulate_input(handle, "job");
     keys_now(cx, handle, "enter");

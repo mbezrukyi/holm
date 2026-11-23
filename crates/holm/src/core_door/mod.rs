@@ -4,8 +4,9 @@
 //! see them, are jobs. They wait in the write line and run one at a time, in the order the UI asked for them. A failed
 //! job does not stop the line.
 //!
-//! Each job ends in one update. The entity sets the snapshot after it and sends one [`DoorEvent`] with the changes up
-//! to that snapshot. Then, in the same update, the caller gets the result. So no frame falls between them.
+//! Each job ends in one update. The jobs that end in one update send one [`DoorEvent`]: the entity sets the snapshot
+//! after the last of them and sends the changes up to it, so each view reads the snapshot of the changes it takes.
+//! Then, in the same update, each caller gets its result, in the order of the jobs. So no frame falls between them.
 //!
 //! A call waits on the UI thread for the jobs before it and its own, up to a budget. A job that ends in time ends in
 //! the update of the call, so no frame falls between the key and the end of its job. A late job ends in a later update,
@@ -40,13 +41,13 @@ use crate::error::AppError;
 use crate::tags::TagChange;
 pub(crate) use draft::DraftVersion;
 use draft::{Draft, DraftSave, Written};
-use write_line::{Ended, JobNumber, Work, WriteLine};
+use write_line::{JobNumber, Work, WriteLine};
 
 mod draft;
 mod write_line;
 
-/// What the core door tells the views: a job of Holm ended, or changes from outside came in. Each job sends one, also a
-/// failed job.
+/// What the core door tells the views: jobs of Holm ended, or changes from outside came in. The jobs that end in one
+/// update send one, also failed jobs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DoorEvent {
     /// The changes of every revision up to [`CoreDoor::snapshot`], in order. It is empty when the snapshot did not
@@ -615,8 +616,10 @@ impl CoreDoor {
             }));
         }
         if !run.ended.is_empty() {
-            for job in run.ended {
-                self.end_job(job, cx);
+            let event = self.keep(run.lists);
+            cx.emit(event);
+            for end in run.ended {
+                end(self, cx);
             }
             self.watch = Self::watch(cx);
         }
@@ -626,13 +629,6 @@ impl CoreDoor {
         if self.writing() != writing {
             cx.notify();
         }
-    }
-
-    /// Sends one event with the lists of the job, and then gives the job its end.
-    fn end_job(&mut self, Ended { end, lists }: Ended<End>, cx: &mut Context<Self>) {
-        let event = self.keep(lists);
-        cx.emit(event);
-        end(self, cx);
     }
 
     /// Runs every job that waits, and then writes the draft. Later jobs do not run.
