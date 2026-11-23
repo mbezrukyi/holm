@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
-      - run: cargo install --locked "cargo-deny@$(sed -n 's/^cargo_deny_version=//p' scripts/check)"
+      - run: cargo "+$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" install --locked "cargo-deny@$(sed -n 's/^cargo_deny_version=//p' scripts/check)"
       - run: cargo deny --locked check advisories
 
   toolchain:

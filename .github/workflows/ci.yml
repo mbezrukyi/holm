@@ -43,7 +43,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:
           save-if: ${{ github.ref == 'refs/heads/master' }}
-      - run: cargo install --locked "cargo-deny@$(sed -n 's/^cargo_deny_version=//p' scripts/check)"
+      - run: cargo "+$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" install --locked "cargo-deny@$(sed -n 's/^cargo_deny_version=//p' scripts/check)"
       - run: scripts/check deny
 
   licenses:
@@ -54,5 +54,5 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:
           save-if: ${{ github.ref == 'refs/heads/master' }}
-      - run: cargo install --locked --features cli "cargo-about@$(sed -n 's/^cargo_about_version=//p' scripts/check)"
+      - run: cargo "+$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" install --locked --features cli "cargo-about@$(sed -n 's/^cargo_about_version=//p' scripts/check)"
       - run: scripts/check licenses

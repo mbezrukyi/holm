@@ -53,7 +53,7 @@ jobs:
           printf '\nDownload `%s` and `SHA256SUMS`. Check your download: `sha256sum -c SHA256SUMS` and `gh release verify-asset v%s %s -R mbezrukyi/holm`. See [Install](https://github.com/mbezrukyi/holm#install).\n' \
             "$appimage" "$VERSION" "$appimage" >> "$notes"
       - uses: ./.github/actions/linux-deps
-      - run: cargo install --locked --features cli "cargo-about@$(sed -n 's/^cargo_about_version=//p' scripts/check)"
+      - run: cargo "+$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" install --locked --features cli "cargo-about@$(sed -n 's/^cargo_about_version=//p' scripts/check)"
       - env:
           VERSION: ${{ steps.version.outputs.version }}
         run: packaging/appimage/build.sh "$VERSION"
