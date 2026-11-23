@@ -68,12 +68,26 @@ cp LICENSE "$notices" "$doc/"
 
 # Extract and run, so the build needs no FUSE. libxkbcommon stays out: it reads the keyboard
 # files of the system, and an old copy fails on the files of a newer system.
+# libXau, libXdmcp, libbsd and libmd come with libxcb, and libxcb-xkb with libxkbcommon-x11, so
+# every system that runs Holm has them. THIRD-PARTY-NOTICES.txt covers no system library.
 APPIMAGE_EXTRACT_AND_RUN=1 LDAI_OUTPUT="$out/$name" LDAI_RUNTIME_FILE="$out/runtime" "$out/linuxdeploy" \
   --appdir "$out/AppDir" \
   --executable target/release/holm \
   --exclude-library 'libxkbcommon*' \
+  --exclude-library 'libXau*' \
+  --exclude-library 'libXdmcp*' \
+  --exclude-library 'libbsd*' \
+  --exclude-library 'libmd*' \
+  --exclude-library 'libxcb-xkb*' \
   --desktop-file "packaging/linux/$id.desktop" \
   --icon-file "packaging/linux/$id.svg" \
   --output appimage
+
+bundled="$(find "$out/AppDir/usr/lib" -mindepth 1 -printf '%f\n')"
+if [[ -n $bundled ]]; then
+  printf 'error: the AppImage bundles system libraries that THIRD-PARTY-NOTICES.txt does not cover:\n%s\n' \
+    "$bundled" >&2
+  exit 1
+fi
 
 (cd "$out" && sha256sum "$name" > SHA256SUMS)
