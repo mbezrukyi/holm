@@ -17,6 +17,10 @@ use crate::config::{AppearanceSetting, Config, SavedSidebarView, Settings, Sideb
 use crate::log::Log;
 use crate::{text, theme};
 
+/// A write budget that no job outlasts, also on a loaded machine, so a test sees a late job only when it sets
+/// [`Duration::ZERO`].
+const QUICK_DISK: Duration = Duration::from_hours(1);
+
 struct Fixture {
     dir: TempDir,
     /// The core opens with no file watching. Tests tell it about outside changes here.
@@ -83,12 +87,12 @@ impl Fixture {
             default_folder: self.dir.path().join("Notes"),
             crashed: crash_log.is_some(),
             log: Log::at(crash_log.unwrap_or_else(|| PathBuf::from("/state/holm/holm.log"))),
-            write_budget: Duration::from_millis(50),
+            write_budget: QUICK_DISK,
         }
     }
 }
 
-/// An inactive window sends no focus events. Each write ends within its budget, as a quick disk does.
+/// An inactive window sends no focus events.
 fn open(cx: &mut TestAppContext, startup: Startup) -> AnyWindowHandle {
     cx.executor().set_block_on_ticks(usize::MAX..=usize::MAX);
     let opened = cx.update(|cx| {
