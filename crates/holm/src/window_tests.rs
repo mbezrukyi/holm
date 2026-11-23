@@ -1962,6 +1962,8 @@ fn a_move_into_a_clash_shows_the_answer_and_moves_nothing(cx: &mut TestAppContex
     fs::create_dir(notes_dir.join("work")).unwrap();
     fs::write(notes_dir.join("Top.md"), "# Top\n").unwrap();
     fs::write(notes_dir.join("work/top.md"), "# Other\n").unwrap();
+    set_time(&notes_dir.join("Top.md"), 200);
+    set_time(&notes_dir.join("work/top.md"), 100);
     let handle = open(cx, fixture.startup(None));
 
     assert_eq!(editor_text(cx, handle), "# Top\n");
@@ -2495,6 +2497,8 @@ fn a_search_during_an_outside_rename_keeps_the_note_in_every_frame(cx: &mut Test
     let notes_dir = fixture.notes();
     fs::write(notes_dir.join("Home.md"), "# Home\n").unwrap();
     fs::write(notes_dir.join("Trip.md"), "# Trip\n").unwrap();
+    set_time(&notes_dir.join("Home.md"), 200);
+    set_time(&notes_dir.join("Trip.md"), 100);
     let handle = open(cx, fixture.startup(None));
     keys(cx, handle, "ctrl-shift-f");
     cx.simulate_input(handle, "tri");
