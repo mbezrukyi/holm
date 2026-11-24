@@ -3452,7 +3452,7 @@ dependencies = [
  "divan",
  "fontdb",
  "gpui-kit",
- "holm-editor-test",
+ "holm-editor",
  "holm-markdown",
  "icu_segmenter",
  "imagesize 0.14.0",
@@ -3463,14 +3463,6 @@ dependencies = [
  "thiserror 2.0.21",
  "ttf-parser",
  "two-face",
-]
-
-[[package]]
-name = "holm-editor-test"
-version = "0.1.1"
-dependencies = [
- "gpui-kit",
- "holm-editor",
 ]
 
 [[package]]

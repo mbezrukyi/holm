@@ -20,13 +20,14 @@ ttf-parser.workspace = true
 two-face.workspace = true
 
 [features]
-# Publishes the editor text for UI tests. A normal build never copies it.
+# Publishes the editor text for UI tests, which a normal build never copies, and the `testing` module: helpers for
+# tests and benches.
 test-support = ["gpui-kit/test-support"]
 
 [dev-dependencies]
 divan.workspace = true
 gpui-kit = { workspace = true, features = ["test-support"] }
-holm-editor-test.workspace = true
+holm-editor = { path = ".", features = ["test-support"] }
 proptest.workspace = true
 
 [[bench]]

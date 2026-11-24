@@ -6,7 +6,7 @@ use gpui_kit::{
     VisualTestContext, point, px,
 };
 use holm_editor::Editor;
-use holm_editor_test::{LINE_HEIGHT, app, column_x, open};
+use holm_editor::testing::{LINE_HEIGHT, app, column_x, open};
 
 const WIDTH: Pixels = px(600.);
 const HEIGHT: Pixels = px(200.);
