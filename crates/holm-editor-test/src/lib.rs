@@ -1,7 +1,6 @@
 #![expect(clippy::expect_used, reason = "test helpers")]
 
 use std::borrow::Cow;
-use std::path::PathBuf;
 
 use gpui_kit::{
     AppContext, Bounds, Context, Entity, EntityInputHandler as _, Focusable, IntoElement, ParentElement, Pixels,
@@ -90,10 +89,6 @@ pub fn advance(cx: &VisualTestContext) -> Pixels {
         .advance(font_id, FONT_SIZE, 'm')
         .expect("the repo font has an advance")
         .width
-}
-
-pub fn data_folder() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../holm-editor/test_data/images")
 }
 
 /// A part of a note with every element, each block closed.

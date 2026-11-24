@@ -7,7 +7,9 @@ use gpui_kit::{
     VisualTestContext, point, px,
 };
 use holm_editor::{Changed, Editor, TextWidth, UpFromStart, WritingHelp};
-use holm_editor_test::{LINE_HEIGHT, MARGIN, advance, app, column_x, data_folder, open};
+use holm_editor_test::{LINE_HEIGHT, MARGIN, advance, app, column_x, open};
+
+use crate::support::data_folder;
 
 const WIDTH: Pixels = px(600.);
 const HEIGHT: Pixels = px(400.);

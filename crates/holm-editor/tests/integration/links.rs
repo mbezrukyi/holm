@@ -7,8 +7,10 @@ use gpui_kit::{
     VisualTestContext, point, px,
 };
 use holm_editor::{CursorLink, Editor, OpenFile, OpenLink, PasteFiles, PastedFile};
-use holm_editor_test::{LINE_HEIGHT, app, column_x, cursor_y, data_folder, open};
+use holm_editor_test::{LINE_HEIGHT, app, column_x, cursor_y, open};
 use holm_markdown::{LinkKind, Target};
+
+use crate::support::data_folder;
 
 const WIDTH: Pixels = px(600.);
 const HEIGHT: Pixels = px(400.);
