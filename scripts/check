@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Runs the checks that CI runs. It never changes files.
 #
-# Usage: scripts/check [fmt|check|deny|licenses]
+# Usage: scripts/check [fmt|layout|check|deny|licenses]
 #
-# With no argument it runs all four. CI runs each job on its own and installs the tools at the
+# With no argument it runs all five. CI runs each job on its own and installs the tools at the
 # versions pinned here.
 set -euo pipefail
 
@@ -28,6 +28,64 @@ check_fmt() {
   cargo fmt --all --check
 }
 
+# The one integration test binary of a crate. A second one needs the user's approval.
+test_targets=(integration)
+
+# The bans of the test layout. The places it names are in the Tests section of .claude/CLAUDE.md.
+check_layout() {
+  local files found failed=0
+  files=$(git ls-files --cached --others --exclude-standard -- crates | while read -r path; do
+    [[ -e $path ]] && echo "$path"
+  done)
+
+  layout_error() {
+    echo "scripts/check layout: $1" >&2
+    sed 's/^/  /' <<<"$2" >&2
+    failed=1
+  }
+
+  found=$(grep '\.rs$' <<<"$files" | xargs grep -nE '^\s*(pub(\([a-z]+\))? )?mod tests\s*\{' || true)
+  [[ -z $found ]] || layout_error \
+    'inline `mod tests { … }`: put the tests in the child file foo/tests.rs, declared `#[cfg(test)] mod tests;`' \
+    "$found"
+
+  found=$(grep '\.rs$' <<<"$files" | xargs awk '
+    /^[[:space:]]*#\[path/ { has_path = 1; next }
+    /^[[:space:]]*#\[cfg\(test\)\]/ { is_test = 1; next }
+    /^[[:space:]]*#\[/ { next }
+    {
+      if (has_path && (is_test || $0 ~ /mod [a-z_]*(test|speed)/)) print FILENAME ":" FNR ": " $0
+      has_path = 0; is_test = 0
+    }' || true)
+  [[ -z $found ]] || layout_error \
+    '`#[path]` on a test module: name the file foo/tests.rs or foo/tests/<topic>.rs, so `mod` finds it' \
+    "$found"
+
+  local targets
+  targets=$(IFS='|'; echo "${test_targets[*]}")
+  found=$({
+    grep -E '^crates/[^/]+/tests/[^/]+\.rs$' <<<"$files" || true
+    grep -E '^crates/[^/]+/tests/[^/]+/main\.rs$' <<<"$files" | grep -vE "/tests/($targets)/main\.rs$" || true
+    grep 'Cargo\.toml$' <<<"$files" | xargs grep -nF '[[test]]' || true
+  })
+  [[ -z $found ]] || layout_error \
+    "a test target outside tests/integration/: make it the module tests/integration/<topic>.rs" \
+    "$found"
+
+  found=$(grep 'Cargo\.toml$' <<<"$files" | xargs grep -nE '^name = ".*-test"' || true)
+  [[ -z $found ]] || layout_error \
+    'a test-only crate: put its helpers in the `testing` module of the crate they test, behind `test-support`' \
+    "$found"
+
+  found=$(grep -E '^crates/[^/]+/tests/' <<<"$files" |
+    grep -vE '\.rs$|/snapshots/[^/]+\.snap$|^crates/[^/]+/tests/proptest-regressions/[^/]+\.txt$' || true)
+  [[ -z $found ]] || layout_error \
+    "data under tests/: put it in test_data/<kind>/ at the crate root" \
+    "$found"
+
+  return "$failed"
+}
+
 check_check() {
   cargo clippy --locked --workspace --all-targets --all-features
   cargo test --locked --workspace
@@ -47,15 +105,16 @@ check_licenses() {
 }
 
 case "${1:-all}" in
-  fmt | check | deny | licenses) "check_$1" ;;
+  fmt | layout | check | deny | licenses) "check_$1" ;;
   all)
     check_fmt
+    check_layout
     check_check
     check_deny
     check_licenses
     ;;
   *)
-    echo "usage: scripts/check [fmt|check|deny|licenses]" >&2
+    echo "usage: scripts/check [fmt|layout|check|deny|licenses]" >&2
     exit 2
     ;;
 esac
