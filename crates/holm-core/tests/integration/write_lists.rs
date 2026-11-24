@@ -9,7 +9,7 @@ use std::path::Path;
 use crate::support::Folder;
 use holm_core::Core;
 use holm_core::model::Change;
-use holm_core_test::{folder_path, note_path, tag_name};
+use holm_core::testing::{folder_path, note_path, tag_name};
 
 /// Each folder and note file below `root`, by its path from `root`. A note maps to its text.
 fn files(root: &Path, dir: &Path, found: &mut BTreeMap<String, Option<String>>) {

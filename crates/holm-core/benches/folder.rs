@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::Command;
 
 use holm_core::model::{NoteSet, Order};
-use holm_core::sample::{self, NOTES};
+use holm_core::testing::sample::{self, NOTES};
 use holm_core::{Core, NotePath, TagName};
 use tempfile::TempDir;
 

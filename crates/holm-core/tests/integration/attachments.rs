@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::support::Folder;
 use holm_core::Error;
-use holm_core_test::note_path;
+use holm_core::testing::note_path;
 
 #[test]
 fn attach_file_copies_the_file_and_returns_the_path_from_the_note() {

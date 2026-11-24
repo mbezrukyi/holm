@@ -5,8 +5,8 @@ use std::os::unix::fs::PermissionsExt as _;
 
 use crate::support::Folder;
 use holm_core::model::{FileTarget, LinkTarget, NoteInfo, NoteSet, Order, Tag};
+use holm_core::testing::{folder_path, note_path, tag_name};
 use holm_core::{AbsolutePath, Core, NotePath, RawPath};
-use holm_core_test::{folder_path, note_path, tag_name};
 
 fn paths(notes: Vec<NoteInfo>) -> Vec<String> {
     crate::support::paths(notes.into_iter().map(|n| n.path))

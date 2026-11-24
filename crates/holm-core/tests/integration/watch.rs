@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use holm_core_test::{folder_path, note_path, tag_name};
+use holm_core::testing::{folder_path, note_path, tag_name};
 
 use std::cell::RefCell;
 use std::fs;

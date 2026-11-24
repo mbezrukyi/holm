@@ -5,8 +5,8 @@ use std::path::PathBuf;
 
 use crate::support::Folder;
 use holm_core::model::{DeleteCount, FileTarget, LinkTarget, NoteInfo, NoteSet, Order};
+use holm_core::testing::{folder_path, note_path};
 use holm_core::{Error, NameProblem};
-use holm_core_test::{folder_path, note_path};
 
 fn note(id: &str, body: &str) -> String {
     format!("---\nid: {id}\n---\n{body}")

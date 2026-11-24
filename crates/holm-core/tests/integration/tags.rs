@@ -5,8 +5,8 @@ use std::os::unix::fs::PermissionsExt as _;
 
 use crate::support::Folder;
 use holm_core::model::{NoteSet, Order};
+use holm_core::testing::{note_path, tag_name};
 use holm_core::{Error, TagName};
-use holm_core_test::{note_path, tag_name};
 
 fn tags(folder: &Folder, path: &str) -> Vec<TagName> {
     folder.core.read(&note_path(path)).unwrap().info.tags

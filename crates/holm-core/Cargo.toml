@@ -21,13 +21,12 @@ tracing.workspace = true
 ulid.workspace = true
 
 [features]
-# Publishes a big sample notes folder for speed tests in other crates.
+# Publishes the `testing` module: helpers for tests and benches, here and in other crates.
 test-support = []
 
 [dev-dependencies]
 divan.workspace = true
 holm-core = { path = ".", features = ["test-support"] }
-holm-core-test.workspace = true
 proptest.workspace = true
 
 [[bench]]

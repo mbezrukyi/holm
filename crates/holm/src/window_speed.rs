@@ -9,7 +9,7 @@
 use std::time::{Duration, Instant};
 
 use gpui_kit::{AnyWindowHandle, AppContext as _, Entity, Keystroke, TestAppContext};
-use holm_core::sample::{self, FOLDERS};
+use holm_core::testing::sample::{self, FOLDERS};
 
 use super::Startup;
 use crate::pane::NotePane;
