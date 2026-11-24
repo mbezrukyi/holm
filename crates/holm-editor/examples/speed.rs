@@ -110,7 +110,10 @@ fn main() -> ExitCode {
     let times = Rc::new(RefCell::new(Vec::new()));
     let result = times.clone();
     gpui_kit::application().run(move |cx: &mut App| {
-        let font = include_bytes!("../tests/fonts/FiraMono-Medium.ttf");
+        let font = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/test_data/fonts/FiraMono-Medium.ttf"
+        ));
         if let Err(error) = cx.text_system().add_fonts(vec![Cow::Borrowed(font)]) {
             eprintln!("The font does not load: {error}");
             cx.quit();
@@ -179,6 +182,6 @@ fn main() -> ExitCode {
 }
 
 fn one_mb_note() -> String {
-    const CHUNK: &str = include_str!("../tests/data/chunk.md");
+    const CHUNK: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/test_data/notes/chunk.md"));
     CHUNK.repeat(1_000_000 / CHUNK.len() + 1)
 }

@@ -71,7 +71,10 @@ fn main() {
                 let note = include_str!("look.md");
                 let from = if tail { note.find("## Code").unwrap_or(0) } else { 0 };
                 editor.set_text(&note[from..], cx);
-                editor.set_folder(Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data")), cx);
+                editor.set_folder(
+                    Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/images")),
+                    cx,
+                );
                 let appearance = if dark { Appearance::Dark } else { Appearance::Light };
                 editor.set_appearance(appearance, cx);
                 editor

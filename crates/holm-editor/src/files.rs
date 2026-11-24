@@ -67,25 +67,25 @@ mod tests {
     use super::*;
 
     fn data(name: &str) -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join(name)
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("test_data").join(name)
     }
 
     #[test]
     fn the_kind_of_a_path_comes_from_the_disk() {
-        assert_eq!(FileKind::of(&data("data")), FileKind::Folder);
-        let path = data("data/chunk.md");
+        assert_eq!(FileKind::of(&data("images")), FileKind::Folder);
+        let path = data("notes/chunk.md");
         let size = path.metadata().map_or_default(|meta| meta.len());
         assert_eq!(FileKind::of(&path), FileKind::File(size));
-        assert_eq!(FileKind::of(&data("data/gone.pdf")), FileKind::Missing);
-        assert!(matches!(FileKind::of(&data("data/cat.png")), FileKind::Image(_)));
+        assert_eq!(FileKind::of(&data("images/gone.pdf")), FileKind::Missing);
+        assert!(matches!(FileKind::of(&data("images/cat.png")), FileKind::Image(_)));
     }
 
     #[test]
     fn a_relative_target_starts_at_the_folder() {
         let mut files = LinkedFiles::default();
         assert_eq!(files.path("docs/a.pdf"), Path::new("docs/a.pdf"));
-        files.set_folder(Some(data("data")));
-        assert_eq!(files.path("cat.png"), data("data/cat.png"));
+        files.set_folder(Some(data("images")));
+        assert_eq!(files.path("cat.png"), data("images/cat.png"));
         assert!(matches!(files.kind("cat.png"), FileKind::Image(_)));
         assert_eq!(files.path("/abs/a.pdf"), Path::new("/abs/a.pdf"));
     }
