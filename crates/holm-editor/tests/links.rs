@@ -223,14 +223,14 @@ fn an_embedded_image_gets_a_line_of_its_own_and_a_file_stays_in_the_line() {
         editor.update(cx, |editor, cx| {
             editor.set_folder(Some(data_folder()), cx);
             editor.insert_link("x", &file("x.pdf"), LinkKind::Embedded, cx);
-            editor.insert_link("y", &file("../data"), LinkKind::Embedded, cx);
+            editor.insert_link("y", &file("../images"), LinkKind::Embedded, cx);
             editor.insert_link("cat", &file("cat.png"), LinkKind::Embedded, cx);
             editor.insert_link("z", &file("z.pdf"), LinkKind::Plain, cx);
         });
     });
     assert_eq!(
         text(&editor, cx),
-        "a ![x](x.pdf) ![y](../data)\n![cat](cat.png)\n[z](z.pdf) b"
+        "a ![x](x.pdf) ![y](../images)\n![cat](cat.png)\n[z](z.pdf) b"
     );
 }
 

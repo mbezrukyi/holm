@@ -36,7 +36,7 @@ pub fn app() -> TestAppContext {
     let text_system = gpui_kit::platform::current_platform(true).text_system();
     text_system
         .add_fonts(vec![Cow::Borrowed(include_bytes!(
-            "../../holm-editor/tests/fonts/FiraMono-Medium.ttf"
+            "../../holm-editor/test_data/fonts/FiraMono-Medium.ttf"
         ))])
         .expect("the repo font loads");
     let cx = TestAppContext::build_with_text_system(TestDispatcher::new(0), None, text_system);
@@ -93,11 +93,11 @@ pub fn advance(cx: &VisualTestContext) -> Pixels {
 }
 
 pub fn data_folder() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../holm-editor/tests/data")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../holm-editor/test_data/images")
 }
 
 /// A part of a note with every element, each block closed.
-const CHUNK: &str = include_str!("../../holm-editor/tests/data/chunk.md");
+const CHUNK: &str = include_str!("../../holm-editor/test_data/notes/chunk.md");
 
 pub fn one_mb_note() -> String {
     CHUNK.repeat(1_000_000 / CHUNK.len() + 1)

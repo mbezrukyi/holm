@@ -189,7 +189,10 @@ impl OutlineBuilder for Ink {
 mod tests {
     use super::*;
 
-    const FONT: &[u8] = include_bytes!("../tests/fonts/FiraMono-Medium.ttf");
+    const FONT: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/test_data/fonts/FiraMono-Medium.ttf"
+    ));
 
     fn band() -> Band {
         Band {

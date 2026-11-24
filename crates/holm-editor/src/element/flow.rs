@@ -874,9 +874,15 @@ mod tests {
         let text_system = gpui_kit::platform::current_platform(true).text_system();
         text_system
             .add_fonts(vec![
-                Cow::Borrowed(include_bytes!("../../tests/fonts/FiraMono-Medium.ttf")),
-                // A narrower font than Fira Mono, from the app.
-                Cow::Borrowed(include_bytes!("../../../holm/fonts/Inter-Regular.ttf")),
+                Cow::Borrowed(include_bytes!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/test_data/fonts/FiraMono-Medium.ttf"
+                ))),
+                // A narrower font than Fira Mono.
+                Cow::Borrowed(include_bytes!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/test_data/fonts/Inter-Regular.ttf"
+                ))),
             ])
             .expect("the repo font loads");
         let mut app = TestAppContext::build_with_text_system(TestDispatcher::new(0), None, text_system);
