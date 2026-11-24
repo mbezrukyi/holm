@@ -6,8 +6,8 @@ use gpui_kit::{
     Bounds, ClipboardItem, Entity, EntityInputHandler, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels,
     VisualTestContext, point, px,
 };
+use holm_editor::testing::{LINE_HEIGHT, MARGIN, advance, app, column_x, open};
 use holm_editor::{Changed, Editor, TextWidth, UpFromStart, WritingHelp};
-use holm_editor_test::{LINE_HEIGHT, MARGIN, advance, app, column_x, open};
 
 use crate::support::data_folder;
 

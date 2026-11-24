@@ -6,8 +6,8 @@ use gpui_kit::{
     ClipboardEntry, ClipboardItem, Entity, ExternalPaths, FileDropEvent, Image, ImageFormat, Modifiers, Pixels,
     VisualTestContext, point, px,
 };
+use holm_editor::testing::{LINE_HEIGHT, app, column_x, cursor_y, open};
 use holm_editor::{CursorLink, Editor, OpenFile, OpenLink, PasteFiles, PastedFile};
-use holm_editor_test::{LINE_HEIGHT, app, column_x, cursor_y, open};
 use holm_markdown::{LinkKind, Target};
 
 use crate::support::data_folder;

@@ -10,6 +10,8 @@ mod ink;
 mod model;
 mod palette;
 pub mod shortcuts;
+#[cfg(any(test, feature = "test-support"))]
+pub mod testing;
 
 pub use editor::{
     Appearance, Changed, CursorLink, CustomColors, Editor, OpenFile, OpenLink, PasteFiles, PastedFile, TextWidth,

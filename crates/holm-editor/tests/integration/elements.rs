@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use gpui_kit::{Entity, EntityInputHandler as _, Modifiers, Pixels, Point, VisualTestContext, point, px};
+use holm_editor::testing::{FONT_SIZE, LINE_HEIGHT, MARGIN, advance, app, column_x, open};
 use holm_editor::{Editor, OpenFile};
-use holm_editor_test::{FONT_SIZE, LINE_HEIGHT, MARGIN, advance, app, column_x, open};
 
 const WIDTH: Pixels = px(600.);
 const HEIGHT: Pixels = px(400.);

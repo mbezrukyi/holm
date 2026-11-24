@@ -1,6 +1,6 @@
 use gpui_kit::{ClipboardItem, Entity, Pixels, VisualTestContext, px};
 use holm_editor::Editor;
-use holm_editor_test::{LINE_HEIGHT, app, cursor_y, open};
+use holm_editor::testing::{LINE_HEIGHT, app, cursor_y, open};
 
 const WIDTH: Pixels = px(600.);
 const HEIGHT: Pixels = px(400.);

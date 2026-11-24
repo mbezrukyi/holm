@@ -2,8 +2,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gpui_kit::{ClipboardItem, Entity, Pixels, VisualTestContext, px};
+use holm_editor::testing::{app, open};
 use holm_editor::{CustomColors, Editor, WritingHelp};
-use holm_editor_test::{app, open};
 use holm_markdown::Color;
 
 const WIDTH: Pixels = px(600.);
