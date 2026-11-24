@@ -15,7 +15,7 @@ Call chains need `kernel.perf_event_paranoid` at 1 or lower. If it is higher, as
      cargo bench -p holm-editor --bench edit --no-run
    ```
 
-   For a test like `window_speed`, use `cargo test --release -p holm --no-run` and `CARGO_PROFILE_RELEASE_DEBUG`.
+   For a speed test like `window::tests::speed`, use `cargo test --release -p holm --no-run` and `CARGO_PROFILE_RELEASE_DEBUG`.
 
 2. Record one bench. The binary needs `--bench`, or it runs each case only once:
 
