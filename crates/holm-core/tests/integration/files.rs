@@ -3,14 +3,10 @@
 use std::fs;
 use std::path::PathBuf;
 
-use crate::support::Folder;
+use crate::support::{Folder, note};
 use holm_core::model::{DeleteCount, FileTarget, LinkTarget, NoteInfo, NoteSet, Order};
 use holm_core::testing::{folder_path, note_path};
 use holm_core::{Error, NameProblem};
-
-fn note(id: &str, body: &str) -> String {
-    format!("---\nid: {id}\n---\n{body}")
-}
 
 fn paths(notes: Vec<NoteInfo>) -> Vec<String> {
     let mut paths = crate::support::paths(notes.into_iter().map(|n| n.path));

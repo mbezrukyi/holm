@@ -9,20 +9,10 @@ use gpui_kit::{
 use holm_editor::testing::{LINE_HEIGHT, MARGIN, advance, app, column_x, open};
 use holm_editor::{Changed, Editor, TextWidth, UpFromStart, WritingHelp};
 
-use crate::support::data_folder;
+use crate::support::{click, data_folder, text};
 
 const WIDTH: Pixels = px(600.);
 const HEIGHT: Pixels = px(400.);
-
-fn text(editor: &Entity<Editor>, cx: &VisualTestContext) -> String {
-    cx.read(|cx| editor.read(cx).text().to_owned())
-}
-
-/// From the top left of the editor.
-fn click(cx: &mut VisualTestContext, column: f32, y: Pixels) {
-    let x = column_x(cx, column);
-    cx.simulate_click(point(x, y), Modifiers::none());
-}
 
 fn multi_click(cx: &mut VisualTestContext, column: f32, y: Pixels, count: usize) {
     let position = point(column_x(cx, column), y);

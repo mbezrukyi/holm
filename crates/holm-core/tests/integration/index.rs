@@ -3,22 +3,14 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt as _;
 
-use crate::support::Folder;
+use crate::support::{Folder, note_paths, note_with_frontmatter};
 use holm_core::model::{FileTarget, LinkTarget, NoteInfo, NoteSet, Order, Tag};
 use holm_core::testing::{folder_path, note_path, tag_name};
 use holm_core::{AbsolutePath, Core, NotePath, RawPath};
 
-fn paths(notes: Vec<NoteInfo>) -> Vec<String> {
-    crate::support::paths(notes.into_iter().map(|n| n.path))
-}
-
 fn found(folder: &Folder, text: &str) -> Vec<String> {
     let found = folder.core.search(text, Order::Title).unwrap();
     crate::support::paths(found.into_parts().1)
-}
-
-fn note(id: &str, extra: &str, body: &str) -> String {
-    format!("---\nid: {id}\n{extra}---\n{body}")
 }
 
 fn tag(name: &str, notes: usize, children: Vec<Tag>) -> Tag {
@@ -45,11 +37,11 @@ fn notes_come_last_change_first_with_pinned_notes_on_top() {
     folder.reopen();
 
     assert_eq!(
-        paths(folder.core.snapshot().notes(NoteSet::All, Order::LastChange)),
+        note_paths(folder.core.snapshot().notes(NoteSet::All, Order::LastChange)),
         ["pinned.md", "new.md", "work/mid.md", "old.md"]
     );
     assert_eq!(
-        paths(folder.core.snapshot().notes(NoteSet::All, Order::Title)),
+        note_paths(folder.core.snapshot().notes(NoteSet::All, Order::Title)),
         ["pinned.md", "work/mid.md", "new.md", "old.md"]
     );
 }
@@ -78,7 +70,7 @@ fn a_folder_lists_only_its_own_notes() {
         ("work/holm/c.md", ""),
     ]);
 
-    let mut work = paths(
+    let mut work = note_paths(
         folder
             .core
             .snapshot()
@@ -88,7 +80,7 @@ fn a_folder_lists_only_its_own_notes() {
 
     assert_eq!(work, ["work/a.md", "work/b.md"]);
     assert_eq!(
-        paths(
+        note_paths(
             folder
                 .core
                 .snapshot()
@@ -153,7 +145,7 @@ fn a_tag_lists_the_notes_of_its_child_tags_too() {
         ("d.md", "---\ntags: [Work]\n---\n"),
     ]);
 
-    let mut work = paths(
+    let mut work = note_paths(
         folder
             .core
             .snapshot()
@@ -163,7 +155,7 @@ fn a_tag_lists_the_notes_of_its_child_tags_too() {
 
     assert_eq!(work, ["a.md", "b.md"]);
     assert_eq!(
-        paths(
+        note_paths(
             folder
                 .core
                 .snapshot()
@@ -251,14 +243,14 @@ fn links_give_every_link_of_a_note_in_order() {
 #[test]
 fn backlinks_come_from_id_links_and_file_links() {
     let folder = Folder::new(&[
-        ("target.md", &note("01T", "", "[me](holm:01T)\n")),
+        ("target.md", &note_with_frontmatter("01T", "", "[me](holm:01T)\n")),
         ("by-id.md", "[t](holm:01T)\n"),
         ("by-heading.md", "[t](<holm:01T#Part>)\n"),
         ("work/by-path.md", "[t](../target.md)\n"),
         ("other.md", "[x](holm:01X) [y](target.pdf)\n"),
     ]);
 
-    let mut back = paths(folder.core.snapshot().backlinks(&note_path("target.md")));
+    let mut back = note_paths(folder.core.snapshot().backlinks(&note_path("target.md")));
     back.sort();
 
     assert_eq!(back, ["by-heading.md", "by-id.md", "work/by-path.md"]);
@@ -291,7 +283,7 @@ fn open_picks_up_changes_made_while_holm_was_closed() {
 
     folder.reopen();
 
-    let mut all = paths(folder.core.snapshot().notes(NoteSet::All, Order::Title));
+    let mut all = note_paths(folder.core.snapshot().notes(NoteSet::All, Order::Title));
     all.sort();
     assert_eq!(all, ["edited.md", "kept.md", "work/added.md"]);
     assert_eq!(found(&folder, "words"), ["edited.md"]);
@@ -316,8 +308,8 @@ fn open_sees_a_change_that_keeps_the_size_and_the_time() {
 
 #[test]
 fn a_copied_note_gets_a_new_id_and_the_known_note_keeps_its_id() {
-    let mut folder = Folder::new(&[("b.md", &note("01SAME", "", "# B\n"))]);
-    folder.write("a.md", &note("01SAME", "author: me\n", "# Copy\n"));
+    let mut folder = Folder::new(&[("b.md", &note_with_frontmatter("01SAME", "", "# B\n"))]);
+    folder.write("a.md", &note_with_frontmatter("01SAME", "author: me\n", "# Copy\n"));
     let time = folder.set_time("a.md", 1_000);
 
     folder.reopen();
@@ -327,14 +319,20 @@ fn a_copied_note_gets_a_new_id_and_the_known_note_keeps_its_id() {
     assert_eq!(b.info.id.unwrap().as_str(), "01SAME");
     let new = a.info.id.unwrap();
     assert_ne!(new.as_str(), "01SAME");
-    assert_eq!(folder.text("a.md"), note(new.as_str(), "author: me\n", "# Copy\n"));
+    assert_eq!(
+        folder.text("a.md"),
+        note_with_frontmatter(new.as_str(), "author: me\n", "# Copy\n")
+    );
     assert_eq!(a.info.modified, time, "the copy keeps its time");
     assert_eq!(folder.core.snapshot().notes(NoteSet::All, Order::Title).len(), 2);
 }
 
 #[test]
 fn the_first_of_two_new_notes_with_the_same_id_keeps_it() {
-    let folder = Folder::new(&[("a.md", &note("01SAME", "", "")), ("b.md", &note("01SAME", "", ""))]);
+    let folder = Folder::new(&[
+        ("a.md", &note_with_frontmatter("01SAME", "", "")),
+        ("b.md", &note_with_frontmatter("01SAME", "", "")),
+    ]);
 
     let a = folder.core.read(&note_path("a.md")).unwrap();
     let b = folder.core.read(&note_path("b.md")).unwrap();
@@ -346,7 +344,7 @@ fn the_first_of_two_new_notes_with_the_same_id_keeps_it() {
 #[test]
 fn a_note_moved_while_holm_was_closed_keeps_its_id() {
     let mut folder = Folder::new(&[
-        ("a.md", &note("01MOVE", "", "# A\n")),
+        ("a.md", &note_with_frontmatter("01MOVE", "", "# A\n")),
         ("link.md", "[a](holm:01MOVE)\n"),
     ]);
     fs::create_dir(folder.path("work")).unwrap();
@@ -354,23 +352,23 @@ fn a_note_moved_while_holm_was_closed_keeps_its_id() {
 
     folder.reopen();
 
-    assert_eq!(folder.text("work/a.md"), note("01MOVE", "", "# A\n"));
+    assert_eq!(folder.text("work/a.md"), note_with_frontmatter("01MOVE", "", "# A\n"));
     assert_eq!(
-        paths(folder.core.snapshot().backlinks(&note_path("work/a.md"))),
+        note_paths(folder.core.snapshot().backlinks(&note_path("work/a.md"))),
         ["link.md"]
     );
 }
 
 #[test]
 fn saving_a_note_with_the_id_of_a_deleted_note_keeps_the_id() {
-    let folder = Folder::new(&[("a.md", &note("01GONE", "", ""))]);
+    let folder = Folder::new(&[("a.md", &note_with_frontmatter("01GONE", "", ""))]);
     fs::remove_file(folder.path("a.md")).unwrap();
-    folder.write("b.md", &note("01GONE", "", ""));
+    folder.write("b.md", &note_with_frontmatter("01GONE", "", ""));
     let saved = folder.core.save(&note_path("b.md"), "Text\n", None).unwrap();
 
     assert_eq!(saved.info.id.unwrap().as_str(), "01GONE");
     assert_eq!(
-        paths(folder.core.snapshot().notes(NoteSet::All, Order::Title)),
+        note_paths(folder.core.snapshot().notes(NoteSet::All, Order::Title)),
         ["b.md"]
     );
 }
@@ -383,7 +381,7 @@ fn a_broken_index_is_rebuilt() {
 
     let core = Core::open(folder.dir.path(), cache.path()).unwrap();
 
-    assert_eq!(paths(core.snapshot().notes(NoteSet::All, Order::Title)), ["a.md"]);
+    assert_eq!(note_paths(core.snapshot().notes(NoteSet::All, Order::Title)), ["a.md"]);
 }
 
 #[test]
@@ -399,7 +397,7 @@ fn an_index_with_another_shape_is_rebuilt() {
 
     let core = Core::open(folder.dir.path(), cache.path()).unwrap();
 
-    assert_eq!(paths(core.snapshot().notes(NoteSet::All, Order::Title)), ["a.md"]);
+    assert_eq!(note_paths(core.snapshot().notes(NoteSet::All, Order::Title)), ["a.md"]);
 }
 
 #[test]
@@ -415,7 +413,7 @@ fn an_index_row_with_a_bad_path_never_reaches_the_snapshot() {
     let core = Core::open(folder.dir.path(), cache.path()).unwrap();
 
     assert_eq!(
-        paths(core.snapshot().notes(NoteSet::All, Order::Title)),
+        note_paths(core.snapshot().notes(NoteSet::All, Order::Title)),
         ["a.md", "b.md"]
     );
 }

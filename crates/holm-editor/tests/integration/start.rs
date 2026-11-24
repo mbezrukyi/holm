@@ -2,11 +2,13 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gpui_kit::{
-    AppContext as _, Entity, FocusHandle, Focusable as _, Modifiers, Pixels, Point, ScrollDelta, ScrollEvent,
+    AppContext as _, Entity, FocusHandle, Focusable as _, Modifiers, Pixels, ScrollDelta, ScrollEvent,
     VisualTestContext, point, px,
 };
 use holm_editor::Editor;
-use holm_editor::testing::{LINE_HEIGHT, app, column_x, open};
+use holm_editor::testing::{LINE_HEIGHT, app, open};
+
+use crate::support::{at, text};
 
 const WIDTH: Pixels = px(600.);
 const HEIGHT: Pixels = px(200.);
@@ -69,15 +71,6 @@ fn open_with_start<'a>(
 fn focus(cx: &mut VisualTestContext, handle: &FocusHandle) {
     cx.update(|window, cx| window.focus(handle, cx));
     cx.run_until_parked();
-}
-
-fn text(editor: &Entity<Editor>, cx: &VisualTestContext) -> String {
-    cx.read(|cx| editor.read(cx).text().to_owned())
-}
-
-/// From the top left of the editor.
-fn at(cx: &VisualTestContext, column: f32, y: Pixels) -> Point<Pixels> {
-    point(column_x(cx, column), y)
 }
 
 /// Up when `by` is below zero.

@@ -2,12 +2,10 @@ use gpui_kit::{ClipboardItem, Entity, Pixels, VisualTestContext, px};
 use holm_editor::Editor;
 use holm_editor::testing::{LINE_HEIGHT, app, cursor_y, open};
 
+use crate::support::text;
+
 const WIDTH: Pixels = px(600.);
 const HEIGHT: Pixels = px(400.);
-
-fn text(editor: &Entity<Editor>, cx: &VisualTestContext) -> String {
-    cx.read(|cx| editor.read(cx).text().to_owned())
-}
 
 fn selected(editor: &Entity<Editor>, cx: &VisualTestContext) -> String {
     cx.read(|cx| editor.read(cx).selected_text().to_owned())
