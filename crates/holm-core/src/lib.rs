@@ -12,11 +12,11 @@ mod nodes;
 mod paths;
 mod reconcile;
 mod retag;
-#[cfg(feature = "test-support")]
-pub mod sample;
 mod snapshot;
 mod store;
 mod tag;
+#[cfg(any(test, feature = "test-support"))]
+pub mod testing;
 mod watch;
 
 use std::path::Path;

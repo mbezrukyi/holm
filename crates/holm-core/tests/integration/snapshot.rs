@@ -4,8 +4,8 @@ use std::fs;
 
 use crate::support::Folder;
 use holm_core::model::{NoteId, NoteInfo, NoteSet, Order, Tag};
+use holm_core::testing::{folder_path, note_path, tag_name};
 use holm_core::{Core, NotePath, Result, Snapshot, TagName};
-use holm_core_test::{folder_path, note_path, tag_name};
 
 fn titles(snapshot: &Snapshot) -> Vec<String> {
     snapshot

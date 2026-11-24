@@ -3431,7 +3431,6 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "holm-core",
- "holm-core-test",
  "holm-markdown",
  "imbl",
  "notify",
@@ -3443,14 +3442,6 @@ dependencies = [
  "thiserror 2.0.21",
  "tracing",
  "ulid",
-]
-
-[[package]]
-name = "holm-core-test"
-version = "0.1.1"
-dependencies = [
- "holm-core",
- "tempfile",
 ]
 
 [[package]]

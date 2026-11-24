@@ -1,6 +1,10 @@
+//! Helpers for the tests and benches of this crate and of the crates that use it.
+
 #![expect(clippy::unwrap_used, reason = "test helpers")]
 
-use holm_core::{FolderPath, NotePath, TagName};
+pub mod sample;
+
+use crate::{FolderPath, NotePath, TagName};
 
 pub fn note_path(path: &str) -> NotePath {
     NotePath::new(path).unwrap()

@@ -9,8 +9,8 @@ use std::path::PathBuf;
 
 use crate::support::Folder;
 use holm_core::model::{LinkTarget, NoteInfo, NoteSet, Order, Tag};
+use holm_core::testing::{folder_path, tag_name};
 use holm_core::{Core, NotePath, TagName};
-use holm_core_test::{folder_path, tag_name};
 use proptest::prelude::*;
 
 const WORDS: [&str; 4] = ["apple", "Berry", "café", "dough"];
