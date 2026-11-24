@@ -37,9 +37,13 @@ fn report(text: &str) -> String {
 
 #[test]
 fn samples() {
-    insta::glob!("samples/*.md", |path| {
-        let text = fs::read_to_string(path).unwrap();
-        assert_eq!(NoteFile::parse(&text).to_string(), text);
-        insta::assert_snapshot!(report(&text));
-    });
+    insta::glob!(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/test_data/samples"),
+        "*.md",
+        |path| {
+            let text = fs::read_to_string(path).unwrap();
+            assert_eq!(NoteFile::parse(&text).to_string(), text);
+            insta::assert_snapshot!(report(&text));
+        }
+    );
 }

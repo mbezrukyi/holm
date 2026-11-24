@@ -1,7 +1,7 @@
 ---
 source: crates/holm-markdown/tests/bodies.rs
 expression: report(&text)
-input_file: crates/holm-markdown/tests/bodies/links.md
+input_file: crates/holm-markdown/test_data/bodies/links.md
 ---
 --- blocks ---
 Paragraph 0..45 "[Holm ideas](holm:01JC3X0000000000000000000A)"

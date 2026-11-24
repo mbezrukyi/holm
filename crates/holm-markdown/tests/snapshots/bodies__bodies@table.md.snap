@@ -1,7 +1,7 @@
 ---
 source: crates/holm-markdown/tests/bodies.rs
 expression: report(&text)
-input_file: crates/holm-markdown/tests/bodies/table.md
+input_file: crates/holm-markdown/test_data/bodies/table.md
 ---
 --- blocks ---
 Table { alignments: [Left, Right] } 0..58 "| Name | Size |\n|:-----|-----:|\n| `a`  | **1** |\n| b | 2 |"

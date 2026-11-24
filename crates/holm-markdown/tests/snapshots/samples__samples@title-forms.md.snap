@@ -1,7 +1,7 @@
 ---
 source: crates/holm-markdown/tests/samples.rs
 expression: report(&text)
-input_file: crates/holm-markdown/tests/samples/title-forms.md
+input_file: crates/holm-markdown/test_data/samples/title-forms.md
 ---
 line ending: Lf
 id: Some("01JC3X5Z8K")

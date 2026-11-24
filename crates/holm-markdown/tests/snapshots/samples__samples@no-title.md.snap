@@ -1,7 +1,7 @@
 ---
 source: crates/holm-markdown/tests/samples.rs
 expression: report(&text)
-input_file: crates/holm-markdown/tests/samples/no-title.md
+input_file: crates/holm-markdown/test_data/samples/no-title.md
 ---
 line ending: Lf
 id: None

@@ -1,7 +1,7 @@
 ---
 source: crates/holm-markdown/tests/bodies.rs
 expression: report(&text)
-input_file: crates/holm-markdown/tests/bodies/code.md
+input_file: crates/holm-markdown/test_data/bodies/code.md
 ---
 --- blocks ---
 Code { language: Some("rust"), style: Fenced } 0..31 "```rust ignore\nfn main() {}\n```"

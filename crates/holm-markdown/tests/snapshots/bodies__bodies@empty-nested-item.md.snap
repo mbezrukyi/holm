@@ -1,7 +1,7 @@
 ---
 source: crates/holm-markdown/tests/bodies.rs
 expression: report(&text)
-input_file: crates/holm-markdown/tests/bodies/empty-nested-item.md
+input_file: crates/holm-markdown/test_data/bodies/empty-nested-item.md
 ---
 --- blocks ---
 List { start: None } 0..8 "- a\n  - "
