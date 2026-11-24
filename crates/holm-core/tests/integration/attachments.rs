@@ -1,8 +1,9 @@
 use std::fs;
 use std::path::Path;
 
+use crate::support::Folder;
 use holm_core::Error;
-use holm_core_test::{Folder, note_path};
+use holm_core_test::note_path;
 
 #[test]
 fn attach_file_copies_the_file_and_returns_the_path_from_the_note() {
@@ -118,7 +119,7 @@ fn attachments_do_not_show_as_folders_or_notes() {
             .core
             .snapshot()
             .folders()
-            .map(holm_core_test::path_buf)
+            .map(crate::support::path_buf)
             .collect::<Vec<_>>(),
         [] as [std::path::PathBuf; 0]
     );

@@ -3,9 +3,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::support::Folder;
 use holm_core::model::{FileTarget, LinkTarget, NoteId};
 use holm_core::{Error, RawPath};
-use holm_core_test::{Folder, folder_path, note_path, tag_name};
+use holm_core_test::{folder_path, note_path, tag_name};
 
 fn note(id: &str, body: &str) -> String {
     format!("---\nid: {id}\n---\n{body}")
