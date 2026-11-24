@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+use holm_core::model::NoteInfo;
 use holm_core::{Core, Feed};
 use tempfile::TempDir;
 
@@ -105,6 +106,20 @@ fn write(root: &Path, path: &str, text: &str) {
 
 pub(crate) fn paths<P: Display>(items: impl IntoIterator<Item = P>) -> Vec<String> {
     items.into_iter().map(|p| p.to_string()).collect()
+}
+
+pub(crate) fn note_paths(notes: Vec<NoteInfo>) -> Vec<String> {
+    paths(notes.into_iter().map(|note| note.path))
+}
+
+/// The text of a note file with only an id in its frontmatter.
+pub(crate) fn note(id: &str, body: &str) -> String {
+    note_with_frontmatter(id, "", body)
+}
+
+/// The text of a note file. `frontmatter` holds the lines after the id, each with its line end.
+pub(crate) fn note_with_frontmatter(id: &str, frontmatter: &str, body: &str) -> String {
+    format!("---\nid: {id}\n{frontmatter}---\n{body}")
 }
 
 pub(crate) fn path_buf(path: impl Display) -> PathBuf {

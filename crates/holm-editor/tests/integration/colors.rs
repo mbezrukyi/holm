@@ -6,12 +6,10 @@ use holm_editor::testing::{app, open};
 use holm_editor::{CustomColors, Editor, WritingHelp};
 use holm_markdown::Color;
 
+use crate::support::text;
+
 const WIDTH: Pixels = px(600.);
 const HEIGHT: Pixels = px(400.);
-
-fn text(editor: &Entity<Editor>, cx: &VisualTestContext) -> String {
-    cx.read(|cx| editor.read(cx).text().to_owned())
-}
 
 fn color(value: &str) -> Color {
     Color::from_hex(value).unwrap_or_else(|| panic!("{value} is a color"))

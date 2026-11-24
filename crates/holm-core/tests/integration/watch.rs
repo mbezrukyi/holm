@@ -15,6 +15,8 @@ use holm_core::model::{Change, ChangeList, FileTarget, LinkTarget, NoteId, NoteI
 use holm_core::{ChangeLists, Core, Error, Feed, FolderPath, NotePath, RawPath, Revision};
 use tempfile::TempDir;
 
+use crate::support::note_with_frontmatter;
+
 /// A notes folder with a core that sees changes only through its feed.
 struct Fed {
     dir: TempDir,
@@ -69,10 +71,6 @@ fn write(path: &std::path::Path, text: &str) {
     fs::write(path, text).unwrap();
 }
 
-fn note(id: &str, extra: &str, body: &str) -> String {
-    format!("---\nid: {id}\n{extra}---\n{body}")
-}
-
 fn previews(core: &Core) -> Vec<String> {
     let mut previews: Vec<String> = core
         .snapshot()
@@ -86,9 +84,9 @@ fn previews(core: &Core) -> Vec<String> {
 
 #[test]
 fn an_outside_edit_updates_the_index_and_sends_a_change() {
-    let fed = Fed::new(&[("a.md", &note("A", "", "# Old\n"))]);
+    let fed = Fed::new(&[("a.md", &note_with_frontmatter("A", "", "# Old\n"))]);
 
-    fed.write("a.md", &note("A", "", "# New words\n"));
+    fed.write("a.md", &note_with_frontmatter("A", "", "# New words\n"));
     fed.feed.changed(["a.md"]).unwrap();
 
     assert_eq!(fed.take(), [Change::Changed(note_path("a.md"))]);
@@ -109,7 +107,7 @@ fn a_new_file_is_added() {
 
 #[test]
 fn a_move_in_two_batches_with_the_old_path_first_is_a_remove_and_an_add() {
-    let fed = Fed::new(&[("a.md", &note("A", "", "# A\n"))]);
+    let fed = Fed::new(&[("a.md", &note_with_frontmatter("A", "", "# A\n"))]);
 
     fs::rename(fed.path("a.md"), fed.path("z.md")).unwrap();
     fed.feed.changed(["a.md"]).unwrap();
@@ -135,8 +133,8 @@ fn a_deleted_file_is_removed() {
 #[test]
 fn a_moved_note_keeps_its_id_and_its_backlinks() {
     let fed = Fed::new(&[
-        ("a.md", &note("A", "", "# A\n")),
-        ("b.md", &note("B", "", "[a](holm:A)\n")),
+        ("a.md", &note_with_frontmatter("A", "", "# A\n")),
+        ("b.md", &note_with_frontmatter("B", "", "[a](holm:A)\n")),
     ]);
 
     fs::create_dir(fed.path("work")).unwrap();
@@ -158,7 +156,7 @@ fn a_moved_note_keeps_its_id_and_its_backlinks() {
 
 #[test]
 fn a_move_with_the_new_path_first_is_one_change() {
-    let fed = Fed::new(&[("a.md", &note("A", "", "# A\n"))]);
+    let fed = Fed::new(&[("a.md", &note_with_frontmatter("A", "", "# A\n"))]);
 
     fs::rename(fed.path("a.md"), fed.path("z.md")).unwrap();
     // In two batches, the core sees the note at the new path before the old path is gone.
@@ -303,7 +301,7 @@ fn each_list_carries_the_snapshot_of_its_revision() {
 
 #[test]
 fn a_list_never_comes_before_its_snapshot() {
-    let fed = Fed::new(&[("a.md", &note("a", "", "zero\n"))]);
+    let fed = Fed::new(&[("a.md", &note_with_frontmatter("a", "", "zero\n"))]);
     let core = fed.core.clone();
     let path = note_path("a.md");
     let writer = std::thread::spawn(move || {
@@ -408,11 +406,14 @@ fn a_deleted_folder_removes_its_notes() {
 #[test]
 fn a_renamed_folder_keeps_search_links_and_file_links_of_its_notes() {
     let fed = Fed::new(&[
-        ("work/a.md", &note("A", "tags: [food]\n", "# A\nPotatoes [c](holm:C)\n")),
-        ("work/pic.md", &note("P", "", "# Pic\n![p](pic.png)\n")),
+        (
+            "work/a.md",
+            &note_with_frontmatter("A", "tags: [food]\n", "# A\nPotatoes [c](holm:C)\n"),
+        ),
+        ("work/pic.md", &note_with_frontmatter("P", "", "# Pic\n![p](pic.png)\n")),
         ("work/plain.md", "# Plain\nCarrots\n"),
-        ("b.md", &note("B", "", "[a](holm:A)\n")),
-        ("c.md", &note("C", "", "# C\n")),
+        ("b.md", &note_with_frontmatter("B", "", "[a](holm:A)\n")),
+        ("c.md", &note_with_frontmatter("C", "", "# C\n")),
     ]);
     let links = fed.core.snapshot().links(&note_path("work/a.md")).to_vec();
     fed.take();
@@ -460,13 +461,13 @@ fn a_renamed_folder_keeps_search_links_and_file_links_of_its_notes() {
 
 #[test]
 fn a_tag_change_sends_a_tags_change() {
-    let fed = Fed::new(&[("a.md", &note("A", "", "# A\n"))]);
+    let fed = Fed::new(&[("a.md", &note_with_frontmatter("A", "", "# A\n"))]);
 
-    fed.write("a.md", &note("A", "tags: [work]\n", "# A\n"));
+    fed.write("a.md", &note_with_frontmatter("A", "tags: [work]\n", "# A\n"));
     fed.feed.changed(["a.md"]).unwrap();
     assert_eq!(fed.take(), [Change::Changed(note_path("a.md")), Change::Tags]);
 
-    fed.write("a.md", &note("A", "tags: [work]\n", "# A\n\nText.\n"));
+    fed.write("a.md", &note_with_frontmatter("A", "tags: [work]\n", "# A\n\nText.\n"));
     fed.feed.changed(["a.md"]).unwrap();
     assert_eq!(fed.take(), [Change::Changed(note_path("a.md"))]);
 
@@ -488,14 +489,14 @@ fn modified(path: &std::path::Path) -> std::time::SystemTime {
 
 #[test]
 fn a_second_write_in_the_same_tick_is_a_change() {
-    let fed = Fed::new(&[("a.md", &note("A", "", "# A\n"))]);
+    let fed = Fed::new(&[("a.md", &note_with_frontmatter("A", "", "# A\n"))]);
     let seen = fed.core.snapshot().revision();
 
-    fed.write("a.md", &note("A", "tags: [work]\n", "# A\n"));
+    fed.write("a.md", &note_with_frontmatter("A", "tags: [work]\n", "# A\n"));
     let first = modified(&fed.path("a.md"));
     fed.feed.changed(["a.md"]).unwrap();
     assert_eq!(fed.take(), [Change::Changed(note_path("a.md")), Change::Tags]);
-    fed.write("a.md", &note("A", "tags: [work]\n", "# A\n\nText.\n"));
+    fed.write("a.md", &note_with_frontmatter("A", "tags: [work]\n", "# A\n\nText.\n"));
     set_modified(&fed.path("a.md"), first);
     fed.feed.changed(["a.md"]).unwrap();
     assert_eq!(fed.take(), [Change::Changed(note_path("a.md"))]);
@@ -511,11 +512,11 @@ fn a_second_write_in_the_same_tick_is_a_change() {
 
 #[test]
 fn a_write_of_the_same_size_in_the_same_tick_is_a_change() {
-    let fed = Fed::new(&[("a.md", &note("A", "", "# A\n\nOne.\n"))]);
+    let fed = Fed::new(&[("a.md", &note_with_frontmatter("A", "", "# A\n\nOne.\n"))]);
     let first = modified(&fed.path("a.md"));
     let seen = fed.core.snapshot().revision();
 
-    fed.write("a.md", &note("A", "", "# A\n\nTwo.\n"));
+    fed.write("a.md", &note_with_frontmatter("A", "", "# A\n\nTwo.\n"));
     set_modified(&fed.path("a.md"), first);
     fed.feed.changed(["a.md"]).unwrap();
 
@@ -529,7 +530,7 @@ fn a_write_of_the_same_size_in_the_same_tick_is_a_change() {
 fn a_new_mode_alone_is_no_change() {
     use std::os::unix::fs::PermissionsExt as _;
 
-    let fed = Fed::new(&[("a.md", &note("A", "", "# A\n"))]);
+    let fed = Fed::new(&[("a.md", &note_with_frontmatter("A", "", "# A\n"))]);
     let seen = fed.core.snapshot().revision();
 
     fs::set_permissions(fed.path("a.md"), fs::Permissions::from_mode(0o600)).unwrap();
@@ -542,7 +543,7 @@ fn a_new_mode_alone_is_no_change() {
 
 #[test]
 fn the_event_of_a_write_of_holm_is_no_outside_change() {
-    let fed = Fed::new(&[("a.md", &note("A", "", "# A\n"))]);
+    let fed = Fed::new(&[("a.md", &note_with_frontmatter("A", "", "# A\n"))]);
     let seen = fed.core.snapshot().revision();
 
     fed.core.save(&note_path("a.md"), "# A\n\nOne.\n", Some(seen)).unwrap();
@@ -595,7 +596,7 @@ fn the_empty_path_checks_the_whole_notes_folder() {
 
 #[test]
 fn a_copied_note_gets_a_new_id() {
-    let fed = Fed::new(&[("a.md", &note("A", "", "# A\n"))]);
+    let fed = Fed::new(&[("a.md", &note_with_frontmatter("A", "", "# A\n"))]);
 
     fs::copy(fed.path("a.md"), fed.path("copy.md")).unwrap();
     fed.feed.changed(["copy.md"]).unwrap();
@@ -730,7 +731,7 @@ mod real_events {
 
     #[test]
     fn a_rename_comes_as_a_move() {
-        let (dir, _cache, _core, mut changes) = open(&[("a.md", &note("A", "", "# A\n"))]);
+        let (dir, _cache, _core, mut changes) = open(&[("a.md", &note_with_frontmatter("A", "", "# A\n"))]);
 
         fs::rename(dir.path().join("a.md"), dir.path().join("b.md")).unwrap();
 
@@ -745,9 +746,12 @@ mod real_events {
 
     #[test]
     fn walks_and_reads_do_not_raise_the_revision() {
-        let (dir, cache, core, mut changes) = open(&[("a.md", &note("A", "", "# A\n"))]);
+        let (dir, cache, core, mut changes) = open(&[("a.md", &note_with_frontmatter("A", "", "# A\n"))]);
         // A folder that moves in comes as one event, so the core walks it in one batch.
-        write(&cache.path().join("work/b.md"), &note("B", "", "# B\n"));
+        write(
+            &cache.path().join("work/b.md"),
+            &note_with_frontmatter("B", "", "# B\n"),
+        );
         fs::rename(cache.path().join("work"), dir.path().join("work")).unwrap();
         while !next(&mut changes).contains(&Change::Folders) {}
         std::thread::sleep(Duration::from_millis(300));

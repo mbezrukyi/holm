@@ -2,7 +2,7 @@
 
 use std::fs;
 
-use crate::support::Folder;
+use crate::support::{Folder, note_paths};
 use holm_core::model::{NoteId, NoteInfo, NoteSet, Order, Tag};
 use holm_core::testing::{folder_path, note_path, tag_name};
 use holm_core::{Core, NotePath, Result, Snapshot, TagName};
@@ -13,10 +13,6 @@ fn titles(snapshot: &Snapshot) -> Vec<String> {
         .into_iter()
         .map(|note| note.title)
         .collect()
-}
-
-fn paths(notes: Vec<NoteInfo>) -> Vec<String> {
-    crate::support::paths(notes.into_iter().map(|note| note.path))
 }
 
 fn folders(snapshot: &Snapshot) -> Vec<String> {
@@ -51,7 +47,7 @@ fn note_writes_show_in_the_snapshot_after_them() {
 
     let (note, snapshot) = one_step(core, |core| core.create(&folder_path("work"), "Untitled"));
     assert_eq!(
-        paths(snapshot.notes(NoteSet::In(&folder_path("work")), Order::Title)),
+        note_paths(snapshot.notes(NoteSet::In(&folder_path("work")), Order::Title)),
         ["work/Untitled.md"]
     );
 
@@ -59,12 +55,15 @@ fn note_writes_show_in_the_snapshot_after_them() {
         core.save(&note.info.path, "# Ideas\n[plans](holm:P)\n", None)
     });
     assert_eq!(titles(&snapshot), ["Plans", "Untitled"]);
-    assert_eq!(paths(snapshot.backlinks(&note_path("Plans.md"))), ["work/Untitled.md"]);
+    assert_eq!(
+        note_paths(snapshot.backlinks(&note_path("Plans.md"))),
+        ["work/Untitled.md"]
+    );
 
     let (info, snapshot) = one_step(core, |core| core.rename_note(&note_path("work/Untitled.md"), "Ideas"));
     assert_eq!(info.path, note_path("work/Ideas.md"));
     assert_eq!(
-        paths(snapshot.notes(NoteSet::In(&folder_path("work")), Order::Title)),
+        note_paths(snapshot.notes(NoteSet::In(&folder_path("work")), Order::Title)),
         ["work/Ideas.md"]
     );
 
@@ -72,17 +71,17 @@ fn note_writes_show_in_the_snapshot_after_them() {
         core.move_note(&note_path("work/Ideas.md"), &folder_path(""))
     });
     assert_eq!(
-        paths(snapshot.notes(NoteSet::In(&folder_path("")), Order::Title)),
+        note_paths(snapshot.notes(NoteSet::In(&folder_path("")), Order::Title)),
         ["Ideas.md", "Plans.md"]
     );
-    assert_eq!(paths(snapshot.backlinks(&note_path("Plans.md"))), ["Ideas.md"]);
+    assert_eq!(note_paths(snapshot.backlinks(&note_path("Plans.md"))), ["Ideas.md"]);
 
     let (_, snapshot) = one_step(core, |core| {
         core.add_tag(&note_path("Ideas.md"), &tag_name("work/holm"))
     });
     assert_eq!(tag_names(&snapshot), ["work"]);
     assert_eq!(
-        paths(snapshot.notes(NoteSet::WithTag(&tag_name("work")), Order::Title)),
+        note_paths(snapshot.notes(NoteSet::WithTag(&tag_name("work")), Order::Title)),
         ["Ideas.md"]
     );
 
@@ -130,7 +129,7 @@ fn folder_writes_show_in_the_snapshot_after_them() {
     let (_, snapshot) = one_step(core, |core| core.rename_folder(&folder_path("work"), "job"));
     assert_eq!(folders(&snapshot), ["Home", "job", "job/old"]);
     assert_eq!(
-        paths(snapshot.notes(NoteSet::In(&folder_path("job/old")), Order::Title)),
+        note_paths(snapshot.notes(NoteSet::In(&folder_path("job/old")), Order::Title)),
         ["job/old/b.md"]
     );
 
@@ -310,9 +309,9 @@ fn newest_and_backlinks_put_the_newest_change_first_with_no_pins_on_top() {
     let snapshot = folder.core.snapshot();
     let linked = ["a/z.md", "a b.md", "a.md", "b.md", "old.md"];
 
-    assert_eq!(paths(snapshot.backlinks(&note_path("target.md"))), linked);
+    assert_eq!(note_paths(snapshot.backlinks(&note_path("target.md"))), linked);
     assert_eq!(
-        paths(snapshot.newest(NoteSet::All)),
+        note_paths(snapshot.newest(NoteSet::All)),
         [&linked[..], &["target.md"]].concat()
     );
 }

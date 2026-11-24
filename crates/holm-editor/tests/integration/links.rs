@@ -4,20 +4,16 @@ use std::rc::Rc;
 
 use gpui_kit::{
     ClipboardEntry, ClipboardItem, Entity, ExternalPaths, FileDropEvent, Image, ImageFormat, Modifiers, Pixels,
-    VisualTestContext, point, px,
+    VisualTestContext, px,
 };
-use holm_editor::testing::{LINE_HEIGHT, app, column_x, cursor_y, open};
+use holm_editor::testing::{LINE_HEIGHT, app, cursor_y, open};
 use holm_editor::{CursorLink, Editor, OpenFile, OpenLink, PasteFiles, PastedFile};
 use holm_markdown::{LinkKind, Target};
 
-use crate::support::data_folder;
+use crate::support::{at, data_folder, text};
 
 const WIDTH: Pixels = px(600.);
 const HEIGHT: Pixels = px(400.);
-
-fn text(editor: &Entity<Editor>, cx: &VisualTestContext) -> String {
-    cx.read(|cx| editor.read(cx).text().to_owned())
-}
 
 /// Collects the events of type `E` that the editor sends.
 fn events<E: Clone + 'static>(editor: &Entity<Editor>, cx: &mut VisualTestContext) -> Rc<RefCell<Vec<E>>>
@@ -44,11 +40,6 @@ fn note(id: &str) -> Target {
 
 fn link_at_cursor(editor: &Entity<Editor>, cx: &VisualTestContext) -> Option<CursorLink> {
     cx.read(|cx| editor.read(cx).link_at_cursor())
-}
-
-/// From the top left of the editor.
-fn at(cx: &VisualTestContext, column: f32, y: Pixels) -> gpui_kit::Point<Pixels> {
-    point(column_x(cx, column), y)
 }
 
 const LINKS: &str = "top\n\nsee [plans](holm:X) and [site](https://a.org)";

@@ -3,14 +3,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::support::Folder;
+use crate::support::{Folder, note};
 use holm_core::model::{FileTarget, LinkTarget, NoteId};
 use holm_core::testing::{folder_path, note_path, tag_name};
 use holm_core::{Error, RawPath};
-
-fn note(id: &str, body: &str) -> String {
-    format!("---\nid: {id}\n---\n{body}")
-}
 
 /// The links of `path` in the snapshot. It checks that the index rows and a new index give the same links.
 fn links_everywhere(folder: &mut Folder, path: &str) -> Vec<LinkTarget> {
