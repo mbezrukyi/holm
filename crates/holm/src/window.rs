@@ -415,5 +415,4 @@ impl Render for HolmWindow {
 }
 
 #[cfg(test)]
-#[path = "window_tests.rs"]
 mod tests;
