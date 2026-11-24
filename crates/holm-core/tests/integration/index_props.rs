@@ -7,9 +7,10 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
 
+use crate::support::Folder;
 use holm_core::model::{LinkTarget, NoteInfo, NoteSet, Order, Tag};
 use holm_core::{Core, NotePath, TagName};
-use holm_core_test::{Folder, folder_path, tag_name};
+use holm_core_test::{folder_path, tag_name};
 use proptest::prelude::*;
 
 const WORDS: [&str; 4] = ["apple", "Berry", "café", "dough"];
@@ -82,7 +83,7 @@ fn answers(core: &Core) -> Answers {
     let notes = core.snapshot().notes(NoteSet::All, Order::LastChange);
     let paths: Vec<NotePath> = notes.iter().map(|n| n.path.clone()).collect();
     Answers {
-        folders: core.snapshot().folders().map(holm_core_test::path_buf).collect(),
+        folders: core.snapshot().folders().map(crate::support::path_buf).collect(),
         by_title: core.snapshot().notes(NoteSet::All, Order::Title),
         in_folders: ["", "work"]
             .iter()

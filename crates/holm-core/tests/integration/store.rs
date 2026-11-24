@@ -1,11 +1,12 @@
 use std::fs;
 
+use crate::support::Folder;
 use holm_core::model::{NoteSet, Order};
 use holm_core::{Core, Error, NameProblem, NotePath};
-use holm_core_test::{Folder, folder_path, note_path};
+use holm_core_test::{folder_path, note_path};
 
 fn paths<P: std::fmt::Display>(items: impl IntoIterator<Item = P>) -> Vec<String> {
-    let mut paths = holm_core_test::paths(items);
+    let mut paths = crate::support::paths(items);
     paths.sort();
     paths
 }

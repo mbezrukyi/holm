@@ -2,9 +2,10 @@
 
 use std::fs;
 
+use crate::support::Folder;
 use holm_core::model::{NoteId, NoteInfo, NoteSet, Order, Tag};
 use holm_core::{Core, NotePath, Result, Snapshot, TagName};
-use holm_core_test::{Folder, folder_path, note_path, tag_name};
+use holm_core_test::{folder_path, note_path, tag_name};
 
 fn titles(snapshot: &Snapshot) -> Vec<String> {
     snapshot
@@ -15,11 +16,11 @@ fn titles(snapshot: &Snapshot) -> Vec<String> {
 }
 
 fn paths(notes: Vec<NoteInfo>) -> Vec<String> {
-    holm_core_test::paths(notes.into_iter().map(|note| note.path))
+    crate::support::paths(notes.into_iter().map(|note| note.path))
 }
 
 fn folders(snapshot: &Snapshot) -> Vec<String> {
-    holm_core_test::paths(snapshot.folders())
+    crate::support::paths(snapshot.folders())
 }
 
 fn tag_names(snapshot: &Snapshot) -> Vec<TagName> {
@@ -248,7 +249,7 @@ fn paths_first_matching_keep_and_counts_agree_with_the_note_lists() {
     }
     assert_eq!(snapshot.folder_counts().len(), 2);
     assert_eq!(
-        holm_core_test::paths(snapshot.paths(NoteSet::All, Order::LastChange)),
+        crate::support::paths(snapshot.paths(NoteSet::All, Order::LastChange)),
         ["c.md", "work/E.md", "work/d.md", "b.md", "A.md"]
     );
 }
