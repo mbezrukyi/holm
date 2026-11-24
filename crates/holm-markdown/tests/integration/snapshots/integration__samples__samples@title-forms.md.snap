@@ -1,0 +1,31 @@
+---
+source: crates/holm-markdown/tests/integration/samples.rs
+expression: report(&text)
+input_file: crates/holm-markdown/test_data/samples/title-forms.md
+---
+line ending: Lf
+id: Some("01JC3X5Z8K")
+tags: []
+pinned: false
+preview: "Bold code and *stars*"
+
+--- frontmatter ---
+---
+id: 01JC3X5Z8K
+---
+
+--- body ---
+   # **Bold** `code` and \*stars\* ##
+
+--- set all ---
+---
+id: 01JC3X0000NEW
+tags:
+  - work/holm
+  - new-tag
+pinned: true
+---
+   # **Bold** `code` and \*stars\* ##
+
+--- remove all ---
+   # **Bold** `code` and \*stars\* ##
