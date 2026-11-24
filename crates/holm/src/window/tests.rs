@@ -3472,7 +3472,6 @@ fn ctrl_n_after_a_refused_title_starts_clean(cx: &mut TestAppContext) {
     assert_eq!(backlink_count(cx, handle), None);
 }
 
-#[path = "window_speed.rs"]
 mod speed;
 
 /// As the settings dialog does.

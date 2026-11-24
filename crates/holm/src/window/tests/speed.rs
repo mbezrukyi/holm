@@ -3,7 +3,7 @@
 //! The test window has no real text system, so the times leave out text shaping.
 //!
 //! ```sh
-//! cargo test --release -p holm window_speed -- --ignored --nocapture
+//! cargo test --release -p holm window::tests::speed -- --ignored --nocapture
 //! ```
 
 use std::time::{Duration, Instant};
