@@ -51,8 +51,12 @@ fn report(text: &str) -> String {
 
 #[test]
 fn bodies() {
-    insta::glob!("bodies/*.md", |path| {
-        let text = fs::read_to_string(path).unwrap();
-        insta::assert_snapshot!(report(&text));
-    });
+    insta::glob!(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/test_data/bodies"),
+        "*.md",
+        |path| {
+            let text = fs::read_to_string(path).unwrap();
+            insta::assert_snapshot!(report(&text));
+        }
+    );
 }

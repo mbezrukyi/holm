@@ -1,7 +1,7 @@
 ---
 source: crates/holm-markdown/tests/samples.rs
 expression: report(&text)
-input_file: crates/holm-markdown/tests/samples/repeated-keys.md
+input_file: crates/holm-markdown/test_data/samples/repeated-keys.md
 ---
 line ending: Lf
 id: Some("first")

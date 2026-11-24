@@ -1,7 +1,7 @@
 ---
 source: crates/holm-markdown/tests/bodies.rs
 expression: report(&text)
-input_file: crates/holm-markdown/tests/bodies/html.md
+input_file: crates/holm-markdown/test_data/bodies/html.md
 ---
 --- blocks ---
 Paragraph 0..24 "Plain <u>under</u> text."

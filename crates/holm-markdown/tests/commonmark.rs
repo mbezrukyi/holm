@@ -23,7 +23,7 @@ struct Example {
 }
 
 fn examples() -> Vec<Example> {
-    let data = fs::read_to_string("tests/data/commonmark-inline.txt").unwrap();
+    let data = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/test_data/commonmark/inline.txt")).unwrap();
     let mut out = Vec::new();
     let mut rest = data.as_str();
     while let Some(start) = rest.find("~~~~ example ") {

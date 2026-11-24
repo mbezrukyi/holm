@@ -1,7 +1,7 @@
 ---
 source: crates/holm-markdown/tests/bodies.rs
 expression: report(&text)
-input_file: crates/holm-markdown/tests/bodies/callouts.md
+input_file: crates/holm-markdown/test_data/bodies/callouts.md
 ---
 --- blocks ---
 Callout(Note) 0..19 "> [!note]\n> A note."

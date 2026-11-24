@@ -1,7 +1,7 @@
 ---
 source: crates/holm-markdown/tests/bodies.rs
 expression: report(&text)
-input_file: crates/holm-markdown/tests/bodies/links-across-lines.md
+input_file: crates/holm-markdown/test_data/bodies/links-across-lines.md
 ---
 --- blocks ---
 Paragraph 0..87 "A [\n][a] link and a [link\n](holm:01JC3X0000000000000000000A) that end on the next line."

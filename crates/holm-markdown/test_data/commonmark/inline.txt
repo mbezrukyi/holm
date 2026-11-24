@@ -1,3 +1,4 @@
+Examples 12-41 and 328-652 of the CommonMark 0.31.2 spec, https://spec.commonmark.org/0.31.2/spec.txt, by John MacFarlane, CC BY-SA 4.0. The fences around each example are changed.
 ~~~~ example 12
 \!\"\#\$\%\&\'\(\)\*\+\,\-\.\/\:\;\<\=\>\?\@\[\\\]\^\_\`\{\|\}\~
 ~~~~ html
