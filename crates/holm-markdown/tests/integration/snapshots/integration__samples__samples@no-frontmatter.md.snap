@@ -1,0 +1,34 @@
+---
+source: crates/holm-markdown/tests/integration/samples.rs
+expression: report(&text)
+input_file: crates/holm-markdown/test_data/samples/no-frontmatter.md
+---
+line ending: Lf
+id: None
+tags: []
+pinned: false
+preview: "Just a title"
+
+--- frontmatter ---
+
+--- body ---
+# Just a title
+
+No frontmatter here.
+
+--- set all ---
+---
+id: 01JC3X0000NEW
+tags:
+  - work/holm
+  - new-tag
+pinned: true
+---
+# Just a title
+
+No frontmatter here.
+
+--- remove all ---
+# Just a title
+
+No frontmatter here.

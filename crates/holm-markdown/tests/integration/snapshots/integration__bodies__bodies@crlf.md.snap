@@ -1,0 +1,20 @@
+---
+source: crates/holm-markdown/tests/integration/bodies.rs
+expression: report(&text)
+input_file: crates/holm-markdown/test_data/bodies/crlf.md
+---
+--- blocks ---
+Heading { level: 1 } 0..7 "# Title"
+Quote 11..26 "> quote\r\n> line"
+  Paragraph 13..26 "quote\r\n> line"
+Code { language: None, style: Fenced } 30..44 "```\r\ncode\r\n```"
+--- spans ---
+--- hidden ---
+0..2 "# "
+11..13 "> "
+20..22 "> "
+30..33 "```"
+41..44 "```"
+--- links ---
+--- headings ---
+1 "Title" 0..7 "# Title"

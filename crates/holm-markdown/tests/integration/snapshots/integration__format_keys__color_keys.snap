@@ -1,0 +1,34 @@
+---
+source: crates/holm-markdown/tests/integration/format_keys.rs
+expression: "cases.join(\"\\n\")"
+---
+a word here
+TextColor(Some(Color { r: 181, g: 68, b: 44 })) on "word": a <span style="color: #b5442c">word</span> here   [word]
+
+a word here
+TextColor(Some(Color { r: 181, g: 68, b: 44 })) on "word here": a <span style="color: #b5442c">word here</span>   [word here]
+TextColor(Some(Color { r: 58, g: 102, b: 160 })) on "here": a <span style="color: #b5442c">word</span> <span style="color: #3a66a0">here</span>   [here]
+TextColor(None) on "ord</span> <span style=\"color: #3a66a0\">he": a <span style="color: #b5442c">w</span>ord he<span style="color: #3a66a0">re</span>   [ord he]
+
+a <span style="color: #b5442c">word</span>
+TextColor(Some(Color { r: 181, g: 68, b: 44 })) on "word": no change
+TextColor(Some(Color { r: 58, g: 102, b: 160 })) on "wo": a <span style="color: #3a66a0">wo</span><span style="color: #b5442c">rd</span>   [wo]
+
+a **word** b
+TextColor(Some(Color { r: 181, g: 68, b: 44 })) on "a **word** b": <span style="color: #b5442c">a **word** b</span>   [a **word** b]
+
+a ==word== b
+HighlightColor(Some(Color { r: 58, g: 102, b: 160 })) on "wor": a <mark style="background: #3a66a0">wor</mark>==d== b   [wor]
+HighlightColor(None) on "a": no change
+
+<mark style="background: #3a66a0">all</mark> of it
+HighlightColor(None) on "all": all of it   [all]
+
+plain
+TextColor(None) on "plain": no change
+
+a <mark style="background: #3a66a0">word</mark> b
+Highlight on "word": a word b   [word]
+
+<mark style="background: #3a66a0">a</mark> word
+Highlight on "a</mark> word": <mark style="background: #3a66a0">a</mark> ==word==   [a</mark> ==word]

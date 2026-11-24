@@ -1,0 +1,23 @@
+---
+source: crates/holm-markdown/tests/integration/bodies.rs
+expression: report(&text)
+input_file: crates/holm-markdown/test_data/bodies/highlight.md
+---
+--- blocks ---
+Paragraph 0..19 "Some ==big== ideas."
+Paragraph 21..66 "Not a == highlight == here, and \\==escaped==."
+Paragraph 68..120 "==**strong** inside== and =single= and ====four====."
+Paragraph 122..138 "One ==open only."
+--- spans ---
+Highlight(None) 7..10 "big"
+Highlight(None) 70..87 "**strong** inside"
+Strong 72..78 "strong"
+--- hidden ---
+5..7 "=="
+10..12 "=="
+53..54 "\\"
+68..72 "==**"
+78..80 "**"
+87..89 "=="
+--- links ---
+--- headings ---

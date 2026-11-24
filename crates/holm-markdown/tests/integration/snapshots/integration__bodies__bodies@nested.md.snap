@@ -1,0 +1,28 @@
+---
+source: crates/holm-markdown/tests/integration/bodies.rs
+expression: report(&text)
+input_file: crates/holm-markdown/test_data/bodies/nested.md
+---
+--- blocks ---
+Quote 0..22 "> - > deep\n>   > quote"
+  List { start: None } 2..22 "- > deep\n>   > quote"
+    Item { task: None } 2..22 "- > deep\n>   > quote"
+      Quote 4..22 "> deep\n>   > quote"
+        Paragraph 6..22 "deep\n>   > quote"
+Quote 24..51 "> ```\n> code in quote\n> ```"
+  Code { language: None, style: Fenced } 26..51 "```\n> code in quote\n> ```"
+Quote 53..73 "> # Heading in quote"
+  Heading { level: 1 } 55..73 "# Heading in quote"
+--- spans ---
+--- hidden ---
+0..2 "> "
+4..6 "> "
+11..13 "> "
+15..17 "> "
+24..29 "> ```"
+30..32 "> "
+46..51 "> ```"
+53..57 "> # "
+--- links ---
+--- headings ---
+1 "Heading in quote" 55..73 "# Heading in quote"

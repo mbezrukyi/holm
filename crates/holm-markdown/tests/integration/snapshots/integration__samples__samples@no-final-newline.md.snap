@@ -1,0 +1,26 @@
+---
+source: crates/holm-markdown/tests/integration/samples.rs
+expression: report(&text)
+input_file: crates/holm-markdown/test_data/samples/no-final-newline.md
+---
+line ending: Lf
+id: Some("no-final-newline")
+tags: []
+pinned: false
+preview: ""
+
+--- frontmatter ---
+---
+id: no-final-newline
+---
+--- body ---
+
+--- set all ---
+---
+id: 01JC3X0000NEW
+tags:
+  - work/holm
+  - new-tag
+pinned: true
+---
+--- remove all ---
