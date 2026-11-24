@@ -143,8 +143,7 @@ mod tests {
     use std::time::SystemTime;
 
     use holm_core::model::NoteInfo;
-
-    use crate::test_paths::note_path;
+    use holm_core::testing::note_path;
 
     use super::*;
 

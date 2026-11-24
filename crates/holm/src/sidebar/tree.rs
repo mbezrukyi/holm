@@ -378,10 +378,10 @@ mod tests {
     use std::fs;
 
     use holm_core::Core;
+    use holm_core::testing::{folder_path, tag_name};
     use tempfile::TempDir;
 
     use super::*;
-    use crate::test_paths::{folder_path, tag_name};
 
     /// A notes folder with four notes, and its tree in title order.
     fn lists() -> Lists {

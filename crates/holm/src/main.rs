@@ -34,8 +34,6 @@ mod shortcuts;
 mod sidebar;
 mod state_menu;
 mod tags;
-#[cfg(test)]
-mod test_paths;
 mod text;
 mod text_field;
 mod text_width;

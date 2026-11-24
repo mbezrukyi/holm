@@ -767,10 +767,10 @@ mod tests {
     use std::rc::Rc;
 
     use gpui_kit::{Entity, TestAppContext};
+    use holm_core::testing::{folder_path, note_path, tag_name};
     use tempfile::TempDir;
 
     use super::*;
-    use crate::test_paths::{folder_path, note_path, tag_name};
 
     fn core_door(cx: &mut TestAppContext) -> (TempDir, Entity<CoreDoor>) {
         let (dir, core_door, _) = fed_core_door(cx);

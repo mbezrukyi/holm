@@ -365,8 +365,9 @@ impl Draft {
 
 #[cfg(test)]
 mod tests {
+    use holm_core::testing::note_path;
+
     use super::*;
-    use crate::test_paths::note_path;
 
     fn save(path: &str, body: &str) -> NoteText {
         NoteText::Save {

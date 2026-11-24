@@ -499,8 +499,9 @@ fn set(table: &mut Table, key: &str, value: Value) {
 
 #[cfg(test)]
 mod tests {
+    use holm_core::testing::{folder_path, tag_name};
+
     use super::*;
-    use crate::test_paths::{folder_path, tag_name};
 
     fn load(text: &str) -> (tempfile::TempDir, Config) {
         let dir = tempfile::tempdir().unwrap();
