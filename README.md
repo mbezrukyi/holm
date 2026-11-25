@@ -9,37 +9,34 @@
 </p>
 
 <p align="center">
-  <a href="#install">Install</a> ·
-  <a href="#first-steps">First steps</a> ·
-  <a href="#report-a-bug">Report a bug</a>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/holm-dark.webp">
+    <img src="docs/holm-light.webp" width="900" alt="Holm in use: typed Markdown turns into styled text, Ctrl+K links a note, and Ctrl+Shift+O opens the linked note">
+  </picture>
 </p>
 
----
-
-## What it is
-
-- **Your files.** Notes are plain `.md` files in one folder. Any other tool can read them.
+- **Your files.** Notes are plain `.md` files in one folder. Holm never goes online.
 - **Live preview.** Markdown shows as styled text while you type. Its marks show only on the line with the cursor.
-- **Keyboard first.** Every action has a key, and `Ctrl+?` lists them all.
-- **Linked notes.** Links, backlinks, tags, pins, full-text search and quick open.
-- **Quiet.** Holm saves on its own, never loses typed text, and uses no network.
+- **Keyboard first.** Every action has a key.
+- **Linked notes.** Links, backlinks, tags, pins, search and quick open.
+- **Early.** x86_64 Linux only, with no sync and no updater.
 
 ## Install
 
-Holm runs on x86_64 Linux. Each [release](https://github.com/mbezrukyi/holm/releases) has an AppImage and a `SHA256SUMS` file.
+Each [release](https://github.com/mbezrukyi/holm/releases) has an AppImage and a `SHA256SUMS` file.
 
-1. Download both files and check the AppImage:
+1. Download both and check the AppImage:
 
    ```sh
    gh release download --repo mbezrukyi/holm --pattern '*.AppImage' --pattern SHA256SUMS
    sha256sum -c SHA256SUMS
    ```
 
-2. Open the AppImage with [Gear Lever](https://flathub.org/apps/it.mijorus.gearlever). It keeps the file in one place and puts Holm in your app menu.
+2. Open the AppImage with [Gear Lever](https://flathub.org/apps/it.mijorus.gearlever). It puts Holm in your app menu.
 
-To update, download the new release and open it with Gear Lever again. Holm has no updater.
+To update, do the same with the new release.
 
-## First steps
+## Start
 
 At the first start, Holm asks for your notes folder.
 
@@ -47,33 +44,16 @@ At the first start, Holm asks for your notes folder.
 | --- | --- |
 | `Ctrl+N` | New note |
 | `Ctrl+Shift+O` | Open a note by its title |
-| `Ctrl+Shift+F` | Search the notes |
-| `Ctrl+K` | Link a note |
-| `Ctrl+Shift+L` | Show or hide the sidebar |
 | `Ctrl+?` | All shortcuts |
-| `F10` | App menu and settings |
-
-The settings file is `~/.config/holm/config.toml`.
 
 ## Report a bug
 
-Open an [issue](https://github.com/mbezrukyi/holm/issues). Write what you did, what you expected, and what happened.
+Open an [issue](https://github.com/mbezrukyi/holm/issues). Write what you did, what you expected, and what happened, and attach the log, `~/.local/state/holm/holm.log`. The log holds paths and note ids, never note text.
 
-Attach the log, `~/.local/state/holm/holm.log`. It is the log of today, and the logs of the last 7 days are in the same folder. The log holds paths and note ids, never note text.
+For more detail, start Holm with `HOLM_LOG=debug holm` and do the steps again.
 
-- After a crash, Holm shows the log path at the next start.
-- For more detail, start Holm with `HOLM_LOG=debug holm` and do the steps again.
+---
 
-## Contributing
+Holm takes issues, not pull requests.
 
-Issues are welcome: bugs, ideas and questions. Holm takes no pull requests. Code in an issue is taken as an idea, and the fix is written fresh in Holm.
-
-## How Holm is made
-
-Holm is written with Claude, an AI model by Anthropic. Its author decides what Holm does and how it works, and directs the work.
-
-## Licence
-
-Holm is free software under the GNU General Public License, version 3 or later. See [`LICENSE`](LICENSE).
-
-Each release ships the notices of the third-party code and fonts in Holm, as `THIRD-PARTY-NOTICES.txt` inside the AppImage and on the release page.
+Holm is written with Claude, an AI model by Anthropic. Its author decides what Holm does and directs the work.
